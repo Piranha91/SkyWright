@@ -1,4 +1,5 @@
-"""Write import.json: the known answers for `runcontrol import-results`, computed by evalrun.py.
+"""Write import.json: the known answers for `runcontrol import-results`, computed by evalrun.py, and for the records
+stage of a lab entry, computed by evalpipeline.py's stage_records with its children stood in for.
 
 Every expected value comes from the real module: datetime.fromisoformat as the import reads a timestamp, capture_token,
 initialize_requests and client_name, rows_output_errors, empty_population, origin_refusals, and _cmd_import_results over
@@ -30,6 +31,7 @@ from runlog import Run   # noqa: E402
 import make_known_answers_finalize as F   # noqa: E402  (its plan, builder and masking helpers)
 import make_known_answers_evaluate as V   # noqa: E402  (its plan with requests, and the emit a probe writes)
 from make_known_answers_finalize import E   # noqa: E402
+import evalpipeline as P   # noqa: E402
 
 OUT = HERE / "import.json"
 T0 = V.T0
@@ -579,8 +581,127 @@ def origin_cases(tmp: Path) -> list:
     return rows
 
 
+# ------------------------------------------------------------------------------------------ the records stage
+
+LAB_ENTRY = {"schema": 1, "id": "m", "subject": {"plugin": "Subj.esp", "mod": "MS"}, "source": {"instance": "S:/src", "profile": "P"},
+             "lab": {"instance": "L:/lab", "game": "G:/game"}}
+IN_PLACE_ENTRY = {"schema": 1, "id": "m", "inPlace": {"instance": "I:/i", "profile": "Default", "game": "G:/g"}, "selection": {"mods": ["S"]}}
+OPEN = {"r.records__candidate-10": {"status": "mcp-only"}, "r.records__baseline": {"status": "mcp-only"}, "r.fields__baseline": {"status": "mcp-only"},
+        "r.records__candidate-2": {"status": "mcp-only"}, "g.overlap__candidate-3": {"status": "completed"}, "odd": {"status": "mcp-only"},
+        "r.none__candidate-4": {"status": None}, "r.done__candidate-5": {"status": "completed", "imported": True}}
+READER = {"readerCmd": '"R:/reader.exe" --stdio'}
+GOOD_SUMMARY = {"baseline": {"imports": ["{cap}/imports/r.records__baseline/result.json", "{cap}/imports/r.fields__baseline/result.json"], "seconds": 2.5},
+                "candidate-10": {"imports": ["{cap}/imports/r.records__candidate-10/result.json", "{cap}/imports/r.done__candidate-5/result.json",
+                                             "{cap}/imports/g.overlap__candidate-3/result.json", "loose.json"]},
+                "candidate-2": {"imports": []}}
+
+
+def records_stage_cases(tmp: Path) -> list:
+    """stage_records with its children stood in for: the capture's command line, the imports it starts, what it
+    prints, refuses and writes."""
+    cases = []
+    real_child, real_env = P.child, os.environ.get("HOUSECARL_RECORD_READER_CMD")
+
+    def case(name, *, entry=LAB_ENTRY, entries=OPEN, machine=READER, summary=GOOD_SUMMARY, workers=None, capture_exit=0, import_exits=(0, 0, 0),
+             capture_log=None, import_logs=True, earlier=0, env_reader=None):
+        root = tmp / f"s{len(cases)}"
+        out = root / "run"
+        F.write(out, "evaluation/ledger.json", json.dumps({"entries": entries}))
+        F.write(root, "entry.json", json.dumps(entry))
+        F.write(root, "machine.json", json.dumps(machine))
+        sdir = out / "records"
+        sdir.mkdir()
+        for i in range(earlier):
+            (sdir / f"capture-{i + 1:02d}").mkdir()
+        ctx = P.Context(root / "entry.json", root / "machine.json", out)
+        started, imports = [], []
+
+        def child(_ctx, ledger_dir, op, argv, **kw):
+            argv = [str(a) for a in argv]
+            started.append({"op": op, "dir": F.mask(str(ledger_dir), root), "script": Path(argv[1]).name, "argv": F.mask(argv[2:], root),
+                            "more": {k: kw[k] for k in sorted(kw)}})
+            if op == "records-capture":
+                cap = Path(argv[argv.index("--out") + 1])
+                fill = lambda doc: json.loads(json.dumps(doc).replace("{cap}", P.fwd(cap)))   # noqa: E731
+                if summary is not None:
+                    F.write(cap, "capture-summary.json", json.dumps(fill(summary)))
+                if workers is not None:
+                    F.write(cap, "capture-workers.json", json.dumps(workers))
+                if capture_log is not None:
+                    F.write(Path(ledger_dir), "records-capture.txt", capture_log)
+                return {"exitCode": capture_exit}
+            imports.append(op)
+            if import_logs:
+                F.write(Path(ledger_dir), op + ".txt", "$ import\n(exit 0, 0.1s)\n\n")
+            return {"exitCode": import_exits[len(imports) - 1]}
+        P.child = child
+        if env_reader is None:
+            os.environ.pop("HOUSECARL_RECORD_READER_CMD", None)
+        else:
+            os.environ["HOUSECARL_RECORD_READER_CMD"] = env_reader
+        row = {"name": name, "entry": entry, "entries": entries, "machine": machine, "summary": summary, "workers": workers,
+               "captureExit": capture_exit, "importExits": list(import_exits), "captureLog": capture_log, "importLogs": import_logs,
+               "earlier": earlier, "envReader": env_reader}
+        try:
+            with F.captured() as (printed, _err):
+                bound, outputs = P.stage_records(ctx, {}, sdir)
+            row["bound"], row["outputs"], row["refusal"] = bound, F.mask([str(o) for o in outputs], root), None
+        except P.Refusal as error:
+            row["refusal"] = F.mask(str(error), root)
+        finally:
+            P.child = real_child
+        record = sdir / "records.json"
+        row["printed"] = F.mask(printed.getvalue(), root)
+        row["started"] = started
+        row["record"] = F.mask(record.read_text(encoding="utf-8"), root) if record.exists() else None
+        row["folders"] = sorted(p.relative_to(out).as_posix() for p in sdir.rglob("*") if p.is_dir())
+        cases.append(row)
+
+    slot = ["python", "S:/tools/idle_lock.py", "hold", "--lock", "{lock}", "--min-free-gb", "16", "--purpose", "{purpose}"]
+    gave_up = "$ slot\n(exit 3, 2.0s)\n\nwaiting for idle\nidle_lock: gave up waiting for idle: {why}\nidle_lock: gave up waiting for idle: later line\n"
+    try:
+        case("an in-place entry: the note, no child", entry=IN_PLACE_ENTRY)
+        case("no row open: the note, no child", entries={"g.overlap__baseline": {"status": "completed"}, "odd": {"status": "mcp-only"},
+                                                        "r.records__baseline": {"status": "mcp-only (imported)"}})
+        case("no entries at all", entries=None)
+        case("captured and imported: only documents of rows open before the capture, in sorted order")
+        case("the workers named as text with spaces", machine=dict(READER, recordWorkers=" 3 "))
+        case("the workers named as a number, a third capture folder", machine=dict(READER, recordWorkers=4), earlier=2)
+        for bad in ("many", 0, None, 2.5, True, "", "-1", "1.0"):
+            case(f"recordWorkers {bad!r} is refused before anything starts", machine=dict(READER, recordWorkers=bad))
+        case("no record reader named", machine={})
+        case("the record reader named by the environment", machine={}, env_reader="E:/env-reader.exe")
+        case("an import refused and an import that never ended, no log of the second", import_exits=(2, None, 0), import_logs=False)
+        case("an arm the capture refused, and the workers' own words", workers={
+            "requested": "auto", "workers": 2, "case": "fits", "warning": "two arms at once need 9 GB; one is read at a time", "memory": {"freeMB": 9000},
+            "curedAlone": {"candidate-2": "the reader ran out of memory", "baseline": "the reader stopped answering"}, "more": "not kept"},
+             summary=dict(GOOD_SUMMARY, **{"candidate-2": {"refused": "the reader answered nothing for 3 plugins"}}), import_exits=(0, 3, 0))
+        case("arms stopped at their deadline", summary={"candidate-2": {"refused": "stopped at its deadline of 150 min"},
+                                                         "baseline": {"refused": {"why": "the arm reached its deadline"}, "imports": ["{cap}/imports/r.records__baseline/result.json"]},
+                                                         "candidate-10": {"refused": "refused for another reason"}})
+        case("a capture that ended 2 with a summary is read", capture_exit=2, summary={"baseline": {"refused": "the reader could not start"}})
+        case("a capture that ended 1", capture_exit=1)
+        case("a capture that never ended", capture_exit=None, summary=None)
+        case("a capture that ended 0 and wrote no summary", summary=None)
+        case("a capture that wrote an empty summary", summary={})
+        case("a capture whose slot gave up waiting for memory", capture_exit=3, summary=None, machine=dict(READER, heavyPrefix=slot),
+             capture_log=gave_up.format(why="memory: 9.1 GB free under the 16 GB floor after 240 min "))
+        case("a capture whose slot gave up waiting for memory, no floor in the slot command", capture_exit=3, summary=None,
+             capture_log=gave_up.format(why="free memory stayed low"))
+        case("a capture whose slot gave up waiting for an idle machine", capture_exit=3, summary=None, machine=dict(READER, heavyPrefix=slot),
+             capture_log=gave_up.format(why="cpu busy: viewprobe.exe"))
+        case("a capture that failed for another reason, with a log", capture_exit=5, summary=None, capture_log="$ slot\n(exit 5, 2.0s)\n\nTraceback\n")
+    finally:
+        P.child = real_child
+        if real_env is None:
+            os.environ.pop("HOUSECARL_RECORD_READER_CMD", None)
+        else:
+            os.environ["HOUSECARL_RECORD_READER_CMD"] = real_env
+    return cases
+
+
 SECTIONS = [("fromiso", iso_cases), ("requests", request_cases), ("rows", rows_cases), ("emptyPopulation", empty_cases),
-            ("origin", origin_cases), ("imports", import_cases)]
+            ("origin", origin_cases), ("imports", import_cases), ("recordsStage", records_stage_cases)]
 
 
 def main() -> int:

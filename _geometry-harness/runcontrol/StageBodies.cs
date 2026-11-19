@@ -10,7 +10,7 @@ public static class StageBodies
     public static Dictionary<string, StageBody> Built() => new(StringComparer.Ordinal)
     {
         ["census"] = Census, ["prepare"] = Prepare, ["scope"] = Scope, ["plan"] = Plan,
-        ["evaluate"] = StageEvaluate.Evaluate, ["records"] = StageEvaluate.Records, ["scenes"] = StageEvaluate.Scenes,
+        ["evaluate"] = StageEvaluate.Evaluate, ["records"] = StageRecords.Records, ["scenes"] = StageEvaluate.Scenes,
         ["bundle"] = StageBundle.Bundle,
     };
 

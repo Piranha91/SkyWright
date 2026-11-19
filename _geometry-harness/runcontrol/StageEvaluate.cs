@@ -1,7 +1,7 @@
 namespace RunControl;
 
 /// <summary>The stage bodies after the plan: evaluate (this program's own `run` and `resume` as children, under the
-/// machine slot), records and scenes.</summary>
+/// machine slot) and scenes.</summary>
 public static class StageEvaluate
 {
     /// <summary>The ledger's entries counted by status word (the part before any bracket), in the order first met.</summary>
@@ -70,21 +70,6 @@ public static class StageEvaluate
         }
         // the ledger is not an output binding: imports and finalize change it in later stages
         return (new PyDict { ["plan"] = Hashing.Sha256File(PyPath.Join(run, "plan.json")) }, [record]);
-    }
-
-    /// <summary>An in-place run offers no model-driven record check: the note is the stage's whole output. A lab
-    /// entry's record capture is not built in this version.</summary>
-    public static (PyDict?, List<string>) Records(RunContext ctx, PyDict res, string sdir)
-    {
-        if (ctx.InPlace == null)
-            throw new Refusal("the records stage for lab entries is not built in this version of runcontrol (the record capture and its "
-                              + "import come in a later slice); run a lab entry through records with the Python pipeline (evalpipeline.py).");
-        string record = PyPath.Join(sdir, "records.json");
-        PyJson.WritePipelineFile(record, new PyDict
-        {
-            ["note"] = "a manual run offers no model-driven record check; mcp-only rows stay open and the bundle says they were not assessed",
-        });
-        return (new PyDict { ["openArms"] = 0L }, [record]);
     }
 
     /// <summary>Overlap scene acquisition is not built in this version: a stated refusal that does not block the stages after it.</summary>

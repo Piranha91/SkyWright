@@ -1,4 +1,5 @@
 using System.Numerics;
+using HousecarlCore.Progress;
 using System.Reflection;
 using System.Text;
 
@@ -38,6 +39,139 @@ public static partial class SelfTestFinalize
             ka = D(PyJson.Loads(r.ReadToEnd()));
         ImportTables(ka);
         foreach (var folder in L(ka["imports"]).Select(D)) ImportFolder(folder);
+        foreach (var stage in L(ka["recordsStage"]).Select(D)) RecordsStageCase(stage);
+        RecordsPythonCases();
+    }
+
+    // The capture's stand-in: the canned summary with the capture folder written into its paths.
+    static byte[] Filled(object? doc, string cap) => PyJson.Utf8(PyJson.Dumps(doc).Replace("{cap}", PyOrder.Fwd(cap)));
+
+    // One recorded run of the records stage, its capture and its imports stood in for.
+    static void RecordsStageCase(PyDict c)
+    {
+        Case($"records stage: {S(c["name"])}", () =>
+        {
+            using var t = new Temp();
+            string run = t.At("run"), sdir = t.At("run/records");
+            t.Write("run/evaluation/ledger.json", PyJson.Utf8(PyJson.Dumps(new PyDict { ["entries"] = c["entries"] })));
+            Directory.CreateDirectory(sdir);
+            for (int i = 0; i < (long)c["earlier"]!; i++) Directory.CreateDirectory(PyPath.Join(sdir, $"capture-{i + 1:00}"));
+            // the capture's Python is a file of this test's own, so the case does not need one on this machine
+            var machine = new PyDict(D(c["machine"])) { ["python"] = t.Write("python.exe", []) };
+            var ctx = new RunContext(D(Py.Copy(c["entry"])), machine, run);
+            var prefix = machine.Get("heavyPrefix") as List<object?>;
+            var started = new List<object?>();
+            var exits = L(c["importExits"]);
+            int imports = 0;
+            string? wrong = null, refusal = null;
+            (PyDict? bound, List<string> outputs) got = (null, []);
+            var saved = ChildLaunch.RunJob;
+            var savedOut = Report.Out;
+            var printed = new StringWriter();
+            string? before = Environment.GetEnvironmentVariable("HOUSECARL_RECORD_READER_CMD");
+            Environment.SetEnvironmentVariable("HOUSECARL_RECORD_READER_CMD", (string?)c["envReader"]);
+            Report.Out = printed;
+            ChildLaunch.RunJob = (op, dir, deadline, job) =>
+            {
+                var argv = job.Argv.ToList();
+                bool capture = job.Id == "records-capture";
+                var more = new PyDict();
+                if (op != "evalpipeline-" + job.Id) wrong ??= $"{job.Id} was started under the run-log name {op}";
+                if (capture)
+                {
+                    const long backstop = 460;   // 150 minutes for each of three arms, and ten
+                    double minutes = Math.Round(((deadline ?? 0) - ChildRunner.Now()) / 60);
+                    if (prefix != null)
+                    {
+                        int cut = argv.IndexOf("--");
+                        var slot = argv.Take(cut).ToList();
+                        argv = argv.Skip(cut + 1).ToList();
+                        string lockFile = PyOrder.Fwd(PyPath.Join(run, "HEAVY-LOCK-m-records-capture"));
+                        string wantSlot = $"python S:/tools/idle_lock.py hold --lock {lockFile} --min-free-gb 16 --purpose evalpipeline m records --max-min {backstop}";
+                        if (string.Join(" ", slot) != wantSlot) wrong ??= $"the slot command was {string.Join(" ", slot)}";
+                        if (minutes != 240 + backstop + ChildLaunch.HoldMarginMin) wrong ??= $"under the slot the capture's deadline was {minutes} minutes";
+                    }
+                    else if (minutes != backstop) wrong ??= $"the capture's deadline was {minutes} minutes";
+                    more = new PyDict { ["deadline_min"] = backstop, ["heavy"] = true, ["hold_min"] = backstop, ["purpose"] = "evalpipeline m records" };
+                    if (argv[0] != S(machine["python"])) wrong ??= $"the capture was started with {argv[0]}";
+                    if (argv[1] != PyOrder.Fwd(PyPath.Join(Checkout.Harness, "evalrecords.py"))) wrong ??= $"the capture's script was {argv[1]}";
+                }
+                else
+                {
+                    if (deadline != null) wrong ??= $"{job.Id} was started with a deadline";
+                    if (argv[0] != Environment.ProcessPath) wrong ??= $"{job.Id} was started with {argv[0]}";
+                }
+                started.Add(new PyDict
+                {
+                    ["op"] = job.Id, ["dir"] = t.Mask(dir), ["script"] = capture ? PyPath.Name(argv[1]) : "evalrun.py",
+                    ["argv"] = t.Mask((capture ? argv.Skip(2) : argv.Skip(1)).Cast<object?>().ToList()), ["more"] = more,
+                });
+                if (capture)
+                {
+                    string cap = argv[argv.IndexOf("--out") + 1];
+                    string rel = Path.GetRelativePath(t.Root, PyPath.Str(cap));
+                    if (c["summary"] != null) t.Write(PyPath.Join(rel, "capture-summary.json"), Filled(c["summary"], cap));
+                    if (c["workers"] != null) t.Write(PyPath.Join(rel, "capture-workers.json"), PyJson.Utf8(PyJson.Dumps(c["workers"])));
+                    if (c["captureLog"] != null) t.Write(Path.GetRelativePath(t.Root, PyPath.Join(dir, "records-capture.txt")), PyJson.Utf8(S(c["captureLog"])));
+                    return new ChildResult(job.Id, c["captureExit"] == null ? null : (int)(long)c["captureExit"]!, 0.1, null, 1);
+                }
+                if (c["importLogs"] is true) t.Write(Path.GetRelativePath(t.Root, PyPath.Join(dir, job.Id + ".txt")), PyJson.Utf8("$ import\n(exit 0, 0.1s)\n\n"));
+                object? code = exits[imports++];
+                return new ChildResult(job.Id, code == null ? null : (int)(long)code, 0.1, null, 1);
+            };
+            try { got = StageRecords.Records(ctx, new PyDict(), sdir); }
+            catch (Refusal r) { refusal = t.Mask(r.Message); }
+            finally
+            {
+                ChildLaunch.RunJob = saved;
+                Report.Out = savedOut;
+                Environment.SetEnvironmentVariable("HOUSECARL_RECORD_READER_CMD", before);
+            }
+            var folders = PyOrder.SortedByCodePoint(Directory.GetDirectories(sdir, "*", SearchOption.AllDirectories)
+                .Select(p => PyOrder.Fwd(Path.GetRelativePath(run, p)))).Cast<object?>().ToList();
+            return wrong ?? Same("refusal", refusal, (string?)c["refusal"])
+                   ?? SameJson("children", started, c["started"])
+                   ?? Same("printed", t.Mask(printed.ToString().Replace("\r\n", "\n")), S(c["printed"]))
+                   ?? Same("records.json", t.Mask(Lines(PyPath.Join(sdir, "records.json"))), (string?)c["record"])
+                   ?? SameJson("folders", folders, PyOrder.SortedByCodePoint(Strings(c["folders"])).Cast<object?>().ToList())
+                   ?? (refusal != null ? null
+                       : SameJson("bound", got.bound, c["bound"]) ?? SameJson("outputs", t.Mask(got.outputs.Cast<object?>().ToList()), c["outputs"]));
+        });
+    }
+
+    // Where the capture's Python is found: this controller's own rule (decision D7), so its own cases.
+    static void RecordsPythonCases()
+    {
+        Case("records stage: the capture's Python is the machine file's, else the first python.exe on PATH, else one sentence", () =>
+        {
+            using var t = new Temp();
+            string named = t.Write("named/python.exe", []), onPath = t.Write("second/python.exe", []);
+            Directory.CreateDirectory(t.At("first"));
+            var saved = StageRecords.SearchPath;
+            RunContext Ctx(PyDict machine) => new(new PyDict(), machine, t.Root, "lab");
+            string? Refused(PyDict machine)
+            {
+                try { return "found " + StageRecords.Python(Ctx(machine)); }
+                catch (Refusal r) { return r.Message; }
+            }
+            try
+            {
+                StageRecords.SearchPath = () => $"{t.At("first")};\"{t.At("second")}\"; ;{t.At("none")}";
+                string? why = Same("the machine file's python", StageRecords.Python(Ctx(new PyDict { ["python"] = named })), named)
+                              ?? Same("python on PATH", StageRecords.Python(Ctx(new PyDict())), onPath);
+                if (why != null) return why;
+                string gone = Refused(new PyDict { ["python"] = t.At("gone/python.exe") })!;
+                StageRecords.SearchPath = () => t.At("first");
+                string none = Refused(new PyDict())!;
+                StageRecords.SearchPath = () => null;
+                string unset = Refused(new PyDict())!;
+                foreach (string sentence in new[] { gone, none, unset })
+                    if (!sentence.StartsWith("the lab records capture needs Python", StringComparison.Ordinal) || !sentence.Contains("key python", StringComparison.Ordinal))
+                        return "the refusal does not say that the capture needs Python and name the machine key: " + sentence;
+                return gone.Contains(t.At("gone/python.exe"), StringComparison.Ordinal) ? null : "the refusal does not name the file the machine file gave: " + gone;
+            }
+            finally { StageRecords.SearchPath = saved; }
+        });
     }
 
     static byte[] Bytes(object? packed) => packed is PyDict z ? Inflate(S(z["z"])) : Convert.FromBase64String(S(packed));

@@ -170,9 +170,6 @@ public static partial class SelfTest
             return jobs4.Count == 0 && fourth.Contains("evaluate: reused (inputs and outputs unchanged)") && fourth.Contains("records: reused (inputs and outputs unchanged)")
                 ? null : "a finished evaluation was not reused: " + fourth;
         });
-        Case("records: a lab entry's records stage is refused in one sentence", () =>
-            Refuses(() => StageEvaluate.Records(new RunContext(new PyDict(), new PyDict(), ".", "lab"), new PyDict(), "x"),
-                "the records stage for lab entries is not built in this version of runcontrol"));
         Case("stages: evaluate, records and scenes run over an entry carrying every presentation key, and read none", () =>
         {
             using var t = new Temp();

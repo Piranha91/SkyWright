@@ -4942,19 +4942,19 @@
       {
        "path": "receipts/r.one__baseline.json",
        "text": {
-        "z": "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"
+        "z": "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"
        }
       },
       {
        "path": "receipts/r.records__baseline.json",
        "text": {
-        "z": "eNqtV8lu3EYQvQfIPxhz1si9L0IQwHYu2RDDknOIZRi9VI9ocUiG5AhWDP17ijtlWZaceDAakVXdxVfVrxZ+/P67J5smXMDe/Ql1k5XF5uQJO+qkNQTIqvbniJINA2K8Jd5STgIovemXVLkrBn13RYYPHXRoM1wOyvoYbZV1bAaNq/eD3LsG8qyA0ZirW5QWhzwflkVXtVCj6CPePtlcZkW/ax+qbbavSlx91Cua8lAH+HWlLov8eoO6m/F5u6vTC1fB2np9GJEPprZ4vzVkRgJF+2pcMW9pWkQI8XUb+ogQpraE4veMkBNKTgj5a9gORbxnVfel06oPWfuijB0o0gvKQ1sd2gbv33Ru9U53WNqLBWbzdI7lu3dT+J7W0Bzy9vh9g6d3NGxrLhyTqttIDBEOUlLUWZeUkIQmSqIVnnPHHLgQtdSaG50scEVAcqEF1cyzpAMNk0V/3UIHjhFFRtG+zfawdpTSLbVnRE2Odsv6M/gabzBaNfx9gGbwKL/rEngSRRDaWE8VstJEIVJQlNMEjjJmQYdgDHEQORhjBReO25Ri4oEqke64ZNR9Ht06OvJfPWLoUVOVRQP3uUQcZlhy2hvNdEwsKaYlA01MCCkwTw1oT5xIPsTIEnrEvfQQgUWlNbOfuiTYV3mEP297Eublbk35gJgPe4hzEgZXxCy6Fk5n6FRGQSA4SmnAQ+GUWk51YEZoZSLXUhofvOaSMW9ASQHKiKBcQMoJFfiYxbPll2NEf3j1xx9n5+c/np/PqmZ1vSVkO0V4Rf0Ocsp2h9q1QzEbzyllxQ7qqs6KrshsOFEKoo7ceaaAM+qSd8iYZJm0RACmCsZYcSWl8MrxRLQNWlJnKDFG0PkE+9rTWZyBnTwE8W7BpaO8yg+7rJhLwEQy1BRu3z/l9PK6zvbH0OxHWysKLgEb7Zyff275QjpOPYCy3ApMGJ9i9CrQGJB1Oiii8BwF1nsvsGZIEYHGRDyXkgflhQaZNoPJm6N7wD7DB1ePwvnJygWiEDoxTizgISRrISZAlNQwbkzyDKhWqU9s6TwI4zSWOeqJtZ0XQrKHID5/NMTn90EkjCstnLKGW0pEdF5YHj1WIaoYkTFg9GLkmAiUaaOMjQJMsD66gEEl/iGIZ9i/oH00zs8tX8BqrhXHYApBKfikgtYeAwdU6kBYsFFRprQVBsMaUdjlspciYWhTMJ5MYPt/byfa1uVVFpHNXyDu72V8tgCae3kZH3L/J9e6uxtjJ/0clvIK6txd91BmfGV1yKd6gCXOxW1XFedsbDFX78wjqMizfTY05LdL3b9dYE7n/AdcO5agGnZZ09bXS40UkhqMpISI1ZEJg7UlREKp0lEopDSThFkfnAx4QBQSM4TIFCW3HgnEzWi4Lct8KWlThC7KQ4P1t863OPtM2K/m4rJhx2TVtzZl1QFvFnAA2B3xB4S0WjtnGAjKPI55IXqNKe8ZB+W7dkuU9YJprQhPRgN2KebiNIaFslq1BY/UdpoDMMFMSNjBbDKRRhqM5kKiVtlgFTMpKoGFOBGsrkxSEbkB48ZD6Li1q92+WdzG+Ld1mefLaLgs6wvxoh9pM7OmCTVOtM0sj9kOx4yV5iT8z89suh9/+8b5Zk7aGlKe7S7akbg9qQb63szD6pXLu96x6l0bFwLgJNzZausDTBx7D6E/yIXpG0zCos3a699uEfdmHOe7IXE2Ch8gHKaUCOW+yqF7xGAn4nVoyy7Am6LcYu+M2D5H5XjXTINrtx3Z5nYwOzudystbibd+Cei0vxzirvdKTpLXxftO5nze2fp4swRodBCzCordUPsGc9vkwpR3iCJmYf0S0cFvp7l/DsUwq62mmqGLn37jmRlHgqo91A+/MXyrxK4zbAGdIuFhX2zW0hcdHZcntOUl9CsB+YavPifr97eTT+tgVmRthrz8B14Ng3mzmlke7eTwkviiBtd+4fVoNZHi382/B8LqRQ=="
+        "z": "eNqtV1lv20YQfi/Q/xDo2Ur3PoSiQJu+9EKLOOlD4iDYY1ZmTJEqSRlxA//3zvJOHMdJW0GWyZ3d4Tcz3xx89/VXjzZtuISD+xOatqirze4RO8urDQQojt1PEVc2DIjxlnhLOQmg9KbfcixdNcjzFRk+dJChznA1CJvHqKtuYjtIXHMY1r1roSwqGJW5psPV6lSWw7bojh00uPQObx9troqqP3UIx21xONa4+6wXtPWpCfDLSlxX5c0GZbfj8/bX55fuCGvtzWlEPqja4v3WkBkJVN3Tccd8pO0QIcTnXeg9QpjaEorfZ4TsKNkR8mI4DlW8Z1f+0mnX26J7UscMivQL9ak7nroW719ms3qjM5bucoHZfjP78vXryX3fNNCeyu7xmxajdzYcay8dkyofNMZynYPnmaIyCKbBOeZS8kkJSMw5F4Pi1kjLQBAnExWWUS6U086yMGn0Nx1kcIwoMi4duuIAa0Mp3VL7jKgd0TupXuQQDDH4EmvQWw38dYJ2sKi8axJ4EkUQ2lhPFbLSRCFSUJTTBI4yZkGHYAxxEDmg/YILx21KMfFAlUh3TDLqPoveCx35txYxtKg91lUL95lEHGZYctobzXRMLCmmJQMMXAgpME8NaE+cSD7EyBJaxL30EIFFpTWzH5ok2BdZhD+vehKW9X5N+YCYTweIcxIGV8Uiug7OZ+hURkEgOEppwKBwSi2nOjAjtDKRaymND15zyZg3oKQAZURQLnCjhQp8zOJZ8x+jR799+vvvzy4uvru4mEXt6npLyHby8Ir6GXIq9qfGdUMxG+OUimoPzbEpqlxkNpwoBVFH7jAtgDPqknfImGSZtESAddnHiisphVeOJ6Jt0JI6Q4kxgs4R7GtP1jgD2z0E8W7BpeP6sTzti2ouARPJUFK5Q/+U86ubpjg8hvYw6lpRcHHYqOfi4mPbF9Jx6gGU5VZgwvgUo1eBxoCs00ERhXEUWO+9EJJIEYHGRDyXkgflhQaZNoPK27N7wH6PDz5+Fs4Pdi4QhdCJcWIBg5CshZgAUVLDuDHJM6BapT6xpfMgjNOKOuqJtdkKIdlDEH/4bIg/3AeRMK60cMoabikR0XlhefRYhahiRMaA3ouRYyJQpo0yNgowwfroAjqV+IcgPsP+Bd1n4/zY9gWs5lpxdKYQlAJ2gKC1R8cBlToQFmxUlClthUG3RlzMueylSOjaFIwnE9j+36uJtk19XURk8yeI+1sdv18Azb28jg+Z/6Pr3N2DMa9+DEt9DU3pbnooM776eCqneoAlzsVtropzNnaYq3fmERSUxaEYGvKrpe6/X2DO5/wH3DuWoAb2Rds1N0uNFJJiG6YSIlZHJgzWlhAJpUpHoZDSTBJmfXAyYIAodmVDiExRcuuRQNyMiru6LpeSNnnosj61WH+bcouzz4T9ei4uG/aYrPrWpj5m4O0CDgC7I/6AkFZr5wzOAZR5HPNC9BpT3jMOyud2S5T1OEFoRXgyGrBLMRenMSzUx1Vb8EhtpzkAE8yEhB3MJhNppMFoLiRKlQ1WMZOiEliIE8HqyiQVkRswbgxC5ta+cYd2MRv93zV1WS6j4bKtL8SLfKTNzJo2NDjRtvN6LPY4Zqwku/AfP7PqfvztG+fLOWkbSGWxv+xG4vakGuh7Ow+r167MvWPVuzYuBMBJOOvqmhNMHHsDoQ/kwvQNJmHVFd3Nr+8R93Yc5/OQOCuFtxBOU0qE+nAsIT9i0BPxOnR1dvCmqrfYOyO2z1E43rXT4JqPI9vcHmZjp6j88V7irV8CsvTnU9z3Vslp5Xn1Jq85X2Zd724XB40GYlZBtR9q36Bum1yY8g5RxCKsXyIy/G6a+2dXDLPaaqoZuvj5/zwz40hw7E7Nw28M/1diNwW2gCxIGOzLzXr1Sabj8oSuvoJ+JyDf8NVnt35/231YB4uq6Ark5d/wdBjM29XM8tlGDi+JTxpw3Sdej1YTKf7d/gMKUerM"
        }
       },
       {
        "path": "receipts/r.records__candidate-01.json",
        "text": {
-        "z": "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"
+        "z": "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"
        }
       },
       {
@@ -6584,19 +6584,19 @@
       {
        "path": "receipts/r.one__baseline.json",
        "text": {
-        "z": "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"
+        "z": "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"
        }
       },
       {
        "path": "receipts/r.records__baseline.json",
        "text": {
-        "z": "eNqtV1lvFEcQfo+U/4D2mYW+DyuKBOQll0DY5AGMUB/V64HZmc3MrIWDnN+e6rnBOIYEy17vVFXXfHVXf/j+u3ubNlzA3v0BTVvU1ebkHrufqQ0EKA7dzxEpGxJscpJ7wlK0WthNL3IoXTXw8zcy/NCBhzrDu4HZPEBddRPbgeOa/UD3roWyqGBU5poOqdWxLAex6A4dNEj6gI/3Nu+Kqj+1D4dtsT/UKH2/Z7T1sQnw64pdV+XVBnnX4/t2l6cX7gBr7c1xRD6o2uLz1ogZCVTd81FiPtJ2iBDiiy7kc4wwtSUUf88IOaHkhJCXw3Go4i1SWZBPUu+L7kkdMyjSE+pjdzh2LT6/ymb1Rmcs3cUCs304+/LNm8l9f7OHDbTHsnvwtsX43R8OtheOSZWPGqcdSUJAso4K8BojGMFGAOKI8pTHSLhlLIZkKRIDCwAyBgtKC2XJpNFfdZDhMaLISNp3xR7WplK6pfaMqGwqoS9zEIYofJ096LEG/jxCO9hU3jQKPIkiCG2sp8pbYqIQKSjKaQJHGbOgQzCGOIgcjLGCC8dtSjHxQJVIN4wy6jab1uHLQf6vNjG0qT3UVQu3GUUcA5Kc9kYzHRNLimnJQBMTQgrMUwPaEyeSDzGyhDZxLz1EYFFpzeynRgn2VTbhx+s+Fct6t078gJiPe4hzKQZXxSK6Dk5n6FRGQSA4SmnAsHBKLac6MCO0MpFrKY0PXnPJmDegpABlRFAucINJFvhYy7PmZ6NPf3j+9OnZ+fmP5+czq1193xKynXy8Sv8MORW7Y+O6oaWNkUpFtYPm0BRVbjUbTpSCqCN3ningjLrkHeZMskxaIsC67GPFlZTCK8cT0TZoSZ2hxBhB5wj2HShrnIGd3AXxZtulI/1QHndFNTeCKc2QU7l9/5bTd1dNsX8A7X7UtUrCxWGjnvPzz4kvScepB1CWW4El41OMXgUaA2adDooojKOwlHshJJEiAo2JeC4lD8oLDTJtBpXX928B+whffPginJ9ILhCF0IlxYgGDkKyFmABRUsO4MckzoFqlvrSl8yCw3ynqqCfWZiuEZHdBfPzFEB/fBpEwjt3SKWu4pURE54Xl0WMfoooR7KbovRg5FgJl2ihjowATrI8uoFOJvwviGU4x6L4Y5+fEF7Caa8XRmUJQCj6poLVHxwGVOhAWbFSUKW2FQbdGJOZa9lIkdG0KxpMJbP/v9ZS2TX1ZRMzmf0nc3+v4aAE0T/Q63mX+T65zNw/GTP0clvoSmtJd9VBmfPXhWE79AFuci9vcFedq7LBWb2wlyCiLfTGM5ddL5/+4wZzO9Q8oO7agBnZF2zVXS48Ukhr0pISI3ZEJg70lREKp0lEoTGkmCbM+OBkwQBQSM4TIFCW3HhOIm1FxV9fl0tImD13Uxxb7b1NucQOasF/OzWXDHpDV5NrUhwy8XcAB4HzEDxDSau2cYSAo8wFUiF5jyXvGQfk8cImyXjCtFeHJaMApxVyclrFQH1ZjwWNqO80BmGAmJJxgNplIIw1GcyGRq2ywipkUlcBGnAh2VyapiNyAcWMQcm7tGrdvF7PR/11Tl+WyIC5ifSNe+GPazFnThgb32namx2KHi8aKcxL+58+sul+C+8H5ai7aBlJZ7C66MXH7pBrS93peWS9dmWfHanZtXAiA+3DW1TVHmHLsLYQ+kEumb7AIq67orn77KHGvx6U+L4qzUngP4TiVRKj3hxLyKwY9Eb+Hrs4O3lT1FmdnxPE5Msendlpf83HMNreD2dgpKs8+Krz1VSBzfznGXW+VnCgvqreZ5nyZdX24Xhw0GohVBdVu6H2Dum1yYao7RBGLsL5KZPjdtP3Prhi2tdVWM0zx02+8N+NKcOiOzd33hm9V2E2BIyAzEgb7YrOmPsnpuLyhq99BLwmYb3gBOlnf4k4+7YNFVXQF5uVf8HxYzdvVzvLFRg5XxScNuO72S9J6I8W/638A8lvvUg=="
+        "z": "eNqtV1lvHEUQfkfiP0T77E36PlYICcILl0BxwkPiKOqjej3J7MwyM2thIvPbqZ47cYwdwLLXO1XVNV/d1e+//OLRpg2XcHC/QdMWdbXZPWJnmdpAgOLYfR+RsiHBJie5JyxFq4Xd9CLH0lUDP38jww8deKgzvBuYzWPUVTexHTiuOQx071ooiwpGZa7pkFqdynIQi+7YQYOk9/j4aPOuqPpTh3DcFodjjdJnPaOtT02AH1fsuiqvN8i7Gd+3vzq/dEdYa29OI/JB1Raft0bMSKDqno0S85G2Q4QQX3Qhn2OEqS2h+PuckB0lO0JeDsehindIZUE+Sf1RdE/rmEGRnlCfuuOpa/H5VTarNzpj6S4XmO2T2Zdv3kzu+4s9aaA9ld3jty3G72w42F46JlU+ajXVhnIgVGkWhXdBpJA4c6A9MzHapDzT3CUaSUQ5apWmkjnOaPLcp0mjv+4gw2NEkZF06IoDrE2ldEvtc6J2RO+kepmDMETh8+xBjzXw+wnawabytlHgSRRBaGM9Vd4SEwVapSinCRxlzIIOwRjiIHIwxgouHLcpxcQDVeK2UUbdZdM6fDnI/9Ymhja1x7pq4S6jiGNAktPeaKZjYkkxLRloYkJIgXlqMGTEieRDjCyhTdxLDxFYVFoz+7FRgn2WTfjxuk/Fst6vEz8g5tMB4lyKwVWxiK6D8xk6lVEQCI5SGjAsnFLLqQ7MCK1M5FpK44PXXDLmDSgpQBkRlAvcaKECH2t51vzr6NOvnv3yy/OLi68vLmZWu/q+JWQ7+XiV/hlyKvanxnVDSxsjlYpqD82xKarcajacKAVRR+48U4D57pJ3mDPJMmmJAOuyjxVXUgqvHE9E26AldYYSYwSdI9h3oKxxBra7D+LttktH+rE87YtqbgRTmiGncof+Lefvrpvi8Bjaw6hrlYSLw0Y9FxefEl+SjlMPoCy3AkvGpxi9CjQGzDodFFEYR2Ep90JIIkUEGhPxXEoelBcaZNoMKm/O7gD7Db74+CCcH0kuEIXQiXFiAYOQrIWYAFFSw7gxyTOgWqW+tKXzIIzTijrqibXZCiHZfRC/fTDEb++CSBhXWjhlDbeUiOi8sDx67ENUMSJjQO/FyLEQKNNGGRsFmGB9xG4cgfj7ID7HKQbdg3F+SnwBq7lWHJ0pBKXgkwpae3QcUKkDYcFGRZnSVhh0a0RirmUvRULXpmA8mcD2/15PadvUV0XEbP6HxP25jt8sgOaJXsf7zP/Ode72wZipn8JSX0FTuuseyoyvPp7KqR9gi3Nxm7viXI0d1uqtrQQZZXEohrH8eun8HzaY87n+AWXHFtTAvmi75nrpkUJSg56UELE7MmGwt4RIKI7lKBSmNJOEWR+cDBggCokZQmSKkluPCcTNqLir63JpaZOHLutTi/23Kbe4AU3Yr+bmsmGPyWpybepjBt4u4ABwPuIHCGm1ds4wEJT5ACpEr7HkPeOgfB64RFkvmNaK8GQ04JRiLk7LWKiPq7HgMbWd5gBMMBMSTjCbTKSRBqO5kMhVNljFTIpKYCNOBLsrk1REbsC4MQg5t/aNO7SL2ej/rqnLclkQF7G+ES/8MW3mrGlDg3ttO9NjscdFY8XZhf/4M6vul+B+cL6ai7aBVBb7y25M3D6phvS9mVfWK1fm2bGaXRsXAuA+nHV1zQmmHHsLoQ/kkukbLMKqK7rrnz5I3Jtxqc+L4qwU/oBwmkoi1IdjCfkVg56I30NXZwdvqnqLszPi+ByZ41M7ra/5OGab28Ns7BSVXz8ovPVVIHN/OMV9b5WcKC+qt5nmfJl1vb9ZHDQaiFUF1X7ofYO6bXJhqjtEEYuwvkpk+N20/c+uGLa11VYzTPHz/3lvxpXg2J2a++8N/1dhNwWOgMxIGOzLzZr6NKfj8oaufge9JGC+4QVot77F7T7ug0VVdAXm5Z/wbFjN29XO8mAjh6vi0wZcd/clab2R4t/N3yOV7VM="
        }
       },
       {
        "path": "receipts/r.records__candidate-01.json",
        "text": {
-        "z": "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"
+        "z": "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"
        }
       },
       {
@@ -9784,6 +9784,3343 @@
      "journal": [],
      "imports": []
     }
+   ]
+  }
+ ],
+ "recordsStage": [
+  {
+   "name": "an in-place entry: the note, no child",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "inPlace": {
+     "instance": "I:/i",
+     "profile": "Default",
+     "game": "G:/g"
+    },
+    "selection": {
+     "mods": [
+      "S"
+     ]
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio"
+   },
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "imports": []
+    }
+   },
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "bound": {
+    "openArms": 0
+   },
+   "outputs": [
+    "<ROOT\\>\\run\\records\\records.json"
+   ],
+   "refusal": null,
+   "printed": "",
+   "started": [],
+   "record": "{\n  \"note\": \"a manual run offers no model-driven record check; mcp-only rows stay open and the bundle says they were not assessed\"\n}\n",
+   "folders": []
+  },
+  {
+   "name": "no row open: the note, no child",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "g.overlap__baseline": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only (imported)"
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio"
+   },
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "imports": []
+    }
+   },
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "bound": {
+    "openArms": 0
+   },
+   "outputs": [
+    "<ROOT\\>\\run\\records\\records.json"
+   ],
+   "refusal": null,
+   "printed": "",
+   "started": [],
+   "record": "{\n  \"note\": \"no mcp-only row is open; nothing to capture\"\n}\n",
+   "folders": []
+  },
+  {
+   "name": "no entries at all",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": null,
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio"
+   },
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "imports": []
+    }
+   },
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "bound": {
+    "openArms": 0
+   },
+   "outputs": [
+    "<ROOT\\>\\run\\records\\records.json"
+   ],
+   "refusal": null,
+   "printed": "",
+   "started": [],
+   "record": "{\n  \"note\": \"no mcp-only row is open; nothing to capture\"\n}\n",
+   "folders": []
+  },
+  {
+   "name": "captured and imported: only documents of rows open before the capture, in sorted order",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio"
+   },
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "imports": []
+    }
+   },
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "bound": {
+    "imports": 3,
+    "refused": 0
+   },
+   "outputs": [
+    "<ROOT\\>\\run\\records\\records.json",
+    "<ROOT\\>\\run\\records\\capture-01",
+    "<ROOT\\>\\run\\records\\checkpoints"
+   ],
+   "refusal": null,
+   "printed": "",
+   "started": [
+    {
+     "op": "records-capture",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrecords.py",
+     "argv": [
+      "capture",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--arm",
+      "baseline",
+      "--arm",
+      "candidate-10",
+      "--arm",
+      "candidate-2",
+      "--baseline-from",
+      "<ROOT/>/run/prepare/preparation.json",
+      "--reader-cmd",
+      "\"R:/reader.exe\" --stdio",
+      "--data",
+      "G:/game/Data",
+      "--mods",
+      "L:/lab/mods",
+      "--profile-dir",
+      "L:/lab/profiles/EP-m",
+      "--reader-data",
+      "<ROOT/>/run/reader-data",
+      "--out",
+      "<ROOT/>/run/records/capture-01",
+      "--checkpoints",
+      "<ROOT/>/run/records/checkpoints",
+      "--arm-deadline-min",
+      "150",
+      "--workers",
+      "auto"
+     ],
+     "more": {
+      "deadline_min": 460,
+      "heavy": true,
+      "hold_min": 460,
+      "purpose": "evalpipeline m records"
+     }
+    },
+    {
+     "op": "import-capture-01-00",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json"
+     ],
+     "more": {}
+    },
+    {
+     "op": "import-capture-01-01",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json"
+     ],
+     "more": {}
+    },
+    {
+     "op": "import-capture-01-02",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json"
+     ],
+     "more": {}
+    }
+   ],
+   "record": "{\n  \"capture\": {\n    \"baseline\": {\n      \"imports\": [\n        \"<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json\",\n        \"<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json\"\n      ],\n      \"seconds\": 2.5\n    },\n    \"candidate-10\": {\n      \"imports\": [\n        \"<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json\",\n        \"<ROOT/>/run/records/capture-01/imports/r.done__candidate-5/result.json\",\n        \"<ROOT/>/run/records/capture-01/imports/g.overlap__candidate-3/result.json\",\n        \"loose.json\"\n      ]\n    },\n    \"candidate-2\": {\n      \"imports\": []\n    }\n  },\n  \"captureExit\": 0,\n  \"imports\": [\n    {\n      \"file\": \"<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json\",\n      \"exitCode\": 0,\n      \"log\": \"<ROOT/>/run/records/commands/import-capture-01-00.txt\"\n    },\n    {\n      \"file\": \"<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json\",\n      \"exitCode\": 0,\n      \"log\": \"<ROOT/>/run/records/commands/import-capture-01-01.txt\"\n    },\n    {\n      \"file\": \"<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json\",\n      \"exitCode\": 0,\n      \"log\": \"<ROOT/>/run/records/commands/import-capture-01-02.txt\"\n    }\n  ],\n  \"refusedArms\": {},\n  \"workers\": {\n    \"requested\": null,\n    \"workers\": null,\n    \"case\": null,\n    \"warning\": null,\n    \"memory\": null,\n    \"curedAlone\": null\n  }\n}\n",
+   "folders": [
+    "records/capture-01",
+    "records/checkpoints",
+    "records/commands"
+   ]
+  },
+  {
+   "name": "the workers named as text with spaces",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio",
+    "recordWorkers": " 3 "
+   },
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "imports": []
+    }
+   },
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "bound": {
+    "imports": 3,
+    "refused": 0
+   },
+   "outputs": [
+    "<ROOT\\>\\run\\records\\records.json",
+    "<ROOT\\>\\run\\records\\capture-01",
+    "<ROOT\\>\\run\\records\\checkpoints"
+   ],
+   "refusal": null,
+   "printed": "",
+   "started": [
+    {
+     "op": "records-capture",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrecords.py",
+     "argv": [
+      "capture",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--arm",
+      "baseline",
+      "--arm",
+      "candidate-10",
+      "--arm",
+      "candidate-2",
+      "--baseline-from",
+      "<ROOT/>/run/prepare/preparation.json",
+      "--reader-cmd",
+      "\"R:/reader.exe\" --stdio",
+      "--data",
+      "G:/game/Data",
+      "--mods",
+      "L:/lab/mods",
+      "--profile-dir",
+      "L:/lab/profiles/EP-m",
+      "--reader-data",
+      "<ROOT/>/run/reader-data",
+      "--out",
+      "<ROOT/>/run/records/capture-01",
+      "--checkpoints",
+      "<ROOT/>/run/records/checkpoints",
+      "--arm-deadline-min",
+      "150",
+      "--workers",
+      "3"
+     ],
+     "more": {
+      "deadline_min": 460,
+      "heavy": true,
+      "hold_min": 460,
+      "purpose": "evalpipeline m records"
+     }
+    },
+    {
+     "op": "import-capture-01-00",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json"
+     ],
+     "more": {}
+    },
+    {
+     "op": "import-capture-01-01",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json"
+     ],
+     "more": {}
+    },
+    {
+     "op": "import-capture-01-02",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json"
+     ],
+     "more": {}
+    }
+   ],
+   "record": "{\n  \"capture\": {\n    \"baseline\": {\n      \"imports\": [\n        \"<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json\",\n        \"<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json\"\n      ],\n      \"seconds\": 2.5\n    },\n    \"candidate-10\": {\n      \"imports\": [\n        \"<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json\",\n        \"<ROOT/>/run/records/capture-01/imports/r.done__candidate-5/result.json\",\n        \"<ROOT/>/run/records/capture-01/imports/g.overlap__candidate-3/result.json\",\n        \"loose.json\"\n      ]\n    },\n    \"candidate-2\": {\n      \"imports\": []\n    }\n  },\n  \"captureExit\": 0,\n  \"imports\": [\n    {\n      \"file\": \"<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json\",\n      \"exitCode\": 0,\n      \"log\": \"<ROOT/>/run/records/commands/import-capture-01-00.txt\"\n    },\n    {\n      \"file\": \"<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json\",\n      \"exitCode\": 0,\n      \"log\": \"<ROOT/>/run/records/commands/import-capture-01-01.txt\"\n    },\n    {\n      \"file\": \"<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json\",\n      \"exitCode\": 0,\n      \"log\": \"<ROOT/>/run/records/commands/import-capture-01-02.txt\"\n    }\n  ],\n  \"refusedArms\": {},\n  \"workers\": {\n    \"requested\": null,\n    \"workers\": null,\n    \"case\": null,\n    \"warning\": null,\n    \"memory\": null,\n    \"curedAlone\": null\n  }\n}\n",
+   "folders": [
+    "records/capture-01",
+    "records/checkpoints",
+    "records/commands"
+   ]
+  },
+  {
+   "name": "the workers named as a number, a third capture folder",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio",
+    "recordWorkers": 4
+   },
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "imports": []
+    }
+   },
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 2,
+   "envReader": null,
+   "bound": {
+    "imports": 3,
+    "refused": 0
+   },
+   "outputs": [
+    "<ROOT\\>\\run\\records\\records.json",
+    "<ROOT\\>\\run\\records\\capture-03",
+    "<ROOT\\>\\run\\records\\checkpoints"
+   ],
+   "refusal": null,
+   "printed": "",
+   "started": [
+    {
+     "op": "records-capture",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrecords.py",
+     "argv": [
+      "capture",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--arm",
+      "baseline",
+      "--arm",
+      "candidate-10",
+      "--arm",
+      "candidate-2",
+      "--baseline-from",
+      "<ROOT/>/run/prepare/preparation.json",
+      "--reader-cmd",
+      "\"R:/reader.exe\" --stdio",
+      "--data",
+      "G:/game/Data",
+      "--mods",
+      "L:/lab/mods",
+      "--profile-dir",
+      "L:/lab/profiles/EP-m",
+      "--reader-data",
+      "<ROOT/>/run/reader-data",
+      "--out",
+      "<ROOT/>/run/records/capture-03",
+      "--checkpoints",
+      "<ROOT/>/run/records/checkpoints",
+      "--arm-deadline-min",
+      "150",
+      "--workers",
+      "4"
+     ],
+     "more": {
+      "deadline_min": 460,
+      "heavy": true,
+      "hold_min": 460,
+      "purpose": "evalpipeline m records"
+     }
+    },
+    {
+     "op": "import-capture-03-00",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-03/imports/r.fields__baseline/result.json"
+     ],
+     "more": {}
+    },
+    {
+     "op": "import-capture-03-01",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-03/imports/r.records__baseline/result.json"
+     ],
+     "more": {}
+    },
+    {
+     "op": "import-capture-03-02",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-03/imports/r.records__candidate-10/result.json"
+     ],
+     "more": {}
+    }
+   ],
+   "record": "{\n  \"capture\": {\n    \"baseline\": {\n      \"imports\": [\n        \"<ROOT/>/run/records/capture-03/imports/r.records__baseline/result.json\",\n        \"<ROOT/>/run/records/capture-03/imports/r.fields__baseline/result.json\"\n      ],\n      \"seconds\": 2.5\n    },\n    \"candidate-10\": {\n      \"imports\": [\n        \"<ROOT/>/run/records/capture-03/imports/r.records__candidate-10/result.json\",\n        \"<ROOT/>/run/records/capture-03/imports/r.done__candidate-5/result.json\",\n        \"<ROOT/>/run/records/capture-03/imports/g.overlap__candidate-3/result.json\",\n        \"loose.json\"\n      ]\n    },\n    \"candidate-2\": {\n      \"imports\": []\n    }\n  },\n  \"captureExit\": 0,\n  \"imports\": [\n    {\n      \"file\": \"<ROOT/>/run/records/capture-03/imports/r.fields__baseline/result.json\",\n      \"exitCode\": 0,\n      \"log\": \"<ROOT/>/run/records/commands/import-capture-03-00.txt\"\n    },\n    {\n      \"file\": \"<ROOT/>/run/records/capture-03/imports/r.records__baseline/result.json\",\n      \"exitCode\": 0,\n      \"log\": \"<ROOT/>/run/records/commands/import-capture-03-01.txt\"\n    },\n    {\n      \"file\": \"<ROOT/>/run/records/capture-03/imports/r.records__candidate-10/result.json\",\n      \"exitCode\": 0,\n      \"log\": \"<ROOT/>/run/records/commands/import-capture-03-02.txt\"\n    }\n  ],\n  \"refusedArms\": {},\n  \"workers\": {\n    \"requested\": null,\n    \"workers\": null,\n    \"case\": null,\n    \"warning\": null,\n    \"memory\": null,\n    \"curedAlone\": null\n  }\n}\n",
+   "folders": [
+    "records/capture-01",
+    "records/capture-02",
+    "records/capture-03",
+    "records/checkpoints",
+    "records/commands"
+   ]
+  },
+  {
+   "name": "recordWorkers 'many' is refused before anything starts",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio",
+    "recordWorkers": "many"
+   },
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "imports": []
+    }
+   },
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "refusal": "the machine file's recordWorkers is 'many'; it takes auto or a whole number from 1 up, and 1 reads one arm at a time.",
+   "printed": "",
+   "started": [],
+   "record": null,
+   "folders": []
+  },
+  {
+   "name": "recordWorkers 0 is refused before anything starts",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio",
+    "recordWorkers": 0
+   },
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "imports": []
+    }
+   },
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "refusal": "the machine file's recordWorkers is 0; it takes auto or a whole number from 1 up, and 1 reads one arm at a time.",
+   "printed": "",
+   "started": [],
+   "record": null,
+   "folders": []
+  },
+  {
+   "name": "recordWorkers None is refused before anything starts",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio",
+    "recordWorkers": null
+   },
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "imports": []
+    }
+   },
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "refusal": "the machine file's recordWorkers is None; it takes auto or a whole number from 1 up, and 1 reads one arm at a time.",
+   "printed": "",
+   "started": [],
+   "record": null,
+   "folders": []
+  },
+  {
+   "name": "recordWorkers 2.5 is refused before anything starts",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio",
+    "recordWorkers": 2.5
+   },
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "imports": []
+    }
+   },
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "refusal": "the machine file's recordWorkers is 2.5; it takes auto or a whole number from 1 up, and 1 reads one arm at a time.",
+   "printed": "",
+   "started": [],
+   "record": null,
+   "folders": []
+  },
+  {
+   "name": "recordWorkers True is refused before anything starts",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio",
+    "recordWorkers": true
+   },
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "imports": []
+    }
+   },
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "refusal": "the machine file's recordWorkers is True; it takes auto or a whole number from 1 up, and 1 reads one arm at a time.",
+   "printed": "",
+   "started": [],
+   "record": null,
+   "folders": []
+  },
+  {
+   "name": "recordWorkers '' is refused before anything starts",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio",
+    "recordWorkers": ""
+   },
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "imports": []
+    }
+   },
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "refusal": "the machine file's recordWorkers is ''; it takes auto or a whole number from 1 up, and 1 reads one arm at a time.",
+   "printed": "",
+   "started": [],
+   "record": null,
+   "folders": []
+  },
+  {
+   "name": "recordWorkers '-1' is refused before anything starts",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio",
+    "recordWorkers": "-1"
+   },
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "imports": []
+    }
+   },
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "refusal": "the machine file's recordWorkers is '-1'; it takes auto or a whole number from 1 up, and 1 reads one arm at a time.",
+   "printed": "",
+   "started": [],
+   "record": null,
+   "folders": []
+  },
+  {
+   "name": "recordWorkers '1.0' is refused before anything starts",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio",
+    "recordWorkers": "1.0"
+   },
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "imports": []
+    }
+   },
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "refusal": "the machine file's recordWorkers is '1.0'; it takes auto or a whole number from 1 up, and 1 reads one arm at a time.",
+   "printed": "",
+   "started": [],
+   "record": null,
+   "folders": []
+  },
+  {
+   "name": "no record reader named",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {},
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "imports": []
+    }
+   },
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "refusal": "no record reader is named: set readerCmd in the machine file (a houseCARL server whose folder carries its generated corpus.json).",
+   "printed": "",
+   "started": [],
+   "record": null,
+   "folders": []
+  },
+  {
+   "name": "the record reader named by the environment",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {},
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "imports": []
+    }
+   },
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": "E:/env-reader.exe",
+   "bound": {
+    "imports": 3,
+    "refused": 0
+   },
+   "outputs": [
+    "<ROOT\\>\\run\\records\\records.json",
+    "<ROOT\\>\\run\\records\\capture-01",
+    "<ROOT\\>\\run\\records\\checkpoints"
+   ],
+   "refusal": null,
+   "printed": "",
+   "started": [
+    {
+     "op": "records-capture",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrecords.py",
+     "argv": [
+      "capture",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--arm",
+      "baseline",
+      "--arm",
+      "candidate-10",
+      "--arm",
+      "candidate-2",
+      "--baseline-from",
+      "<ROOT/>/run/prepare/preparation.json",
+      "--reader-cmd",
+      "E:/env-reader.exe",
+      "--data",
+      "G:/game/Data",
+      "--mods",
+      "L:/lab/mods",
+      "--profile-dir",
+      "L:/lab/profiles/EP-m",
+      "--reader-data",
+      "<ROOT/>/run/reader-data",
+      "--out",
+      "<ROOT/>/run/records/capture-01",
+      "--checkpoints",
+      "<ROOT/>/run/records/checkpoints",
+      "--arm-deadline-min",
+      "150",
+      "--workers",
+      "auto"
+     ],
+     "more": {
+      "deadline_min": 460,
+      "heavy": true,
+      "hold_min": 460,
+      "purpose": "evalpipeline m records"
+     }
+    },
+    {
+     "op": "import-capture-01-00",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json"
+     ],
+     "more": {}
+    },
+    {
+     "op": "import-capture-01-01",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json"
+     ],
+     "more": {}
+    },
+    {
+     "op": "import-capture-01-02",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json"
+     ],
+     "more": {}
+    }
+   ],
+   "record": "{\n  \"capture\": {\n    \"baseline\": {\n      \"imports\": [\n        \"<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json\",\n        \"<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json\"\n      ],\n      \"seconds\": 2.5\n    },\n    \"candidate-10\": {\n      \"imports\": [\n        \"<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json\",\n        \"<ROOT/>/run/records/capture-01/imports/r.done__candidate-5/result.json\",\n        \"<ROOT/>/run/records/capture-01/imports/g.overlap__candidate-3/result.json\",\n        \"loose.json\"\n      ]\n    },\n    \"candidate-2\": {\n      \"imports\": []\n    }\n  },\n  \"captureExit\": 0,\n  \"imports\": [\n    {\n      \"file\": \"<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json\",\n      \"exitCode\": 0,\n      \"log\": \"<ROOT/>/run/records/commands/import-capture-01-00.txt\"\n    },\n    {\n      \"file\": \"<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json\",\n      \"exitCode\": 0,\n      \"log\": \"<ROOT/>/run/records/commands/import-capture-01-01.txt\"\n    },\n    {\n      \"file\": \"<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json\",\n      \"exitCode\": 0,\n      \"log\": \"<ROOT/>/run/records/commands/import-capture-01-02.txt\"\n    }\n  ],\n  \"refusedArms\": {},\n  \"workers\": {\n    \"requested\": null,\n    \"workers\": null,\n    \"case\": null,\n    \"warning\": null,\n    \"memory\": null,\n    \"curedAlone\": null\n  }\n}\n",
+   "folders": [
+    "records/capture-01",
+    "records/checkpoints",
+    "records/commands"
+   ]
+  },
+  {
+   "name": "an import refused and an import that never ended, no log of the second",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio"
+   },
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "imports": []
+    }
+   },
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    2,
+    null,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": false,
+   "earlier": 0,
+   "envReader": null,
+   "bound": {
+    "imports": 3,
+    "refused": 2
+   },
+   "outputs": [
+    "<ROOT\\>\\run\\records\\records.json",
+    "<ROOT\\>\\run\\records\\capture-01",
+    "<ROOT\\>\\run\\records\\checkpoints"
+   ],
+   "refusal": null,
+   "printed": "records: 2 import(s) refused and 0 arm(s) refused; see <ROOT/>/run/records/records.json\n",
+   "started": [
+    {
+     "op": "records-capture",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrecords.py",
+     "argv": [
+      "capture",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--arm",
+      "baseline",
+      "--arm",
+      "candidate-10",
+      "--arm",
+      "candidate-2",
+      "--baseline-from",
+      "<ROOT/>/run/prepare/preparation.json",
+      "--reader-cmd",
+      "\"R:/reader.exe\" --stdio",
+      "--data",
+      "G:/game/Data",
+      "--mods",
+      "L:/lab/mods",
+      "--profile-dir",
+      "L:/lab/profiles/EP-m",
+      "--reader-data",
+      "<ROOT/>/run/reader-data",
+      "--out",
+      "<ROOT/>/run/records/capture-01",
+      "--checkpoints",
+      "<ROOT/>/run/records/checkpoints",
+      "--arm-deadline-min",
+      "150",
+      "--workers",
+      "auto"
+     ],
+     "more": {
+      "deadline_min": 460,
+      "heavy": true,
+      "hold_min": 460,
+      "purpose": "evalpipeline m records"
+     }
+    },
+    {
+     "op": "import-capture-01-00",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json"
+     ],
+     "more": {}
+    },
+    {
+     "op": "import-capture-01-01",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json"
+     ],
+     "more": {}
+    },
+    {
+     "op": "import-capture-01-02",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json"
+     ],
+     "more": {}
+    }
+   ],
+   "record": "{\n  \"capture\": {\n    \"baseline\": {\n      \"imports\": [\n        \"<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json\",\n        \"<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json\"\n      ],\n      \"seconds\": 2.5\n    },\n    \"candidate-10\": {\n      \"imports\": [\n        \"<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json\",\n        \"<ROOT/>/run/records/capture-01/imports/r.done__candidate-5/result.json\",\n        \"<ROOT/>/run/records/capture-01/imports/g.overlap__candidate-3/result.json\",\n        \"loose.json\"\n      ]\n    },\n    \"candidate-2\": {\n      \"imports\": []\n    }\n  },\n  \"captureExit\": 0,\n  \"imports\": [\n    {\n      \"file\": \"<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json\",\n      \"exitCode\": 2,\n      \"log\": null\n    },\n    {\n      \"file\": \"<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json\",\n      \"exitCode\": null,\n      \"log\": null\n    },\n    {\n      \"file\": \"<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json\",\n      \"exitCode\": 0,\n      \"log\": null\n    }\n  ],\n  \"refusedArms\": {},\n  \"workers\": {\n    \"requested\": null,\n    \"workers\": null,\n    \"case\": null,\n    \"warning\": null,\n    \"memory\": null,\n    \"curedAlone\": null\n  }\n}\n",
+   "folders": [
+    "records/capture-01",
+    "records/checkpoints"
+   ]
+  },
+  {
+   "name": "an arm the capture refused, and the workers' own words",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio"
+   },
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "refused": "the reader answered nothing for 3 plugins"
+    }
+   },
+   "workers": {
+    "requested": "auto",
+    "workers": 2,
+    "case": "fits",
+    "warning": "two arms at once need 9 GB; one is read at a time",
+    "memory": {
+     "freeMB": 9000
+    },
+    "curedAlone": {
+     "candidate-2": "the reader ran out of memory",
+     "baseline": "the reader stopped answering"
+    },
+    "more": "not kept"
+   },
+   "captureExit": 0,
+   "importExits": [
+    0,
+    3,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "bound": {
+    "imports": 3,
+    "refused": 2
+   },
+   "outputs": [
+    "<ROOT\\>\\run\\records\\records.json",
+    "<ROOT\\>\\run\\records\\capture-01",
+    "<ROOT\\>\\run\\records\\checkpoints"
+   ],
+   "refusal": null,
+   "printed": "records: two arms at once need 9 GB; one is read at a time\nrecords: candidate-2 was refused beside other arms and read fine alone: the reader ran out of memory\nrecords: baseline was refused beside other arms and read fine alone: the reader stopped answering\nrecords: 1 import(s) refused and 1 arm(s) refused; see <ROOT/>/run/records/records.json\n",
+   "started": [
+    {
+     "op": "records-capture",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrecords.py",
+     "argv": [
+      "capture",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--arm",
+      "baseline",
+      "--arm",
+      "candidate-10",
+      "--arm",
+      "candidate-2",
+      "--baseline-from",
+      "<ROOT/>/run/prepare/preparation.json",
+      "--reader-cmd",
+      "\"R:/reader.exe\" --stdio",
+      "--data",
+      "G:/game/Data",
+      "--mods",
+      "L:/lab/mods",
+      "--profile-dir",
+      "L:/lab/profiles/EP-m",
+      "--reader-data",
+      "<ROOT/>/run/reader-data",
+      "--out",
+      "<ROOT/>/run/records/capture-01",
+      "--checkpoints",
+      "<ROOT/>/run/records/checkpoints",
+      "--arm-deadline-min",
+      "150",
+      "--workers",
+      "auto"
+     ],
+     "more": {
+      "deadline_min": 460,
+      "heavy": true,
+      "hold_min": 460,
+      "purpose": "evalpipeline m records"
+     }
+    },
+    {
+     "op": "import-capture-01-00",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json"
+     ],
+     "more": {}
+    },
+    {
+     "op": "import-capture-01-01",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json"
+     ],
+     "more": {}
+    },
+    {
+     "op": "import-capture-01-02",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json"
+     ],
+     "more": {}
+    }
+   ],
+   "record": "{\n  \"capture\": {\n    \"baseline\": {\n      \"imports\": [\n        \"<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json\",\n        \"<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json\"\n      ],\n      \"seconds\": 2.5\n    },\n    \"candidate-10\": {\n      \"imports\": [\n        \"<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json\",\n        \"<ROOT/>/run/records/capture-01/imports/r.done__candidate-5/result.json\",\n        \"<ROOT/>/run/records/capture-01/imports/g.overlap__candidate-3/result.json\",\n        \"loose.json\"\n      ]\n    },\n    \"candidate-2\": {\n      \"refused\": \"the reader answered nothing for 3 plugins\"\n    }\n  },\n  \"captureExit\": 0,\n  \"imports\": [\n    {\n      \"file\": \"<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json\",\n      \"exitCode\": 0,\n      \"log\": \"<ROOT/>/run/records/commands/import-capture-01-00.txt\"\n    },\n    {\n      \"file\": \"<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json\",\n      \"exitCode\": 3,\n      \"log\": \"<ROOT/>/run/records/commands/import-capture-01-01.txt\"\n    },\n    {\n      \"file\": \"<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json\",\n      \"exitCode\": 0,\n      \"log\": \"<ROOT/>/run/records/commands/import-capture-01-02.txt\"\n    }\n  ],\n  \"refusedArms\": {\n    \"candidate-2\": \"the reader answered nothing for 3 plugins\"\n  },\n  \"workers\": {\n    \"requested\": \"auto\",\n    \"workers\": 2,\n    \"case\": \"fits\",\n    \"warning\": \"two arms at once need 9 GB; one is read at a time\",\n    \"memory\": {\n      \"freeMB\": 9000\n    },\n    \"curedAlone\": {\n      \"candidate-2\": \"the reader ran out of memory\",\n      \"baseline\": \"the reader stopped answering\"\n    }\n  }\n}\n",
+   "folders": [
+    "records/capture-01",
+    "records/checkpoints",
+    "records/commands"
+   ]
+  },
+  {
+   "name": "arms stopped at their deadline",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio"
+   },
+   "summary": {
+    "candidate-2": {
+     "refused": "stopped at its deadline of 150 min"
+    },
+    "baseline": {
+     "refused": {
+      "why": "the arm reached its deadline"
+     },
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json"
+     ]
+    },
+    "candidate-10": {
+     "refused": "refused for another reason"
+    }
+   },
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "refusal": "the record read of arm(s) baseline, candidate-2 reached its 150-minute deadline; run again: finished arms are kept in <ROOT/>/run/records/checkpoints and only these are read again.",
+   "printed": "",
+   "started": [
+    {
+     "op": "records-capture",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrecords.py",
+     "argv": [
+      "capture",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--arm",
+      "baseline",
+      "--arm",
+      "candidate-10",
+      "--arm",
+      "candidate-2",
+      "--baseline-from",
+      "<ROOT/>/run/prepare/preparation.json",
+      "--reader-cmd",
+      "\"R:/reader.exe\" --stdio",
+      "--data",
+      "G:/game/Data",
+      "--mods",
+      "L:/lab/mods",
+      "--profile-dir",
+      "L:/lab/profiles/EP-m",
+      "--reader-data",
+      "<ROOT/>/run/reader-data",
+      "--out",
+      "<ROOT/>/run/records/capture-01",
+      "--checkpoints",
+      "<ROOT/>/run/records/checkpoints",
+      "--arm-deadline-min",
+      "150",
+      "--workers",
+      "auto"
+     ],
+     "more": {
+      "deadline_min": 460,
+      "heavy": true,
+      "hold_min": 460,
+      "purpose": "evalpipeline m records"
+     }
+    },
+    {
+     "op": "import-capture-01-00",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json"
+     ],
+     "more": {}
+    }
+   ],
+   "record": "{\n  \"capture\": {\n    \"candidate-2\": {\n      \"refused\": \"stopped at its deadline of 150 min\"\n    },\n    \"baseline\": {\n      \"refused\": {\n        \"why\": \"the arm reached its deadline\"\n      },\n      \"imports\": [\n        \"<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json\"\n      ]\n    },\n    \"candidate-10\": {\n      \"refused\": \"refused for another reason\"\n    }\n  },\n  \"captureExit\": 0,\n  \"imports\": [\n    {\n      \"file\": \"<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json\",\n      \"exitCode\": 0,\n      \"log\": \"<ROOT/>/run/records/commands/import-capture-01-00.txt\"\n    }\n  ],\n  \"refusedArms\": {\n    \"candidate-2\": \"stopped at its deadline of 150 min\",\n    \"baseline\": {\n      \"why\": \"the arm reached its deadline\"\n    },\n    \"candidate-10\": \"refused for another reason\"\n  },\n  \"workers\": {\n    \"requested\": null,\n    \"workers\": null,\n    \"case\": null,\n    \"warning\": null,\n    \"memory\": null,\n    \"curedAlone\": null\n  }\n}\n",
+   "folders": [
+    "records/capture-01",
+    "records/checkpoints",
+    "records/commands"
+   ]
+  },
+  {
+   "name": "a capture that ended 2 with a summary is read",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio"
+   },
+   "summary": {
+    "baseline": {
+     "refused": "the reader could not start"
+    }
+   },
+   "workers": null,
+   "captureExit": 2,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "bound": {
+    "imports": 0,
+    "refused": 1
+   },
+   "outputs": [
+    "<ROOT\\>\\run\\records\\records.json",
+    "<ROOT\\>\\run\\records\\capture-01",
+    "<ROOT\\>\\run\\records\\checkpoints"
+   ],
+   "refusal": null,
+   "printed": "records: 0 import(s) refused and 1 arm(s) refused; see <ROOT/>/run/records/records.json\n",
+   "started": [
+    {
+     "op": "records-capture",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrecords.py",
+     "argv": [
+      "capture",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--arm",
+      "baseline",
+      "--arm",
+      "candidate-10",
+      "--arm",
+      "candidate-2",
+      "--baseline-from",
+      "<ROOT/>/run/prepare/preparation.json",
+      "--reader-cmd",
+      "\"R:/reader.exe\" --stdio",
+      "--data",
+      "G:/game/Data",
+      "--mods",
+      "L:/lab/mods",
+      "--profile-dir",
+      "L:/lab/profiles/EP-m",
+      "--reader-data",
+      "<ROOT/>/run/reader-data",
+      "--out",
+      "<ROOT/>/run/records/capture-01",
+      "--checkpoints",
+      "<ROOT/>/run/records/checkpoints",
+      "--arm-deadline-min",
+      "150",
+      "--workers",
+      "auto"
+     ],
+     "more": {
+      "deadline_min": 460,
+      "heavy": true,
+      "hold_min": 460,
+      "purpose": "evalpipeline m records"
+     }
+    }
+   ],
+   "record": "{\n  \"capture\": {\n    \"baseline\": {\n      \"refused\": \"the reader could not start\"\n    }\n  },\n  \"captureExit\": 2,\n  \"imports\": [],\n  \"refusedArms\": {\n    \"baseline\": \"the reader could not start\"\n  },\n  \"workers\": {\n    \"requested\": null,\n    \"workers\": null,\n    \"case\": null,\n    \"warning\": null,\n    \"memory\": null,\n    \"curedAlone\": null\n  }\n}\n",
+   "folders": [
+    "records/capture-01",
+    "records/checkpoints"
+   ]
+  },
+  {
+   "name": "a capture that ended 1",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio"
+   },
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "imports": []
+    }
+   },
+   "workers": null,
+   "captureExit": 1,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "refusal": "the record capture did not finish (exit 1); read <ROOT/>/run/records/commands.",
+   "printed": "",
+   "started": [
+    {
+     "op": "records-capture",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrecords.py",
+     "argv": [
+      "capture",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--arm",
+      "baseline",
+      "--arm",
+      "candidate-10",
+      "--arm",
+      "candidate-2",
+      "--baseline-from",
+      "<ROOT/>/run/prepare/preparation.json",
+      "--reader-cmd",
+      "\"R:/reader.exe\" --stdio",
+      "--data",
+      "G:/game/Data",
+      "--mods",
+      "L:/lab/mods",
+      "--profile-dir",
+      "L:/lab/profiles/EP-m",
+      "--reader-data",
+      "<ROOT/>/run/reader-data",
+      "--out",
+      "<ROOT/>/run/records/capture-01",
+      "--checkpoints",
+      "<ROOT/>/run/records/checkpoints",
+      "--arm-deadline-min",
+      "150",
+      "--workers",
+      "auto"
+     ],
+     "more": {
+      "deadline_min": 460,
+      "heavy": true,
+      "hold_min": 460,
+      "purpose": "evalpipeline m records"
+     }
+    },
+    {
+     "op": "import-capture-01-00",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json"
+     ],
+     "more": {}
+    },
+    {
+     "op": "import-capture-01-01",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json"
+     ],
+     "more": {}
+    },
+    {
+     "op": "import-capture-01-02",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrun.py",
+     "argv": [
+      "import-results",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--file",
+      "<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json"
+     ],
+     "more": {}
+    }
+   ],
+   "record": "{\n  \"capture\": {\n    \"baseline\": {\n      \"imports\": [\n        \"<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json\",\n        \"<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json\"\n      ],\n      \"seconds\": 2.5\n    },\n    \"candidate-10\": {\n      \"imports\": [\n        \"<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json\",\n        \"<ROOT/>/run/records/capture-01/imports/r.done__candidate-5/result.json\",\n        \"<ROOT/>/run/records/capture-01/imports/g.overlap__candidate-3/result.json\",\n        \"loose.json\"\n      ]\n    },\n    \"candidate-2\": {\n      \"imports\": []\n    }\n  },\n  \"captureExit\": 1,\n  \"imports\": [\n    {\n      \"file\": \"<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json\",\n      \"exitCode\": 0,\n      \"log\": \"<ROOT/>/run/records/commands/import-capture-01-00.txt\"\n    },\n    {\n      \"file\": \"<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json\",\n      \"exitCode\": 0,\n      \"log\": \"<ROOT/>/run/records/commands/import-capture-01-01.txt\"\n    },\n    {\n      \"file\": \"<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json\",\n      \"exitCode\": 0,\n      \"log\": \"<ROOT/>/run/records/commands/import-capture-01-02.txt\"\n    }\n  ],\n  \"refusedArms\": {},\n  \"workers\": {\n    \"requested\": null,\n    \"workers\": null,\n    \"case\": null,\n    \"warning\": null,\n    \"memory\": null,\n    \"curedAlone\": null\n  }\n}\n",
+   "folders": [
+    "records/capture-01",
+    "records/checkpoints",
+    "records/commands"
+   ]
+  },
+  {
+   "name": "a capture that never ended",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio"
+   },
+   "summary": null,
+   "workers": null,
+   "captureExit": null,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "refusal": "the record capture did not finish (exit None); read <ROOT/>/run/records/commands.",
+   "printed": "",
+   "started": [
+    {
+     "op": "records-capture",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrecords.py",
+     "argv": [
+      "capture",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--arm",
+      "baseline",
+      "--arm",
+      "candidate-10",
+      "--arm",
+      "candidate-2",
+      "--baseline-from",
+      "<ROOT/>/run/prepare/preparation.json",
+      "--reader-cmd",
+      "\"R:/reader.exe\" --stdio",
+      "--data",
+      "G:/game/Data",
+      "--mods",
+      "L:/lab/mods",
+      "--profile-dir",
+      "L:/lab/profiles/EP-m",
+      "--reader-data",
+      "<ROOT/>/run/reader-data",
+      "--out",
+      "<ROOT/>/run/records/capture-01",
+      "--checkpoints",
+      "<ROOT/>/run/records/checkpoints",
+      "--arm-deadline-min",
+      "150",
+      "--workers",
+      "auto"
+     ],
+     "more": {
+      "deadline_min": 460,
+      "heavy": true,
+      "hold_min": 460,
+      "purpose": "evalpipeline m records"
+     }
+    }
+   ],
+   "record": "{\n  \"capture\": {},\n  \"captureExit\": null,\n  \"imports\": [],\n  \"refusedArms\": {},\n  \"workers\": {\n    \"requested\": null,\n    \"workers\": null,\n    \"case\": null,\n    \"warning\": null,\n    \"memory\": null,\n    \"curedAlone\": null\n  }\n}\n",
+   "folders": [
+    "records/checkpoints"
+   ]
+  },
+  {
+   "name": "a capture that ended 0 and wrote no summary",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio"
+   },
+   "summary": null,
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "refusal": "the record capture did not finish (exit 0); read <ROOT/>/run/records/commands.",
+   "printed": "",
+   "started": [
+    {
+     "op": "records-capture",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrecords.py",
+     "argv": [
+      "capture",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--arm",
+      "baseline",
+      "--arm",
+      "candidate-10",
+      "--arm",
+      "candidate-2",
+      "--baseline-from",
+      "<ROOT/>/run/prepare/preparation.json",
+      "--reader-cmd",
+      "\"R:/reader.exe\" --stdio",
+      "--data",
+      "G:/game/Data",
+      "--mods",
+      "L:/lab/mods",
+      "--profile-dir",
+      "L:/lab/profiles/EP-m",
+      "--reader-data",
+      "<ROOT/>/run/reader-data",
+      "--out",
+      "<ROOT/>/run/records/capture-01",
+      "--checkpoints",
+      "<ROOT/>/run/records/checkpoints",
+      "--arm-deadline-min",
+      "150",
+      "--workers",
+      "auto"
+     ],
+     "more": {
+      "deadline_min": 460,
+      "heavy": true,
+      "hold_min": 460,
+      "purpose": "evalpipeline m records"
+     }
+    }
+   ],
+   "record": "{\n  \"capture\": {},\n  \"captureExit\": 0,\n  \"imports\": [],\n  \"refusedArms\": {},\n  \"workers\": {\n    \"requested\": null,\n    \"workers\": null,\n    \"case\": null,\n    \"warning\": null,\n    \"memory\": null,\n    \"curedAlone\": null\n  }\n}\n",
+   "folders": [
+    "records/checkpoints"
+   ]
+  },
+  {
+   "name": "a capture that wrote an empty summary",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio"
+   },
+   "summary": {},
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "refusal": "the record capture did not finish (exit 0); read <ROOT/>/run/records/commands.",
+   "printed": "",
+   "started": [
+    {
+     "op": "records-capture",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrecords.py",
+     "argv": [
+      "capture",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--arm",
+      "baseline",
+      "--arm",
+      "candidate-10",
+      "--arm",
+      "candidate-2",
+      "--baseline-from",
+      "<ROOT/>/run/prepare/preparation.json",
+      "--reader-cmd",
+      "\"R:/reader.exe\" --stdio",
+      "--data",
+      "G:/game/Data",
+      "--mods",
+      "L:/lab/mods",
+      "--profile-dir",
+      "L:/lab/profiles/EP-m",
+      "--reader-data",
+      "<ROOT/>/run/reader-data",
+      "--out",
+      "<ROOT/>/run/records/capture-01",
+      "--checkpoints",
+      "<ROOT/>/run/records/checkpoints",
+      "--arm-deadline-min",
+      "150",
+      "--workers",
+      "auto"
+     ],
+     "more": {
+      "deadline_min": 460,
+      "heavy": true,
+      "hold_min": 460,
+      "purpose": "evalpipeline m records"
+     }
+    }
+   ],
+   "record": "{\n  \"capture\": {},\n  \"captureExit\": 0,\n  \"imports\": [],\n  \"refusedArms\": {},\n  \"workers\": {\n    \"requested\": null,\n    \"workers\": null,\n    \"case\": null,\n    \"warning\": null,\n    \"memory\": null,\n    \"curedAlone\": null\n  }\n}\n",
+   "folders": [
+    "records/capture-01",
+    "records/checkpoints"
+   ]
+  },
+  {
+   "name": "a capture whose slot gave up waiting for memory",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio",
+    "heavyPrefix": [
+     "python",
+     "S:/tools/idle_lock.py",
+     "hold",
+     "--lock",
+     "{lock}",
+     "--min-free-gb",
+     "16",
+     "--purpose",
+     "{purpose}"
+    ]
+   },
+   "summary": null,
+   "workers": null,
+   "captureExit": 3,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": "$ slot\n(exit 3, 2.0s)\n\nwaiting for idle\nidle_lock: gave up waiting for idle: memory: 9.1 GB free under the 16 GB floor after 240 min \nidle_lock: gave up waiting for idle: later line\n",
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "refusal": "the record capture never started: the machine slot's wait for memory ran out (gave up waiting for idle: memory: 9.1 GB free under the 16 GB floor after 240 min); it needs 16 GB free, so close other programs or lower --min-free-gb in the machine file's heavyPrefix, then run again.",
+   "printed": "",
+   "started": [
+    {
+     "op": "records-capture",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrecords.py",
+     "argv": [
+      "capture",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--arm",
+      "baseline",
+      "--arm",
+      "candidate-10",
+      "--arm",
+      "candidate-2",
+      "--baseline-from",
+      "<ROOT/>/run/prepare/preparation.json",
+      "--reader-cmd",
+      "\"R:/reader.exe\" --stdio",
+      "--data",
+      "G:/game/Data",
+      "--mods",
+      "L:/lab/mods",
+      "--profile-dir",
+      "L:/lab/profiles/EP-m",
+      "--reader-data",
+      "<ROOT/>/run/reader-data",
+      "--out",
+      "<ROOT/>/run/records/capture-01",
+      "--checkpoints",
+      "<ROOT/>/run/records/checkpoints",
+      "--arm-deadline-min",
+      "150",
+      "--workers",
+      "auto"
+     ],
+     "more": {
+      "deadline_min": 460,
+      "heavy": true,
+      "hold_min": 460,
+      "purpose": "evalpipeline m records"
+     }
+    }
+   ],
+   "record": "{\n  \"capture\": {},\n  \"captureExit\": 3,\n  \"imports\": [],\n  \"refusedArms\": {},\n  \"workers\": {\n    \"requested\": null,\n    \"workers\": null,\n    \"case\": null,\n    \"warning\": null,\n    \"memory\": null,\n    \"curedAlone\": null\n  }\n}\n",
+   "folders": [
+    "records/checkpoints",
+    "records/commands"
+   ]
+  },
+  {
+   "name": "a capture whose slot gave up waiting for memory, no floor in the slot command",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio"
+   },
+   "summary": null,
+   "workers": null,
+   "captureExit": 3,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": "$ slot\n(exit 3, 2.0s)\n\nwaiting for idle\nidle_lock: gave up waiting for idle: free memory stayed low\nidle_lock: gave up waiting for idle: later line\n",
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "refusal": "the record capture never started: the machine slot's wait for memory ran out (gave up waiting for idle: free memory stayed low); it needs None GB free, so close other programs or lower --min-free-gb in the machine file's heavyPrefix, then run again.",
+   "printed": "",
+   "started": [
+    {
+     "op": "records-capture",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrecords.py",
+     "argv": [
+      "capture",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--arm",
+      "baseline",
+      "--arm",
+      "candidate-10",
+      "--arm",
+      "candidate-2",
+      "--baseline-from",
+      "<ROOT/>/run/prepare/preparation.json",
+      "--reader-cmd",
+      "\"R:/reader.exe\" --stdio",
+      "--data",
+      "G:/game/Data",
+      "--mods",
+      "L:/lab/mods",
+      "--profile-dir",
+      "L:/lab/profiles/EP-m",
+      "--reader-data",
+      "<ROOT/>/run/reader-data",
+      "--out",
+      "<ROOT/>/run/records/capture-01",
+      "--checkpoints",
+      "<ROOT/>/run/records/checkpoints",
+      "--arm-deadline-min",
+      "150",
+      "--workers",
+      "auto"
+     ],
+     "more": {
+      "deadline_min": 460,
+      "heavy": true,
+      "hold_min": 460,
+      "purpose": "evalpipeline m records"
+     }
+    }
+   ],
+   "record": "{\n  \"capture\": {},\n  \"captureExit\": 3,\n  \"imports\": [],\n  \"refusedArms\": {},\n  \"workers\": {\n    \"requested\": null,\n    \"workers\": null,\n    \"case\": null,\n    \"warning\": null,\n    \"memory\": null,\n    \"curedAlone\": null\n  }\n}\n",
+   "folders": [
+    "records/checkpoints",
+    "records/commands"
+   ]
+  },
+  {
+   "name": "a capture whose slot gave up waiting for an idle machine",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio",
+    "heavyPrefix": [
+     "python",
+     "S:/tools/idle_lock.py",
+     "hold",
+     "--lock",
+     "{lock}",
+     "--min-free-gb",
+     "16",
+     "--purpose",
+     "{purpose}"
+    ]
+   },
+   "summary": null,
+   "workers": null,
+   "captureExit": 3,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": "$ slot\n(exit 3, 2.0s)\n\nwaiting for idle\nidle_lock: gave up waiting for idle: cpu busy: viewprobe.exe\nidle_lock: gave up waiting for idle: later line\n",
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "refusal": "the record capture never started: the machine slot's wait for an idle machine ran out (gave up waiting for idle: cpu busy: viewprobe.exe); end what it names, then run again.",
+   "printed": "",
+   "started": [
+    {
+     "op": "records-capture",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrecords.py",
+     "argv": [
+      "capture",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--arm",
+      "baseline",
+      "--arm",
+      "candidate-10",
+      "--arm",
+      "candidate-2",
+      "--baseline-from",
+      "<ROOT/>/run/prepare/preparation.json",
+      "--reader-cmd",
+      "\"R:/reader.exe\" --stdio",
+      "--data",
+      "G:/game/Data",
+      "--mods",
+      "L:/lab/mods",
+      "--profile-dir",
+      "L:/lab/profiles/EP-m",
+      "--reader-data",
+      "<ROOT/>/run/reader-data",
+      "--out",
+      "<ROOT/>/run/records/capture-01",
+      "--checkpoints",
+      "<ROOT/>/run/records/checkpoints",
+      "--arm-deadline-min",
+      "150",
+      "--workers",
+      "auto"
+     ],
+     "more": {
+      "deadline_min": 460,
+      "heavy": true,
+      "hold_min": 460,
+      "purpose": "evalpipeline m records"
+     }
+    }
+   ],
+   "record": "{\n  \"capture\": {},\n  \"captureExit\": 3,\n  \"imports\": [],\n  \"refusedArms\": {},\n  \"workers\": {\n    \"requested\": null,\n    \"workers\": null,\n    \"case\": null,\n    \"warning\": null,\n    \"memory\": null,\n    \"curedAlone\": null\n  }\n}\n",
+   "folders": [
+    "records/checkpoints",
+    "records/commands"
+   ]
+  },
+  {
+   "name": "a capture that failed for another reason, with a log",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "subject": {
+     "plugin": "Subj.esp",
+     "mod": "MS"
+    },
+    "source": {
+     "instance": "S:/src",
+     "profile": "P"
+    },
+    "lab": {
+     "instance": "L:/lab",
+     "game": "G:/game"
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio"
+   },
+   "summary": null,
+   "workers": null,
+   "captureExit": 5,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": "$ slot\n(exit 5, 2.0s)\n\nTraceback\n",
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "refusal": "the record capture did not finish (exit 5); read <ROOT/>/run/records/commands.",
+   "printed": "",
+   "started": [
+    {
+     "op": "records-capture",
+     "dir": "<ROOT\\>\\run\\records\\commands",
+     "script": "evalrecords.py",
+     "argv": [
+      "capture",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--arm",
+      "baseline",
+      "--arm",
+      "candidate-10",
+      "--arm",
+      "candidate-2",
+      "--baseline-from",
+      "<ROOT/>/run/prepare/preparation.json",
+      "--reader-cmd",
+      "\"R:/reader.exe\" --stdio",
+      "--data",
+      "G:/game/Data",
+      "--mods",
+      "L:/lab/mods",
+      "--profile-dir",
+      "L:/lab/profiles/EP-m",
+      "--reader-data",
+      "<ROOT/>/run/reader-data",
+      "--out",
+      "<ROOT/>/run/records/capture-01",
+      "--checkpoints",
+      "<ROOT/>/run/records/checkpoints",
+      "--arm-deadline-min",
+      "150",
+      "--workers",
+      "auto"
+     ],
+     "more": {
+      "deadline_min": 460,
+      "heavy": true,
+      "hold_min": 460,
+      "purpose": "evalpipeline m records"
+     }
+    }
+   ],
+   "record": "{\n  \"capture\": {},\n  \"captureExit\": 5,\n  \"imports\": [],\n  \"refusedArms\": {},\n  \"workers\": {\n    \"requested\": null,\n    \"workers\": null,\n    \"case\": null,\n    \"warning\": null,\n    \"memory\": null,\n    \"curedAlone\": null\n  }\n}\n",
+   "folders": [
+    "records/checkpoints",
+    "records/commands"
    ]
   }
  ]
