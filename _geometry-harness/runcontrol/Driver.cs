@@ -123,7 +123,7 @@ public sealed class Driver
             if (limit != null)
             {
                 double frozen = Py.Float(PlannedBudget(outDir));
-                measured["evaluation"] = new PyDict(Py.D(measured["evaluation"])) { ["budgetMinutes"] = frozen == Math.Truncate(frozen) ? (long)frozen : frozen };
+                measured["evaluation"] = new PyDict(Py.D(measured["evaluation"])) { ["budgetMinutes"] = frozen == Math.Truncate(frozen) ? (object)(long)frozen : frozen };
             }
             var upstream = new PyDict();
             foreach (string s in Stages.Take(At(name))) upstream[s] = Py.DictOrEmpty(Py.D(ledger.Doc["stages"]).Get(s)).Get("inputsSha256");

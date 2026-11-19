@@ -151,6 +151,7 @@ public static partial class SelfTest
         SelfTestSweep.Run(Case);
         SelfTestFinalize.Run(Case);
         SelfTestFinalize.RunEvaluate(Case);
+        EvaluateStageCases();
         LiveCases();
         PipelineLiveCases();
 
