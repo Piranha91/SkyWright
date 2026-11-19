@@ -48,6 +48,13 @@ internal sealed record WorldTerrain(string Worldspace, int MinX, int MinY, int W
     public int MaxY => MinY + Height - 1;
 }
 
+/// <summary>A named map marker of a worldspace: the game's own marker type, and where it stands.</summary>
+internal sealed record MapPlace(string Key, string Name, string Type, float X, float Y);
+
+/// <summary>What a worldspace's map draws over its terrain: its named map markers, and the outline from above of each
+/// placed building (<paramref name="Outlines"/>: one closed ring of X,Y pairs per building, in world units).</summary>
+internal sealed record WorldFeatures(string Worldspace, IReadOnlyList<MapPlace> Places, IReadOnlyList<float[]> Outlines, int PlacedRead, double Seconds);
+
 /// <summary>Where a record is: its cell and worldspace, and its winning position when it is a placed object.</summary>
 internal sealed record Located(string Key, string RecordType, string? Cell, string? Worldspace, bool IsCell, float[]? Position);
 
@@ -403,6 +410,118 @@ internal sealed class WorldIndex : IDisposable
                 }
         return new WorldTerrain(FormIdToken.Of(wk), minX, minY, w, h, n, heights, has, water, land, unreadable, clock.Elapsed.TotalSeconds)
         { Parent = parent is { } pw ? FormIdToken.Of(pw) : null, Borrowed = borrowed };
+    }
+
+    static readonly Type[] StaticType = { typeof(IStaticGetter) }, PlacedType = { typeof(IPlacedObjectGetter) }, WorldType = { typeof(IWorldspaceGetter) };
+
+    /// <summary>A worldspace's map markers and building outlines, on a background thread. A building here is a placed
+    /// static whose mesh is filed under an "architecture" folder and whose box is architecture-scale (256 units and
+    /// up on its longest side, the detectors' own scale rule, DetectorModel.ClassifyOverlapScale): a naming convention,
+    /// so a mod's building filed elsewhere is not drawn, and rocks and trees never are. A reference that starts
+    /// disabled is left out; whether an enable parent or a quest later shows or hides one is not read.
+    /// A walled city is its own worldspace, and its marker and buildings are filed there. So a worldspace's map also
+    /// takes the buildings of a child that says it uses the parent's land (the rule the terrain follows; such a child
+    /// shares the parent's ground), and the parent's buildings and markers on the squares of such a child. It takes
+    /// the markers of every child that says it uses the parent's map, each put where the child's world map offset
+    /// places it (position times the scale, plus the offset); a child whose scale folds it to a point is left to the
+    /// parent's own marker for its entrance. A city with its own land (Markarth) therefore gets its caption and not
+    /// its buildings. The ground meshes of a city (a mesh path naming "terrain") and a box wider than two cells are
+    /// not buildings and are not drawn.</summary>
+    public Task<WorldFeatures> FeaturesOfAsync(string worldspaceKey, CancellationToken ct) => Task.Run(() => FeaturesOf(worldspaceKey, ct), ct);
+
+    WorldFeatures FeaturesOf(string worldspaceKey, CancellationToken ct)
+    {
+        var clock = Stopwatch.StartNew();
+        var held = Live();
+        if (ParseKey(worldspaceKey) is not { } wk) throw new ArgumentException($"'{worldspaceKey}' is not a worldspace in this load order.");
+        var view = held.Resolver.Capture(null);
+
+        // the buildings among the statics, at their winners: the box each states
+        var boxes = new Dictionary<FormKey, (Vec3 Min, Vec3 Max)>();
+        foreach (var (fk, _, body) in view.WinnerRecordsOfType(StaticType))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (body is not IStaticGetter st || st.ObjectBounds is not { } b) continue;
+            if (st.Model?.File is not { } file || string.IsNullOrWhiteSpace(file.GivenPath) || !file.GivenPath.Contains("architecture", StringComparison.OrdinalIgnoreCase)
+                || file.GivenPath.Contains("terrain", StringComparison.OrdinalIgnoreCase)) continue;
+            var min = new Vec3(Math.Min(b.First.X, b.Second.X), Math.Min(b.First.Y, b.Second.Y), Math.Min(b.First.Z, b.Second.Z));
+            var max = new Vec3(Math.Max(b.First.X, b.Second.X), Math.Max(b.First.Y, b.Second.Y), Math.Max(b.First.Z, b.Second.Z));
+            if (Math.Max(max.X - min.X, Math.Max(max.Y - min.Y, max.Z - min.Z)) >= 256f && Math.Max(max.X - min.X, max.Y - min.Y) <= 8192f) boxes[fk] = (min, max);
+        }
+
+        // the worldspaces on this one's coordinates: its children, and its parent (kept to this worldspace's own squares)
+        // per related worldspace: whether its buildings are drawn, and where its markers go (scale, then offset)
+        var related = new Dictionary<FormKey, (bool Buildings, float Scale, float OffX, float OffY)> { [wk] = (true, 1f, 0f, 0f) };
+        FormKey? parent = null;
+        foreach (var (fk, _, body) in view.WinnerRecordsOfType(WorldType))
+        {
+            if (body is not IWorldspaceGetter ws || ws.Parent is not { } link || link.Worldspace.FormKeyNullable is not { IsNull: false } up) continue;
+            bool sharesLand = link.Flags.HasFlag(WorldspaceParent.Flag.UseLandData);
+            if (fk == wk) { if (sharesLand) { parent = up; related[up] = (true, 1f, 0f, 0f); } continue; }
+            if (up != wk) continue;
+            if (sharesLand) related[fk] = (true, 1f, 0f, 0f);
+            else if (link.Flags.HasFlag(WorldspaceParent.Flag.UseMapData) && ws.WorldMapOffsetScale is > 0.01f and var scale && float.IsFinite(scale))
+                related[fk] = (false, scale, ws.WorldMapCellOffset.X, ws.WorldMapCellOffset.Y);
+        }
+        float minX = float.MinValue, maxX = float.MaxValue, minY = float.MinValue, maxY = float.MaxValue;
+        if (parent is not null && held.CellsOfWorld.TryGetValue(wk, out var own) && own.Any(c => c.GridX is not null))
+        {
+            minX = own.Min(c => c.GridX ?? int.MaxValue) * 4096f; maxX = (own.Max(c => c.GridX ?? int.MinValue) + 1) * 4096f;
+            minY = own.Min(c => c.GridY ?? int.MaxValue) * 4096f; maxY = (own.Max(c => c.GridY ?? int.MinValue) + 1) * 4096f;
+        }
+
+        var places = new List<MapPlace>();
+        var outlines = new List<float[]>();
+        int read = 0;
+        foreach (var (fk, _, body, source) in view.RecordsIn(Array.Empty<string>(), PlacedType))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (view.ParentOf(fk) is not { } ck || view.ParentOf(ck) is not { } inWorld || !related.TryGetValue(inWorld, out var how)) continue;
+            if (view.ResolveWinner(fk) is not { } win || !string.Equals(win.WinnerPlugin, source, StringComparison.OrdinalIgnoreCase)) continue;
+            if (body is not IPlacedObjectGetter placed || PlacementExtract.RefOf(placed) is not { } r || r.Deleted) continue;
+            if (inWorld == parent && (r.Position.X < minX || r.Position.X > maxX || r.Position.Y < minY || r.Position.Y > maxY)) continue;
+            read++;
+            if (placed.MapMarker is { } marker)
+            {
+                if (marker.Name?.String is { Length: > 0 } name)
+                    places.Add(new MapPlace(FormIdToken.Of(fk), name, marker.Type.ToString(), r.Position.X * how.Scale + how.OffX, r.Position.Y * how.Scale + how.OffY));
+                continue;
+            }
+            if (!how.Buildings || r.InitiallyDisabled || r.Base is not { } bk || !boxes.TryGetValue(bk, out var box)) continue;
+            outlines.Add(OutlineOf(box.Min, box.Max, r));
+        }
+        return new WorldFeatures(FormIdToken.Of(wk), places, outlines, read, clock.Elapsed.TotalSeconds);
+    }
+
+    /// <summary>A placed box seen from above: the convex outline of its eight corners at the reference's scale,
+    /// rotation (the shared REFR convention, <see cref="SpatialOverlap.RefrRotation"/>) and position, as X,Y pairs.</summary>
+    internal static float[] OutlineOf(Vec3 min, Vec3 max, PlacedRef r)
+    {
+        var rot = SpatialOverlap.RefrRotation(r.Rotation);
+        var pts = new List<(float X, float Y)>(8);
+        for (int i = 0; i < 8; i++)
+        {
+            var local = new System.Numerics.Vector3((i & 1) == 0 ? min.X : max.X, (i & 2) == 0 ? min.Y : max.Y, (i & 4) == 0 ? min.Z : max.Z) * r.Scale;
+            var world = System.Numerics.Vector3.Transform(local, rot);
+            pts.Add((world.X + r.Position.X, world.Y + r.Position.Y));
+        }
+        // Andrew's monotone chain
+        pts.Sort((a, b) => a.X != b.X ? a.X.CompareTo(b.X) : a.Y.CompareTo(b.Y));
+        static float Cross((float X, float Y) o, (float X, float Y) a, (float X, float Y) b) => (a.X - o.X) * (b.Y - o.Y) - (a.Y - o.Y) * (b.X - o.X);
+        var hull = new List<(float X, float Y)>(9);
+        for (int pass = 0; pass < 2; pass++)
+        {
+            int start = hull.Count;
+            foreach (var p in pass == 0 ? pts : Enumerable.Reverse(pts))
+            {
+                while (hull.Count - start >= 2 && Cross(hull[^2], hull[^1], p) <= 0) hull.RemoveAt(hull.Count - 1);
+                hull.Add(p);
+            }
+            hull.RemoveAt(hull.Count - 1);
+        }
+        var ring = new float[hull.Count * 2];
+        for (int i = 0; i < hull.Count; i++) { ring[2 * i] = hull[i].X; ring[2 * i + 1] = hull[i].Y; }
+        return ring;
     }
 
     /// <summary>How many records the index files under a cell; 0 for a key that is not a cell.</summary>

@@ -9,15 +9,21 @@ namespace Workbench;
 
 /// <summary>The World tab's map: one worldspace's terrain drawn from above as shaded relief, from the load order's own
 /// LAND records (<see cref="WorldIndex.TerrainOfAsync"/>). The wheel zooms about the pointer, a drag pans, the pointer
-/// names the cell under it and a click picks that cell. North is up. Nothing here edits.</summary>
+/// names the cell under it and a click picks that cell. Over the terrain it draws each building's outline and the
+/// game's own map markers as captions: hold capitals at any zoom, towns and forts closer in, everything else closer
+/// still, a caption giving way to a more important one it would cover. North is up. Nothing here edits.</summary>
 internal sealed class WorldMap
 {
     readonly Border _frame = new() { ClipToBounds = true, Background = Theme.Brush("#101214"), MinHeight = 120, Cursor = Cursors.Cross };
     readonly Canvas _sheet = new();                         // bitmap pixels; the pan and zoom transform is on it
     readonly Image _image = new();
     readonly Rectangle _hover = Box("#FFFFFF"), _chosen = Box("#00E5FF");
+    readonly System.Windows.Shapes.Path _buildings = new() { Fill = Theme.Brush("#D8E6DCCB"), Stroke = Theme.Brush("#2A2622"), IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+    readonly Canvas _captions = new() { IsHitTestVisible = false };   // screen pixels, over the sheet: text keeps its size at any zoom
     readonly MatrixTransform _view = new();
+    readonly List<(MapPlace Place, int Tier, Border Box, TextBlock Text, System.Windows.Shapes.Ellipse Dot)> _places = new();
     WorldTerrain? _terrain;
+    WorldFeatures? _features;
     Point _down;
     bool _pressed, _dragged;
 
@@ -29,6 +35,12 @@ internal sealed class WorldMap
     internal UIElement View => _frame;
     internal WorldTerrain? Terrain => _terrain;
     internal (int X, int Y)? Chosen { get; private set; }
+    internal WorldFeatures? Features => _features;
+    /// <summary>The captions drawn now, most important first.</summary>
+    internal IReadOnlyList<string> CaptionsShown { get; private set; } = Array.Empty<string>();
+    internal bool BuildingsShown => _buildings.Visibility == Visibility.Visible;
+    /// <summary>Screen pixels across one cell at the current zoom.</summary>
+    internal double PixelsPerCell => _terrain is { } t ? _view.Matrix.M11 * t.Samples : 0;
 
     static Rectangle Box(string hex) => new() { Stroke = Theme.Brush(hex), Fill = Brushes.Transparent, Visibility = Visibility.Collapsed, IsHitTestVisible = false };
 
@@ -36,9 +48,11 @@ internal sealed class WorldMap
     {
         RenderOptions.SetBitmapScalingMode(_image, BitmapScalingMode.Linear);
         _sheet.RenderTransform = _view;
-        _sheet.Children.Add(_image); _sheet.Children.Add(_chosen); _sheet.Children.Add(_hover);
-        _frame.Child = _sheet;
-        _frame.SizeChanged += (_, e) => { if (e.PreviousSize.Width < 1 || e.PreviousSize.Height < 1) Fit(); };
+        _sheet.Children.Add(_image); _sheet.Children.Add(_buildings); _sheet.Children.Add(_chosen); _sheet.Children.Add(_hover);
+        var layers = new Grid();
+        layers.Children.Add(_sheet); layers.Children.Add(_captions);
+        _frame.Child = layers;
+        _frame.SizeChanged += (_, e) => { if (e.PreviousSize.Width < 1 || e.PreviousSize.Height < 1) Fit(); else Viewed(); };
         _frame.MouseWheel += (_, e) => Zoom(e.GetPosition(_frame), e.Delta > 0 ? 1.25 : 0.8);
         _frame.MouseLeftButtonDown += (_, e) => { _down = e.GetPosition(_frame); _pressed = true; _dragged = false; _frame.CaptureMouse(); };
         _frame.MouseMove += (_, e) => Moved(e.GetPosition(_frame));
@@ -55,6 +69,7 @@ internal sealed class WorldMap
     internal void Show(WorldTerrain? t, BitmapSource? picture)
     {
         _terrain = t; _image.Source = picture; Chosen = null;
+        ShowFeatures(null);
         _hover.Visibility = _chosen.Visibility = Visibility.Collapsed;
         Fit();
     }
@@ -71,7 +86,99 @@ internal sealed class WorldMap
             var m = _view.Matrix;
             m.Translate(_frame.ActualWidth / 2 - c.X, _frame.ActualHeight / 2 - c.Y);
             _view.Matrix = m;
+            Viewed();
         }
+    }
+
+    /// <summary>Draw a worldspace's buildings and captions over the terrain shown (null clears them).</summary>
+    internal void ShowFeatures(WorldFeatures? f)
+    {
+        _features = f; _places.Clear(); _captions.Children.Clear(); _buildings.Data = null; CaptionsShown = Array.Empty<string>();
+        if (f is null || _terrain is not { } t) { _buildings.Visibility = Visibility.Collapsed; return; }
+        // world units to sheet pixels: one cell is 4096 units and Samples pixels; north is up
+        double k = t.Samples / 4096.0, x0 = t.MinX * 4096.0, yTop = (t.MaxY + 1) * 4096.0;
+        var g = new StreamGeometry { FillRule = FillRule.Nonzero };
+        using (var c = g.Open())
+            foreach (var ring in f.Outlines)
+            {
+                if (ring.Length < 6) continue;
+                c.BeginFigure(new Point((ring[0] - x0) * k, (yTop - ring[1]) * k), true, true);
+                for (int i = 2; i < ring.Length; i += 2) c.LineTo(new Point((ring[i] - x0) * k, (yTop - ring[i + 1]) * k), true, false);
+            }
+        g.Freeze();
+        _buildings.Data = g;
+        foreach (var place in f.Places.OrderBy(p => TierOf(p.Type)).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            int tier = TierOf(place.Type);
+            var text = new TextBlock { Text = place.Name, Foreground = Brushes.White, FontWeight = tier == 0 ? FontWeights.SemiBold : FontWeights.Normal };
+            var box = new Border { Child = text, Background = Theme.Brush("#B8101214"), CornerRadius = new CornerRadius(3), Padding = new Thickness(4, 0, 4, 1), Visibility = Visibility.Collapsed };
+            var dot = new System.Windows.Shapes.Ellipse { Width = 5, Height = 5, Fill = Brushes.White, Stroke = Brushes.Black, StrokeThickness = 1, Visibility = Visibility.Collapsed };
+            _captions.Children.Add(dot); _captions.Children.Add(box);
+            _places.Add((place, tier, box, text, dot));
+        }
+        Viewed();
+    }
+
+    /// <summary>How soon a marker's caption appears: 0 a city or hold capital (always), 1 a town, settlement, castle,
+    /// fort or stronghold (zoomed part of the way in), 2 everything else (zoomed well in). From the marker's own type.</summary>
+    internal static int TierOf(string type) =>
+        type == "City" || type.EndsWith("Capitol", StringComparison.Ordinal) ? 0
+        : type is "Town" or "Settlement" or "Fort" or "OrcStronghold" or "RavenRock" or "TelMithryn" or "TempleOfMiraak" || type.EndsWith("Castle", StringComparison.Ordinal) || type.StartsWith("Castle", StringComparison.Ordinal) ? 1
+        : 2;
+
+    /// <summary>Screen pixels across one cell at which each tier's captions appear, and at which buildings do.</summary>
+    internal static readonly double[] TierAppears = { 0, 9, 26 };
+    internal const double BuildingsAppear = 12;
+
+    /// <summary>The view moved or zoomed: outlines keep their screen width, buildings show when close enough, and the
+    /// captions are placed again, the more important first; one that would cover a caption already placed is left out.</summary>
+    void Viewed()
+    {
+        double scale = Math.Max(_view.Matrix.M11, 1e-6);
+        _hover.StrokeThickness = _chosen.StrokeThickness = 1.5 / scale;
+        if (_terrain is not { } t) return;
+        double perCell = PixelsPerCell;
+        _buildings.Visibility = _features is not null && perCell >= BuildingsAppear ? Visibility.Visible : Visibility.Collapsed;
+        _buildings.StrokeThickness = perCell >= 48 ? 0.8 / scale : 0;
+        double k = t.Samples / 4096.0, x0 = t.MinX * 4096.0, yTop = (t.MaxY + 1) * 4096.0;
+        double w = _frame.ActualWidth, h = _frame.ActualHeight;
+        var taken = new List<Rect>();
+        var shown = new List<string>();
+        foreach (var (place, tier, box, text, dot) in _places)
+        {
+            box.Visibility = dot.Visibility = Visibility.Collapsed;
+            if (perCell < TierAppears[tier]) continue;
+            var at = _view.Matrix.Transform(new Point((place.X - x0) * k, (yTop - place.Y) * k));
+            if (at.X < -40 || at.Y < -20 || at.X > w + 40 || at.Y > h + 20) continue;
+            // a caption grows a little as the view closes in on it, up to four points over its base size
+            double size = (tier == 0 ? 14 : tier == 1 ? 12.5 : 11) + Math.Clamp(1.5 * Math.Log2(Math.Max(perCell, 1) / Math.Max(TierAppears[tier], 4)), 0, 4);
+            text.FontSize = size;
+            // the text is measured, not its box: a collapsed box measures as nothing
+            text.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            var want = new Size(text.DesiredSize.Width + 8, text.DesiredSize.Height + 1);
+            // above the place, or else below it, beside it, or off one of its corners: the first that covers no caption already placed
+            Rect? free = null;
+            double ww = want.Width, hh = want.Height;
+            foreach (var spot in new[]
+                     {
+                         new Rect(at.X - ww / 2, at.Y - hh - 5, ww, hh), new Rect(at.X - ww / 2, at.Y + 5, ww, hh),
+                         new Rect(at.X + 6, at.Y - hh / 2, ww, hh), new Rect(at.X - ww - 6, at.Y - hh / 2, ww, hh),
+                         new Rect(at.X - ww - 3, at.Y - hh - 3, ww, hh), new Rect(at.X + 3, at.Y - hh - 3, ww, hh),
+                         new Rect(at.X - ww - 3, at.Y + 3, ww, hh), new Rect(at.X + 3, at.Y + 3, ww, hh),
+                     })
+            {
+                var guard = Rect.Inflate(spot, 3, 2);
+                if (taken.Any(r => r.IntersectsWith(guard))) continue;
+                free = spot; break;
+            }
+            if (free is not { } rect) continue;
+            taken.Add(rect);
+            Canvas.SetLeft(box, rect.X); Canvas.SetTop(box, rect.Y);
+            Canvas.SetLeft(dot, at.X - 2.5); Canvas.SetTop(dot, at.Y - 2.5);
+            box.Visibility = dot.Visibility = Visibility.Visible;
+            shown.Add(place.Name);
+        }
+        CaptionsShown = shown;
     }
 
     void Fit()
@@ -80,7 +187,7 @@ internal sealed class WorldMap
         double w = t.Width * t.Samples, h = t.Height * t.Samples;
         double s = Math.Min(_frame.ActualWidth / w, _frame.ActualHeight / h);
         _view.Matrix = new Matrix(s, 0, 0, s, (_frame.ActualWidth - w * s) / 2, (_frame.ActualHeight - h * s) / 2);
-        Strokes();
+        Viewed();
     }
 
     void Zoom(Point about, double by)
@@ -91,11 +198,8 @@ internal sealed class WorldMap
         if (next < 0.02 || next > 64) return;
         m.ScaleAt(by, by, about.X, about.Y);
         _view.Matrix = m;
-        Strokes();
+        Viewed();
     }
-
-    // the outlines stay about a pixel and a half wide on screen at any zoom
-    void Strokes() => _hover.StrokeThickness = _chosen.StrokeThickness = 1.5 / Math.Max(_view.Matrix.M11, 1e-6);
 
     void Moved(Point p)
     {
@@ -104,6 +208,7 @@ internal sealed class WorldMap
             var m = _view.Matrix;
             m.Translate(p.X - _down.X, p.Y - _down.Y);
             _view.Matrix = m; _down = p; _dragged = true;
+            Viewed();
             return;
         }
         var at = SquareAt(p);

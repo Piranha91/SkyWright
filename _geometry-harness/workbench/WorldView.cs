@@ -154,6 +154,16 @@ internal static class WorldView
             SetMapStatus(FormattableString.Invariant($"{t.LandCells:N0} cells of terrain{lent}, read in {t.Seconds:0.0} s")
                          + (t.Unreadable > 0 ? $"; {t.Unreadable:N0} could not be read and are not drawn" : "") + ". Wheel zooms, drag pans, click opens a cell.");
             if (_pendingMark is { } m) { _pendingMark = null; Map.Choose(m.X, m.Y); }
+            // the buildings and captions follow the terrain: they take longer to read
+            string terrainSaid = _mapStatus;
+            SetMapStatus("reading buildings and places… " + terrainSaid);
+            x.FeaturesOfAsync(worldKey, CancellationToken.None).ContinueWith(fr => ui.BeginInvoke(() =>
+            {
+                if (gen != _generation || !string.Equals(_mapWorld, worldKey, StringComparison.OrdinalIgnoreCase)) return;
+                if (fr.IsFaulted) { SetMapStatus("buildings and places could not be read: " + fr.Exception!.GetBaseException().Message + " " + terrainSaid); return; }
+                Map.ShowFeatures(fr.Result);
+                SetMapStatus(FormattableString.Invariant($"{fr.Result.Outlines.Count:N0} buildings and {fr.Result.Places.Count:N0} places, read in {fr.Result.Seconds:0.0} s. ") + terrainSaid);
+            }), TaskScheduler.Default);
         }), TaskScheduler.Default);
     }
     static (int X, int Y)? _pendingMark;
@@ -531,7 +541,9 @@ internal static class WorldView
             objects,
             map = new { worldspace = _mapWorld, ready = Map.Terrain is not null, status = _mapStatus, seconds = MapSeconds, landCells = Map.Terrain?.LandCells, samples = Map.Terrain?.Samples, parent = Map.Terrain?.Parent, borrowedCells = Map.Terrain?.BorrowedCells,
                         unreadable = Map.Terrain?.Unreadable, grid = Map.Terrain is { } t ? new[] { t.MinX, t.MinY, t.Width, t.Height } : null,
-                        chosen = Map.Chosen is { } c ? new[] { c.X, c.Y } : null },
+                        chosen = Map.Chosen is { } c ? new[] { c.X, c.Y } : null,
+                        featuresReady = Map.Features is not null, featureSeconds = Map.Features?.Seconds, buildings = Map.Features?.Outlines.Count, places = Map.Features?.Places.Count,
+                        placedRead = Map.Features?.PlacedRead, pixelsPerCell = Map.PixelsPerCell, buildingsShown = Map.BuildingsShown, captionsShown = Map.CaptionsShown },
         };
     }
 }

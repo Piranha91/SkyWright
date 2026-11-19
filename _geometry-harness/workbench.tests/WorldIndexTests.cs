@@ -303,6 +303,36 @@ public class WorldIndexTests : IClassFixture<WorldTreeIndex>
     }
 
     [Fact]
+    public void A_building_outline_is_its_box_from_above_at_the_references_scale_turn_and_place()
+    {
+        static PlacedRef At(float turnZ, float scale) =>
+            new(FormKey.Null, "REFR", null, new Vec3(1000, 2000, 0), new Vec3(0, 0, turnZ), scale, null, false, false, false);
+        static (float MinX, float MaxX, float MinY, float MaxY) Span(float[] ring)
+        {
+            var xs = ring.Where((_, i) => i % 2 == 0).ToList(); var ys = ring.Where((_, i) => i % 2 == 1).ToList();
+            return (MathF.Round(xs.Min()), MathF.Round(xs.Max()), MathF.Round(ys.Min()), MathF.Round(ys.Max()));
+        }
+        // a box reaching 200 units along its own +X, 20 wide: unturned at scale 2 it reaches 400 east of the reference
+        var flat = WorldIndex.OutlineOf(new Vec3(0, -10, 0), new Vec3(200, 10, 50), At(0, 2));
+        Assert.Equal(8, flat.Length);                        // four corners: the eight box corners fold to a rectangle
+        Assert.Equal((1000, 1400, 1980, 2020), Span(flat));
+        // a quarter turn about Z is clockwise seen from above: the box now reaches south
+        var turned = WorldIndex.OutlineOf(new Vec3(0, -10, 0), new Vec3(200, 10, 50), At(MathF.PI / 2, 1));
+        Assert.Equal((990, 1010, 1800, 2000), Span(turned));
+    }
+
+    [Theory]
+    [InlineData("WhiterunCapitol", 0)]
+    [InlineData("City", 0)]
+    [InlineData("Town", 1)]
+    [InlineData("WhiterunCastle", 1)]
+    [InlineData("Fort", 1)]
+    [InlineData("Cave", 2)]
+    [InlineData("NordicRuins", 2)]
+    public void A_map_markers_type_sets_how_soon_its_caption_appears(string type, int tier) =>
+        Assert.Equal(tier, WorldMap.TierOf(type));
+
+    [Fact]
     public async Task A_persistent_reference_of_a_worldspace_opens_the_grid_cell_it_stands_in()
     {
         var persistent = await Objects(WorldTreeWorld.LandPersistent);
