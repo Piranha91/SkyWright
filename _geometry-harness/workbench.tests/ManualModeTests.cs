@@ -936,7 +936,8 @@ public sealed class InPlaceRunTests
             Assert.Empty(Directory.EnumerateFileSystemEntries(decoy));
             Assert.StartsWith(Path.Combine(outDir, "workbench-runs"), folder);
 
-            if (accepted.Contains("bundle"))
+            // the scenes stage is always a stated, non-blocking refusal, so bundle is looked for by name, not by position
+            if (stages.Any(x => x[0] == "bundle" && x[1].StartsWith("accepted")))
             {
                 // the engine built the bundle: the run is done, and the workbench checked and opened it with the same engine
                 Assert.True(state == "done", $"the engine's bundle stage is accepted but the run is '{state}': {refusal}");
