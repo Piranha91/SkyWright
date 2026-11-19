@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import struct
 import subprocess
@@ -32,6 +33,11 @@ FIXT = HERE / "fixtures" / "evalrun"          # tracked: the generator, the fake
 EXPECTED = FIXT / "expected"
 GEN = FIXT / "_generated"                     # generated per run; never tracked (set in main())
 EVALRUN = HARNESS / "evalrun.py"
+# The controller every child-process case starts. EVALRUN_CONTROLLER_CMD names another program taking evalrun.py's
+# subcommands (the C# port: the path of runcontrol.exe), so one case text judges both; unset, it is evalrun.py. The
+# cases that load evalrun.py as a module judge the Python controller whatever this says.
+CONTROLLER = (shlex.split(os.environ["EVALRUN_CONTROLLER_CMD"], posix=False) if os.environ.get("EVALRUN_CONTROLLER_CMD", "").strip()
+              else [sys.executable, str(EVALRUN)])
 # conflictdiff is built from this checkout's source into the run's temp folder once per run (use_conflictdiff), so
 # a stale binary is never tested; HOUSECARL_EVALRUN_TEST_HARNESS names a tree to use as given instead (reproducing
 # an old run). Never a silent skip - a failed build or a missing binary fails the run and says so.
@@ -75,7 +81,7 @@ def evalrun(args, scenario: Path | None = None, expect_exit=None, timeout=300, c
     env = dict(os.environ)
     if scenario:
         env["EVALRUN_FAKE_SCENARIO"] = str(scenario)
-    r = subprocess.run([sys.executable, str(EVALRUN)] + [str(a) for a in args],
+    r = subprocess.run(CONTROLLER + [str(a) for a in args],
                        capture_output=True, text=True, env=env, timeout=timeout, cwd=cwd)
     if expect_exit is not None and r.returncode != expect_exit:
         print(r.stdout[-3000:])
@@ -463,7 +469,7 @@ def case_08(tmp):
     sentinel.write_text("held", encoding="utf-8")
     env = dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scen),
                EVALRUN_FAKE_SENTINEL=str(sentinel), EVALRUN_FAKE_BLOCK_PROBE="switchprobe")
-    proc = subprocess.Popen([sys.executable, str(EVALRUN), "run", "--run", str(run)],
+    proc = subprocess.Popen([*CONTROLLER, "run", "--run", str(run)],
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, text=True)
     deadline = time.time() + 120
     running = False
@@ -2076,7 +2082,7 @@ def case_21(tmp):
     env = dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scen), HOUSECARL_RUNLOG_DIR=str(store))
 
     def ev(args, extra_env=None, timeout=300):
-        return subprocess.run([sys.executable, str(EVALRUN)] + [str(a) for a in args], capture_output=True,
+        return subprocess.run(CONTROLLER + [str(a) for a in args], capture_output=True,
                               text=True, env=dict(env, **(extra_env or {})), timeout=timeout)
 
     p = ev(["plan", "--registry", GEN / "registry" / "fixture-check-registry.json",
@@ -2113,7 +2119,7 @@ def case_21(tmp):
     # ---- the interrupted run: the deadline must stop the sweep's tree with nobody's help
     fired = threading.Event()
     t_launch = time.monotonic()
-    proc = subprocess.Popen([sys.executable, str(EVALRUN), "run", "--run", str(run)],
+    proc = subprocess.Popen([*CONTROLLER, "run", "--run", str(run)],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                             env=dict(env, EVALRUN_SLOW_ARM=cand_stem, EVALRUN_SLOW_PIDFILE=str(pidfile)))
 
@@ -2318,7 +2324,7 @@ def case_22(tmp):
     env = dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scen), HOUSECARL_RUNLOG_DIR=str(store))
 
     def ev(args, extra_env=None, timeout=300):
-        return subprocess.run([sys.executable, str(EVALRUN)] + [str(a) for a in args], capture_output=True,
+        return subprocess.run(CONTROLLER + [str(a) for a in args], capture_output=True,
                               text=True, env=dict(env, **(extra_env or {})), timeout=timeout)
 
     p = ev(["plan", "--registry", GEN / "registry" / "fixture-check-registry.json",
@@ -2336,7 +2342,7 @@ def case_22(tmp):
     base_id = next((a["armId"] for a in plan.get("arms") or [] if a.get("kind") == "baseline"), "baseline")
 
     t_launch = time.monotonic()
-    proc = subprocess.Popen([sys.executable, str(EVALRUN), "run", "--run", str(run)],
+    proc = subprocess.Popen([*CONTROLLER, "run", "--run", str(run)],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                             env=dict(env, EVALRUN_SLOW_ARM=cand_stem, EVALRUN_SLOW_PIDFILE=str(pidfile)))
     out_text = []
@@ -2481,7 +2487,7 @@ def case_23(tmp):
     env = dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scen), HOUSECARL_RUNLOG_DIR=str(store))
 
     def ev(args, extra_env=None, timeout=300):
-        return subprocess.run([sys.executable, str(EVALRUN)] + [str(a) for a in args], capture_output=True,
+        return subprocess.run(CONTROLLER + [str(a) for a in args], capture_output=True,
                               text=True, env=dict(env, **(extra_env or {})), timeout=timeout)
 
     p = ev(["plan", "--registry", GEN / "registry" / "fixture-check-registry.json",
@@ -2884,7 +2890,7 @@ def case_24(tmp):
     env = dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scen), HOUSECARL_RUNLOG_DIR=str(run.parent / f"{case}-runlog"))
 
     def ev(args, extra_env=None, timeout=300):
-        return subprocess.run([sys.executable, str(EVALRUN)] + [str(a) for a in args], capture_output=True,
+        return subprocess.run(CONTROLLER + [str(a) for a in args], capture_output=True,
                               text=True, env=dict(env, **(extra_env or {})), timeout=timeout)
 
     p = ev(["plan", "--registry", GEN / "registry" / "fixture-check-registry.json",
@@ -2987,7 +2993,7 @@ def case_25(tmp):
     probe.write_text(f"FIXT_DIR = {str(FIXT)!r}\n" + DEADLINE_EARLYEXIT_PROBE, encoding="utf-8")
     pidfile = tmp / f"{case}.pids"
     env = dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scen), HOUSECARL_RUNLOG_DIR=str(run.parent / f"{case}-runlog"))
-    p = subprocess.run([sys.executable, str(EVALRUN), "plan", "--registry",
+    p = subprocess.run([*CONTROLLER, "plan", "--registry",
                         str(GEN / "registry" / "fixture-check-registry.json"),
                         "--scope", str(GEN / "cases" / fixture / "scope.json"),
                         "--candidates", str(GEN / "cases" / fixture / "candidates"),
@@ -3003,7 +3009,7 @@ def case_25(tmp):
     cand = next((a for a in plan.get("arms") or [] if a.get("kind") == "candidate"), {})
     cand_id, cand_stem = cand.get("armId"), Path(cand.get("candidateFile") or "x.json").stem
     try:
-        r = subprocess.run([sys.executable, str(EVALRUN), "run", "--run", str(run)], capture_output=True, text=True,
+        r = subprocess.run([*CONTROLLER, "run", "--run", str(run)], capture_output=True, text=True,
                            env=dict(env, EVALRUN_SLOW_ARM=cand_stem, EVALRUN_SLOW_PIDFILE=str(pidfile)), timeout=120)
     finally:
         left = []                        # protects the machine ONLY: kill by recorded PID
@@ -3029,7 +3035,7 @@ def case_25(tmp):
     # parts is left `running`. The arm's prerequisite result is imposed in-process on the one controller call.
     run_c = tmp / f"{case}-blocked-arm"
     pidfile_c = tmp / f"{case}-blocked-arm.pids"
-    p = subprocess.run([sys.executable, str(EVALRUN), "plan", "--registry",
+    p = subprocess.run([*CONTROLLER, "plan", "--registry",
                         str(GEN / "registry" / "fixture-check-registry.json"),
                         "--scope", str(GEN / "cases" / fixture / "scope.json"),
                         "--candidates", str(GEN / "cases" / fixture / "candidates"),
@@ -3087,7 +3093,7 @@ def case_25(tmp):
     hang = tmp / "hang-probe-25.py"
     hang.write_text("import os, sys, time\nopen(%r, 'a').write('probe %%d\\n' %% os.getpid())\ntime.sleep(900)\n"
                     % str(pidfile_d), encoding="utf-8")
-    p = subprocess.run([sys.executable, str(EVALRUN), "plan", "--registry",
+    p = subprocess.run([*CONTROLLER, "plan", "--registry",
                         str(GEN / "registry" / "fixture-check-registry.json"),
                         "--scope", str(GEN / "cases" / fixture / "scope.json"),
                         "--candidates", str(GEN / "cases" / fixture / "candidates"),
@@ -3100,7 +3106,7 @@ def case_25(tmp):
         print(p.stdout[-2000:], p.stderr[-2000:])
         return
     try:
-        r = subprocess.run([sys.executable, str(EVALRUN), "run", "--run", str(run_d)], capture_output=True,
+        r = subprocess.run([*CONTROLLER, "run", "--run", str(run_d)], capture_output=True,
                            text=True, env=env, timeout=120)
     finally:
         left = []
@@ -3428,7 +3434,7 @@ def case_27(tmp):
         """The controller dies after its sweep child finished, before the split wrote a receipt."""
 
     def plan(run):
-        p = subprocess.run([sys.executable, str(EVALRUN), "plan", "--registry",
+        p = subprocess.run([*CONTROLLER, "plan", "--registry",
                             str(GEN / "registry" / "fixture-check-registry.json"),
                             "--scope", str(GEN / "cases" / fixture / "scope.json"),
                             "--candidates", str(GEN / "cases" / fixture / "candidates"),
@@ -3745,7 +3751,7 @@ def case_28(tmp):
             return base_runner.run(self, jobs, echo)
 
     def plan(run, extra):
-        p = subprocess.run([sys.executable, str(EVALRUN), "plan", "--registry",
+        p = subprocess.run([*CONTROLLER, "plan", "--registry",
                             str(GEN / "registry" / "fixture-check-registry.json"),
                             "--scope", str(GEN / "cases" / fixture / "scope.json"),
                             "--candidates", str(GEN / "cases" / fixture / "candidates"),
@@ -3827,7 +3833,7 @@ def case_29(tmp):
         spec.loader.exec_module(mod)
         run = tmp / f"{case}-{tag}"
         store = tmp / f"{case}-{tag}-runlog"
-        p = subprocess.run([sys.executable, str(EVALRUN), "plan", "--registry",
+        p = subprocess.run([*CONTROLLER, "plan", "--registry",
                             str(GEN / "registry" / "fixture-check-registry.json"),
                             "--scope", str(GEN / "cases" / fixture / "scope.json"),
                             "--candidates", str(GEN / "cases" / fixture / "candidates"),
@@ -4002,7 +4008,7 @@ class SweepInProc:
 
     def plan(self, run: Path, extra=(), fixture: str | None = None):
         fx = fixture or self.fixture
-        p = subprocess.run([sys.executable, str(EVALRUN), "plan", "--registry",
+        p = subprocess.run([*CONTROLLER, "plan", "--registry",
                             str(GEN / "registry" / "fixture-check-registry.json"),
                             "--scope", str(GEN / "cases" / fx / "scope.json"),
                             "--candidates", str(GEN / "cases" / fx / "candidates"),
@@ -4522,7 +4528,7 @@ def case_35(tmp):
     env = dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scen), HOUSECARL_RUNLOG_DIR=str(tmp / f"{case}-b-runlog"))
 
     def ev(args, extra_env=None, timeout=300):
-        return subprocess.run([sys.executable, str(EVALRUN)] + [str(a) for a in args], capture_output=True,
+        return subprocess.run(CONTROLLER + [str(a) for a in args], capture_output=True,
                               text=True, env=dict(env, **(extra_env or {})), timeout=timeout)
 
     p = ev(["plan", "--registry", GEN / "registry" / "fixture-check-registry.json",
@@ -4796,7 +4802,7 @@ def case_38(tmp):
     env = dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scen), HOUSECARL_RUNLOG_DIR=str(tmp / f"{case}-a-runlog"))
 
     def ev(args, extra_env=None, timeout=300):
-        return subprocess.run([sys.executable, str(EVALRUN)] + [str(a) for a in args], capture_output=True,
+        return subprocess.run(CONTROLLER + [str(a) for a in args], capture_output=True,
                               text=True, env=dict(env, **(extra_env or {})), timeout=timeout)
 
     p = ev(["plan", "--registry", GEN / "registry" / "fixture-check-registry.json",
@@ -5072,7 +5078,7 @@ def case_39(tmp):
         env = dict(os.environ, EVALRUN_FAKE_SCENARIO=str(h.scen), HOUSECARL_RUNLOG_DIR=str(h.store),
                    PYTHONPATH=str(site), EVALRUN_TEST_REFUSE_ARGV=want_of(stem))
         t0 = time.monotonic()
-        r = subprocess.run([sys.executable, str(EVALRUN), "run", "--run", str(run)], capture_output=True, text=True,
+        r = subprocess.run([*CONTROLLER, "run", "--run", str(run)], capture_output=True, text=True,
                            env=env, timeout=240)
         expect(r.returncode, 0, f"{case}/{tag}: premise - the run exits 0")
         check(time.monotonic() - t0 < 150, f"{case}/{tag}: premise - the run ended well inside its 3-minute budget")
@@ -8316,10 +8322,10 @@ def _sl_plan_run(tmp: Path, name: str, env_over: dict, run_it: bool = True, betw
     args = ["plan", "--registry", GEN / "registry" / "fixture-check-registry.json", "--scope", d / "scope.json",
             "--candidates", d / "candidates", "--out", run, "--harness", REAL_HARNESS, "--states", "baseline,fixture-switched",
             "--select", "state.switch-census,state.conditional-geometry"] + probe_cmds()
-    p = subprocess.run([sys.executable, str(EVALRUN)] + [str(a) for a in args], capture_output=True, text=True, env=env, timeout=300)
+    p = subprocess.run(CONTROLLER + [str(a) for a in args], capture_output=True, text=True, env=env, timeout=300)
     if between and (run / "plan.json").exists():
         between(run)
-    r = (subprocess.run([sys.executable, str(EVALRUN), "run", "--run", str(run)], capture_output=True, text=True, env=env, timeout=300)
+    r = (subprocess.run([*CONTROLLER, "run", "--run", str(run)], capture_output=True, text=True, env=env, timeout=300)
          if run_it and p.returncode == 0 else None)
     return run, p, r
 
