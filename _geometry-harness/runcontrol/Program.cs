@@ -25,7 +25,8 @@ string command = args.Length >= 1 ? args[0] : "";
 bool pipeline = command is "run" or "arms" or "status";
 // The pipeline commands record under the Python pipeline's run-log name, which the workbench reads. `run` opens its
 // record itself (Driver.OpenRun below), once the entry has said where the run log goes.
-using var __run = !pipeline ? RunLog.BeginProcess("runcontrol", args) : command == "run" ? null : RunLog.BeginProcess("evalpipeline", args);
+using var __run = !pipeline ? RunLog.BeginProcess("runcontrol", args)
+    : command == "run" ? null : RunLog.BeginProcess("evalpipeline", args, new RunOptions { Mode = command });
 try
 {
     if (args.Length >= 1 && args[0] == "--self-test") return SelfTest.Run();
