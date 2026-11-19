@@ -290,9 +290,7 @@ internal static class Shell
     {
         FindingList.Items.Clear();
         // each ticked check first: ran with its rows, or why not, so a check that failed never reads as one that found nothing
-        foreach (var c in Bundle?.Checks ?? Array.Empty<CheckStatus>())
-            FindingList.Items.Add(new ListBoxItem { Content = c.State == "ran" ? $"{c.CheckId}: ran, {CheckStatusWords.Rows(c)}" : $"{c.CheckId}: {c.State}: {c.Why}",
-                                                    Foreground = c.State == "ran" ? Brushes.DarkGray : Brushes.Salmon });
+        foreach (var c in Bundle?.Checks ?? Array.Empty<CheckStatus>()) FindingList.Items.Add(CheckItem(c));
         foreach (var f in Findings)
         {
             var item = new ListBoxItem
@@ -304,6 +302,23 @@ internal static class Shell
             if (f.Row.Role == "incomplete") item.Foreground = Brushes.DarkOrange;
             FindingList.Items.Add(item);
         }
+    }
+
+    /// <summary>A ticked check's line on the Findings tab, with the probe's "?" help after it when the check is a probe.</summary>
+    internal static ListBoxItem CheckItem(CheckStatus c)
+    {
+        var rest = c.State == "ran" ? $": ran, {CheckStatusWords.Rows(c)}" : $": {c.State}: {c.Why}";
+        object content = c.CheckId + rest;
+        if (ProbeHelp.Of(c.CheckId) is not null)
+        {
+            // the "?" sits right after the id, so a long line never scrolls it out of view
+            var line = new TextBlock();
+            line.Inlines.Add(new System.Windows.Documents.Run(c.CheckId));
+            line.Inlines.Add(new System.Windows.Documents.InlineUIContainer(ProbeHelpPopup.Button(c.CheckId)) { BaselineAlignment = BaselineAlignment.Center });
+            line.Inlines.Add(new System.Windows.Documents.Run(rest));
+            content = line;
+        }
+        return new ListBoxItem { Content = content, Foreground = c.State == "ran" ? Brushes.DarkGray : Brushes.Salmon };
     }
 
     internal static void FillTree(IReadOnlyList<TreeNode> tree)

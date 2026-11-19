@@ -77,6 +77,31 @@ public sealed class ProbeHelpTests
     }
 
     [Fact]
+    public void A_probe_check_line_on_the_Findings_tab_carries_a_help_button_and_other_checks_do_not()
+    {
+        Exception? failed = null; string? probeText = null; object? probeTag = null; object? otherContent = null; int otherButtons = -1;
+        ShellCollection.Ui.Value.Invoke(() =>
+        {
+            try
+            {
+                var probe = Shell.CheckItem(new CheckStatus("geometry.object-overlap", "ran", 3, null));
+                probeText = string.Concat(Descendants(probe).OfType<System.Windows.Documents.Run>().Select(r => r.Text));
+                // the "?" follows the id directly, ahead of the rest of the line
+                probeTag = ((probe.Content as TextBlock)?.Inlines.ElementAtOrDefault(1) as System.Windows.Documents.InlineUIContainer)?.Child is Button { Content: "?" } b ? b.Tag : null;
+                var other = Shell.CheckItem(new CheckStatus("records.no-such-check", "blocked", null, "it needs the game running"));
+                otherContent = other.Content;
+                otherButtons = Descendants(other).OfType<Button>().Count();
+            }
+            catch (Exception ex) { failed = ex; }
+        });
+        Assert.True(failed is null, "a check line did not build: " + failed);
+        Assert.Contains("geometry.object-overlap: ran, 3 row(s)", probeText);
+        Assert.Equal("geometry.object-overlap", probeTag);
+        Assert.Equal("records.no-such-check: blocked: it needs the game running", otherContent);
+        Assert.Equal(0, otherButtons);
+    }
+
+    [Fact]
     public void A_probe_with_no_help_says_so_in_the_popup()
     {
         string? said = null;
