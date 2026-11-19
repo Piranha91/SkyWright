@@ -3104,6 +3104,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         // --interactive: hovering bare ground answers with the quadrant's painted layers. Assigned
         // inside the terrain block (it captures the walked LAND census); null on interiors.
         Func<float, float, string?>? terrainDescribeAt = null;
+        // Grass grows only from an exterior's land: an interior shot after an exterior one must not keep its cells.
+        if (interior || targetGrid is null) { ViewProbe.GrassLayer.Cells.Clear(); ViewProbe.GrassLayer.WaterHeights.Clear(); }
         // Reuse is restricted above to static worklists. Interactive terrain hover needs the
         // LAND layer census callback and therefore cannot enter this retained branch.
         if (retainedWalkHit && (drawTerrain || drawWater) && !interior && targetGrid is not null)

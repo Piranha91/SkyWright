@@ -3872,6 +3872,12 @@ yaw-only refs included, and cut the vanilla navmesh floor five-fold. CLOSED.
 
 ## Fixed defects worth remembering
 
+**An interior scene after an exterior one drew the exterior's grass** (fixed 2026-11-19). The grass
+cells are filled by the exterior terrain walk and were never emptied for an interior, so in one run
+(a worklist, or the workbench switching cells) an interior kept the last exterior's grass, placed at
+that exterior's coordinates. Found when the workbench's layer toolbar counted grass meshes in an
+inn. An interior shot now starts with no grass cells.
+
 **Euler composition order was reversed, so every TILTED ref was flung off its placement**
 (fixed 2026-08-30). Reported as four separate symptoms at the College of Winterhold — a large tower
 with a hole in it, turret roofs missing, a gatehouse roof missing, and arch pieces free-floating in
