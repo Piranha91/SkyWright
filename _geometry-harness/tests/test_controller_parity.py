@@ -700,6 +700,16 @@ def p20(tmp):
     stopped_job(pair.b, 2, job="oneprobe-candidate-02")
     lines = pair.lines()
     check(len(lines) == 2 and names(lines, cache_log, "line 3") and names(lines, sweep_log, "line 4"), f"P20: another job on that line is caught ({lines})")
+    # a later line that names a key alone points at the job that key was named after
+    pair = Pair(tmp, "p20-reference")
+    for run, n, resumed in ((pair.a, 1, "oneprobe-candidate-01"), (pair.b, 2, "oneprobe-candidate-02")):
+        keys = {job: sha(f"{job}{n}")[:12] for job in ("oneprobe-candidate-01", "oneprobe-candidate-02")}
+        put(run / "evaluation/sweep/inv-0001/cache.json", {})
+        put(run / cache_log, "".join(f"MISS {job}: no entry for request key {key}\n" for job, key in keys.items())
+            + f"resumed at request key {keys[resumed]}\n")
+    lines = pair.lines()
+    check(len(lines) == 1 and names(lines, cache_log, "line 3") and "<CACHEKEY:oneprobe-candidate-01>" in lines[0]
+          and "<CACHEKEY:oneprobe-candidate-02>" in lines[0], f"P20: a line that names the unstored key of another job is caught ({lines})")
     pair = Pair(tmp, "p20-other-line")
     stopped_job(pair.a, 1)
     stopped_job(pair.b, 2)
