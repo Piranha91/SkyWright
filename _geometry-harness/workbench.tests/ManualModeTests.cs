@@ -832,7 +832,16 @@ public sealed class InPlaceRunTests
     {
         using var w = new TiltedRefWorld();
         SelWorld(w);
-        var game = Path.GetDirectoryName(w.DataDir)!;
+        // WB_TEST_INSTANCE, with WB_TEST_PROFILE, WB_TEST_GAME and WB_TEST_MOD, points the same run at a real profile
+        var real = Environment.GetEnvironmentVariable("WB_TEST_INSTANCE") is { Length: > 0 } ri ? ri : null;
+        string Real(string name) => Environment.GetEnvironmentVariable(name) is { Length: > 0 } v ? v : throw new InvalidOperationException($"WB_TEST_INSTANCE is set, so {name} must be set too.");
+        var instance = real ?? w.Instance;
+        var profile = real is null ? "Default" : Real("WB_TEST_PROFILE");
+        var mod = real is null ? "SelMod" : Real("WB_TEST_MOD");
+        var game = real is null ? Path.GetDirectoryName(w.DataDir)! : Real("WB_TEST_GAME");
+        // a real instance is too large to list whole: its profile folder and the chosen mod's folder are watched
+        var watched = real is null ? new[] { instance, game } : new[] { Path.Combine(instance, "profiles", profile), Path.Combine(instance, "mods", mod) };
+        var minutes = int.TryParse(Environment.GetEnvironmentVariable("WB_TEST_RUN_MINUTES"), out var m) ? m : 20;
         var gh = Path.Combine(R3Bundle.Checkout(), "_geometry-harness");
         var exe = Environment.GetEnvironmentVariable("WB_TEST_WORKBENCH") is { Length: > 0 } we ? we
             : Directory.GetFiles(Path.Combine(gh, "workbench", "bin", "Release"), "workbench.exe", SearchOption.AllDirectories).Single();
@@ -863,7 +872,7 @@ public sealed class InPlaceRunTests
         psi.Environment["WB_RUNCONTROL"] = engine;
         psi.Environment["HOUSECARL_RUNLOG_DIR"] = decoy;                 // the run must keep its own run log, not this one
         foreach (var k in new[] { "WB_CONTROLLER", "WB_PIPELINE_CMD", "WB_PIPELINE", "WB_EVALRUN", "WB_HARNESS", "WB_OUT", "WB_SCRIPT", "WB_MACHINE" }) psi.Environment.Remove(k);
-        var before = Listing(w.Instance, game);
+        var before = Listing(watched);
         using var wb = Process.Start(psi)!;
         var console = new System.Text.StringBuilder();
         wb.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (console) console.AppendLine(e.Data); };
@@ -891,8 +900,8 @@ public sealed class InPlaceRunTests
             var shots = Environment.GetEnvironmentVariable("WB_TEST_SHOTS") is { Length: > 0 } sd ? Directory.CreateDirectory(sd).FullName : null;
             async Task Shot(string name) { if (shots is not null) { await Task.Delay(1500); await Ok("workbench_act", ("verb", "capture_window"), ("path", Path.Combine(shots, name + ".png"))); } }
 
-            await Ok("workbench_act", ("verb", "open_profile"), ("mode", "free"), ("instance", w.Instance), ("profile", "Default"), ("game", game));
-            await Ok("workbench_act", ("verb", "select_mods"), ("mods", new[] { "SelMod" }));
+            await Ok("workbench_act", ("verb", "open_profile"), ("mode", "free"), ("instance", instance), ("profile", profile), ("game", game));
+            await Ok("workbench_act", ("verb", "select_mods"), ("mods", new[] { mod }));
             await Ok("workbench_act", ("verb", "select_probes"), ("checks", new[] { "geometry.object-overlap" }));
             var set = await Ok("workbench_act", ("verb", "set_output"), ("path", outDir));
             Assert.Equal("python", set.GetProperty("launcher").GetProperty("controller").GetString());   // nothing chosen yet
@@ -905,15 +914,18 @@ public sealed class InPlaceRunTests
             var started = await Ok("workbench_act", ("verb", "run"));
             Assert.Equal("running", started.GetProperty("launcher").GetProperty("run").GetProperty("state").GetString());
             var folder = started.GetProperty("launcher").GetProperty("run").GetProperty("folder").GetString()!;
-            JsonElement run = default; int pictures = 0;
-            for (var until = DateTime.UtcNow.AddMinutes(20); DateTime.UtcNow < until; )
+            JsonElement run = default; int pictures = 0, busy = 0;
+            for (var until = DateTime.UtcNow.AddMinutes(minutes); DateTime.UtcNow < until; )
             {
                 // with pictures asked for, the window is captured about once a second while the run goes (its line refreshes each second)
                 if (shots is not null && pictures < 12) { await Task.Delay(1100); await Ok("workbench_act", ("verb", "capture_window"), ("path", Path.Combine(shots, $"run-in-progress-built-in-{++pictures}.png"))); }
-                run = (await Ok("workbench_state", ("project", new[] { "launcher" }), ("wait_seconds", shots is not null && pictures < 12 ? 0 : 20))).GetProperty("launcher").GetProperty("run");
+                // on a real profile the window can be busy longer than a call waits; the tool says so and the poll asks again
+                try { run = (await Ok("workbench_state", ("project", new[] { "launcher" }), ("wait_seconds", shots is not null && pictures < 12 ? 0 : 20))).GetProperty("launcher").GetProperty("run"); }
+                catch (Xunit.Sdk.XunitException e) when (e.Message.Contains("its thread is busy")) { busy++; await Task.Delay(2000); continue; }
                 if (run.GetProperty("state").GetString() != "running") break;
             }
             await Shot("run-ended-built-in");
+            if (busy > 0) System.Console.WriteLine($"B5: the window was too busy to answer {busy} state call(s) during the run");
             string state = run.GetProperty("state").GetString()!, refusal = run.GetProperty("refusal").GetString() ?? "";
             var log = File.ReadAllText(Path.Combine(folder, "pipeline.log"));
 
@@ -933,7 +945,12 @@ public sealed class InPlaceRunTests
             Assert.DoesNotContain("python", log, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("python", refusal, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("\"op\":\"evalpipeline\"", File.ReadAllText(Path.Combine(folder, "run", "runlog", "history.jsonl")).Replace(" ", ""));
-            Assert.Empty(Directory.EnumerateFileSystemEntries(decoy));
+            // on a real profile the window draws the opened finding with viewprobe, which is the window's own call and
+            // rightly logs to the ambient store; any other record there would be the run's
+            var strays = Directory.EnumerateFiles(decoy, "*", SearchOption.AllDirectories).Select(x => Path.GetRelativePath(decoy, x))
+                .Where(x => !Path.GetFileName(x).StartsWith("viewprobe-")).ToList();
+            var strayOps = strays.Where(x => x.EndsWith(".jsonl")).SelectMany(x => File.ReadLines(Path.Combine(decoy, x)).Take(40)).Select(l => l.Length > 300 ? l[..300] : l).ToList();
+            Assert.True(strays.Count == 0, $"something wrote its run log outside the run: {string.Join("; ", strays.Take(12))} :: {string.Join(" | ", strayOps.Take(12))}");
             Assert.StartsWith(Path.Combine(outDir, "workbench-runs"), folder);
 
             // the scenes stage is always a stated, non-blocking refusal, so bundle is looked for by name, not by position
@@ -959,7 +976,7 @@ public sealed class InPlaceRunTests
                 Assert.Equal($"the run stopped (exit code 2) without making results: {next}: not built in this version; the run stops here. (its log: {Path.Combine(folder, "pipeline.log")})", refusal);
                 System.Console.WriteLine($"B5 branch: NOT BUILT YET (stages accepted: {string.Join(", ", accepted)}; the engine stopped at '{next}' on its own sentence)");
             }
-            var after = Listing(w.Instance, game);
+            var after = Listing(watched);
             var changed = before.Keys.Union(after.Keys).Where(k => !before.TryGetValue(k, out var b) || !after.TryGetValue(k, out var a) || b != a).ToList();
             Assert.True(changed.Count == 0, $"the run changed the instance or the game folder: {string.Join("; ", changed.Take(5))}");
         }
