@@ -55,7 +55,7 @@ public static class Receipts
     }
 
     // st_mtime as Python's float: whole seconds plus the nanoseconds as a fraction.
-    static double MtimeSeconds(string path)
+    public static double MtimeSeconds(string path)
     {
         long ns = Hashing.MtimeNs(path);
         long sec = Math.DivRem(ns, 1_000_000_000L, out long rem);

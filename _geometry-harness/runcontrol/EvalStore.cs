@@ -74,6 +74,9 @@ public static class Ev
     /// <summary>read_text(encoding="utf-8", errors="replace"): invalid bytes become U+FFFD; None when unreadable is the caller's.</summary>
     public static string ReadLoose(string path) => new UTF8Encoding(false, false).GetString(File.ReadAllBytes(path));
 
+    /// <summary>read_text(encoding="utf-8", errors="replace") as Python's text mode gives it: every line end is one line feed.</summary>
+    public static string ReadText(string path) => ReadLoose(path).Replace("\r\n", "\n").Replace('\r', '\n');
+
     /// <summary>write_text(text, encoding="utf-8"): Python's text mode writes "\n" as the platform's line end.</summary>
     public static void WriteText(string path, string text)
     {
