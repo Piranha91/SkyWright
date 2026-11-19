@@ -48,7 +48,7 @@ try
         Console.WriteLine($"canonical   {Hashing.Sha256Text(PyJson.Canonical(doc))}");
         return Exit.Ok;
     }
-    if (command == "plan") return Plan.Run(PlanArgs.Parse(args[1..]));
+    if (command == "plan") return Plan.Run(PlanFlags(args));
     if (!pipeline)
         throw new Refusal(args.Length == 0
             ? "runcontrol needs a command: run, arms, status, plan, --self-test, identity FOLDER or canon."
@@ -114,4 +114,56 @@ catch (FormatException f)
 {
     Console.Error.WriteLine($"REFUSED: {f.Message}; give valid JSON.");
     return Exit.Refused;
+}
+
+// evalrun.py plan's flags, read as its parser reads them; a flag it does not have or a missing value is refused.
+static PlanArgs PlanFlags(string[] args)
+{
+    var a = new PlanArgs();
+    for (int i = 1; i < args.Length; i++)
+    {
+        string flag = args[i];
+        string? joined = null;   // the value of `--flag=value`
+        if (flag.StartsWith("--", StringComparison.Ordinal) && flag.Contains('='))
+        {
+            joined = flag[(flag.IndexOf('=') + 1)..];
+            flag = flag[..flag.IndexOf('=')];
+        }
+        string Value()
+        {
+            if (joined != null) return joined;
+            if (i + 1 < args.Length && !PlanArgs.ReadsAsFlag(args[i + 1])) return args[++i];
+            throw new Refusal($"plan: {flag} needs a value after it.");
+        }
+        switch (flag)
+        {
+            case "--registry": a.Registry = Value(); break;
+            case "--scope": a.Scope = Value(); break;
+            case "--candidates": a.Candidates = Value(); break;
+            case "--alt": a.Alt = PlanArgs.Add(a.Alt, Value()); break;
+            case "--supplied": a.Supplied = PlanArgs.Add(a.Supplied, Value()); break;
+            case "--states": a.States = Value(); break;
+            case "--depth": a.Depth = PlanArgs.DepthOf(Value()); break;
+            case "--settings": a.Settings = Value(); break;
+            case "--select": a.Select = PlanArgs.Add(a.Select, Value()); break;
+            case "--review-arm": a.ReviewArm = Value(); break;
+            case "--exclude": a.Exclude = PlanArgs.Add(a.Exclude, Value()); break;
+            case "--opt-in": a.OptIn = PlanArgs.Add(a.OptIn, Value()); break;
+            case "--budget-minutes": a.BudgetMinutes = PlanArgs.Minutes(Value()); break;
+            case "--max-candidates": a.MaxCandidates = PlanArgs.Count(Value()); break;
+            case "--out": a.Out = Value(); break;
+            case "--instance": a.Instance = Value(); break;
+            case "--profile": a.Profile = Value(); break;
+            case "--game": a.Game = Value(); break;
+            case "--harness": a.Harness = Value(); break;
+            case "--probe-args": a.ProbeArgs = Value(); break;
+            case "--primitive-solidity": a.PrimitiveSolidity = Value(); break;
+            case "--population-from": a.PopulationFrom = Value(); break;
+            case "--probe-cmd": a.ProbeCmd = PlanArgs.Add(a.ProbeCmd, Value()); break;
+            case "--diff-tolerance": a.DiffTolerance = Value(); break;
+            case "--no-reverse" when joined == null: a.NoReverse = true; break;
+            default: throw new Refusal($"plan does not take {args[i]}; its flags are those of evalrun.py plan.");
+        }
+    }
+    return a.Checked();
 }
