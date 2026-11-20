@@ -98,7 +98,7 @@ EVIDENCE_STRENGTHS = frozenset({
 #: a new rule the controller has never seen.
 TRIGGER_KEYS = frozenset({
     "always", "anyType", "placed", "exterior", "land", "navmesh", "overlays", "nexusId",
-    "masters", "anyOf", "allOf",
+    "masters", "placedMeshes", "anyOf", "allOf",
 })
 
 #: Unmeasured extents, closed (PLAN amendment A-1). scope.json's `unmeasured` is a list of
@@ -125,6 +125,9 @@ _TRIGGER_FIELD = {
     "overlays": "configuration.overlays",
     "nexusId": "nexusId",
     "masters": "masters",
+    # not a scope field: the C# controller's mesh reach (scope/mesh-reach.json, overlapprobe --mesh-reach); this pipeline
+    # does not measure it, so the key always answers unknown here
+    "placedMeshes": "mesh-reach.json credited (not measured by this pipeline)",
 }
 
 
@@ -544,6 +547,11 @@ def _evaluate(trigger, scope):
         return _combine(value, scope, any_mode=True)
     if key == "allOf":
         return _combine(value, scope, any_mode=False)
+    if key == "placedMeshes":
+        # this pipeline never measures the reach (the C# controller's scope stage does), so it is never given one; the
+        # sentence is the C# controller's for a plan given no reach, word for word
+        return "unknown", ("no mesh reach was measured, so whether a selected folder's mesh is used by a placed object "
+                           "is not known.")
 
     if scope is None:
         return "unknown", "no scope.json was measured, so this trigger could not be read."

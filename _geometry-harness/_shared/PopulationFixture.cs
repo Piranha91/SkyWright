@@ -80,8 +80,8 @@ namespace HarnessShared;
 //        drops a render face (other bytes) and keeps the same collision, so the cup still rests on the slab; it also sits 3 u
 //        inside n6 with no face facing it (a graze, within the 4 u epsilon). No row: a graze never stands in for the slab
 // A copy the folder rule cannot read as a shape (fold-review-fix/GATE-A.md): PpBase's pp\mshv.nif, slabv.nif and cupv.nif are bytes
-// that are not a NIF; PpMeshMod ships a real box for each, so the folder is credited but the shape without it is unknown.
-//  M13   x13 (A, MeshV) 0 x y13 (B, Box) 80, interior IM13   PpMeshMod +-60 / PpBase not a NIF   the counterfactual is unknown;
+// that are not a NIF; PpSkyMod ships a real box for each, so the folder is credited but the shape without it is unknown.
+//  M13   x13 (A, MeshV) 0 x y13 (B, Box) 80, interior IM13   PpSkyMod +-60 / PpBase not a NIF   the counterfactual is unknown;
 //        the crossing is cross-plugin, so the plugin rule judges it: plugin row A x B, with the mod's mesh only (without it, x13
 //        has no geometry); counted MeshUnknownJudgedByPluginRule
 //  K7    cup c7 (PpBase) on slab hs7 (PpBase, SlabV), E35 (x0+6500)   the reshaped host's fallback has no geometry: no row,
@@ -391,13 +391,15 @@ public static class PopulationFixture
         var dm = Path.Combine(mods, "PpDelta", "meshes", "pp"); Directory.CreateDirectory(dm);
         File.WriteAllBytes(Path.Combine(dm, "msho.nif"), Mesh(60, true));
         File.WriteAllBytes(Path.Combine(dm, "dnew.nif"), Mesh(60, true));
-        // M13, K7, K8: PpBase's copy is not a NIF, PpMeshMod's is a real box
+        // M13, K7, K8: PpBase's copy is not a NIF, PpSkyMod's is a real box. PpSkyMod.esp masters neither placement's plugin, so every
+        // pair is Blind for it; the asset-only instances carry no PpSkyMod, so there these meshes are the same on both arms
+        // (tests/test_asset_only_selection.py)
         File.WriteAllBytes(Path.Combine(bm, "mshv.nif"), NotANif);
         File.WriteAllBytes(Path.Combine(bm, "slabv.nif"), NotANif);
         File.WriteAllBytes(Path.Combine(bm, "cupv.nif"), NotANif);
-        File.WriteAllBytes(Path.Combine(mm, "mshv.nif"), Mesh(60, true));
-        File.WriteAllBytes(Path.Combine(mm, "slabv.nif"), Mesh(100, true));
-        File.WriteAllBytes(Path.Combine(mm, "cupv.nif"), Mesh(20, true));
+        File.WriteAllBytes(Path.Combine(um, "mshv.nif"), Mesh(60, true));
+        File.WriteAllBytes(Path.Combine(um, "slabv.nif"), Mesh(100, true));
+        File.WriteAllBytes(Path.Combine(um, "cupv.nif"), Mesh(20, true));
         // extras: plugins that place nothing, outside the fixture's order
         var ex = Path.Combine(d, "extras"); Directory.CreateDirectory(ex);
         foreach (var name in new[] { "PpMeshModEsp", "PpSameEsp" })

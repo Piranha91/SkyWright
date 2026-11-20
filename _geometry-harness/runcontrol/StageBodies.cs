@@ -164,6 +164,13 @@ public static class StageBodies
         }
         string scopes = PyPath.Join(sdir, "scopes.json");
         PyJson.WritePipelineFile(scopes, accepted);
+        // the mesh reach of the combined arm: which placed objects a folder the arms differ by gives a mesh that wins and differs
+        PyDict? reach = null;
+        if (accepted.ContainsKey("combined"))
+        {
+            (string reachFile, reach) = MeshReachStage.Measure(ctx, res, sdir);
+            outs.Add(reachFile);
+        }
         if (ctx.InPlace != null && accepted.ContainsKey("combined"))
         {
             string lineFile = PyPath.Join(sdir, "scope-line.json");
@@ -171,7 +178,8 @@ public static class StageBodies
             // the line speaks of the selection's own plugins: an asset-only selection has none, and the plugin its
             // arms scope only to prove the order loads is not the selection's
             scope["targets"] = Py.ListOrEmpty(scope.Get("targets")).Where(t => subject.Contains(PyText.Str(Py.D(t).Get("name")))).ToList();
-            string line = subject.Count == 0 ? ScopeRules.AssetOnlyLine(ctx, res) : ScopeRules.Line(scope, res, ScopeRules.DisabledModOf(ctx, res));
+            string line = subject.Count == 0 ? ScopeRules.AssetOnlyLine(reach!, res)
+                : ScopeRules.Line(scope, res, ScopeRules.DisabledModOf(ctx, res)) + (ScopeRules.MeshClause(reach!) ?? "");
             PyJson.WritePipelineFile(lineFile, new PyDict { ["line"] = line });
             outs.Add(lineFile);
         }
@@ -191,6 +199,9 @@ public static class StageBodies
         string budget = PyText.Str(ev.ContainsKey("budgetMinutes") ? ev["budgetMinutes"] : 90L);
         string candidates = PyOrder.Fwd(PyPath.Join(ctx.Out, "prepare", "candidates"));
         string[] where = ["--instance", PyOrder.Fwd(ctx.Instance), "--profile", ctx.Profile, "--game", PyOrder.Fwd(ctx.Game)];
+        // the placedMeshes trigger reads the combined arm's mesh reach, with or without a scope
+        string reachFile = PyPath.Join(ctx.Out, "scope", MeshReachStage.FileName);
+        if (File.Exists(reachFile)) where = [.. where, "--mesh-reach", PyOrder.Fwd(reachFile)];
         List<string> argv;
         Dictionary<string, string>? env = null;
         if (ctx.InPlace != null)

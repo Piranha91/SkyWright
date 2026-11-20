@@ -71,62 +71,91 @@ public static class ScopeRules
     /// <summary>The plugin an arm is scoped to when it loads none of the selection's: its last one, only to prove the order loads.</summary>
     public static string? OrderProof(IReadOnlyList<string> plugins) => plugins.Count > 0 ? plugins[^1] : null;
 
-    /// <summary>The tab's plain sentence for a selection with no plugin: what kind of files its folders hold, what the
-    /// checks compare for them and what they do not measure. Which placed objects a mesh reaches is the probes' own
-    /// population rule; this only names the files.</summary>
-    public static string AssetOnlyLine(RunContext ctx, PyDict res)
+    // The reach's numbers, summed over its folders (the delta's), with the stronger folders named.
+    sealed record Reach(long Refs, long Credited, long Equal, long Fresh, long NotLoaded, long Over, SortedDictionary<string, long> Stronger, long Meshes,
+                        long Textures, long Held, long Loaded, bool Complete, string Why, PyDict? Example);
+
+    static long N(PyDict d, string k) => Py.Truthy(d.Get(k)) ? (long)PyValue.Int(d[k]) : 0;
+
+    static Reach Read(PyDict reach)
+    {
+        var folders = Py.ListOrEmpty(reach.Get("folders")).Select(Py.D).ToList();
+        long Sum(string k) => folders.Sum(f => N(f, k));
+        var stronger = new SortedDictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in folders)
+            foreach (var (k, v) in Py.DictOrEmpty(f.Get("overriddenBy"))) stronger[k] = stronger.GetValueOrDefault(k) + (long)PyValue.Int(v);
+        long held = folders.Sum(f => (long)Py.ListOrEmpty(Py.DictOrEmpty(f.Get("archives")).Get("held")).Count);
+        long loaded = folders.Sum(f => (long)Py.ListOrEmpty(Py.DictOrEmpty(f.Get("archives")).Get("loaded")).Count);
+        var example = folders.SelectMany(f => Py.ListOrEmpty(f.Get("examples"))).Select(Py.D).FirstOrDefault();
+        string why = string.Join("; ", Py.ListOrEmpty(reach.Get("why")).Select(PyText.Str));
+        return new Reach(Sum("references"), Sum("credited"), Sum("equalBytes"), Sum("noFallback"), Sum("notLoaded"),
+                         stronger.Values.Sum(), stronger, Sum("meshFiles"), Sum("textureFiles"), held, loaded,
+                         reach.Get("complete") is true, why.Length > 0 ? why : "no reason given", example);
+    }
+
+    static string Count(long n, string one) => $"{n} {one}{(n != 1 ? "s" : "")}";
+    static string Use(long n) => n == 1 ? "uses" : "use";
+
+    // Of the placed objects that use one of the folders' meshes, why none gets a changed one.
+    static string Split(Reach r)
+    {
+        var parts = new List<string>();
+        if (r.Equal > 0) parts.Add($"{r.Equal} {(r.Equal == 1 ? "gets" : "get")} the same bytes {(r.Equal == 1 ? "it" : "they")} had without it");
+        if (r.Over > 0)
+            parts.Add($"{r.Over} {(r.Over == 1 ? "gets" : "get")} the copy of a stronger folder ("
+                      + (r.Stronger.Count == 1 ? r.Stronger.Keys.First() : string.Join(", ", r.Stronger.Select(kv => $"{kv.Key} {kv.Value}"))) + ")");
+        if (r.Fresh > 0) parts.Add($"{r.Fresh} {Use(r.Fresh)} a mesh only it has");
+        if (r.NotLoaded > 0) parts.Add($"{r.NotLoaded} would read it from an archive the game does not load");
+        return string.Join(", ", parts);
+    }
+
+    // The archive sentence (3466b0a3): the game loads a folder's archive only beside a plugin of the same name or from the INI's list.
+    static string Unloaded(Reach r) => r.Held > r.Loaded
+        ? $" The game does not load {(r.Loaded == 0 ? (r.Held == 1 ? "its archive" : $"its {r.Held} archives") : $"{r.Held - r.Loaded} of its {r.Held} archives")}: "
+          + "an archive loads only beside a loaded plugin of the same name or from the INI's archive list, so what it holds is not measured."
+        : "";
+
+    const string WhyUnknown = " With no plugin to read, the two checks cannot be ruled out, so they show as not complete; that is not a fault in the mod.";
+
+    /// <summary>The tab's plain sentence for a selection with no plugin, from the mesh reach (scope/mesh-reach.json): how many
+    /// placed objects use a mesh it provides that wins and differs, why none does, and what is not measured.</summary>
+    public static string AssetOnlyLine(PyDict reach, PyDict res)
     {
         var ticked = Py.Strs(res.Get("selection"));
         string who = ticked.Count > 0 ? NamesOf(ticked, 3) : "the selection";
-        long meshes = 0, archives = 0, textures = 0;
-        foreach (string mod in ticked)
+        var r = Read(reach);
+        string notMeasured = $"Worn and actor meshes, its textures ({Count(r.Textures, "file")}) and other files are not measured.";
+        if (r.Credited > 0)
         {
-            string folder = PyPath.Join(ctx.Instance, "mods", mod);
-            if (!Directory.Exists(folder)) continue;
-            meshes += FilesUnder(PyPath.Join(folder, "meshes"), ".nif");
-            textures += FilesUnder(PyPath.Join(folder, "textures"), null);
-            archives += Directory.EnumerateFiles(folder).Count(f => f.EndsWith(".bsa", StringComparison.OrdinalIgnoreCase));
+            string eg = r.Example is { } e ? $" (for example {PyPath.Name(PyText.Str(e.Get("model")))} in {PyText.Str(e.Get("cell"))})" : "";
+            return $"{who} has no plugin, so it places nothing; {Count(r.Credited, "placed object")} {Use(r.Credited)} a mesh it provides that wins and "
+                   + $"differs from the one it replaces{eg}. Object overlap and placement contact compare those with and without it. "
+                   + notMeasured + Unloaded(r);
         }
-        string Count(long n, string one) => $"{n} {one}{(n != 1 ? "s" : "")}";
-        long loaded = archives > 0 ? LoadedArchives(ctx, res, ticked) : 0;
-        // the game loads a folder's archive only beside a plugin of the same name or from the INI's archive list
-        string unloaded = archives > loaded
-            ? $" The game does not load {(loaded == 0 ? (archives == 1 ? "its archive" : $"its {archives} archives") : $"{archives - loaded} of its {archives} archives")}: "
-              + "an archive loads only beside a loaded plugin of the same name or from the INI's archive list, so what it holds is not measured."
-            : "";
-        if (meshes == 0 && loaded == 0)
-            return $"{who} has no plugin and no mesh{(archives > 0 ? " the game loads" : "")} ({Count(textures, "texture file")}{(archives > 0 ? $", {Count(archives, "archive")}" : "")}), "
-                   + "so no check here can measure it: textures, sounds and scripts change nothing these checks read." + unloaded;
-        string holds = meshes > 0 && loaded > 0 ? $"{Count(meshes, "mesh file")} and {Count(loaded, "loaded archive")}"
-            : meshes > 0 ? Count(meshes, "mesh file") : Count(loaded, "loaded archive");
-        return $"{who} has no plugin, so it places nothing; it holds {holds}. The checks that read meshes compare every placed object "
-               + $"that uses one of its meshes, with and without it. Its textures ({Count(textures, "file")}) and other files are not measured." + unloaded;
+        if (!r.Complete)
+            return $"{who} has no plugin; whether a placed object uses a mesh it changes is not known: {r.Why}." + Unloaded(r);
+        if (r.Meshes == 0 && r.Loaded == 0)
+            return $"{who} has no plugin and no mesh{(r.Held > 0 ? " the game loads" : "")} ({Count(r.Textures, "texture file")}{(r.Held > 0 ? $", {Count(r.Held, "archive")}" : "")}), "
+                   + "so no check here can measure it: textures, sounds and scripts change nothing these checks read." + WhyUnknown + Unloaded(r);
+        if (r.Refs == 0)
+            return $"{who} has no plugin, and no placed object uses any of its {Count(r.Meshes, "mesh file")}, so object overlap and placement "
+                   + $"contact have nothing of it to compare. Worn and actor meshes (body and armour replacers) are not measured, nor are its "
+                   + $"textures ({Count(r.Textures, "file")})." + WhyUnknown + Unloaded(r);
+        return $"{who} has no plugin, and no placed object uses a mesh it changes: of the {Count(r.Refs, "placed object")} that {Use(r.Refs)} one of "
+               + $"its meshes, {Split(r)}. " + notMeasured + WhyUnknown + Unloaded(r);
     }
 
-    /// <summary>How many archives of the ticked folders the game loads on an arm that has them, by the shared archive
-    /// discovery (the INI's archive list, then each loaded plugin's own archives), over that arm's plugins and folders.</summary>
-    static long LoadedArchives(RunContext ctx, PyDict res, IReadOnlyCollection<string> ticked)
+    /// <summary>The mesh sentence after a plugin selection's scope line, when the arms differ by a mod folder that holds a mesh;
+    /// null otherwise.</summary>
+    public static string? MeshClause(PyDict reach)
     {
-        var mine = new HashSet<string>(ticked, StringComparer.OrdinalIgnoreCase);
-        long best = 0;
-        foreach (var arm in Py.ListOrEmpty(res.Get("arms")).Select(Py.D))
-        {
-            var mods = Py.Strs(arm.Get("mods"));
-            if (!mods.Any(mine.Contains)) continue;
-            string profile = PyPath.Join(ctx.Instance, "profiles", ctx.Profile);
-            var found = ArchiveDiscovery.DiscoverFor(Py.Strs(arm.Get("plugins")), mods, profile, PyPath.Join(ctx.Instance, "mods"),
-                                                     PyPath.Join(ctx.Game, "Data"), PyPath.Join(ctx.Instance, "overwrite"), ctx.Game);
-            best = Math.Max(best, found.Archives.Where(x => x.OwningMod is { } m && mine.Contains(m))
-                                       .Select(x => x.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count());
-        }
-        return best;
-    }
-
-    static long FilesUnder(string folder, string? extension)
-    {
-        if (!Directory.Exists(folder)) return 0;
-        return Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
-            .Count(f => extension == null || f.EndsWith(extension, StringComparison.OrdinalIgnoreCase));
+        if (Py.ListOrEmpty(reach.Get("folders")).Count == 0) return null;
+        var r = Read(reach);
+        if (r.Meshes == 0 && r.Loaded == 0 && r.Refs == 0) return null;   // a plugin mod that ships no mesh: nothing to say about meshes
+        if (r.Credited > 0) return $" Its meshes: {Count(r.Credited, "placed object")} {Use(r.Credited)} one that wins and differs from the one it replaces.";
+        if (!r.Complete) return $" Whether a placed object uses a mesh it changes is not known: {r.Why}.";
+        if (r.Refs == 0) return " No placed object uses any of its meshes.";
+        return $" No placed object uses a mesh it changes: of the {Count(r.Refs, "placed object")} that {Use(r.Refs)} one of its meshes, {Split(r)}.";
     }
 
     /// <summary>The plugins one arm's scope targets.</summary>

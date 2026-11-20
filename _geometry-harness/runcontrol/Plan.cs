@@ -77,6 +77,27 @@ public static class Plan
             Environment.SetEnvironmentVariable("HOUSECARL_RUNLOG_DIR", PyPath.Resolve(PyPath.Join(run, "runlog")));
     }
 
+    static List<string> ReachFolders(PyDict reach) =>
+        Py.ListOrEmpty(reach.Get("folders")).Select(f => PyText.Str(Py.DictOrEmpty(f).Get("name"))).ToList();
+
+    /// <summary>The mesh reach must be about exactly the folders the probes will credit: the population's mods when it is scoped,
+    /// its meshFolders when it is not. Otherwise the applicability it gives is about other folders, and the plan refuses.</summary>
+    public static void CheckReachFolders(PyDict reach, PyDict populationBlock, IEnumerable<PyDict> checks)
+    {
+        // only a planned mesh probe credits a folder; with none planned there is nothing the reach must agree with
+        bool meshPlanned = checks.Any(c => Py.DictOrEmpty(c.Get("adapter")).Get("exe") is string exe && HarnessShared.PopulationRules.MeshProbes.Contains(exe)
+                                           && Py.ListOrEmpty(c.Get("arms")).Any(r => Py.DictOrEmpty(r).Get("status") as string == "planned"));
+        if (!meshPlanned) return;
+        var credited = Py.ListOrEmpty(Py.Truthy(populationBlock.Get("scoped")) ? populationBlock.Get("mods") : populationBlock.Get("meshFolders"))
+            .Select(PyText.Str).ToList();
+        var measured = ReachFolders(reach);
+        var a = PyOrder.SortedByLowerKey(credited.Distinct(StringComparer.OrdinalIgnoreCase));
+        var b = PyOrder.SortedByLowerKey(measured.Distinct(StringComparer.OrdinalIgnoreCase));
+        if (!a.Select(PyText.Lower).SequenceEqual(b.Select(PyText.Lower)))
+            throw new Refusal($"the mesh reach measured the folders [{string.Join(", ", b)}], but this plan credits [{string.Join(", ", a)}]; "
+                              + "re-run the scope stage so the reach is about the folders the probes credit.");
+    }
+
     public static int Run(PlanArgs a)
     {
         string run = PyPath.Str(a.Out!);
@@ -110,6 +131,15 @@ public static class Plan
         var scope = scopeRead == null ? null : PyValue.Dict(scopeRead);
         var scopeOr = scope ?? new PyDict();
         string? scopeSha = scopePath != null ? Hashing.Sha256FileOrNull(scopePath) : null;
+        // the mesh reach (scope/mesh-reach.json): the one input the placedMeshes trigger reads, with or without a scope
+        string? reachPath = string.IsNullOrEmpty(a.MeshReach) ? null : GivenPath(a.MeshReach);
+        PyDict? meshReach = null;
+        if (reachPath != null)
+        {
+            object? read = File.Exists(reachPath) ? PyJson.LoadEvalFile(reachPath) : null;
+            if (read is not PyDict rd) throw new Refusal($"--mesh-reach {reachPath}: not readable as a JSON object; re-run the scope stage.");
+            meshReach = rd;
+        }
 
         if (!Directory.Exists(cdir)) throw new Refusal($"--candidates {cdir}: not a directory");
         var files = PyOrder.SortedPaths(Directory.EnumerateFileSystemEntries(cdir).Where(f =>
@@ -375,7 +405,7 @@ public static class Plan
                                           + ". A placeholder is never passed through to a probe literally.");
 
         PyDict appMap;
-        try { appMap = Registry.Applicability(regDoc, scope); }
+        try { appMap = Registry.Applicability(regDoc, scope, meshReach); }
         catch (Exception ex) when (ex is PyError or Refusal or InvalidCastException or KeyNotFoundException)
         {
             throw new Refusal($"the registry's applicability could not be derived from this scope: {ex.Message}");
@@ -505,6 +535,7 @@ public static class Plan
                 if (PyValue.Eq(ad.Get("kind"), "ordersweep-probe") && ad.Get("exe") is string exe && HarnessShared.PopulationRules.MeshProbes.Contains(exe))
                     ad["population"] = HarnessShared.PopulationRules.MeshIdentity(population, meshFolders.Select(PyText.Str));
             }
+        if (meshReach != null) CheckReachFolders(meshReach, populationBlock, checks);
         var censusChecks = PyOrder.SortedByCodePoint(checks.Where(c => PyValue.Eq(Py.DictOrEmpty(c["inputs"]).Get("states"), "selected")).Select(c => Py.S(c["checkId"])));
         var statesNotExplored = new List<object?>();
         foreach (var c in checks.Where(c => PyValue.Eq(Py.DictOrEmpty(c["inputs"]).Get("states"), "all")))
@@ -572,6 +603,12 @@ public static class Plan
             ["arms"] = arms.Cast<object?>().ToList(),
         };
         if (reviewArm != null) plan["reviewArm"] = reviewArm;
+        if (meshReach != null)
+            plan["meshReach"] = new PyDict
+            {
+                ["file"] = reachPath, ["sha256"] = Hashing.Sha256FileOrNull(reachPath!), ["complete"] = meshReach.Get("complete"),
+                ["credited"] = meshReach.Get("credited"), ["folders"] = ReachFolders(meshReach).Cast<object?>().ToList(),
+            };
         plan.Update(new PyDict
         {
             ["states"] = statesBlock,

@@ -43,11 +43,14 @@ public static class PlacedMeshReach
             var providers = folders.Where(f => population.ModFilesByFolder.TryGetValue(f, out var files) && files.Contains(norm)).ToList();
             if (providers.Count == 0) continue;
             var o = owners.Of(path);
+            var sources = assets.ResolveForPlacement(path).Sources;
             foreach (var f in providers)
             {
                 var c = per[f];
                 c.References++;
                 bool mine = string.Equals(o.Folder, f, StringComparison.OrdinalIgnoreCase);
+                // the folder holds the path but the view does not (an archive the game does not load): nothing of it is drawn
+                if (!sources.Any(x => string.Equals(MeshResponsibility.FolderOf(x), f, StringComparison.OrdinalIgnoreCase))) { c.NotLoaded++; continue; }
                 switch (o.Shape)
                 {
                     case MeshShape.Credited when mine:
@@ -62,7 +65,6 @@ public static class PlacedMeshReach
                     case MeshShape.EqualBytes when mine: c.EqualBytes++; break;
                     case MeshShape.NoFallback when mine: c.NoFallback++; break;
                     case MeshShape.Unreadable when mine: c.Unreadable++; break;
-                    case MeshShape.GameOrMissing: c.NotLoaded++; break;
                     default:
                         // another folder's copy wins over this one: credited to that folder, or a folder this run does not credit
                         string winner = o.Folder ?? "?";

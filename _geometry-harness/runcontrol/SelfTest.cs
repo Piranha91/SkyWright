@@ -145,6 +145,7 @@ public static partial class SelfTest
         DriverCases();
         ChildCases();
         StageCases();
+        MeshReachCases();
         BlackBoxCases();
         SelfTestPlanModules.Run(Case, Skip);
         PlanCases();

@@ -458,12 +458,35 @@ def test_no_is_quoted_from_the_counters():
         "total": 0, "interior": 0, "exterior": 0, "persistent": 0, "navm": 0, "land": 0,
         "cells": [], "exteriorCells": [], "worldspaces": []}
     answers = R.applicability(registry, scope)
-    placed = answers["geometry.object-overlap"]
+    # object overlap now also applies through a selected folder's meshes (placedMeshes), which this pipeline does not
+    # measure; route-cut's trigger is still placed alone, so it carries the counter
+    placed = answers["geometry.route-cut"]
     assert placed["applicability"] == "no", placed
     assert "0" in placed["evidence"], placed
     quest = answers["records.registration-and-dialogue"]
     assert quest["applicability"] == "no", quest
     assert "QUST" in quest["evidence"], quest
+
+
+def test_placed_meshes_is_known_to_the_vocabulary_and_unknown_here():
+    """Rejects: a registry carrying the placedMeshes trigger refused as an unknown operator, and an overlap check answered
+    "no" for a target that places nothing when a selected folder's meshes may still reach placed objects (FOLD-REVIEW
+    finding 1): this pipeline does not measure the mesh reach, so it must say unknown, never not-applicable."""
+    registry = load_registry()
+    assert R.validate(registry) == [], R.validate(registry)
+    overlap = next(c for c in registry["checks"] if c["id"] == "geometry.object-overlap")
+    assert {"placedMeshes": True} in overlap["applicability"]["trigger"]["anyOf"], overlap["applicability"]
+    scope = complete_scope()
+    scope["targets"][0]["footprint"]["placed"] = {
+        "total": 0, "interior": 0, "exterior": 0, "persistent": 0, "navm": 0, "land": 0,
+        "cells": [], "exteriorCells": [], "worldspaces": []}
+    for cid in ("geometry.object-overlap", "geometry.placement-contact"):
+        got = R.applicability(registry, scope)[cid]
+        assert got["applicability"] == "unknown", (cid, got)
+        assert "no mesh reach was measured" in got["evidence"], (cid, got)
+    scope["targets"][0]["footprint"]["placed"]["total"] = 3
+    got = R.applicability(registry, scope)["geometry.object-overlap"]
+    assert got["applicability"] == "yes", got
 
 
 # ---------------------------------------------------------- unknown, and that it never becomes "no"

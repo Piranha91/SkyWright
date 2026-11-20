@@ -171,6 +171,7 @@ static PlanArgs PlanFlags(string[] args)
             case "--probe-args": a.ProbeArgs = Value(); break;
             case "--primitive-solidity": a.PrimitiveSolidity = Value(); break;
             case "--population-from": a.PopulationFrom = Value(); break;
+            case "--mesh-reach": a.MeshReach = Value(); break;
             case "--probe-cmd": a.ProbeCmd = PlanArgs.Add(a.ProbeCmd, Value()); break;
             case "--diff-tolerance": a.DiffTolerance = Value(); break;
             case "--no-reverse" when joined == null: a.NoReverse = true; break;

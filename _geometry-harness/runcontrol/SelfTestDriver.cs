@@ -366,7 +366,8 @@ public static partial class SelfTest
     {
         var argv = job.Argv.ToList();
         launched.Add(job.Id);
-        string Value(string flag) => argv[argv.IndexOf(flag) + 1];
+        string Value(string flag) => argv.IndexOf(flag) is >= 0 and var at ? argv[at + 1] : throw new InvalidOperationException($"the stand-in was given no {flag}");
+        if (argv.Contains("--mesh-reach")) return StandInMeshReach(Value("--population"), Value("--mesh-reach"), job);
         var headers = D(res["headers"]);
         PyDict order = argv.Contains("--order")
             ? D(PyJson.ReadPipelineFile(Value("--order")))
@@ -402,6 +403,27 @@ public static partial class SelfTest
         return new ChildResult(job.Id, 0, 0.1, null, 1);
     }
 
+    /// <summary>What overlapprobe --mesh-reach writes, stood in for: the population's folders, each with the numbers
+    /// <see cref="StandInReachNumbers"/> gives (none credited by default), and complete.</summary>
+    static Func<string, PyDict>? StandInReachNumbers;
+    static ChildResult StandInMeshReach(string population, string output, ChildJob job)
+    {
+        var mods = L(D(PyJson.ReadPipelineFile(population))["mods"]).Select(m => S(D(m)["name"])).ToList();
+        var folders = mods.Select(m => (object?)(StandInReachNumbers?.Invoke(m) ?? new PyDict
+        {
+            ["name"] = m, ["meshFiles"] = 0L, ["textureFiles"] = 0L, ["archives"] = new PyDict { ["held"] = new List<object?>(), ["loaded"] = new List<object?>() },
+            ["references"] = 0L, ["credited"] = 0L, ["equalBytes"] = 0L, ["overriddenBy"] = new PyDict(), ["noFallback"] = 0L, ["unreadable"] = 0L,
+            ["notLoaded"] = 0L, ["examples"] = new List<object?>(),
+        })).ToList();
+        long Sum(string k) => folders.Sum(f => (long)PyValue.Int(D(f)[k]));
+        PyJson.WritePipelineFile(output, new PyDict
+        {
+            ["schema"] = 1L, ["complete"] = true, ["why"] = new List<object?>(), ["folders"] = folders,
+            ["references"] = Sum("references"), ["credited"] = Sum("credited"),
+        });
+        return new ChildResult(job.Id, 0, 0.1, null, 1);
+    }
+
     static readonly string[] BuiltStages = ["census", "prepare", "scope"];
 
     static void StageCases()
@@ -431,7 +453,7 @@ public static partial class SelfTest
                 if (exit != Exit.Ok) return $"exit {exit}: {stderr}{stdout}";
                 foreach (string s in BuiltStages)
                     if (!stdout.Contains($"{s}: accepted in ")) return $"{s} was not accepted: {stdout}";
-                string? why = Same("children", string.Join(" ", launched), "census-scope scope-candidate-00-baseline scope-candidate-01")
+                string? why = Same("children", string.Join(" ", launched), "census-scope scope-candidate-00-baseline scope-candidate-01 mesh-reach")
                               ?? Same("scope line", S(D(PyJson.ReadPipelineFile(t.At("run/scope/scope-line.json")))["line"]),
                                       "Sel edits 1 interior (Room); no other enabled plugin besides the base game touches those cells or the 2 cells around them "
                                       + "(persistent references placed into those cells are not read).")
@@ -448,10 +470,10 @@ public static partial class SelfTest
                 if (exit != Exit.Ok || launched.Count > 0) return $"a presentation change ran {string.Join(" ", launched)} (exit {exit}): {stderr}";
                 foreach (string s in BuiltStages)
                     if (!stdout.Contains($"{s}: reused (inputs and outputs unchanged)")) return $"{s} was not reused: {stdout}";
-                // a measuring key: every stage runs again
+                // a measuring key: every stage runs again (census, two scopes and the mesh reach)
                 var other = new PyDict(entry) { ["evaluation"] = Json("{\"select\": [\"geometry.object-overlap\"], \"depth\": \"deep\"}") };
                 (exit, stdout, _) = Drive(Driver(other), args);
-                if (exit != Exit.Ok || launched.Count != 3) return $"a changed measuring key ran {launched.Count} children (exit {exit})";
+                if (exit != Exit.Ok || launched.Count != 4) return $"a changed measuring key ran {launched.Count} children (exit {exit})";
                 // a stage reading a presentation key the table does not declare for it is refused by the accessor
                 var ctx = new RunContext(entry, new PyDict(), t.At("run"));
                 return Rows(BuiltStages, s => Refuses(() => ctx.Entry.Presentation(s, "modNames"), s))
@@ -488,36 +510,35 @@ public static partial class SelfTest
                 if (why != null) return why;
                 File.AppendAllText(PyPath.Join(inst, "profiles", "P", "modlist.txt"), "# touched\r\n");
                 var third = Run("r3");
-                return third.exit == Exit.Ok && launched.Count == 3 && third.stdout.Contains("preparation: not reused: r2 used this profile and selection, but a profile file changed")
+                return third.exit == Exit.Ok && launched.Count == 4 && third.stdout.Contains("preparation: not reused: r2 used this profile and selection, but a profile file changed")
                     ? null : $"after a profile file changed: exit {third.exit}, {launched.Count} children: {third.stdout}";
             }
             finally { ChildLaunch.RunJob = saved; }
         });
-        // a selection with no plugin: the census is skipped, and the scope line says what its folders hold and what is measured
-        string? AssetOnlyLine(string[] files, string expected)
+        // a selection with no plugin: the census is skipped, the scope stage measures the combined arm's mesh reach over a
+        // population naming the folder, and the scope line is built from that reach (fold-review-fix, finding 3)
+        string? AssetOnlyLine(PyDict folder, string expected)
         {
             using var t = new Temp();
             var (inst, game) = World(t, [new ModFolder("Tex"), Mod("A", "A.esp")], ["Tex", "A"], ["A.esp"]);
-            foreach (string f in files)
-            {
-                string at = PyPath.Join(inst, "mods", "Tex", f);
-                Directory.CreateDirectory(Path.GetDirectoryName(at)!);
-                File.WriteAllBytes(at, [0]);
-            }
             var entry = InPlaceEntry(inst, game, ["Tex"], ["geometry.object-overlap"]);
             var res = new RunContext(entry, new PyDict(), t.At("run")).Resolve();
             var launched = new List<string>();
             ChildLaunch.RunJob = (_, _, _, job) => StandInScopeprobe(res, job, launched);
+            StandInReachNumbers = name => new PyDict(folder) { ["name"] = name };
             try
             {
                 var (exit, stdout, stderr) = Drive(new Driver { OpenRun = QuietRun, SetsRunLogFolder = false, MakeContext = a => new RunContext(entry, new PyDict(), a.Out!) },
                                                    new PipelineArgs(Entry: "e.json", Out: t.At("run"), Through: "scope"));
                 if (exit != Exit.Ok) return $"exit {exit}: {stderr}";
+                var pop = D(PyJson.ReadPipelineFile(t.At("run/scope/mesh-population.json")));
                 return (stdout.Contains("census: the selection provides no plugin; skipped, and the plan runs without a scope") ? null : stdout)
-                       ?? Same("children", string.Join(" ", launched), "scope-candidate-00-baseline scope-candidate-01")
+                       ?? Same("children", string.Join(" ", launched), "scope-candidate-00-baseline scope-candidate-01 mesh-reach")
+                       ?? Same("population folders", string.Join(",", L(pop["mods"]).Select(m => S(D(m)["name"]))), "Tex")
+                       ?? Same("population plugins", L(pop["plugins"]).Count.ToString(), "0")
                        ?? Same("scope line", S(D(PyJson.ReadPipelineFile(t.At("run/scope/scope-line.json")))["line"]), expected);
             }
-            finally { ChildLaunch.RunJob = saved; }
+            finally { ChildLaunch.RunJob = saved; StandInReachNumbers = null; }
         }
         Case("stages: the machine wait is read from each slot command's taken line and reset per stage", () =>
         {
@@ -537,25 +558,43 @@ public static partial class SelfTest
             }
             finally { Directory.Delete(dir, true); }
         });
-        Case("stages: a selection with only textures says no check can measure it", () => AssetOnlyLine(["textures/a/b.dds"],
-            "Tex has no plugin and no mesh (1 texture file), so no check here can measure it: textures, sounds and scripts change nothing these checks read."));
-        Case("stages: an empty selected folder says no check can measure it", () => AssetOnlyLine([],
-            "Tex has no plugin and no mesh (0 texture files), so no check here can measure it: textures, sounds and scripts change nothing these checks read."));
-        Case("stages: a selection with meshes says the mesh checks compare the objects that use them", () => AssetOnlyLine(
-            ["meshes/x/a.nif", "meshes/x/y/b.NIF", "meshes/x/notes.txt", "textures/t.dds", "textures/u/v.dds"],
-            "Tex has no plugin, so it places nothing; it holds 2 mesh files. The checks that read meshes compare every placed object that uses one of its meshes, "
-            + "with and without it. Its textures (2 files) and other files are not measured."));
-        Case("stages: a selection with a mesh and an archive names both", () => AssetOnlyLine(["meshes/a.nif", "Tex.bsa"],
-            "Tex has no plugin, so it places nothing; it holds 1 mesh file. The checks that read meshes compare every placed object that uses one of its meshes, "
-            + "with and without it. Its textures (0 files) and other files are not measured. The game does not load its archive: an archive loads only beside a "
-            + "loaded plugin of the same name or from the INI's archive list, so what it holds is not measured."));
-        Case("stages: a selection with only an archive no plugin loads says the game does not load it", () => AssetOnlyLine(["Tex.BSA", "textures/t.dds"],
-            "Tex has no plugin and no mesh the game loads (1 texture file, 1 archive), so no check here can measure it: textures, sounds and scripts change nothing "
-            + "these checks read. The game does not load its archive: an archive loads only beside a loaded plugin of the same name or from the INI's archive "
-            + "list, so what it holds is not measured."));
-        Case("stages: a selection's archive named for a loaded plugin is counted as loaded", () => AssetOnlyLine(["A.bsa", "meshes/x/a.nif"],
-            "Tex has no plugin, so it places nothing; it holds 1 mesh file and 1 loaded archive. The checks that read meshes compare every placed object "
-            + "that uses one of its meshes, with and without it. Its textures (0 files) and other files are not measured."));
+        const string notAFault = " With no plugin to read, the two checks cannot be ruled out, so they show as not complete; that is not a fault in the mod.";
+        const string unloaded = " The game does not load its archive: an archive loads only beside a loaded plugin of the same name or from the INI's "
+                                + "archive list, so what it holds is not measured.";
+        PyDict Reach(long meshes = 0, long textures = 0, long refs = 0, long credited = 0, long equal = 0, long notLoaded = 0,
+                     string[]? held = null, string[]? loaded = null, PyDict? over = null, PyDict? example = null) => new()
+        {
+            ["meshFiles"] = meshes, ["textureFiles"] = textures,
+            ["archives"] = new PyDict { ["held"] = Py.Objs(held ?? []), ["loaded"] = Py.Objs(loaded ?? []) },
+            ["references"] = refs, ["credited"] = credited, ["equalBytes"] = equal, ["overriddenBy"] = over ?? new PyDict(), ["noFallback"] = 0L,
+            ["unreadable"] = 0L, ["notLoaded"] = notLoaded, ["examples"] = example is null ? new List<object?>() : new List<object?> { example },
+        };
+        Case("stages: a selection with only textures says no check can measure it, and why its checks show as not complete", () => AssetOnlyLine(Reach(textures: 1),
+            "Tex has no plugin and no mesh (1 texture file), so no check here can measure it: textures, sounds and scripts change nothing these checks read." + notAFault));
+        Case("stages: an empty selected folder says no check can measure it", () => AssetOnlyLine(Reach(),
+            "Tex has no plugin and no mesh (0 texture files), so no check here can measure it: textures, sounds and scripts change nothing these checks read." + notAFault));
+        Case("stages: a selection whose meshes reach placed objects says how many, from the reach", () => AssetOnlyLine(
+            Reach(meshes: 2, textures: 2, refs: 3, credited: 2, equal: 1, example: new PyDict { ["model"] = "meshes\\x\\a.nif", ["cell"] = "Room" }),
+            "Tex has no plugin, so it places nothing; 2 placed objects use a mesh it provides that wins and differs from the one it replaces (for example "
+            + "a.nif in Room). Object overlap and placement contact compare those with and without it. Worn and actor meshes, its textures (2 files) and "
+            + "other files are not measured."));
+        Case("stages: a selection with a credited mesh and an archive the game does not load names both", () => AssetOnlyLine(
+            Reach(meshes: 1, refs: 1, credited: 1, held: ["Tex.bsa"]),
+            "Tex has no plugin, so it places nothing; 1 placed object uses a mesh it provides that wins and differs from the one it replaces. Object overlap "
+            + "and placement contact compare those with and without it. Worn and actor meshes, its textures (0 files) and other files are not measured." + unloaded));
+        Case("stages: a selection with only an archive no plugin loads says the game does not load it", () => AssetOnlyLine(
+            Reach(textures: 1, held: ["Tex.BSA"]),
+            "Tex has no plugin and no mesh the game loads (1 texture file, 1 archive), so no check here can measure it: textures, sounds and scripts change "
+            + "nothing these checks read." + notAFault + unloaded));
+        Case("stages: a body replacer whose archive loads: no placed object uses its meshes, and worn meshes are not measured", () => AssetOnlyLine(
+            Reach(meshes: 1, held: ["A.bsa"], loaded: ["A.bsa"]),
+            "Tex has no plugin, and no placed object uses any of its 1 mesh file, so object overlap and placement contact have nothing of it to compare. "
+            + "Worn and actor meshes (body and armour replacers) are not measured, nor are its textures (0 files)." + notAFault));
+        Case("stages: a selection whose meshes change nothing says why, folder by folder", () => AssetOnlyLine(
+            Reach(meshes: 3, refs: 4, equal: 1, notLoaded: 1, over: new PyDict { ["Strong"] = 2L }),
+            "Tex has no plugin, and no placed object uses a mesh it changes: of the 4 placed objects that use one of its meshes, 1 gets the same bytes "
+            + "it had without it, 2 get the copy of a stronger folder (Strong), 1 would read it from an archive the game does not load. Worn and actor "
+            + "meshes, its textures (0 files) and other files are not measured." + notAFault));
         Case("stages: a scope that stops on the order reader's refusal names it for the profile without the selection", () =>
         {
             using var t = new Temp();

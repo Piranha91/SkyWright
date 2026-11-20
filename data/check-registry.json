@@ -9,7 +9,7 @@
     "adapterArgs": "adapter.args is the argv shape the check needs, with placeholders the controller fills: {order} {emit} {base} {json} {target} {switchMap} {pair} {nexusId} {out}. For kind ordersweep-probe the shape is what ordersweep.py hands the probe; the controller passes the exe name to `ordersweep.py --probes`, it does not spawn the probe itself.",
     "claimRows": "evidence.claim names the row in _claude/GlobalDocs/CLAIMS.md a finding reports under. null means the ledger has no row for this check; evidence.limits then says why, and a finding from it is never upgraded to a ledger claim.",
     "unmeasuredExtents": "scope.json's `unmeasured` is a list of {extent, why} over the closed vocabulary script-placement, alias-fill, bos-swaps, asset-replacers, door-destinations, generated-output (PLAN amendment A-1). A check may declare applicability.dependsOnExtents naming any of them; evalregistry then answers unknown whenever the scope lists one, whatever the trigger says.",
-    "triggerFields": "Each trigger key reads one scope field and nothing else: placed -> placed.total, exterior -> placed.exterior, land -> placed.land, navmesh -> placed.navm, anyType -> recordTypes, overlays -> configuration.overlays, nexusId -> nexusId, masters -> masters; always reads nothing.",
+    "triggerFields": "Each trigger key reads one scope field and nothing else: placed -> placed.total, exterior -> placed.exterior, land -> placed.land, navmesh -> placed.navm, anyType -> recordTypes, overlays -> configuration.overlays, nexusId -> nexusId, masters -> masters; always reads nothing. placedMeshes reads no scope field: it reads the mesh reach (scope/mesh-reach.json, written by overlapprobe --mesh-reach on the combined arm), credited -> yes, a complete reach with none credited -> no, none or an incomplete reach -> unknown.",
     "adapterResult": "A-6: a check whose adapter output is json or text carries adapter.result {kind, findings, judged, unjudgeable}. A spec is a dotted path into the child's JSON output (a number is that number, a list is its length) or regex:<pattern> with a named group `n` over the child's log. A null spec means the probe prints no such count -- adapter.result.note says so, and the controller records the gap rather than reading a number that means something else. kind detector reads finding when findings > 0, else no-finding; catalogue and discovery read catalogue. scopeprobe is excepted (D2's `complete` field). A kind that runs no child (derived, media, mcp-only, manual, unsupported) has output null: there is no child output to read.",
     "commonFlags": "A-10(b): --instance/--profile/--game are passed only where adapter.commonFlags is true. blockprobe, patchprobe, fomodprobe and poolprobe parse no --instance at all (grepped) and find the instance through HarnessTarget, which reads HOUSECARL_MO2_INSTANCE / HOUSECARL_MO2_PROFILE / HOUSECARL_GAME_PATH from the environment every child gets. A placeholder is substituted in the shape the args give it: a bare {target} is positional, --target {target} is a flag.",
     "population": "A-10(d)/A-11(d): adapter.population / adapter.state name the population a probe's emit actually declares when it is not the arm's, so the receipt validator compares the emit against the probe's own words rather than the plan's. Three probes differ, each for the same reason -- their population is not placed references: driftprobe (placement history), seamprobe (LAND heightmaps) and waterprobe (CELL water records). navownprobe, overlapprobe, contactprobe and stateprobe emit load-time/baseline and declare nothing."
@@ -325,9 +325,16 @@
       "required": true,
       "applicability": {
         "trigger": {
-          "placed": true
+          "anyOf": [
+            {
+              "placed": true
+            },
+            {
+              "placedMeshes": true
+            }
+          ]
         },
-        "note": "The population is placed references; a target that files nothing under a cell cannot introduce an intersection."
+        "note": "The population is placed references and the meshes they use. A target that files something under a cell can introduce an intersection; so can a selected mod folder whose mesh wins for a placed reference and differs from the one it replaces, with a plugin or without one. Not applicable only when both are measured false."
       },
       "prerequisites": [
         "loadability.masters-and-order"
@@ -366,9 +373,16 @@
       "required": true,
       "applicability": {
         "trigger": {
-          "placed": true
+          "anyOf": [
+            {
+              "placed": true
+            },
+            {
+              "placedMeshes": true
+            }
+          ]
         },
-        "note": "The population is placed references and the surfaces they rest on; nothing filed under a cell means no contact to break."
+        "note": "The population is placed references and the surfaces they rest on. A target that files something under a cell can break a contact; so can a selected mod folder whose mesh wins for a placed reference and differs from the one it replaces (a reshaped host or dependent), with a plugin or without one. Not applicable only when both are measured false."
       },
       "prerequisites": [
         "loadability.masters-and-order"

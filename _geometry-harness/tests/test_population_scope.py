@@ -417,7 +417,7 @@ def contact_mesh_pass_counts_the_unjudged(arm, which):
 
 def mesh_reach_counts_are_the_tables():
     """Rejects: a reach that counts files instead of placed references, credits equal bytes (e1, e3), a stronger folder's shape
-    (t1) or a new mesh (n1, n2), or loses an unreadable fallback (x13, hs7, c8 are credited: the folder's copy wins and differs)."""
+    (t1) or a new mesh (n1, n2), or loses an unreadable fallback (x13, hs7, c8 are PpSkyMod's: its copy wins and differs)."""
     L = lab()
     out = L.tmp / "mesh-reach-with.json"
     r = L.probe("overlapprobe", "with", ["--population", L.population, "--mesh-reach", out])
@@ -426,10 +426,10 @@ def mesh_reach_counts_are_the_tables():
     got = {f["name"]: (f["references"], f["credited"], f["equalBytes"], f["overriddenBy"], f["noFallback"]) for f in doc["folders"]}
     want = {
         # mshb (m8, v1, s1, c1), mshs (t1: PpStrongMod's wins), mshe (e1, equal), mshz (e3, equal to PpBase.bsa's), slabm (hs4),
-        # cupm (c5), shell (q1), slabk (hs6), touch (r1), mshv (x13), slabv (hs7), cupv (c8)
-        "PpMeshMod": (15, 12, 2, {"PpStrongMod": 1}, 0),
+        # cupm (c5), shell (q1), slabk (hs6), touch (r1)
+        "PpMeshMod": (12, 9, 2, {"PpStrongMod": 1}, 0),
         "PpDelta": (4, 2, 0, {}, 2),     # msho (o2, o3), dnew (n1, n2: only PpDelta's folder has it)
-        "PpSkyMod": (1, 1, 0, {}, 0),    # mshu (w1)
+        "PpSkyMod": (4, 4, 0, {}, 0),    # mshu (w1), mshv (x13), slabv (hs7), cupv (c8)
     }
     assert got == want, f"(references, credited, equal, overridden by, no fallback) {got}, the table says {want}"
     assert doc["credited"] == 15 and doc["complete"] is True, (doc["credited"], doc["complete"], doc["why"])

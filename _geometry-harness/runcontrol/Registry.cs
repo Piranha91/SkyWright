@@ -19,7 +19,7 @@ public static class Registry
         "adviceprobe", "patchprobe"];
     static readonly HashSet<string> EvidenceStrengths = ["record-fact", "calibrated-inference", "engine-observation", "supplied-media"];
     static readonly HashSet<string> TriggerKeys = ["always", "anyType", "placed", "exterior", "land", "navmesh", "overlays", "nexusId",
-        "masters", "anyOf", "allOf"];
+        "masters", "placedMeshes", "anyOf", "allOf"];
     static readonly HashSet<string> Extents = ["script-placement", "alias-fill", "bos-swaps", "asset-replacers", "door-destinations",
         "generated-output"];
 
@@ -364,8 +364,9 @@ public static class Registry
 
     // ---- applicability
 
-    /// <summary>Per check id: {applicability: yes | no | unknown, evidence: one sentence}. A null scope is "not measured".</summary>
-    public static PyDict Applicability(PyDict registry, PyDict? scope)
+    /// <summary>Per check id: {applicability: yes | no | unknown, evidence: one sentence}. A null scope is "not measured"; so is a
+    /// null mesh reach (scope/mesh-reach.json, overlapprobe --mesh-reach), which only the placedMeshes trigger reads.</summary>
+    public static PyDict Applicability(PyDict registry, PyDict? scope, PyDict? meshReach = null)
     {
         var result = new PyDict();
         foreach (object? row in PyValue.Truthy(registry.Get("checks")) ? PyValue.Iter(registry.Get("checks")) : [])
@@ -391,7 +392,7 @@ public static class Registry
                 };
                 continue;
             }
-            var (verdict, evidence) = Evaluate(trigger, scope);
+            var (verdict, evidence) = Evaluate(trigger, scope, meshReach);
             result[cid] = new PyDict { ["applicability"] = verdict, ["evidence"] = evidence };
         }
         return result;
@@ -412,7 +413,7 @@ public static class Registry
         return null;
     }
 
-    static (string verdict, string evidence) Evaluate(object? trigger, PyDict? scope)
+    static (string verdict, string evidence) Evaluate(object? trigger, PyDict? scope, PyDict? reach)
     {
         var t = PyValue.Dict(trigger);
         if (t.Count != 1) throw new PyError(t.Count > 1 ? "too many values to unpack (expected 1)" : "not enough values to unpack (expected 1, got 0)");
@@ -420,8 +421,9 @@ public static class Registry
         object? value = t[key];
 
         if (key == "always") return ("yes", "this check applies to every evaluation.");
-        if (key == "anyOf") return Combine(value, scope, anyMode: true);
-        if (key == "allOf") return Combine(value, scope, anyMode: false);
+        if (key == "anyOf") return Combine(value, scope, reach, anyMode: true);
+        if (key == "allOf") return Combine(value, scope, reach, anyMode: false);
+        if (key == "placedMeshes") return PlacedMeshes(reach);
 
         if (scope == null) return ("unknown", "no scope.json was measured, so this trigger could not be read.");
         if (scope.Get("complete") is not true)
@@ -468,15 +470,48 @@ public static class Registry
     }
 
     // anyOf is yes on the first yes; allOf is no on the first no; an unknown arm is never resolved by its neighbours.
-    static (string verdict, string evidence) Combine(object? subs, PyDict? scope, bool anyMode)
+    static (string verdict, string evidence) Combine(object? subs, PyDict? scope, PyDict? reach, bool anyMode)
     {
-        var results = PyValue.Iter(subs).Select(sub => Evaluate(sub, scope)).ToList();
+        var results = PyValue.Iter(subs).Select(sub => Evaluate(sub, scope, reach)).ToList();
         var (win, lose) = anyMode ? ("yes", "no") : ("no", "yes");
         foreach (var r in results)
             if (r.verdict == win) return (win, r.evidence);
         foreach (var r in results)
             if (r.verdict == "unknown") return r;
         return (lose, string.Join("; ", results.Select(r => r.evidence)));
+    }
+
+    /// <summary>The placedMeshes trigger: does a selected folder provide a mesh that wins for a placed reference and differs from
+    /// the one it replaces. Read from the mesh reach only; a found yes stands even when the reach is incomplete, a no needs it complete.</summary>
+    static (string verdict, string evidence) PlacedMeshes(PyDict? reach)
+    {
+        const string what = "whether a selected folder's mesh is used by a placed object";
+        if (reach == null) return ("unknown", $"no mesh reach was measured, so {what} is not known.");
+        var folders = PyValue.Truthy(reach.Get("folders")) ? PyValue.Iter(reach.Get("folders")).Select(PyValue.Dict).ToList() : [];
+        BigInteger credited = PyValue.Truthy(reach.Get("credited")) ? PyValue.Int(reach["credited"]) : 0;
+        string names = string.Join(", ", folders.Select(f => PyText.Str(f.Get("name"))));
+        if (credited > 0)
+            return ("yes", $"{credited} placed reference(s) use a mesh {names} provide(s) that wins and differs from the one it replaces.");
+        if (reach.Get("complete") is not true)
+        {
+            var why = PyValue.Truthy(reach.Get("why")) ? string.Join("; ", PyValue.Iter(reach.Get("why")).Select(PyText.Str)) : "no reason given";
+            return ("unknown", $"the mesh reach is incomplete ({why}), so {what} is not known.");
+        }
+        if (folders.Count == 0) return ("no", "the arms differ by no mod folder, so no mesh is credited to one.");
+        BigInteger Sum(string key) => folders.Aggregate(BigInteger.Zero, (n, f) => n + (PyValue.Truthy(f.Get(key)) ? PyValue.Int(f[key]) : 0));
+        BigInteger refs = Sum("references"), equal = Sum("equalBytes"), fresh = Sum("noFallback"), notLoaded = Sum("notLoaded");
+        var stronger = new SortedDictionary<string, BigInteger>(StringComparer.Ordinal);
+        foreach (var f in folders)
+            foreach (var (k, v) in PyValue.Truthy(f.Get("overriddenBy")) ? PyValue.Dict(f["overriddenBy"]) : [])
+                stronger[k] = stronger.GetValueOrDefault(k) + PyValue.Int(v);
+        BigInteger over = stronger.Values.Aggregate(BigInteger.Zero, (a, b) => a + b);
+        var parts = new List<string>();
+        if (equal > 0) parts.Add($"{equal} equal to the copy they replace");
+        if (over > 0) parts.Add($"{over} overridden by {string.Join(", ", stronger.Keys)}");
+        if (fresh > 0) parts.Add($"{fresh} new with nothing below");
+        if (notLoaded > 0) parts.Add($"{notLoaded} in an archive the game does not load");
+        return ("no", $"no placed reference uses a mesh {names} provide(s) that wins and differs: "
+                      + (refs == 0 ? "no placed reference uses any of its meshes." : $"{refs} use one of its meshes ({string.Join(", ", parts)})."));
     }
 
     // The scope counters the triggers read, summed over every target.

@@ -6,7 +6,7 @@ namespace RunControl;
 public sealed class PlanArgs
 {
     public string? Registry, Scope, Candidates, States, Depth, Settings, ReviewArm, Out, Instance, Profile, Game, Harness,
-                   PrimitiveSolidity, PopulationFrom, DiffTolerance;
+                   PrimitiveSolidity, PopulationFrom, DiffTolerance, MeshReach;
     public string ProbeArgs = "";
     public List<string>? Alt, Supplied, Select, Exclude, OptIn, ProbeCmd;
     public double? BudgetMinutes;
