@@ -11,8 +11,7 @@ without it, whole-order and with --population, and checks:
   - conflictdiff refuses a scoped emit against an unscoped one, and two scoped emits give the whole-order diff's counts.
 Mesh responsibility (cases M1-M8, K4, K5 of the fixture's table; mesh-responsibility/GATE-B.md): the rows a folder's mesh alone
 creates name the folder; the whole-order runs credit the population's folders (--mesh-folder, so scoped = whole holds), and one
-more whole-order run on the arm with the delta credits every folder. HC_POP_NO_MESH_FOLDERS=1 leaves --mesh-folder off (the red
-run on a build from before the option, whose whole-order runs would otherwise stop on an unknown argument).
+more whole-order run on the arm with the delta credits every folder (--mesh-folder *).
 Each test names the wrong answer it rejects. Probes come from this checkout's Release builds unless HC_POP_HARNESS names
 another harness folder (the red run points it at a build without --population).
 """
@@ -55,7 +54,6 @@ def run(argv, **kw):
 
 ORDER = ["Skyrim.esm", "PpBase.esm", "PpA.esp", "PpB.esp", "PpMover.esp", "PpDelta.esp"]
 MESH_FOLDERS = ["PpMeshMod", "PpDelta"]   # the population's folders
-NO_MESH_FLAG = bool(os.environ.get("HC_POP_NO_MESH_FOLDERS"))
 
 
 def fk(hexid, plugin):
@@ -78,7 +76,7 @@ R = {
     "s1": fk("00090B", "PpA.esp"), "s2": fk("00090C", "PpA.esp"), "c1": fk("00090D", "PpA.esp"), "t1": fk("00090E", "PpA.esp"),
     "t2": fk("00090F", "PpA.esp"), "u2": fk("000910", "PpA.esp"), "c2b": fk("00090A", "PpB.esp"),
     "o1": fk("000906", "PpDelta.esp"), "n1": fk("000907", "PpDelta.esp"), "n2": fk("000908", "PpDelta.esp"), "u1": fk("000909", "PpDelta.esp"),
-    "o2": fk("000909", "PpBase.esm"), "hs4": fk("00090A", "PpBase.esm"), "c4": fk("00090B", "PpBase.esm"),
+    "o2": fk("000909", "PpBase.esm"), "o3": fk("00090E", "PpBase.esm"), "o4": fk("00090F", "PpBase.esm"), "hs4": fk("00090A", "PpBase.esm"), "c4": fk("00090B", "PpBase.esm"),
     "hs5": fk("00090C", "PpBase.esm"), "c5": fk("00090D", "PpBase.esm"),
     "v1": fk("000901", "Skyrim.esm"), "v2": fk("000902", "Skyrim.esm"), "e1": fk("000903", "Skyrim.esm"),
     "e2": fk("000904", "Skyrim.esm"), "e3": fk("000905", "Skyrim.esm"), "e4": fk("000906", "Skyrim.esm"),
@@ -87,7 +85,7 @@ OVERLAP = {"O1": ("a1", "b1"), "O2": ("a2", "b2"), "O3": ("d3", "a3"), "O3b": ("
            "O4b": ("hA", "bE"), "O5": ("pA", "bP"), "O5b": ("pA2", "bP2"), "O6": ("Kc", "b6"), "O7": ("x7", "b7"),
            "O8": ("m8", "b8"), "O9": ("a9", "b9"),
            "M1": ("s1", "s2"), "M2": ("v1", "v2"), "M3": ("c1", "c2b"), "M4": ("t1", "t2"), "M5": ("e1", "e2"), "M5b": ("e3", "e4"),
-           "M6": ("o2", "o1"), "M7": ("n1", "n2"), "M8": ("u1", "u2")}
+           "M6": ("o2", "o1"), "M7": ("n1", "n2"), "M8": ("u1", "u2"), "M9": ("o3", "o4")}
 CONTACT = {"K1": ("dc1", "hs1"), "K2": ("c2", "hs2"), "K3": ("c3", "hs3"), "K4": ("c4", "hs4"), "K5": ("c5", "hs5")}
 # What each arm holds, whole-order and in the population (the fixture's table).
 WANT = {
@@ -184,14 +182,14 @@ class Lab:
                                              "--population-audit", whole, audit])
                 self.logs[(probe, arm, "scoped")] = r2
                 self.out[(probe, arm)] = (whole, scoped, audit)
-            # the arm with the delta, whole-order, every folder credited (no --mesh-folder)
+            # the arm with the delta, whole-order, every folder credited
             every = tmp / f"{probe}-with-every.json"
-            self.logs[(probe, "with", "every")] = self.probe(probe, "with", ["--emit", every])
+            self.logs[(probe, "with", "every")] = self.probe(probe, "with", ["--emit", every, "--mesh-folder", "*"])
             self.out[(probe, "every")] = every
 
     @staticmethod
     def mesh_flags():
-        return [] if NO_MESH_FLAG else [x for m in MESH_FOLDERS for x in ("--mesh-folder", m)]
+        return [x for m in MESH_FOLDERS for x in ("--mesh-folder", m)]
 
     def probe(self, probe, arm, extra):
         return run([exe(PROBES, probe), "--order", self.cand[arm], "--instance", self.inst, "--game", self.game,
@@ -244,7 +242,8 @@ def scoped_is_whole_in_scope(probe, arm):
             assert sr[i] == wr[i], f"row {i} differs: scoped {json.dumps(sr[i])[:400]} vs whole {json.dumps(wr[i])[:400]}"
         pop = s.get("Population") or ""
         assert pop.startswith("load-time+population:") and len(pop) == len("load-time+population:") + 12, pop
-        assert (w.get("Population") or "") == "load-time", w.get("Population")
+        # the whole-order runs credit the population's folders by --mesh-folder, which their identity carries
+        assert (w.get("Population") or "").startswith("load-time+mesh:") and len(w["Population"]) == len("load-time+mesh:") + 12, w.get("Population")
         assert s["Configuration"]["Population"] == pop, "the configuration identity carries the scoped population"
     return t
 
@@ -353,7 +352,7 @@ def mesh_counts_are_the_tables(arm, which):
         doc = emit_of("overlapprobe", arm, which)
         m = coverage(doc, "mesh responsibility")
         aside = m.get("SetAside") or {}
-        want = {"with": (5, {"CrossesWithoutTheFolderMesh": 1, "MeshEqualsReplaced": 2, "NewMeshNoFallback": 1, "BaseGameReadmitted": 2}),
+        want = {"with": (6, {"CrossesWithoutTheFolderMesh": 1, "MeshEqualsReplaced": 2, "NewMeshNoFallback": 1, "BaseGameReadmitted": 2}),
                 "without": (0, {"CrossesWithoutTheFolderMesh": 0, "MeshEqualsReplaced": 0, "NewMeshNoFallback": 0, "BaseGameReadmitted": 0})}[arm]
         cand = coverage(doc, "candidate refs").get("SetAside") or {}
         # six Skyrim.esm references set aside; with the mod, v1 and v2 come back in

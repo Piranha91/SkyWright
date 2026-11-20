@@ -225,6 +225,10 @@ var responsiblePairNames = new List<(string A, string B)>();
 string? sceneId = null, sceneRole = null;
 var candidatePluginNames = new List<string>();
 var candidateModNames = new List<string>();
+// --mesh-folder NAME (repeatable): the folders a whole-order run may credit with a shape (_shared/MeshResponsibility.cs); with
+// --population the population's folders are credited instead; "*" credits every folder; with neither, none.
+var meshFolderNames = new List<string>();
+
 var sceneScopeFromPaths = new List<string>();
 var explicitSceneCells = new List<string>();
 bool bosOn = true;
@@ -302,6 +306,8 @@ try
         else if (flag == "--scene-role") { sceneRole = NeedValue(i, flag); i++; }
         else if (flag == "--candidate-plugin") { candidatePluginNames.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--candidate-mod") { candidateModNames.Add(NeedValue(i, flag)); i++; }
+        else if (flag == "--mesh-folder") { meshFolderNames.Add(NeedValue(i, flag)); i++; }
+
         else if (flag == "--scene-scope-from") { sceneScopeFromPaths.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--scene-cell") { explicitSceneCells.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--scene-space") throw new ArgumentException("--scene-space is refused because an exterior worldspace is unbounded; use bounded --scene-cell FormKey values");
@@ -1460,15 +1466,34 @@ if (sceneCapture)
     }
 var sceneIncludedKeys = candidates.Select(c => c.Key).Concat(sceneReferenceSeeds).Concat(importedSceneReferences)
     .Concat(sceneUnknownScope.Keys).ToHashSet();
-candidates = candidates.Where(c =>
+bool StateGates(SurfaceOverlapCandidate c, CandidateSkips s)
 {
-    if (popMode != PopulationMode.Flags && !arms.Winner(c.Key).Resolved) { skips.EnableStateUnresolved++; return false; }
+    if (popMode != PopulationMode.Flags && !arms.Winner(c.Key).Resolved) { s.EnableStateUnresolved++; return false; }
     if (idx.BosSwaps.TryGetValue(c.Key, out var bos) && (bos.Random || bos.PerSession || bos.PropertiesRandom || bos.Alternatives.Count != 1))
-    { skips.BosUnresolved++; return false; }
+    { s.BosUnresolved++; return false; }
     return true;
-}).ToList();
+}
+candidates = candidates.Where(c => StateGates(c, skips)).ToList();
+// THE FOLDER RULE (overlapprobe/MeshRule.cs): which base-game references come back in, in the emit pass only. Scene capture
+// and --responsible-pair keep the plugin rule and say so in their manifests.
+var meshRule = new MeshRule(idx, assets, population, meshFolderNames, cfg, closure, IsBaseGame, surfaceTolerance, maxTrianglePairs, pairSeconds, pairResults);
+bool meshMode = !sceneCapture && responsiblePairs.Count == 0;
+if (meshMode && meshRule.Active)
+{
+    var readmit = meshRule.Readmit(candidates, Obstructing, enabledOf);
+    if (readmit.Count > 0)
+    {
+        var back = idx.SurfaceCandidates(CandidateGeometryOf, Obstructing, p => !IsBaseGame(p), out var backSkips, enabledOf, (k, _) => readmit.Contains(k));
+        back = back.Where(c => StateGates(c, backSkips)).ToList();
+        candidates.AddRange(back);
+        foreach (var c in back) meshRule.Readmitted.Add(c.Key);
+    }
+    meshRule.SetTargets(candidates);
+}
 __run.ReviseTotal(candidateGeometryLookups, "candidate source and state gates established the exact geometry lookup count");
 Console.WriteLine("\n" + pop.Describe());
+Console.WriteLine($"mesh responsibility: credited {meshRule.Scope}" + (meshMode ? $"; {meshRule.Targets.Count:N0} target reference(s), "
+    + $"{meshRule.Readmitted.Count:N0} base-game reference(s) back in ({meshRule.ReadmitSeconds:0.0}s)" : "; not applied in this mode"));
 
 if (dumpPath is not null)
 {
@@ -1487,7 +1512,7 @@ Console.WriteLine($"\ncandidates: {candidates.Count:N0} refs" + (sceneCapture ? 
 Console.WriteLine("   geometry (strict decoded render vertices; record ObjectBounds unused): "
                 + string.Join(", ", geometryCounts.OrderBy(k => k.Key).Select(k => $"{k.Key} {k.Value:N0}")));
 Console.WriteLine($"   skipped (counted, per rule 6): {skips.Deleted:N0} deleted, {skips.Disabled:N0} not present at load, "
-                + $"{skips.NonObstructingType:N0} non-obstructing type, {skips.NoGeometry:N0} no geometry, {skips.ExcludedResponsible:N0} base-game-responsible, {skips.ScopeExcluded:N0} outside explicit scene scope,");
+                + $"{skips.NonObstructingType:N0} non-obstructing type, {skips.NoGeometry:N0} no geometry, {skips.ExcludedResponsible - meshRule.Readmitted.Count:N0} base-game-responsible, {skips.ScopeExcluded:N0} outside explicit scene scope,");
 Console.WriteLine($"                                  {skips.InvalidTransform:N0} invalid transforms, {skips.DegenerateGeometry:N0} zero-scale transforms, {skips.MarkerMesh:N0} editor markers (no rendered mesh, cannot obstruct), "
                 + $"{skips.EnableStateUnresolved:N0} unresolved enable state, {skips.BosUnresolved:N0} unresolved BOS outcome");
 
@@ -1510,7 +1535,7 @@ CoverageLine CandidateRefsLine() => new("candidate refs", candidates.Count,
     new Dictionary<string, long>(pop.Unjudgeable) { ["NoGeometry"] = skips.NoGeometry,
         ["InvalidTransform"] = skips.InvalidTransform, ["DegenerateTransform"] = skips.DegenerateGeometry },
     new Dictionary<string, long> { ["Deleted"] = skips.Deleted, ["NotPresentAtLoad"] = skips.Disabled, ["NonObstructingType"] = skips.NonObstructingType,
-                                   ["BaseGameResponsible"] = skips.ExcludedResponsible, ["EditorMarker"] = skips.MarkerMesh },
+                                   ["BaseGameResponsible"] = skips.ExcludedResponsible - meshRule.Readmitted.Count, ["EditorMarker"] = skips.MarkerMesh },
     $"population {pop.Identity} / state {pop.StateName}");
 CoverageLine? PopulationScopeLine()
 {
@@ -1520,7 +1545,7 @@ CoverageLine? PopulationScopeLine()
         new Dictionary<string, long> { ["OutsidePopulation"] = candidates.Count - inScope },
         $"pairs measured only where a reference is in the plan's population; {population.Describe()}");
 }
-string populationIdentity = population?.Identity(pop.Identity) ?? pop.Identity;
+string populationIdentity = (population?.Identity(pop.Identity) ?? pop.Identity) + meshRule.IdentitySuffix;
 List<Predicate> MeasureBasePredicates(string path)
 {
     var baseFile = ConflictIo.Read(path);
@@ -1612,8 +1637,11 @@ var sweep = OverlapIndex.SurfacePairs(candidates, closure, surfaceTolerance, max
         if (checkedPairs - lastPairProgress < 250) return;
         lastPairProgress = checkedPairs;
         Console.WriteLine($"   ... {checkedPairs:N0} actual-shape pairs tested ({sw.Elapsed.TotalSeconds:0}s)");
-    }, retainSameResults: sceneCapture, includePair: population is null ? null : PairInPopulation,
-    sameTimer: sameTimer, crossTimer: crossTimer, onPair: LedgerLine, prepared: preparedCache, results: pairResults, threads: pairThreads);
+    }, retainSameResults: sceneCapture,
+    includePair: meshRule.Readmitted.Count == 0 ? (population is null ? null : PairInPopulation)
+                 : (a, b) => (population is null || PairInPopulation(a, b)) && meshRule.PairAllowed(a, b),
+    sameTimer: sameTimer, crossTimer: crossTimer, onPair: LedgerLine, prepared: preparedCache, results: pairResults, threads: pairThreads,
+    keepSame: meshMode && meshRule.Active ? meshRule.HasCreditedSide : null);
 double sweepSeconds = sw.Elapsed.TotalSeconds - sweepStarted;
 Console.WriteLine($"   pair sweep threads: {pairThreads}; worker time-outs measured again in order: {sweep.Remeasured:N0}");
 __run.ReviseTotal(sweep.PairsChecked, "the bounds sweep established the exact number of mesh queries");
@@ -1690,12 +1718,35 @@ Console.WriteLine("   relations: " + string.Join(", ", undeclared.GroupBy(h => h
 
 __run.Stage("provenance", "rebuilding actual-surface intersection provenance", sweep.CrossHits.Count, "intersections");
 var rows = new List<SurfaceOverlapRow>(sweep.CrossHits.Count);
+var meshVerdicts = new List<MeshRule.Verdict>();
 foreach (var h in sweep.CrossHits)
 {
-    rows.Add(idx.JudgeSurface(h, closure, SurfaceGeometryOf, surfaceTolerance,
-        maxTrianglePairs, TimeSpan.FromSeconds(pairSeconds), popMode == PopulationMode.Flags ? null : arms, default, provenanceTimer, pairResults));
+    var mv = meshMode ? meshRule.Judge(h) : null;
+    if (mv is { Kind: MeshRule.Outcome.Folder }) meshVerdicts.Add(mv);
+    else if (mv is not { Kind: MeshRule.Outcome.Unknown })
+        rows.Add(idx.JudgeSurface(h, closure, SurfaceGeometryOf, surfaceTolerance,
+            maxTrianglePairs, TimeSpan.FromSeconds(pairSeconds), popMode == PopulationMode.Flags ? null : arms, default, provenanceTimer, pairResults));
     __run.Advance();
 }
+if (meshMode)
+    foreach (var h in sweep.SameKept)
+        if (meshRule.Judge(h) is { Kind: MeshRule.Outcome.Folder } mv) meshVerdicts.Add(mv);
+var meshClass = meshVerdicts.Where(v => v.Origin == OverlapOrigin.Introduced && v.Sight == OverlapSight.Blind)
+    .OrderBy(v => v.Necessary.Key.ToString(), StringComparer.Ordinal).ThenBy(v => v.Other.Key.ToString(), StringComparer.Ordinal).ToList();
+string DescribeMesh(MeshRule.Verdict v) =>
+    $"{TypeOf(v.Necessary.Base)} whose mesh {v.Folder} provides ({MeshOf(v.Necessary.Base)}) / {TypeOf(v.Other.Base)} placed by {PluginName(v.Other.Win.Plugin)}: "
+  + $"{v.Hit.Query.SurfaceRelation}, containment {v.Hit.Query.Containment}, {v.Hit.Query.TrianglePairsTested:N0} triangle pairs"
+  + $" in {CellOf(v.Necessary.Win.Cell)} {v.Necessary.Key} / {v.Other.Key}";
+MeshCause CauseOf(MeshRule.Verdict v) => new(v.Folder!,
+    v.Swapped.Select(s => new MeshSwap(s.Ref.Key.ToString(), s.Owner.Path, s.Owner.WinnerSha256!,
+        MeshResponsibility.FolderOf(s.Owner.Fallback!), s.Owner.Fallback!.Kind == AssetKind.Bsa ? s.Owner.Fallback.ProviderName : null, s.Owner.FallbackSha256!)).ToList(),
+    new[] { PluginName(v.Necessary.Win.Plugin), PluginName(v.Other.Win.Plugin) }, v.Sight.ToString(), v.Why, v.JointSwap,
+    v.AlsoFolders.Count > 0 ? v.AlsoFolders : null);
+Console.WriteLine($"\n==== MESH RESPONSIBILITY — a crossing only a credited folder's mesh makes ({meshRule.Judged:N0} intersections given a mesh counterfactual) ====");
+Console.WriteLine($"   credited {meshRule.Scope}");
+Console.WriteLine($"   folder-made {meshVerdicts.Count:N0} (Blind {meshClass.Count:N0}, Seen {meshVerdicts.Count(v => v.Sight == OverlapSight.Seen):N0}); "
+    + $"cross without the folder's mesh {meshRule.CrossesWithout:N0}; unknown {meshRule.Unknown:N0}; joint swaps {meshRule.Joint:N0}");
+foreach (var v in meshClass.Take(listN)) Console.WriteLine("   " + DescribeMesh(v));
 ReportTimer("provenance", provenanceTimer, null);
 var split = OverlapClass.Of(rows, PopOf);   // overlapprobe/OverlapClass.cs
 var provenanceUnknown = split.ProvenanceUnknown;
@@ -1758,6 +1809,15 @@ if (emitPath is not null)
         reconciliationPredicates++;
         __run.Advance();
     }
+    foreach (var v in meshClass)
+    {
+        var (st, why) = OverlapPredicate(v.Necessary.Key, v.Other.Key);
+        conflicts.Add(new Conflict("OVERLAP", PluginName(v.Other.Win.Plugin), v.Folder!, DescribeMesh(v),
+            new List<ConflictRecord> { new(v.Necessary.Key.ToString(), "placed-ref", CellOf(v.Necessary.Win.Cell), st, why) },
+            new List<ConflictRecord> { new(v.Other.Key.ToString(), "placed-ref", null) }, CauseOf(v)));
+        reconciliationPredicates++;
+        __run.Advance();
+    }
     // --reverse-of measured the --base rows before deciding it had to sweep: those are the rows, measured once.
     List<Predicate>? predicates = basePredicatesMeasured ?? (basePath is not null ? MeasureBasePredicates(basePath) : null);
     int notRebuilt = rows.Count(r => r.CounterfactualStatus == "unknown");
@@ -1774,6 +1834,7 @@ if (emitPath is not null)
             $"class {cls.Count:N0}; unknown counterfactual rows have null provenance and are withheld from the class"),
     };
     if (PopulationScopeLine() is { } scopeLine) coverage.Add(scopeLine);
+    coverage.Add(meshRule.Coverage());
     var identity = cfg.Identity(populationIdentity, pop.StateName);
     ReportTimer("reconciliation", reconcileTimer, null);
     __run.ReviseTotal(reconciliationPredicates, "the current class and optional base emit established the exact predicate count");

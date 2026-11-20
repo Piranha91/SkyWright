@@ -61,6 +61,8 @@ namespace HarnessShared;
 //  M5b   e3 (Skyrim, SkZ) 2200 x e4 (Skyrim, SkBox) 2300, SkRoom   PpMeshMod loose +-60 = PpBase.bsa entry   no row
 //  M6    o2 (PpBase, MeshO) 2200 x o1 (Delta, Box) 2300   PpDelta folder +-60 / PpBase +-20   no row: Seen (the folder ships PpDelta.esp)
 //  M7    n1 (Delta, DNew) 3200 x n2 (Delta, DNew) 3260    only PpDelta's folder has dnew       no row: a new mesh, same-plugin floor
+//  M9    o3 (PpBase, MeshO) 3700 x o4 (PpBase, Box) 3800   PpDelta folder +-60 / PpBase +-20   no row: Seen, the folder's
+//                                                         PpDelta.esp masters PpBase, so both placements were in its editor (M2's mirror)
 //  M8    u1 (Delta, MeshT) 2700 x u2 (A, Box) 2800  PpStrongMod +-60 / PpBase +-20          scoped: plugin row A x Delta (PpStrongMod
 //                                                                                         is not a population folder); every folder: PpStrongMod
 //  K4    cup c4 on slab hs4 (both PpBase, SlabM), E35   PpMeshMod +-60 / PpBase +-100      Stranded, reshaped host, PpMeshMod
@@ -87,7 +89,7 @@ public static class PopulationFixture
     public static readonly FormKey D0 = KD(0x901), D3 = KD(0x902), DE = KD(0x903), Dc1 = KD(0x904), Ds2 = KD(0x905);
     // mesh responsibility
     public static readonly FormKey MeshS = K(0x808), MeshO = K(0x80A), SlabM = K(0x80B), CupM = K(0x80C), MeshT = K(0x80D), E30 = K(0x846), E35 = K(0x847);
-    public static readonly FormKey O2 = K(0x909), Hs4 = K(0x90A), C4 = K(0x90B), Hs5 = K(0x90C), C5 = K(0x90D);
+    public static readonly FormKey O2 = K(0x909), Hs4 = K(0x90A), C4 = K(0x90B), Hs5 = K(0x90C), C5 = K(0x90D), O3 = K(0x90E), O4 = K(0x90F);
     public static readonly FormKey S1 = KA(0x90B), S2 = KA(0x90C), C1 = KA(0x90D), T1 = KA(0x90E), T2 = KA(0x90F), U2 = KA(0x910), C2b = KB(0x90A);
     public static readonly FormKey DNew = KD(0x801), O1 = KD(0x906), N1 = KD(0x907), N2 = KD(0x908), U1 = KD(0x909);
     public static readonly FormKey SkB = KS(0x801), SkBox = KS(0x802), SkE = KS(0x803), SkZ = KS(0x804), SkRoom = KS(0x810),
@@ -206,6 +208,7 @@ public static class PopulationFixture
             var e50 = Ext(E50, 5, 0); e50.Temporary.Add(Ref(Hs2, Slab, 5 * C + 500, 500, 0)); e50.Temporary.Add(Ref(C2, Cup, 5 * C + 500, 500, 120));
             var e600 = Ext(E600, 60, 0); e600.Temporary.Add(Ref(Hs3, Slab, 60 * C + 500, 500, 0)); e600.Temporary.Add(Ref(C3, Cup, 60 * C + 500, 500, 120));
             var e30 = Ext(E30, 3, 0); e30.Temporary.Add(Ref(O2, MeshO, X30 + 2200, 100, 0));
+            e30.Temporary.Add(Ref(O3, MeshO, X30 + 3700, 100, 0)); e30.Temporary.Add(Ref(O4, Box, X30 + 3800, 100, 0));
             var e35 = Ext(E35, 35, 0);
             e35.Temporary.Add(Ref(Hs4, SlabM, X35 + 500, 500, 0)); e35.Temporary.Add(Ref(C4, Cup, X35 + 500, 500, 120));
             e35.Temporary.Add(Ref(Hs5, Slab, X35 + 2500, 500, 0)); e35.Temporary.Add(Ref(C5, CupM, X35 + 2500, 500, 120));
