@@ -79,6 +79,17 @@ namespace HarnessShared;
 //  K6    cup c6 on slab hs6 (both PpBase, SlabK), E35 (x0+4500), inside a closed +-23 box n6 (PpBase, Encl): PpMeshMod's slabk
 //        drops a render face (other bytes) and keeps the same collision, so the cup still rests on the slab; it also sits 3 u
 //        inside n6 with no face facing it (a graze, within the 4 u epsilon). No row: a graze never stands in for the slab
+// A copy the folder rule cannot read as a shape (fold-review-fix/GATE-A.md): PpBase's pp\mshv.nif, slabv.nif and cupv.nif are bytes
+// that are not a NIF; PpMeshMod ships a real box for each, so the folder is credited but the shape without it is unknown.
+//  M13   x13 (A, MeshV) 0 x y13 (B, Box) 80, interior IM13   PpMeshMod +-60 / PpBase not a NIF   the counterfactual is unknown;
+//        the crossing is cross-plugin, so the plugin rule judges it: plugin row A x B, with the mod's mesh only (without it, x13
+//        has no geometry); counted MeshUnknownJudgedByPluginRule
+//  K7    cup c7 (PpBase) on slab hs7 (PpBase, SlabV), E35 (x0+6500)   the reshaped host's fallback has no geometry: no row,
+//        counted HostNoGeometry on contact's mesh line
+//  K8    cup c8 (PpBase, CupV) on slab hs8 (PpBase), E35 (x0+8500)   the reshaped dependent's fallback has no geometry: no row,
+//        counted on contact's mesh line by its blocker
+// Extras (pp\extras, never in the fixture's own instance): PpMeshModEsp.esp and PpSameEsp.esp, plugins that place nothing (one
+// GLOB each), for the in-place runs of a mesh folder that ships a plugin (tests/test_asset_only_selection.py).
 public static class PopulationFixture
 {
     public const SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
@@ -110,6 +121,11 @@ public static class PopulationFixture
     public static readonly FormKey SkB = KS(0x801), SkBox = KS(0x802), SkE = KS(0x803), SkZ = KS(0x804), SkRoom = KS(0x810),
         V1 = KS(0x901), V2 = KS(0x902), E1 = KS(0x903), E2 = KS(0x904), E3 = KS(0x905), E4 = KS(0x906), SkU = KS(0x805), W1 = KS(0x907);
     public static readonly FormKey W2 = new(UpKey, 0x901);
+    // unreadable fallback copies
+    public static readonly FormKey MeshV = K(0x822), SlabV = K(0x823), CupV = K(0x824), IM13 = K(0x813),
+        Hs7 = K(0x919), C7 = K(0x91A), Hs8 = K(0x91B), C8 = K(0x91C), X13 = KA(0x915), Y13 = KB(0x90B);
+    /// <summary>Bytes that are not a NIF: a copy the folder rule cannot read as a shape.</summary>
+    public static readonly byte[] NotANif = Encoding.ASCII.GetBytes("not a NIF file: the fixture's unreadable fallback copy\n");
     public static readonly string[] Order = { "Skyrim.esm", "Update.esm", "PpBase.esm", "PpA.esp", "PpB.esp", "PpMover.esp", "PpDelta.esp", "PpSkyMod.esp" };
     const float X30 = 3 * 4096f, X35 = 35 * 4096f;
     const float C = 4096f;
@@ -225,6 +241,9 @@ public static class PopulationFixture
         b.Statics.Add(new Static(SlabK, Rel) { EditorID = "PpSlabK", Model = new Model { File = "pp\\slabk.nif" } });
         b.Statics.Add(new Static(Encl, Rel) { EditorID = "PpEncl", Model = new Model { File = "pp\\encl.nif" } });
         b.Statics.Add(new Static(Touch, Rel) { EditorID = "PpTouch", Model = new Model { File = "pp\\touch.nif" } });
+        b.Statics.Add(new Static(MeshV, Rel) { EditorID = "PpMeshV", Model = new Model { File = "pp\\mshv.nif" } });
+        b.Statics.Add(new Static(SlabV, Rel) { EditorID = "PpSlabV", Model = new Model { File = "pp\\slabv.nif" } });
+        b.Statics.Add(new Static(CupV, Rel) { EditorID = "PpCupV", Model = new Model { File = "pp\\cupv.nif" } });
         b.Statics.Add(new Static(Huge, Rel)
         {
             EditorID = "PpHuge", Model = new Model { File = "pp\\huge.nif" },
@@ -233,6 +252,7 @@ public static class PopulationFixture
         Room(b, IPop, "PpRoomPop");
         Room(b, IOther, "PpRoomOther", Ref(B4, Box, 2000, 500, 0), Ref(Hs1, Slab, 5000, 0, 0));
         Room(b, IOut, "PpRoomOut");
+        Room(b, IM13, "PpRoomM13");
         {
             var top = Top();
             top.Persistent.Add(Ref(PA, Box, 9 * C + 100, 2000, 0));
@@ -246,6 +266,8 @@ public static class PopulationFixture
             e35.Temporary.Add(Ref(Hs5, Slab, X35 + 2500, 500, 0)); e35.Temporary.Add(Ref(C5, CupM, X35 + 2500, 500, 120));
             e35.Temporary.Add(Ref(Hs6, SlabK, X35 + 4500, 500, 0)); e35.Temporary.Add(Ref(C6, Cup, X35 + 4500, 500, 120));
             e35.Temporary.Add(Ref(N6, Encl, X35 + 4500, 500, 120));
+            e35.Temporary.Add(Ref(Hs7, SlabV, X35 + 6500, 500, 0)); e35.Temporary.Add(Ref(C7, Cup, X35 + 6500, 500, 120));
+            e35.Temporary.Add(Ref(Hs8, Slab, X35 + 8500, 500, 0)); e35.Temporary.Add(Ref(C8, CupV, X35 + 8500, 500, 120));
             b.Worldspaces.Add(Wrld(top, Ext(E00, 0, 0), Ext(E10, 1, 0), e50, Ext(E90, 9, 0), Ext(E200, 20, 0), e600, e30, e35));
         }
         var bPath = Save(b);
@@ -256,6 +278,7 @@ public static class PopulationFixture
         Room(a, IPop, "PpRoomPop", Ref(A1, Box, 0, 0, 0));
         Room(a, IOut, "PpRoomOut", Ref(A2, Box, 0, 0, 0));
         Room(a, IOther, "PpRoomOther", Ref(A3, Box, 1050, 30, 20), Ref(A4, Box, 2050, 30, 20));
+        Room(a, IM13, "PpRoomM13", Ref(X13, MeshV, 0, 0, 0));
         {
             var top = Top(); top.Persistent.Add(Ref(PA2, Box, 9 * C + 1000, 100, 0));
             var e10 = Ext(E10, 1, 0); e10.Temporary.Add(Ref(HA, Huge, 4200, 100, 0));
@@ -277,6 +300,7 @@ public static class PopulationFixture
         var bb = new SkyrimMod(BKey, Rel);
         Room(bb, IPop, "PpRoomPop", Ref(B1, Box, 50, 30, 20));
         Room(bb, IOut, "PpRoomOut", Ref(B2, Box, 50, 30, 20));
+        Room(bb, IM13, "PpRoomM13", Ref(Y13, Box, 80, 0, 0));
         {
             var e10 = Ext(E10, 1, 0); e10.Temporary.Add(Ref(BE, Box, 5000, 100, 0));
             var e90 = Ext(E90, 9, 0);
@@ -367,6 +391,22 @@ public static class PopulationFixture
         var dm = Path.Combine(mods, "PpDelta", "meshes", "pp"); Directory.CreateDirectory(dm);
         File.WriteAllBytes(Path.Combine(dm, "msho.nif"), Mesh(60, true));
         File.WriteAllBytes(Path.Combine(dm, "dnew.nif"), Mesh(60, true));
+        // M13, K7, K8: PpBase's copy is not a NIF, PpMeshMod's is a real box
+        File.WriteAllBytes(Path.Combine(bm, "mshv.nif"), NotANif);
+        File.WriteAllBytes(Path.Combine(bm, "slabv.nif"), NotANif);
+        File.WriteAllBytes(Path.Combine(bm, "cupv.nif"), NotANif);
+        File.WriteAllBytes(Path.Combine(mm, "mshv.nif"), Mesh(60, true));
+        File.WriteAllBytes(Path.Combine(mm, "slabv.nif"), Mesh(100, true));
+        File.WriteAllBytes(Path.Combine(mm, "cupv.nif"), Mesh(20, true));
+        // extras: plugins that place nothing, outside the fixture's order
+        var ex = Path.Combine(d, "extras"); Directory.CreateDirectory(ex);
+        foreach (var name in new[] { "PpMeshModEsp", "PpSameEsp" })
+        {
+            var key = new ModKey(name, ModType.Plugin);
+            var m = new SkyrimMod(key, Rel);
+            m.Globals.Add(new GlobalShort(new FormKey(key, 0x800), Rel) { EditorID = name + "Loaded" });
+            m.BeginWrite.ToPath(Path.Combine(ex, name + ".esp")).WithNoLoadOrder().Write();
+        }
         return new Written(paths, mods);
     }
 

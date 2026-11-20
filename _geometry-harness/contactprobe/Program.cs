@@ -1262,6 +1262,7 @@ Console.WriteLine($"   MoveableStatic bases with geometry: {mstt.Count:N0}; thei
 // so every other arm is the winner's); the arm without it is the winning placement with the mesh that wins without the folder.
 var meshRows = new List<(ContactRow Row, MeshOwner Owner, bool DependentSide)>();
 var meshSkips = new ContactSkips();
+var meshUnjudged = new Dictionary<string, long>(StringComparer.Ordinal);
 long meshHosts = 0, meshDeps = 0;
 long meshSeenNotTested = 0;
 var meshFolderPlugins = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
@@ -1287,8 +1288,12 @@ if (meshActive)
         return k;
     }
     var seenPairs = new HashSet<(FormKey, FormKey)>();
+    var unjudgedPairs = new HashSet<(FormKey, FormKey)>();
     void Keep(ContactRow r, MeshOwner o, bool depSide)
     {
+        // a pair the pass could not judge is counted once by its blocker, whatever its relation (the rows kept are unchanged)
+        if (r.Verdict == ContactVerdict.Unjudgeable && unjudgedPairs.Add((r.Dependent, r.Host.Key)))
+            meshUnjudged["Row" + r.Reason] = meshUnjudged.GetValueOrDefault("Row" + r.Reason) + 1;
         if (r.Relation == ContactRelation.None || !seenPairs.Add((r.Dependent, r.Host.Key))) return;
         meshRows.Add((r, o, depSide));
     }
@@ -1665,8 +1670,19 @@ if (emitPath is not null)
             $"relationships {rel.Count:N0}, class {classRows.Count:N0}"),
     };
     coverage.InsertRange(1, PreLoopLines());
-    coverage.Add(new("mesh responsibility", meshHosts + meshDeps, new Dictionary<string, long>(),
-        new Dictionary<string, long> { ["MeshEqualsReplaced"] = meshOwners.Answered.Count(x => x.Shape == MeshShape.EqualBytes),
+    // what the mesh pass could not judge, classed as the main pass classes it (PreLoopLines), non-zero only as overlap's line does
+    var meshUnj = new Dictionary<string, long>(StringComparer.Ordinal)
+    {
+        ["HostNoGeometry"] = meshSkips.HostNoGeometry, ["HostEnableChainUnresolved"] = meshSkips.HostEnableUnresolved,
+        ["DepNoGeometry"] = meshSkips.DepNoGeometry, ["DepEnableChainUnresolved"] = meshSkips.DepEnableUnresolved,
+        ["WinnerEnableChainUnresolved"] = meshSkips.WinnerEnableUnresolved,
+        ["MeshCopyUnreadable"] = meshOwners.Answered.Count(x => x.Shape == MeshShape.Unreadable),
+    };
+    foreach (var (k, v) in meshUnjudged) meshUnj[k] = v;
+    coverage.Add(new("mesh responsibility", meshHosts + meshDeps, meshUnj.Where(kv => kv.Value > 0).ToDictionary(kv => kv.Key, kv => kv.Value),
+        new Dictionary<string, long> { ["HostNoSolidCollision"] = meshSkips.HostNoCollision, ["HostVolumeScale"] = meshSkips.HostVolume,
+                                       ["HostTooSmall"] = meshSkips.HostTooSmall, ["HostRuntimeDisabled"] = meshSkips.HostRuntimeDisabled,
+                                       ["MeshEqualsReplaced"] = meshOwners.Answered.Count(x => x.Shape == MeshShape.EqualBytes),
                                        ["NewMeshNoFallback"] = meshOwners.Answered.Count(x => x.Shape == MeshShape.NoFallback),
                                        ["SeenNotTested"] = meshSeenNotTested,
                                        ["SeenFolderRows"] = meshRows.Count(m => m.Row.Verdict is ContactVerdict.Stranded or ContactVerdict.Orphaned && MeshSight(m.Row, m.Owner.Folder!).Sight == OverlapSight.Seen) },

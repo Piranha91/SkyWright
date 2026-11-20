@@ -50,7 +50,13 @@ using HousecarlCore.Progress;
 // counted as TouchingNotCredited. The plugin rule below is unchanged and still takes touching hits; in practice its rows are
 // all crossing. The folders credited: with --population its folders; otherwise --mesh-folder (repeatable, "*" for
 // every folder); with neither, none, and the emit's coverage says so. A crossing that persists without the folder's mesh is
-// judged by the plugin rule below. Scene capture and --responsible-pair keep the plugin rule.
+// judged by the plugin rule below, and so is a cross-plugin crossing whose folder counterfactual is unknown (the crossing is
+// measured; only the folder's part in it is not), counted as MeshUnknownJudgedByPluginRule; a same-plugin or base-game pair
+// with an unknown counterfactual is withheld and counted. Scene capture and --responsible-pair keep the plugin rule.
+//
+// --mesh-reach FILE (with --population): write the mesh reach of this arm (_shared/PlacedMeshReach.cs: the placed references whose
+// model a population folder provides, and how many of them it wins with and changes) and stop before any pair work. Pass 1,
+// the BOS layer, the population and the credited folders are this run's own, so the reach is what this probe would credit.
 //
 // Boundary (the standing rules, applied):
 //   - Geometry is complete decoded visible render vertices from the winning VFS NIF. Record OBND and stored NIF
@@ -66,7 +72,7 @@ using HousecarlCore.Progress;
 //                     [--prepared-cache-mib N] [--threads N] [--pair-cache-read FILE]* [--pair-cache-write FILE]
 //                     [--bos on|off] [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
 //                     [--responsible-pair A.esp B.esp]* [--historical-pairs crosswalk.json] [--geometry-manifest output.json]
-//                     [--motion swept [--motion-delta U]] [--mesh-folder NAME|*]*
+//                     [--motion swept [--motion-delta U]] [--mesh-folder NAME|*]* [--population FILE [--mesh-reach FILE]]
 //   --motion swept  a base whose render geometry refuses as unsupported_pose but whose motion the files settle (NifMotion:
 //                   NIF sequences and controllers, behaviour-graph clips) is discovered by a swept proxy instead of being
 //                   unmeasurable: the boxes of its sampled poses, each grown by the sample's certified delta (default 0.5 u,
@@ -264,6 +270,8 @@ string? orderFile = null;
 // --population FILE (P25): the plan's population (_shared/PopulationScope.cs); --population-audit EMIT OUT writes, for every
 // row of EMIT, whether it is in that population (the equivalence check reads it).
 string? populationPath = null, populationAuditEmit = null, populationAuditOut = null;
+// --mesh-reach FILE: the mesh reach of this arm, then exit (see the header).
+string? meshReachPath = null;
 string NeedValue(int index, string flag)
 {
     if (index + 1 >= args.Length || args[index + 1].StartsWith("--", StringComparison.Ordinal))
@@ -334,6 +342,7 @@ try
         else if (flag == "--self-check-declared-cells") { declaredCellsFixture = NeedValue(i, flag); i++; }
         else if (flag == "--order") { orderFile = NeedValue(i, flag); i++; }
         else if (flag == "--population") { populationPath = NeedValue(i, flag); i++; }
+        else if (flag == "--mesh-reach") { meshReachPath = NeedValue(i, flag); i++; }
         else if (flag == "--population-audit")
         {
             populationAuditEmit = NeedValue(i, flag);
@@ -392,6 +401,11 @@ if (populationPath is not null && (sceneCapture || scenePreflight || responsible
     return 2;
 }
 if (populationAuditEmit is not null && populationPath is null) { Console.Error.WriteLine("--population-audit needs --population"); return 2; }
+if (meshReachPath is not null && populationPath is null)
+{
+    Console.Error.WriteLine("--mesh-reach needs --population: the reach is about the population's folders; name them with a population file.");
+    return 2;
+}
 if (populationAuditEmit is not null && !File.Exists(populationAuditEmit)) { Console.Error.WriteLine($"--population-audit input does not exist: {populationAuditEmit}"); return 2; }
 PopulationScope? population = null;
 if (populationPath is not null)
@@ -594,6 +608,17 @@ if (population is not null)
 {
     population.Bind(idx);
     Console.WriteLine("   " + population.Describe());
+}
+if (meshReachPath is not null)
+{
+    // the reach of this arm, from the same index, BOS bases, asset view and credited folders a full run's MeshRule reads
+    var reach = PlacedMeshReach.Measure(idx, population!, new MeshResponsibility(assets, population!.Mods), cfg, assets, unreadablePlugins,
+                                  orderFile is not null ? Path.GetFileNameWithoutExtension(orderFile) : profileName);
+    PlacedMeshReach.Write(meshReachPath, reach);
+    Console.WriteLine($"\nmesh reach:{reach["references"]} placed reference(s) use a mesh a population folder provides, {reach["credited"]} of them one "
+                    + $"it wins with and changes; complete {reach["complete"]} -> {meshReachPath}");
+    __run.Artifact(meshReachPath);
+    return 0;
 }
 // The overlap population rule: a pair is measured when either reference is in the plan's population.
 bool PairInPopulation(SurfaceOverlapCandidate a, SurfaceOverlapCandidate b)
@@ -1741,9 +1766,14 @@ foreach (var h in sweep.CrossHits)
 {
     var mv = meshMode ? meshRule.Judge(h) : null;
     if (mv is { Kind: MeshRule.Outcome.Folder }) meshVerdicts.Add(mv);
-    else if (mv is not { Kind: MeshRule.Outcome.Unknown or MeshRule.Outcome.SeenSkipped })
+    // a cross-plugin crossing is measured whatever the folder's counterfactual: unknown goes to the plugin rule, counted; only
+    // SeenSkipped (Skyrim.esm x Update.esm, the one cross pair that is a floor pair) stays withheld
+    else if (mv is not { Kind: MeshRule.Outcome.SeenSkipped })
+    {
+        if (mv is { Kind: MeshRule.Outcome.Unknown }) meshRule.UnknownJudgedByPluginRule++;
         rows.Add(idx.JudgeSurface(h, closure, SurfaceGeometryOf, surfaceTolerance,
             maxTrianglePairs, TimeSpan.FromSeconds(pairSeconds), popMode == PopulationMode.Flags ? null : arms, default, provenanceTimer, pairResults));
+    }
     __run.Advance();
 }
 if (meshMode)
@@ -1763,7 +1793,7 @@ MeshCause CauseOf(MeshRule.Verdict v) => new(v.Folder!,
 Console.WriteLine($"\n==== MESH RESPONSIBILITY — a crossing only a credited folder's mesh makes ({meshRule.Judged:N0} intersections given a mesh counterfactual) ====");
 Console.WriteLine($"   credited {meshRule.Scope}");
 Console.WriteLine($"   folder-made {meshVerdicts.Count:N0} (Blind {meshClass.Count:N0}, Seen {meshVerdicts.Count(v => v.Sight == OverlapSight.Seen):N0}); "
-    + $"cross without the folder's mesh {meshRule.CrossesWithout:N0}; unknown {meshRule.Unknown:N0}; joint swaps {meshRule.Joint:N0}; "
+    + $"cross without the folder's mesh {meshRule.CrossesWithout:N0}; unknown {meshRule.Unknown:N0} ({meshRule.UnknownJudgedByPluginRule:N0} cross-plugin, judged by the plugin rule); joint swaps {meshRule.Joint:N0}; "
     + $"Seen and not tested {meshRule.SeenNotTested:N0}; base-game references left out as Seen {meshRule.SeenNotReadmitted.Count:N0}");
 foreach (var ((folder, lo, hi, what), n) in meshRule.SeenTally.OrderByDescending(kv => kv.Value).Take(listN))
     Console.WriteLine($"   Seen, {what}: {n:N0} pair(s), folder {folder} (ships {string.Join(", ", meshRule.PluginsOf(folder).Select(PluginName))}"

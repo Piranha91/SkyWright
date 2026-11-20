@@ -84,18 +84,22 @@ R = {
     "e2": fk("000904", "Skyrim.esm"), "e3": fk("000905", "Skyrim.esm"), "e4": fk("000906", "Skyrim.esm"),
     "w1": fk("000907", "Skyrim.esm"), "w2": fk("000901", "Update.esm"), "q1": fk("000911", "PpA.esp"), "q2": fk("000912", "PpA.esp"),
     "r1": fk("000913", "PpA.esp"), "r2": fk("000914", "PpA.esp"),
+    # an unreadable fallback copy (fold-review-fix)
+    "x13": fk("000915", "PpA.esp"), "y13": fk("00090B", "PpB.esp"), "hs7": fk("000919", "PpBase.esm"), "c7": fk("00091A", "PpBase.esm"),
+    "hs8": fk("00091B", "PpBase.esm"), "c8": fk("00091C", "PpBase.esm"),
 }
 OVERLAP = {"O1": ("a1", "b1"), "O2": ("a2", "b2"), "O3": ("d3", "a3"), "O3b": ("b4", "a4"), "O4": ("dE", "hA"),
            "O4b": ("hA", "bE"), "O5": ("pA", "bP"), "O5b": ("pA2", "bP2"), "O6": ("Kc", "b6"), "O7": ("x7", "b7"),
            "O8": ("m8", "b8"), "O9": ("a9", "b9"),
            "M1": ("s1", "s2"), "M2": ("v1", "v2"), "M3": ("c1", "c2b"), "M4": ("t1", "t2"), "M5": ("e1", "e2"), "M5b": ("e3", "e4"),
-           "M6": ("o2", "o1"), "M7": ("n1", "n2"), "M8": ("u1", "u2"), "M9": ("o3", "o4"), "M10": ("w1", "w2"), "M11": ("q1", "q2"), "M12": ("r1", "r2")}
+           "M6": ("o2", "o1"), "M7": ("n1", "n2"), "M8": ("u1", "u2"), "M9": ("o3", "o4"), "M10": ("w1", "w2"), "M11": ("q1", "q2"), "M12": ("r1", "r2"),
+           "M13": ("x13", "y13")}
 CONTACT = {"K1": ("dc1", "hs1"), "K2": ("c2", "hs2"), "K3": ("c3", "hs3"), "K4": ("c4", "hs4"), "K5": ("c5", "hs5"),
            "K6": ("c6", "hs6"), "K6n": ("c6", "n6")}
 # What each arm holds, whole-order and in the population (the fixture's table).
 WANT = {
-    ("overlapprobe", "with", "whole"): {"O1", "O2", "O3", "O3b", "O4", "O4b", "O5", "O5b", "O7", "O8", "O9", "M1", "M2", "M3", "M8", "M10", "M11"},
-    ("overlapprobe", "with", "scoped"): {"O1", "O3", "O3b", "O4", "O5", "O7", "O8", "M1", "M2", "M3", "M8", "M10", "M11"},
+    ("overlapprobe", "with", "whole"): {"O1", "O2", "O3", "O3b", "O4", "O4b", "O5", "O5b", "O7", "O8", "O9", "M1", "M2", "M3", "M8", "M10", "M11", "M13"},
+    ("overlapprobe", "with", "scoped"): {"O1", "O3", "O3b", "O4", "O5", "O7", "O8", "M1", "M2", "M3", "M8", "M10", "M11", "M13"},
     ("overlapprobe", "without", "whole"): {"O1", "O2", "O4b", "O5b", "O6", "O9", "M3"},
     ("overlapprobe", "without", "scoped"): {"O1", "O6", "M3"},
     ("contactprobe", "with", "whole"): {"K1", "K3", "K4", "K5"},
@@ -370,11 +374,12 @@ def mesh_counts_are_the_tables(arm, which):
         m = coverage(doc, "mesh responsibility")
         aside = m.get("SetAside") or {}
         # with: O8, M1, M2, M3, M6, M10, M11, and K6's slab with its cup and with the box n6 (both meet the slab's top with either copy) given a
-        # counterfactual; M9 (Seen by its folder's plugin) counted, not tested
-        want = {"with": (9, {"CrossesWithoutTheFolderMesh": 3, "MeshEqualsReplaced": 2, "NewMeshNoFallback": 1, "BaseGameReadmitted": 4,
-                             "SeenNotTested": 1, "TouchingNotCredited": 1}),
+        # counterfactual; M9 (Seen by its folder's plugin) counted, not tested; and the three pairs whose fallback copy is not a NIF:
+        # M13 (cross-plugin, so judged by the plugin rule) and K7's and K8's cup with its slab (PpBase both, so withheld)
+        want = {"with": (12, {"CrossesWithoutTheFolderMesh": 3, "MeshEqualsReplaced": 2, "NewMeshNoFallback": 1, "BaseGameReadmitted": 4,
+                              "SeenNotTested": 1, "TouchingNotCredited": 1, "MeshUnknownJudgedByPluginRule": 1}),
                 "without": (0, {"CrossesWithoutTheFolderMesh": 0, "MeshEqualsReplaced": 0, "NewMeshNoFallback": 0, "BaseGameReadmitted": 0,
-                                "SeenNotTested": 0, "TouchingNotCredited": 0})}[arm]
+                                "SeenNotTested": 0, "TouchingNotCredited": 0, "MeshUnknownJudgedByPluginRule": 0})}[arm]
         cand = coverage(doc, "candidate refs").get("SetAside") or {}
         # eight base-game references set aside (seven Skyrim.esm, one Update.esm); with the mods, v1, v2, w1 and w2 come back in
         want = want + ({"with": 4, "without": 8}[arm],)
@@ -382,6 +387,58 @@ def mesh_counts_are_the_tables(arm, which):
         assert got == want, (f"{arm} {which}: (pairs given a mesh counterfactual, counts, base-game references set aside) {got}, "
                              f"the table says {want}")
     return t
+
+
+def unknown_counterfactual_keeps_the_plugin_row(which):
+    """Rejects: a cross-plugin crossing dropped because the folder's counterfactual is unknown (M13: the copy below PpMeshMod's is
+    not a NIF). The crossing is measured; the plugin rule reports it as before the folder rule, and the unknown is counted."""
+    def t():
+        doc = emit_of("overlapprobe", "with", which)
+        c = row_of("overlapprobe", doc, "M13")
+        assert {c["A"], c["B"]} == {"PpA.esp", "PpB.esp"} and "Mesh" not in c, f"M13: {c['A']} x {c['B']}, mesh {c.get('Mesh')}"
+        m = coverage(doc, "mesh responsibility")
+        got = ((m.get("SetAside") or {}).get("MeshUnknownJudgedByPluginRule"), (m.get("Unjudgeable") or {}).get("MeshCounterfactualUnknown"))
+        # one cross-plugin unknown (M13) judged by the plugin rule; three unknowns in all (M13, K7's and K8's cup with its slab)
+        assert got == (1, 3), f"(unknown judged by the plugin rule, unknown in all) {got}, the table says (1, 3)"
+    return t
+
+
+def contact_mesh_pass_counts_the_unjudged(arm, which):
+    """Rejects: a mesh pass whose coverage line says it judged everything (Unjudgeable {}) when a reshaped host's or dependent's
+    fallback copy could not be read. With: three hosts with no fallback geometry (K7's slab hs7, K8's cup c8 and M13's x13, each
+    tried as a reshaped host) and two dependents whose fallback is unreadable on a real host (c8 on hs8, x13 on y13)."""
+    def t():
+        doc = emit_of("contactprobe", arm, which)
+        m = coverage(doc, "mesh responsibility")
+        want = {"with": {"HostNoGeometry": 3, "RowNoDependentGeometry": 2}, "without": {}}[arm]
+        assert (m.get("Unjudgeable") or {}) == want, f"{arm} {which}: the mesh line's unjudgeable {m.get('Unjudgeable')}, the table says {want}"
+    return t
+
+
+def mesh_reach_counts_are_the_tables():
+    """Rejects: a reach that counts files instead of placed references, credits equal bytes (e1, e3), a stronger folder's shape
+    (t1) or a new mesh (n1, n2), or loses an unreadable fallback (x13, hs7, c8 are credited: the folder's copy wins and differs)."""
+    L = lab()
+    out = L.tmp / "mesh-reach-with.json"
+    r = L.probe("overlapprobe", "with", ["--population", L.population, "--mesh-reach", out])
+    assert r.returncode == 0 and out.exists(), f"exit {r.returncode}: {r.stderr[-600:]}"
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    got = {f["name"]: (f["references"], f["credited"], f["equalBytes"], f["overriddenBy"], f["noFallback"]) for f in doc["folders"]}
+    want = {
+        # mshb (m8, v1, s1, c1), mshs (t1: PpStrongMod's wins), mshe (e1, equal), mshz (e3, equal to PpBase.bsa's), slabm (hs4),
+        # cupm (c5), shell (q1), slabk (hs6), touch (r1), mshv (x13), slabv (hs7), cupv (c8)
+        "PpMeshMod": (15, 12, 2, {"PpStrongMod": 1}, 0),
+        "PpDelta": (4, 2, 0, {}, 2),     # msho (o2, o3), dnew (n1, n2: only PpDelta's folder has it)
+        "PpSkyMod": (1, 1, 0, {}, 0),    # mshu (w1)
+    }
+    assert got == want, f"(references, credited, equal, overridden by, no fallback) {got}, the table says {want}"
+    assert doc["credited"] == 15 and doc["complete"] is True, (doc["credited"], doc["complete"], doc["why"])
+
+
+def mesh_reach_needs_a_population():
+    L = lab()
+    r = L.probe("overlapprobe", "with", ["--mesh-reach", L.tmp / "no-population.json"])
+    assert r.returncode == 2 and "--mesh-reach needs --population" in r.stderr, (r.returncode, r.stderr[-300:])
 
 
 TESTS = [
@@ -419,6 +476,16 @@ TESTS = [
     ("C416 overlap, arm with, whole: mesh counts and base-game readmission are the table's", mesh_counts_are_the_tables("with", "whole")),
     ("C416 overlap, arm with, scoped: the same", mesh_counts_are_the_tables("with", "scoped")),
     ("C416 overlap, arm without, whole: nothing credited, nothing readmitted", mesh_counts_are_the_tables("without", "whole")),
+    ("C440 overlap, arm with, whole: a cross-plugin crossing whose folder counterfactual is unknown (M13) is the plugin rule's row, counted",
+     unknown_counterfactual_keeps_the_plugin_row("whole")),
+    ("C440 overlap, arm with, scoped: the same", unknown_counterfactual_keeps_the_plugin_row("scoped")),
+    ("C441 contact, arm with, whole: the mesh pass counts what it could not judge (K7's host, K8's and x13's fallback copies)",
+     contact_mesh_pass_counts_the_unjudged("with", "whole")),
+    ("C441 contact, arm with, scoped: the same", contact_mesh_pass_counts_the_unjudged("with", "scoped")),
+    ("C441 contact, arm without, whole: nothing credited, nothing unjudged", contact_mesh_pass_counts_the_unjudged("without", "whole")),
+    ("C442 overlapprobe --mesh-reach: per folder, the placed references its meshes reach and the ones it wins with and changes",
+     mesh_reach_counts_are_the_tables),
+    ("C442 overlapprobe --mesh-reach is refused without --population", mesh_reach_needs_a_population),
 ]
 
 

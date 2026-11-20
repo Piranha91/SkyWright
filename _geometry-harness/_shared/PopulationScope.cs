@@ -48,6 +48,8 @@ public sealed class PopulationScope
     public HashSet<FormKey> FileRecords { get; } = new();
     public HashSet<FormKey> FileCells { get; } = new();
     public HashSet<string> ModFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>The same files by the folder that holds them (folder name -> its files, loose and archive entries).</summary>
+    public Dictionary<string, HashSet<string>> ModFilesByFolder { get; } = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Cells where a delta plugin carries terrain or navmesh (interior cell keys; exterior worldspace + grid), whatever
     /// else the cell holds: the route half of stateprobe reads both (task 1 of window 2).</summary>
     public HashSet<FormKey> FileGeometryInterior { get; } = new();
@@ -172,20 +174,27 @@ public sealed class PopulationScope
 
     void ReadModFolder(string name, string dir)
     {
+        if (!ModFilesByFolder.TryGetValue(name, out var mine)) ModFilesByFolder[name] = mine = new(StringComparer.OrdinalIgnoreCase);
         foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
         {
             var rel = NormalAsset(Path.GetRelativePath(dir, f));
             if (PopulationRules.IsSwapIni(rel))
                 throw new PopulationRefused($"mod folder {name} ships a Base Object Swapper ini ({rel}), whose swaps this population does not model; run this probe on the whole order (no --population).");
-            ModFiles.Add(rel);
+            ModFiles.Add(rel); mine.Add(rel);
             if (!rel.Contains('\\') && (rel.EndsWith(".bsa", StringComparison.Ordinal) || rel.EndsWith(".ba2", StringComparison.Ordinal)))
             {
                 var reader = Archive.CreateReader(GameRelease.SkyrimSE, f);
-                try { foreach (var e in reader.Files) ModFiles.Add(NormalAsset(e.Path)); }
+                try { foreach (var e in reader.Files) { var ep = NormalAsset(e.Path); ModFiles.Add(ep); mine.Add(ep); } }
                 finally { (reader as IDisposable)?.Dispose(); }
             }
         }
     }
+
+    /// <summary>S2's test for one base: its model (or an armour's female model) is a file a delta mod folder provides.</summary>
+    public bool ModelFromDeltaFolder(OverlapIndex idx, FormKey b) =>
+        ModFiles.Count > 0
+        && ((idx.BaseMesh.TryGetValue(b, out var m) && ModFiles.Contains(NormalMesh(m)))
+         || (idx.BaseMeshFemale.TryGetValue(b, out var mf) && ModFiles.Contains(NormalMesh(mf))));
 
     static (int X, int Y) GridOf(Vec3 p) => ((int)MathF.Floor(p.X / CellSize), (int)MathF.Floor(p.Y / CellSize));
 
@@ -207,10 +216,7 @@ public sealed class PopulationScope
         {
             if (!idx.RefBase.TryGetValue(key, out var b)) continue;
             if (FileRecords.Contains(b)) { Seed(key, "S4 base record in a delta plugin"); continue; }
-            if (ModFiles.Count > 0
-                && ((idx.BaseMesh.TryGetValue(b, out var m) && ModFiles.Contains(NormalMesh(m)))
-                 || (idx.BaseMeshFemale.TryGetValue(b, out var mf) && ModFiles.Contains(NormalMesh(mf)))))
-                Seed(key, "S2 model from a delta mod folder");
+            if (ModelFromDeltaFolder(idx, b)) Seed(key, "S2 model from a delta mod folder");
         }
         // S3: a reference any of whose XESP parents is a seed, to a fixpoint (the chain's own untouched links are the same
         // records in every arm; a touched link is itself a seed).

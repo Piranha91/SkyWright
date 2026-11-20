@@ -36,7 +36,7 @@ sealed class MeshRule
     public string IdentitySuffix { get; }
     public HashSet<FormKey> Readmitted { get; } = new();
     public HashSet<FormKey> Targets { get; } = new();
-    public long Judged, CrossesWithout, Unknown, Joint, SeenRows, Partners, SeenNotTested, TouchingNotCredited;
+    public long Judged, CrossesWithout, Unknown, Joint, SeenRows, Partners, SeenNotTested, TouchingNotCredited, UnknownJudgedByPluginRule;
     public double ReadmitSeconds, JudgeSeconds;
 
     public MeshRule(OverlapIndex idx, AssetResolver assets, PopulationScope? population, IReadOnlyList<string> meshFolders,
@@ -64,7 +64,7 @@ sealed class MeshRule
     }
 
     static string Names(IEnumerable<string> n) => string.Join(", ", n.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
-    string? ModelOf(FormKey b) => _idx.BaseMesh.TryGetValue(b, out var m) && !string.IsNullOrWhiteSpace(m) ? MeshResponsibility.FullModelPath(m) : null;
+    string? ModelOf(FormKey b) => MeshResponsibility.ModelPathOf(_idx, b);
     bool InPop(FormKey k, Snap s) => _population is null || _population.KeyInScope(k, s.Cell);
     public MeshOwner? CreditedOwner(FormKey b) => ModelOf(b) is { } m && Owners.Of(m) is { Shape: MeshShape.Credited } o ? o : null;
 
@@ -465,7 +465,7 @@ sealed class MeshRule
                 ["NewMeshNoFallback"] = Count(MeshShape.NoFallback), ["BaseGameReadmitted"] = Readmitted.Count,
                 ["JointSwap"] = Joint, ["SeenFolderRows"] = SeenRows, ["SeenNotTested"] = SeenNotTested,
                 ["SeenNotReadmitted"] = SeenNotReadmitted.Count, ["ChangedRegionClear"] = RegionShortcuts,
-                ["TouchingNotCredited"] = TouchingNotCredited,
+                ["TouchingNotCredited"] = TouchingNotCredited, ["MeshUnknownJudgedByPluginRule"] = UnknownJudgedByPluginRule,
             },
             $"credited: {Scope}; {Count(MeshShape.Credited):N0} model path(s) a credited folder reshapes; {Targets.Count:N0} target reference(s), "
           + $"{Partners:N0} base-game partner(s) readmitted; readmission {ReadmitSeconds:0.0}s, counterfactuals {JudgeSeconds:0.0}s");

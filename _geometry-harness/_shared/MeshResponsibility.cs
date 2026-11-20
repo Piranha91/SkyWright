@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using HousecarlCore;
+using Mutagen.Bethesda.Plugins;
 
 namespace HarnessShared;
 
@@ -87,6 +88,10 @@ public sealed class MeshResponsibility
     }
 
     static string Sha(byte[] b) => Convert.ToHexString(SHA256.HashData(b)).ToLowerInvariant();
+
+    /// <summary>The model path a base's shape is judged by, as the folder rule reads it (the index's BaseMesh), or null.</summary>
+    public static string? ModelPathOf(OverlapIndex idx, FormKey b) =>
+        !b.IsNull && idx.BaseMesh.TryGetValue(b, out var m) && !string.IsNullOrWhiteSpace(m) ? FullModelPath(m) : null;
 
     /// <summary>A model path as a base record stores it, under meshes\ with backslashes (overlapprobe's GeometryOf spelling).</summary>
     public static string FullModelPath(string rel)
