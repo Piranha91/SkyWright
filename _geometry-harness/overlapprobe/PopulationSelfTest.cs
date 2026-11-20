@@ -25,12 +25,12 @@ static class PopulationSelfTest
         var scope = PopulationScope.Load(pop);
         scope.Bind(idx);
         string Has(params FormKey[] keys) => string.Join(", ", keys.Where(k => !scope.Seeds.Contains(k)));
-        var fileRefs = new[] { F.D0, F.D3, F.B4, F.Dc1, F.PA, F.Mk, F.DE, F.Ds2 };
+        var fileRefs = new[] { F.D0, F.D3, F.B4, F.Dc1, F.PA, F.Mk, F.DE, F.Ds2, F.O1, F.N1, F.N2, F.U1 };
 
-        t.Check("C400 S1 comes from the delta FILE: in an arm without PpDelta.esp its 8 references (new, overrides of PpBase refs) are seeds",
+        t.Check("C400 S1 comes from the delta FILE: in an arm without PpDelta.esp its 12 references (new, overrides of PpBase refs) are seeds",
                 scope.FileRefs.SetEquals(fileRefs) && fileRefs.All(scope.Seeds.Contains), $"file refs {scope.FileRefs.Count}; missing seeds: {Has(fileRefs)}");
-        t.Check("C401 a delta cell is a population cell (IPop, IOther, E00, E50) and IOut is not; a1 in IPop is in scope, a2 in IOut is not",
-                scope.FileCells.SetEquals(new[] { F.IPop, F.IOther, F.E00, F.E50 }) && scope.KeyInScope(F.A1, F.IPop) && !scope.KeyInScope(F.A2, F.IOut),
+        t.Check("C401 a delta cell is a population cell (IPop, IOther, E00, E50, E30) and IOut is not; a1 in IPop is in scope, a2 in IOut is not",
+                scope.FileCells.SetEquals(new[] { F.IPop, F.IOther, F.E00, F.E50, F.E30 }) && scope.KeyInScope(F.A1, F.IPop) && !scope.KeyInScope(F.A2, F.IOut),
                 string.Join(", ", scope.FileCells));
         t.Check("C402 the huge partner hA (filed in E10) is not itself in scope; its delta partner dE (E00) is",
                 !scope.KeyInScope(F.HA, F.E10) && scope.KeyInScope(F.DE, F.E00), "");
@@ -41,9 +41,24 @@ static class PopulationSelfTest
         t.Check("C405 S4: x7, whose base PpStatX the delta overrides, is a seed", scope.Seeds.Contains(F.X7), "");
         t.Check("C406 S2: m8, whose model PpMeshMod ships, is a seed in an arm whose view lacks PpMeshMod",
                 scope.Seeds.Contains(F.M8) && scope.ModFiles.Contains("meshes\\pp\\mshb.nif"), string.Join(", ", scope.ModFiles));
-        var expected = fileRefs.Concat(new[] { F.Kc, F.X7, F.M8 }).ToHashSet();
-        t.Check("C406 nothing else is a seed: exactly the 8 file references, Kc, x7 and m8",
+        // S2 by listing (mesh responsibility cases): PpMeshMod ships mshb (v1, s1, c1), mshs (t1, though PpStrongMod's wins), mshe (e1),
+        // mshz (e3), slabm (hs4), cupm (c5); the PpDelta folder ships msho (o2) and dnew (only delta references use it)
+        var s2 = new[] { F.M8, F.V1, F.S1, F.C1, F.T1, F.E1, F.E3, F.Hs4, F.C5, F.O2 };
+        t.Check("C406 S2 for the mesh cases: every reference whose model a population folder lists is a seed", s2.All(scope.Seeds.Contains), $"missing: {Has(s2)}");
+        var expected = fileRefs.Concat(new[] { F.Kc, F.X7 }).Concat(s2).ToHashSet();
+        t.Check("C406 nothing else is a seed: exactly the 12 file references, Kc, x7 and the ten S2 references",
                 scope.Seeds.SetEquals(expected), string.Join(", ", scope.Seeds.Except(expected)));
+        // mesh responsibility, finding 2: an archive entry is read decompressed, so the same file compares equal loose and archived
+        var bsaPath = Path.Combine(w.ModsDir, "PpBase", "PpBase.bsa");
+        var loose = File.ReadAllBytes(Path.Combine(w.ModsDir, F.MeshModName, "meshes", "pp", "mshz.nif"));
+        var fromArchive = AssetResolver.TryReadArchiveEntry(bsaPath, "meshes\\pp\\mshz.nif");
+        bool compressedFlag = (BitConverter.ToUInt32(File.ReadAllBytes(bsaPath), 12) & 0x4) != 0;
+        t.Check("C408 an LZ4-compressed archive entry reads back as the loose file's bytes (PpBase.bsa mshz = PpMeshMod mshz)",
+                compressedFlag && fromArchive is not null && fromArchive.AsSpan().SequenceEqual(loose),
+                $"compressed flag {compressedFlag}, read {fromArchive?.Length.ToString() ?? "nothing"} bytes, loose {loose.Length}");
+        t.Check("C408 the equal-bytes mesh is equal: PpMeshMod's mshe is PpBase's byte for byte",
+                File.ReadAllBytes(Path.Combine(w.ModsDir, F.MeshModName, "meshes", "pp", "mshe.nif")).AsSpan()
+                    .SequenceEqual(File.ReadAllBytes(Path.Combine(w.ModsDir, "PpBase", "meshes", "pp", "mshe.nif"))), "");
         Snap S(FormKey k) => idx.History.Winning(k)!.Value;
         t.Check("C407 the contact region holds c2 (E50, the ring of the delta's ds2) in an arm where ds2 does not exist; not c3 (E600)",
                 scope.PlaceInScope(S(F.C2)) && !scope.PlaceInScope(S(F.C3)) && !scope.PlaceInScope(S(F.Hs3)), "");
