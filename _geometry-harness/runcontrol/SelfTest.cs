@@ -5,8 +5,9 @@ using System.Text.RegularExpressions;
 
 namespace RunControl;
 
-/// <summary>The known answers: every value here was computed by the Python controller
-/// (known-answers/make_known_answers.py) and this program must reach it exactly.</summary>
+/// <summary>The known answers: every value here was computed by the Python controller before it was retired, and is
+/// recorded in known-answers/*.json; this program must reach it exactly. Those are the known answers now: a behaviour
+/// change gets a new one from what the game does. The cases in SelfTestOwnCases.cs were worked by hand.</summary>
 public static partial class SelfTest
 {
     static int _green, _red, _skipped;
@@ -156,6 +157,7 @@ public static partial class SelfTest
         SelfTestFinalize.RunBundle(Case);
         SelfTestFinalize.RunRows(Case);
         SelfTestFinalize.RunImport(Case);
+        SelfTestFinalize.RunOwnCases(Case);
         LiveCases();
         PipelineLiveCases();
 
