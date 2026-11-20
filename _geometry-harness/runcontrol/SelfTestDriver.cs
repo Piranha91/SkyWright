@@ -546,11 +546,16 @@ public static partial class SelfTest
             "Tex has no plugin, so it places nothing; it holds 2 mesh files. The checks that read meshes compare every placed object that uses one of its meshes, "
             + "with and without it. Its textures (2 files) and other files are not measured."));
         Case("stages: a selection with a mesh and an archive names both", () => AssetOnlyLine(["meshes/a.nif", "Tex.bsa"],
-            "Tex has no plugin, so it places nothing; it holds 1 mesh file and 1 archive. The checks that read meshes compare every placed object that uses one of its meshes, "
-            + "with and without it. Its textures (0 files) and other files are not measured."));
-        Case("stages: a selection with only an archive names it", () => AssetOnlyLine(["Tex.BSA", "textures/t.dds"],
-            "Tex has no plugin, so it places nothing; it holds 1 archive. The checks that read meshes compare every placed object that uses one of its meshes, "
-            + "with and without it. Its textures (1 file) and other files are not measured."));
+            "Tex has no plugin, so it places nothing; it holds 1 mesh file. The checks that read meshes compare every placed object that uses one of its meshes, "
+            + "with and without it. Its textures (0 files) and other files are not measured. The game does not load its archive: an archive loads only beside a "
+            + "loaded plugin of the same name or from the INI's archive list, so what it holds is not measured."));
+        Case("stages: a selection with only an archive no plugin loads says the game does not load it", () => AssetOnlyLine(["Tex.BSA", "textures/t.dds"],
+            "Tex has no plugin and no mesh the game loads (1 texture file, 1 archive), so no check here can measure it: textures, sounds and scripts change nothing "
+            + "these checks read. The game does not load its archive: an archive loads only beside a loaded plugin of the same name or from the INI's archive "
+            + "list, so what it holds is not measured."));
+        Case("stages: a selection's archive named for a loaded plugin is counted as loaded", () => AssetOnlyLine(["A.bsa", "meshes/x/a.nif"],
+            "Tex has no plugin, so it places nothing; it holds 1 mesh file and 1 loaded archive. The checks that read meshes compare every placed object "
+            + "that uses one of its meshes, with and without it. Its textures (0 files) and other files are not measured."));
         Case("stages: a scope that stops on the order reader's refusal names it for the profile without the selection", () =>
         {
             using var t = new Temp();

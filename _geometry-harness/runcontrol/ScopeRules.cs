@@ -88,13 +88,38 @@ public static class ScopeRules
             archives += Directory.EnumerateFiles(folder).Count(f => f.EndsWith(".bsa", StringComparison.OrdinalIgnoreCase));
         }
         string Count(long n, string one) => $"{n} {one}{(n != 1 ? "s" : "")}";
-        if (meshes == 0 && archives == 0)
-            return $"{who} has no plugin and no mesh ({Count(textures, "texture file")}), so no check here can measure it: "
-                   + "textures, sounds and scripts change nothing these checks read.";
-        string holds = meshes > 0 && archives > 0 ? $"{Count(meshes, "mesh file")} and {Count(archives, "archive")}"
-            : meshes > 0 ? Count(meshes, "mesh file") : Count(archives, "archive");
+        long loaded = archives > 0 ? LoadedArchives(ctx, res, ticked) : 0;
+        // the game loads a folder's archive only beside a plugin of the same name or from the INI's archive list
+        string unloaded = archives > loaded
+            ? $" The game does not load {(loaded == 0 ? (archives == 1 ? "its archive" : $"its {archives} archives") : $"{archives - loaded} of its {archives} archives")}: "
+              + "an archive loads only beside a loaded plugin of the same name or from the INI's archive list, so what it holds is not measured."
+            : "";
+        if (meshes == 0 && loaded == 0)
+            return $"{who} has no plugin and no mesh{(archives > 0 ? " the game loads" : "")} ({Count(textures, "texture file")}{(archives > 0 ? $", {Count(archives, "archive")}" : "")}), "
+                   + "so no check here can measure it: textures, sounds and scripts change nothing these checks read." + unloaded;
+        string holds = meshes > 0 && loaded > 0 ? $"{Count(meshes, "mesh file")} and {Count(loaded, "loaded archive")}"
+            : meshes > 0 ? Count(meshes, "mesh file") : Count(loaded, "loaded archive");
         return $"{who} has no plugin, so it places nothing; it holds {holds}. The checks that read meshes compare every placed object "
-               + $"that uses one of its meshes, with and without it. Its textures ({Count(textures, "file")}) and other files are not measured.";
+               + $"that uses one of its meshes, with and without it. Its textures ({Count(textures, "file")}) and other files are not measured." + unloaded;
+    }
+
+    /// <summary>How many archives of the ticked folders the game loads on an arm that has them, by the shared archive
+    /// discovery (the INI's archive list, then each loaded plugin's own archives), over that arm's plugins and folders.</summary>
+    static long LoadedArchives(RunContext ctx, PyDict res, IReadOnlyCollection<string> ticked)
+    {
+        var mine = new HashSet<string>(ticked, StringComparer.OrdinalIgnoreCase);
+        long best = 0;
+        foreach (var arm in Py.ListOrEmpty(res.Get("arms")).Select(Py.D))
+        {
+            var mods = Py.Strs(arm.Get("mods"));
+            if (!mods.Any(mine.Contains)) continue;
+            string profile = PyPath.Join(ctx.Instance, "profiles", ctx.Profile);
+            var found = ArchiveDiscovery.DiscoverFor(Py.Strs(arm.Get("plugins")), mods, profile, PyPath.Join(ctx.Instance, "mods"),
+                                                     PyPath.Join(ctx.Game, "Data"), PyPath.Join(ctx.Instance, "overwrite"), ctx.Game);
+            best = Math.Max(best, found.Archives.Where(x => x.OwningMod is { } m && mine.Contains(m))
+                                       .Select(x => x.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        }
+        return best;
     }
 
     static long FilesUnder(string folder, string? extension)
