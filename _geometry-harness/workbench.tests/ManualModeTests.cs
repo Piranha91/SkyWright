@@ -823,9 +823,8 @@ public sealed class InPlaceRunTests
     static int FreePort() { var l = new TcpListener(IPAddress.Loopback, 0); l.Start(); int p = ((IPEndPoint)l.LocalEndpoint).Port; l.Stop(); return p; }
 
     /// <summary>B5: the workbench itself, started with no Python anywhere on its PATH and the built-in run engine chosen
-    /// through its own tool, runs the selection. While the built-in engine stops at a stage it does not have yet, the run
-    /// must get as far as that stage and stop on the engine's own sentence; once the engine builds the bundle, the same
-    /// test asserts the run is done and its bundle was checked and opened, still with no Python. The engine is this
+    /// through its own tool, runs the selection to done: the engine builds the bundle and the workbench checks and opens
+    /// it, still with no Python. A run that stops before the bundle fails the test. The engine is this
     /// checkout's runcontrol.exe (or WB_RUNCONTROL); set WB_TEST_SHOTS to a folder to keep pictures of the window.</summary>
     [Fact]
     public async Task B5_with_the_built_in_engine_the_workbench_runs_with_no_python_on_its_path()
@@ -954,28 +953,18 @@ public sealed class InPlaceRunTests
             Assert.StartsWith(Path.Combine(outDir, "workbench-runs"), folder);
 
             // the scenes stage is always a stated, non-blocking refusal, so bundle is looked for by name, not by position
-            if (stages.Any(x => x[0] == "bundle" && x[1].StartsWith("accepted")))
-            {
-                // the engine built the bundle: the run is done, and the workbench checked and opened it with the same engine
-                Assert.True(state == "done", $"the engine's bundle stage is accepted but the run is '{state}': {refusal}");
-                var bundle = run.GetProperty("bundle").GetString()!;
-                Assert.True(File.Exists(Path.Combine(bundle, "manifest.json")), "no bundle under the work folder");
-                var verdict = Path.Combine(folder, "workbench", "bundle-verify.json");
-                for (var until = DateTime.UtcNow.AddSeconds(120); !File.Exists(verdict) && DateTime.UtcNow < until; ) await Task.Delay(500);
-                Assert.True(File.Exists(verdict), $"the finished bundle was not checked: {Console()}");
-                using var v = JsonDocument.Parse(File.ReadAllText(verdict));
-                Assert.True(v.RootElement.GetProperty("bundle").GetProperty("complete").GetBoolean());
-                Assert.DoesNotContain("could not be opened", Console());
-                System.Console.WriteLine("B5 branch: DONE (the built-in engine built the bundle; the workbench verified it)");
-            }
-            else
-            {
-                // the engine stops at the first stage it does not have yet, on its own sentence; nothing else failed
-                var next = stages[accepted.Count][0];
-                Assert.Equal("refused", state);
-                Assert.Equal($"the run stopped (exit code 2) without making results: {next}: not built in this version; the run stops here. (its log: {Path.Combine(folder, "pipeline.log")})", refusal);
-                System.Console.WriteLine($"B5 branch: NOT BUILT YET (stages accepted: {string.Join(", ", accepted)}; the engine stopped at '{next}' on its own sentence)");
-            }
+            Assert.True(stages.Any(x => x[0] == "bundle" && x[1].StartsWith("accepted")),
+                $"the engine did not build the bundle ({state}; {refusal}); stages: {string.Join(", ", stages.Select(x => x[0] + " " + x[1]))}");
+            // the engine built the bundle: the run is done, and the workbench checked and opened it with the same engine
+            Assert.True(state == "done", $"the engine's bundle stage is accepted but the run is '{state}': {refusal}");
+            var bundle = run.GetProperty("bundle").GetString()!;
+            Assert.True(File.Exists(Path.Combine(bundle, "manifest.json")), "no bundle under the work folder");
+            var verdict = Path.Combine(folder, "workbench", "bundle-verify.json");
+            for (var until = DateTime.UtcNow.AddSeconds(120); !File.Exists(verdict) && DateTime.UtcNow < until; ) await Task.Delay(500);
+            Assert.True(File.Exists(verdict), $"the finished bundle was not checked: {Console()}");
+            using var v = JsonDocument.Parse(File.ReadAllText(verdict));
+            Assert.True(v.RootElement.GetProperty("bundle").GetProperty("complete").GetBoolean());
+            Assert.DoesNotContain("could not be opened", Console());
             var after = Listing(watched);
             var changed = before.Keys.Union(after.Keys).Where(k => !before.TryGetValue(k, out var b) || !after.TryGetValue(k, out var a) || b != a).ToList();
             Assert.True(changed.Count == 0, $"the run changed the instance or the game folder: {string.Join("; ", changed.Take(5))}");
