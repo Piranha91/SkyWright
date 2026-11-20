@@ -45,7 +45,10 @@ using HousecarlCore.Progress;
 // back in when its shape is a credited folder's, or when its placed render bounds come within the tolerance of such a shape.
 // Sight: Seen when the later placement's plugin masters a plugin the folder ships, or a plugin the folder ships masters both
 // placements' plugins; a folder with no plugin is always Blind. The class is Introduced + Blind; the Bethesda floor does not
-// withhold a folder row. The folders credited: with --population its folders; otherwise --mesh-folder (repeatable, "*" for
+// withhold a folder row. A folder is credited for a crossing, a coplanar overlap (it z-fights) or a containment, never for
+// surfaces that only touch (they show nothing in game; kit seams touch by design): a touching pair gets no counterfactual,
+// counted as TouchingNotCredited. The plugin rule below is unchanged and still takes touching hits; in practice its rows are
+// all crossing. The folders credited: with --population its folders; otherwise --mesh-folder (repeatable, "*" for
 // every folder); with neither, none, and the emit's coverage says so. A crossing that persists without the folder's mesh is
 // judged by the plugin rule below. Scene capture and --responsible-pair keep the plugin rule.
 //

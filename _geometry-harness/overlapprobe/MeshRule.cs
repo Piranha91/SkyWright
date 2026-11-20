@@ -36,7 +36,7 @@ sealed class MeshRule
     public string IdentitySuffix { get; }
     public HashSet<FormKey> Readmitted { get; } = new();
     public HashSet<FormKey> Targets { get; } = new();
-    public long Judged, CrossesWithout, Unknown, Joint, SeenRows, Partners, SeenNotTested;
+    public long Judged, CrossesWithout, Unknown, Joint, SeenRows, Partners, SeenNotTested, TouchingNotCredited;
     public double ReadmitSeconds, JudgeSeconds;
 
     public MeshRule(OverlapIndex idx, AssetResolver assets, PopulationScope? population, IReadOnlyList<string> meshFolders,
@@ -244,7 +244,7 @@ sealed class MeshRule
         return src.FirstOrDefault(x => MeshResponsibility.IsGame(MeshResponsibility.FolderOf(x))) ?? src.LastOrDefault();
     }
 
-    public enum Outcome { NotJudged, Folder, Persists, Unknown, SeenSkipped }
+    public enum Outcome { NotJudged, Folder, Persists, Unknown, SeenSkipped, Touching }
 
     // ---- the changed-region bound (Gate C) ------------------------------------------------------------------------------
     // A pair whose relation is a SURFACE relation (crossing, coplanar overlap, touching: MeshIntersection.QuerySurfaces, decided
@@ -363,6 +363,14 @@ sealed class MeshRule
         var folders = sides.Select(s => s.Owner.Folder!).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(Priority).ThenBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
         // Sight before cost (Gate C): a pair of one plugin, or of two base-game placements, ends as no row whether or not the
         // folder made it when every folder on it would be Seen; it is counted, not tested.
+        // Touching is never a folder's (decision 2026-11-19, the probes follow what happens in game): surfaces that only touch
+        // show nothing to a player, and kit seams touch by design. Such a pair gets no counterfactual and no folder row; a
+        // cross-plugin pair goes on to the plugin rule as before.
+        if (h.Query.SurfaceRelation == "touching")
+        {
+            TouchingNotCredited++;
+            return new(h, Outcome.Touching, null, folders, false, h.A, h.B, sides, null, null, null, OverlapSight.Blind, "", default);
+        }
         bool floorPair = h.A.Win.Plugin == h.B.Win.Plugin || (_isCore(h.A.Win.Plugin) && _isCore(h.B.Win.Plugin));
         if (floorPair && folders.All(f => !BlindPossible(f, h.A.Win.Plugin, h.B.Win.Plugin)))
         {
@@ -457,6 +465,7 @@ sealed class MeshRule
                 ["NewMeshNoFallback"] = Count(MeshShape.NoFallback), ["BaseGameReadmitted"] = Readmitted.Count,
                 ["JointSwap"] = Joint, ["SeenFolderRows"] = SeenRows, ["SeenNotTested"] = SeenNotTested,
                 ["SeenNotReadmitted"] = SeenNotReadmitted.Count, ["ChangedRegionClear"] = RegionShortcuts,
+                ["TouchingNotCredited"] = TouchingNotCredited,
             },
             $"credited: {Scope}; {Count(MeshShape.Credited):N0} model path(s) a credited folder reshapes; {Targets.Count:N0} target reference(s), "
           + $"{Partners:N0} base-game partner(s) readmitted; readmission {ReadmitSeconds:0.0}s, counterfactuals {JudgeSeconds:0.0}s");

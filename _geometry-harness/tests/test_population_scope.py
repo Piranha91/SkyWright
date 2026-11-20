@@ -82,12 +82,13 @@ R = {
     "v1": fk("000901", "Skyrim.esm"), "v2": fk("000902", "Skyrim.esm"), "e1": fk("000903", "Skyrim.esm"),
     "e2": fk("000904", "Skyrim.esm"), "e3": fk("000905", "Skyrim.esm"), "e4": fk("000906", "Skyrim.esm"),
     "w1": fk("000907", "Skyrim.esm"), "w2": fk("000901", "Update.esm"), "q1": fk("000911", "PpA.esp"), "q2": fk("000912", "PpA.esp"),
+    "r1": fk("000913", "PpA.esp"), "r2": fk("000914", "PpA.esp"),
 }
 OVERLAP = {"O1": ("a1", "b1"), "O2": ("a2", "b2"), "O3": ("d3", "a3"), "O3b": ("b4", "a4"), "O4": ("dE", "hA"),
            "O4b": ("hA", "bE"), "O5": ("pA", "bP"), "O5b": ("pA2", "bP2"), "O6": ("Kc", "b6"), "O7": ("x7", "b7"),
            "O8": ("m8", "b8"), "O9": ("a9", "b9"),
            "M1": ("s1", "s2"), "M2": ("v1", "v2"), "M3": ("c1", "c2b"), "M4": ("t1", "t2"), "M5": ("e1", "e2"), "M5b": ("e3", "e4"),
-           "M6": ("o2", "o1"), "M7": ("n1", "n2"), "M8": ("u1", "u2"), "M9": ("o3", "o4"), "M10": ("w1", "w2"), "M11": ("q1", "q2")}
+           "M6": ("o2", "o1"), "M7": ("n1", "n2"), "M8": ("u1", "u2"), "M9": ("o3", "o4"), "M10": ("w1", "w2"), "M11": ("q1", "q2"), "M12": ("r1", "r2")}
 CONTACT = {"K1": ("dc1", "hs1"), "K2": ("c2", "hs2"), "K3": ("c3", "hs3"), "K4": ("c4", "hs4"), "K5": ("c5", "hs5")}
 # What each arm holds, whole-order and in the population (the fixture's table).
 WANT = {
@@ -358,9 +359,9 @@ def mesh_counts_are_the_tables(arm, which):
         aside = m.get("SetAside") or {}
         # with: O8, M1, M2, M3, M6, M10, M11 given a counterfactual; M9 (Seen by its folder's plugin) counted, not tested
         want = {"with": (7, {"CrossesWithoutTheFolderMesh": 1, "MeshEqualsReplaced": 2, "NewMeshNoFallback": 1, "BaseGameReadmitted": 4,
-                             "SeenNotTested": 1}),
+                             "SeenNotTested": 1, "TouchingNotCredited": 1}),
                 "without": (0, {"CrossesWithoutTheFolderMesh": 0, "MeshEqualsReplaced": 0, "NewMeshNoFallback": 0, "BaseGameReadmitted": 0,
-                                "SeenNotTested": 0})}[arm]
+                                "SeenNotTested": 0, "TouchingNotCredited": 0})}[arm]
         cand = coverage(doc, "candidate refs").get("SetAside") or {}
         # eight base-game references set aside (seven Skyrim.esm, one Update.esm); with the mods, v1, v2, w1 and w2 come back in
         want = want + ({"with": 4, "without": 8}[arm],)
