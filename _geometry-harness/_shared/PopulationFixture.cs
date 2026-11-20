@@ -66,7 +66,7 @@ namespace HarnessShared;
 //  M8    u1 (Delta, MeshT) 2700 x u2 (A, Box) 2800  PpStrongMod +-60 / PpBase +-20          scoped: plugin row A x Delta (PpStrongMod
 //                                                                                         is not a population folder); every folder: PpStrongMod
 //  K4    cup c4 on slab hs4 (both PpBase, SlabM), E35   PpMeshMod +-60 / PpBase +-100      Stranded, reshaped host, PpMeshMod
-//  K5    cup c5 (PpBase, CupM) on slab hs5 (PpBase), E35  PpMeshMod +-10 / PpBase +-20     Stranded, reshaped dependent, PpMeshMod
+//  K5    cup c5 (PpBase, CupM) on slab hs5 (PpBase), E35  PpMeshMod +-5 / PpBase +-20      Stranded, reshaped dependent, PpMeshMod
 public static class PopulationFixture
 {
     public const SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
@@ -309,7 +309,7 @@ public static class PopulationFixture
         File.WriteAllBytes(Path.Combine(mm, "mshe.nif"), Mesh(60, true));
         File.WriteAllBytes(Path.Combine(mm, "mshz.nif"), Mesh(60, true));
         File.WriteAllBytes(Path.Combine(mm, "slabm.nif"), Mesh(60, true));
-        File.WriteAllBytes(Path.Combine(mm, "cupm.nif"), Mesh(10, true));
+        File.WriteAllBytes(Path.Combine(mm, "cupm.nif"), Mesh(5, true));   // +-5: 15 u clear of the slab, more than the collision radii and the 4 u epsilon
         var sm = Path.Combine(mods, StrongModName, "meshes", "pp"); Directory.CreateDirectory(sm);
         File.WriteAllBytes(Path.Combine(sm, "mshs.nif"), Mesh(30, true));
         File.WriteAllBytes(Path.Combine(sm, "msht.nif"), Mesh(60, true));
