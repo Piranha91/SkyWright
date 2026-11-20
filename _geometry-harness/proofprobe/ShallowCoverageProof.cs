@@ -298,7 +298,10 @@ static class ShallowCoverageProof
             var derived = new[] { "soup", "grid", "e" };   // built from the key by DepSoup / HostGrid; the timer entry changes nothing
             var parms = measure?.GetParameters().Select(x => x.Name!).Where(n => !derived.Contains(n)).Select(n => n.ToLowerInvariant()).OrderBy(n => n).ToList() ?? new();
             var fields = keyType?.GetProperties().Select(x => x.Name.ToLowerInvariant()).Where(n => n != "equalitycontract").OrderBy(n => n).ToList() ?? new();
-            var mutableAllowed = new[] { nameof(ContactIndex.Timer), nameof(ContactIndex.Trace), nameof(ContactIndex.StageProbe), nameof(ContactIndex.State) };
+            // The folder rule's two (mesh responsibility): DependentAuthoringBase picks the depBase Judge hands to Measure, which the
+            // key holds; DependentFilter picks which dependents Judge visits. Measure reads neither.
+            var mutableAllowed = new[] { nameof(ContactIndex.Timer), nameof(ContactIndex.Trace), nameof(ContactIndex.StageProbe), nameof(ContactIndex.State),
+                                         nameof(ContactIndex.DependentAuthoringBase), nameof(ContactIndex.DependentFilter) };
             static bool InitOnly(System.Reflection.PropertyInfo pi) => pi.SetMethod!.ReturnParameter.GetRequiredCustomModifiers()
                 .Any(m => m.FullName == "System.Runtime.CompilerServices.IsExternalInit");
             var mutable = typeof(ContactIndex).GetProperties().Where(pi => pi.SetMethod is { IsPublic: true } && !InitOnly(pi)).Select(pi => pi.Name).OrderBy(n => n).ToList();

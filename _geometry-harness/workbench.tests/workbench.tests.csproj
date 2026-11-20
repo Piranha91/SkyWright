@@ -16,6 +16,10 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" />
   </ItemGroup>
   <ItemGroup>
+    <!-- dispositions real runs wrote, for the end sentence (RunTallyTests, LauncherDoneLineTests) -->
+    <None Include="fixtures\dispositions\*.json" CopyToOutputDirectory="PreserveNewest" LinkBase="fixtures\dispositions" />
+  </ItemGroup>
+  <ItemGroup>
     <Using Include="System.IO" />
     <ProjectReference Include="..\workbench\workbench.csproj" />
     <ProjectReference Include="..\viewprobe\viewprobe.csproj" />

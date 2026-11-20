@@ -46,6 +46,7 @@ HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
 REPO = HARNESS.parent
 EVALRUN = HARNESS / "evalrun.py"
+from test_evalrun import CONTROLLER  # noqa: E402  (the built-in controller, runcontrol, as test_evalrun starts it)
 FIXT = HERE / "fixtures" / "evalrun"
 REGISTRY = REPO / ".claude" / "skills" / "world-edit-compatibility" / "references" / "check-registry.json"
 DIALOGUE = "records.registration-and-dialogue"
@@ -66,7 +67,7 @@ def check(ok, label):
 
 
 def evalrun(args, env):
-    return subprocess.run([sys.executable, str(EVALRUN)] + [str(a) for a in args], capture_output=True, text=True,
+    return subprocess.run(CONTROLLER + [str(a) for a in args], capture_output=True, text=True,
                           encoding="utf-8", errors="replace", env=env, timeout=300)
 
 

@@ -7,8 +7,6 @@ readings are injected through a file. The slot cases use the real idle_lock on a
 the repository's _claude/tools, and say so when it isn't there. No game, no lab, no houseCARL server.
 """
 import ctypes
-import contextlib
-import io
 import json
 import os
 import shutil
@@ -17,7 +15,6 @@ import sys
 import tempfile
 import threading
 import time
-import types
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -148,44 +145,6 @@ class Lab(K.Lab):
         return list((self.t / "ckpt" / arm).glob(f"*/sessions/{arm}/*"))
 
 
-def stage_ctx(lab: Lab, machine):
-    """The real stage over the lab: a run folder, a ledger with every record row open, and the lab as instance and game."""
-    out = lab.t / "stage"
-    (out / "evaluation").mkdir(parents=True)
-    (out / "prepare").mkdir()
-    shutil.copy2(lab.run_dir / "plan.json", out / "evaluation" / "plan.json")
-    shutil.copy2(lab.t / "prep.json", out / "prepare" / "preparation.json")
-    entries = {f"{c}__{a}": {"status": "mcp-only"} for c in K.CHECKS for a in lab.arm_ids}
-    (out / "evaluation" / "ledger.json").write_text(json.dumps({"entries": entries}), encoding="utf-8")
-    prof = lab.t / "inst" / "profiles" / "p"
-    prof.mkdir(parents=True)
-    (prof / "skyrim.ini").write_text("[General]\n", encoding="utf-8")
-    (out / "records").mkdir()
-    return types.SimpleNamespace(out=out, game=lab.t, instance=lab.t / "inst", profile="p", id="m", machine={"readerCmd": f'"{sys.executable}" "{FAKE}"', **machine})
-
-
-def run_stage(lab, machine, script=None, arm_minutes=None):
-    """stage_records in this process, the stand-in's switches in the environment. Returns (printed text, refusal or None)."""
-    import evalpipeline as EP
-    saved_env, saved_min = dict(os.environ), EP.RECORDS_ARM_MINUTES
-    os.environ.update(lab.env(script))
-    if arm_minutes:
-        EP.RECORDS_ARM_MINUTES = arm_minutes
-    ctx = stage_ctx(lab, machine)
-    buf = io.StringIO()
-    refusal = None
-    try:
-        with contextlib.redirect_stdout(buf):
-            EP.stage_records(ctx, {}, ctx.out / "records")
-    except EP.Refusal as ex:
-        refusal = str(ex)
-    finally:
-        os.environ.clear()
-        os.environ.update(saved_env)
-        EP.RECORDS_ARM_MINUTES = saved_min
-    return buf.getvalue(), refusal, ctx
-
-
 def idle_lock():
     named = os.environ.get("KEEP_IDLE_LOCK")
     f = Path(named) if named else HARNESS.parent / "_claude" / "tools" / "idle_lock.py"
@@ -206,34 +165,6 @@ def case_01_one_worker_reads_in_this_process(tmp):
         sent = [r["method"] for r in lab.event_rows() if r["event"] == "request" and r["arm"] == arm]
         kept = [json.loads(x)["method"] for f in (lab.t / "ckpt" / arm).glob(f"*/sessions/{arm}/request.jsonl") for x in f.read_text(encoding="utf-8").splitlines()]
         T.expect(kept, sent, f"01: {arm}'s transcript holds what its reader was sent, in order")
-
-
-def case_18_the_stage_asks_for_one_worker_unless_the_machine_file_says(tmp):
-    import evalpipeline as EP
-    seen = []
-    lab = Lab(tmp / "a", arms=ARMS[:2])
-
-    def ask(machine):
-        saved = EP.child, EP.reader_cmd
-        ctx = stage_ctx(lab, machine)
-        try:
-            EP.child = lambda c, d, op, argv, **k: seen.append((op, argv, k)) or {"exitCode": 0}
-            EP.reader_cmd = lambda c: "reader"
-            try:
-                EP.stage_records(ctx, {}, ctx.out / "records")
-            except EP.Refusal:
-                pass
-        finally:
-            EP.child, EP.reader_cmd = saved
-            shutil.rmtree(ctx.out)
-            shutil.rmtree(lab.t / "inst" / "profiles")
-        op, argv, k = next(x for x in seen if x[0] == "records-capture")
-        seen.clear()
-        T.check(k.get("heavy") is True, "18: the capture takes the machine slot, once, whatever the workers")
-        return argv[argv.index("--workers") + 1] if "--workers" in argv else None
-    T.expect(ask({}), "auto", "18: with no recordWorkers in the machine file the stage chooses from memory")
-    T.expect(ask({"recordWorkers": 1}), "1", "18: recordWorkers 1 is how a user refuses")
-    T.expect(ask({"recordWorkers": "auto"}), "auto", "18: the machine file's recordWorkers reaches the capture")
 
 
 # ---------------------------------------------------------------- what arms must not share
@@ -303,13 +234,11 @@ def case_06_a_reader_that_dies_beside_others_reads_again_alone(tmp):
 
 def case_07_a_refusal_cured_alone_stays_visible(tmp):
     lab = Lab(tmp / "a", arms=ARMS[:2])
-    text, refusal, ctx = run_stage(lab, {"recordWorkers": 2}, script={"candidate-01": {"refuseBeside": 4}, "baseline": {"delay": 3}})
-    rec = json.loads((ctx.out / "records" / "records.json").read_text(encoding="utf-8"))
-    T.check("refused" not in rec["capture"].get("candidate-01", {"refused": "absent"}), "07: the arm's final answer is the one read alone")
-    T.check("candidate-01" in ((rec.get("workers") or {}).get("curedAlone") or {}), "07: records.json names the arm a retry cured")
-    T.check("candidate-01" in text and "alone" in text, f"07: the stage says so to its caller, got {text[-300:]!r}")
-    cap = json.loads(next((ctx.out / "records").glob("capture-*/capture-workers.json")).read_text(encoding="utf-8")) if list((ctx.out / "records").glob("capture-*/capture-workers.json")) else {}
-    T.check("candidate-01" in (cap.get("curedAlone") or {}), "07: capture-workers.json names it")
+    p = lab.capture(workers=2, script={"candidate-01": {"refuseBeside": 4}, "baseline": {"delay": 3}})
+    T.check(p.returncode == 0, f"07: the capture ends clean once the arm reads alone, exit {p.returncode}: {p.stdout[-300:]}")
+    T.check("refused" not in lab.summary().get("candidate-01", {"refused": "absent"}), "07: the arm's final answer is the one read alone")
+    cap = json.loads((lab.out / "capture-workers.json").read_text(encoding="utf-8")) if (lab.out / "capture-workers.json").is_file() else {}
+    T.check("candidate-01" in (cap.get("curedAlone") or {}), "07: capture-workers.json names the arm a retry cured")
 
 
 def case_06b_a_capture_process_that_dies_is_named_and_read_again(tmp):
@@ -334,13 +263,13 @@ def case_08_an_arm_refused_alone_too_is_refused(tmp):
 
 def case_09_a_deadline_is_named_and_not_retried(tmp):
     lab = Lab(tmp / "a", arms=ARMS[:3])
-    text, refusal, ctx = run_stage(lab, {"recordWorkers": 3}, script={"candidate-01": {"hang": True}}, arm_minutes=0.1)
-    T.check(refusal is not None and "candidate-01" in refusal and "deadline" in refusal, f"09: the stage names the arm and the deadline, got {refusal}")
-    T.check(refusal is not None and "baseline" not in refusal and "candidate-02" not in refusal, "09: only that arm is named")
+    p = lab.capture(workers=3, script={"candidate-01": {"hang": True}}, deadline=0.1)
+    v = lab.summary().get("candidate-01", {})
+    T.check("deadline" in str(v.get("refused")), f"09: the arm is refused at its deadline, got {v}")
+    T.check(all("refused" not in lab.summary().get(a, {}) for a in ("baseline", "candidate-02")), "09: only that arm is refused")
     T.expect(len(lab.starts("candidate-01")), 1, "09: a deadline is not retried")
-    root = ctx.out / "records" / "checkpoints"
-    T.check((root / "baseline" / "checkpoint.json").is_file() and (root / "candidate-02" / "checkpoint.json").is_file(), "09: finished arms are kept")
-    T.check(not (root / "candidate-01" / "checkpoint.json").is_file(), "09: the stopped arm has no checkpoint")
+    T.check(lab.checkpoint("baseline") and lab.checkpoint("candidate-02"), "09: finished arms are kept")
+    T.check(not lab.checkpoint("candidate-01"), "09: the stopped arm has no checkpoint")
     if lab.most_at_once() < 2:
         T.check(False, "09: arms did not overlap")
 
@@ -626,23 +555,6 @@ def case_17_workers_stay_under_one_slot(tmp):
     T.check(not (root / "HEAVY-SLOT").exists(), "17: the slot is free once it ends")
 
 
-def case_19_a_slot_wait_that_runs_out_says_so(tmp):
-    tool = idle_lock()
-    if tool is None:
-        print("   19: idle_lock.py is not in this checkout: not run", flush=True)
-        return
-    lab = Lab(tmp / "a", arms=ARMS[:1])
-    root = tmp / "runs"
-    (root / "locks").mkdir(parents=True)
-    prefix = [sys.executable, str(tool), "hold", "--lock", "{lock}", "--purpose", "{purpose}", "--max-min", "5", "--wait-timeout-min", "0.01", "--min-free-gb", "999999",
-              "--runs-root", str(root), "--checks", "1", "--ok-interval-s", "0.1", "--busy-interval-s", "0.1"]
-    text, refusal, ctx = run_stage(lab, {"heavyPrefix": prefix, "lockDir": str(root / "locks")})
-    T.check(refusal is not None and "wait for memory ran out" in refusal, f"19: the stage says the wait for memory ran out, got {refusal}")
-    T.check(refusal is not None and "999999" in refusal, f"19: it says how much was needed, got {refusal}")
-    T.check(refusal is not None and "close" in refusal and "--min-free-gb" in refusal, f"19: it says what to try, got {refusal}")
-    T.expect(lab.starts(), [], "19: no reader started")
-
-
 def case_20_a_childs_run_store_is_its_parents(tmp):
     lab = Lab(tmp / "a", arms=ARMS[:3])
     env = lab.env()
@@ -711,11 +623,6 @@ def case_24_a_bad_worker_value_is_one_plain_sentence(tmp):
         T.expect(p.returncode, 2, f"24: --workers {bad} is refused")
         T.check("auto or a whole number" in p.stderr and "Traceback" not in p.stderr, f"24: --workers {bad} gets one sentence, got {p.stderr[-160:]!r}")
         T.expect(lab.starts(), [], f"24: --workers {bad} reads no arm")
-    lab = Lab(tmp / "stage", arms=ARMS[:1])
-    text, refusal, ctx = run_stage(lab, {"recordWorkers": "many"})
-    T.check(refusal is not None and "recordWorkers" in refusal and "auto or a whole number" in refusal, f"24: the stage's sentence names the machine file's value, got {refusal}")
-    T.expect(lab.starts(), [], "24: and the stage reads no arm")
-    T.check(not list((ctx.out / "records").glob("capture-*")), "24: before any capture starts")
 
 
 def case_25_a_failed_measurement_costs_no_transcript(tmp):

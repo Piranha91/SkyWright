@@ -1589,11 +1589,11 @@ def all_reader_lines(pres: dict) -> list:
 
 def import_origin_control(tmp: Path, index: dict):
     """Known answers for how a report describes imported MCP evidence (option A, 2026-09-17). The fixture bundle is
-    real: one mcp-only check imported by the controller on four arms - fresh, reused from another evaluation, a
-    receipt written before an origin had to be declared, and one whose prerequisite failed after the import had been
-    accepted. Beside the affected result the reader must be told that a reused result was not measured for this
-    evaluation and that its source was declared rather than re-checked; that a legacy result's origin is not
-    recorded (never that it is fresh); and which prerequisite a blocked check waited for. Plan, arm and hash detail
+    real: one mcp-only check imported by the controller fresh and reused from another evaluation, and one arm whose
+    prerequisite failed. Beside the affected result the reader must be told that a reused result was not measured for
+    this evaluation and that its source was declared rather than re-checked; that a result whose origin is not recorded
+    is never called fresh (read here with the origin fields removed: the pre-origin receipt a bundle once carried had
+    only the Python controller as its writer); and that an arm whose prerequisite failed is credited nowhere. Plan, arm and hash detail
     belongs to the evidence index, and no measured count may move because of any of it."""
     case = IMPORT_ORIGIN_CASE
     label = "R7/import-origin"
@@ -1617,22 +1617,18 @@ def import_origin_control(tmp: Path, index: dict):
     ledger = load(bundle / "ledger.json") or {}
     declared = {r.get("armId"): r.get("origin") for r in disp.get("importedEvidence") or []}
     expect([declared.get(fresh_arm), declared.get(reused_arm), declared.get(legacy_arm), declared.get(blocked_arm)],
-           ["fresh", "reused", "unknown", None],
-           f"{label}: premise - the bundle credits a fresh, a reused and a legacy import and no blocked one")
-    expect(next((m.get("status") for m in (disp.get("evaluation") or {}).get("missing") or []
-                 if m.get("checkId") == check_id and m.get("armId") == blocked_arm), None),
-           f"blocked(prerequisite:{prerequisite})",
-           f"{label}: premise - the blocked import is missing by its prerequisite")
+           ["fresh", "reused", None, None],
+           f"{label}: premise - the bundle credits a fresh and a reused import and no blocked one")
     expect(((ledger.get("entries") or {}).get(f"{check_id}__{fresh_arm}") or {}).get("status"), "reused",
            f"{label}: premise - the FRESH import's ledger status is the controller's own `reused`")
 
     # ---- the plan records each credited import's origin, from the receipt, and no uncredited one
     rows = {r.get("armId"): r for r in ((pres.get("imports") or {}).get("rows") or [])}
     expect([(pres.get("imports") or {}).get("source"), sorted(rows)],
-           ["disposition", sorted([fresh_arm, reused_arm, legacy_arm])],
-           f"{label}: the plan lists the three credited imports and where the list came from")
-    expect([rows.get(a, {}).get("origin") for a in (fresh_arm, reused_arm, legacy_arm)],
-           ["fresh", "reused", "unknown"], f"{label}: each import's origin as the receipt records it")
+           ["disposition", sorted([fresh_arm, reused_arm])],
+           f"{label}: the plan lists the two credited imports and where the list came from")
+    expect([rows.get(a, {}).get("origin") for a in (fresh_arm, reused_arm)],
+           ["fresh", "reused"], f"{label}: each import's origin as the receipt records it")
     expect((rows.get(reused_arm) or {}).get("reusedFrom"), fixture["reusedFrom"],
            f"{label}: the reused import keeps the source plan, arm and result hash it declared")
     expect((rows.get(reused_arm) or {}).get("reusedFromVerified"), False,
@@ -1651,12 +1647,10 @@ def import_origin_control(tmp: Path, index: dict):
         setup cannot stand in for it."""
         return next((x for x in lines if arm_labels[arm_id] in x and import_title in x), "")
 
-    reused_line, legacy_line, fresh_line = line_for(reused_arm), line_for(legacy_arm), line_for(fresh_arm)
+    reused_line, fresh_line = line_for(reused_arm), line_for(fresh_arm)
     check(reused_sentence.rstrip(".") in reused_line,
           f"{label}: the reused result's own line says it was not measured here and its source was not re-checked "
           f"(got {reused_line!r})")
-    check(unknown_sentence.rstrip(".") in legacy_line,
-          f"{label}: the legacy result's own line says its origin is not recorded (got {legacy_line!r})")
     check(bool(fresh_line) and reused_sentence.rstrip(".") not in fresh_line
           and unknown_sentence.rstrip(".") not in fresh_line
           and "reused" not in fresh_line.lower(),
@@ -1664,9 +1658,7 @@ def import_origin_control(tmp: Path, index: dict):
           f"ledger status never reaches the reader (got {fresh_line!r})")
     # Re-baselined 2026-10-09 (lane P, D1 accepted): the reused result reports a count with no pair of mods, so it
     # leaves the report's detail list for the evidence index's set-aside list, and its qualification travels with it
-    # (said beside the result, where the result is printed). The legacy result's line is a no-finding line and stays.
-    check(normalise(unknown_sentence) in normalise(md), f"{label}: report.md carries the unknown-origin qualification")
-    check(html_escape(unknown_sentence) in html, f"{label}: report.html carries the unknown-origin qualification")
+    # (said beside the result, where the result is printed).
     reused_ids = [f.get("id") for f in pres.get("findings") or [] if f.get("kind") == "finding"
                   and f.get("checkId") == check_id and f.get("armId") == reused_arm]
     aside_lines = [ln for ln in idx.splitlines() if ln.startswith("- [") and any(f"[{i}]" in ln for i in reused_ids)
@@ -1674,8 +1666,7 @@ def import_origin_control(tmp: Path, index: dict):
     check(bool(reused_ids) and any(normalise(reused_sentence) in normalise(ln) for ln in aside_lines),
           f"{label}: the reused result's set-aside line in evidence-index.md carries its qualification "
           f"(ids {reused_ids}, lines {aside_lines[:1]!r})")
-    check("fresh" not in normalise(legacy_line).lower() and legacy_arm not in md,
-          f"{label}: the legacy result is never called fresh and no setup id leaks into the report")
+    check(reused_arm not in md and blocked_arm not in md, f"{label}: no setup id leaks into the report")
     for token in (fixture["reusedFrom"]["planId"], fixture["reusedFrom"]["resultSha256"],
                   str((rows.get(reused_arm) or {}).get("receiptId"))):
         check(token not in md and token not in html,
@@ -1717,44 +1708,36 @@ def import_origin_control(tmp: Path, index: dict):
     for token in (fixture["reusedFrom"]["planId"], fixture["reusedFrom"]["armId"],
                   fixture["reusedFrom"]["resultSha256"]):
         check(token in idx, f"{label}: the evidence index carries the reused import's {token[:12]!r}")
-    for arm in (fresh_arm, reused_arm, legacy_arm):
+    for arm in (fresh_arm, reused_arm):
         rid = str((rows.get(arm) or {}).get("receiptId"))
         check(rid in idx, f"{label}: the evidence index names the receipt of the import on {arm}")
-    check(f"`{check_id}` | {legacy_arm} | `unknown`" in idx,
-          f"{label}: the evidence index labels the legacy import's origin unknown")
 
-    # ---- the blocked import: named by its prerequisite, credited nowhere
-    prerequisite_reason = ("Was not checked, because the check it depends on (whether the tested load order can "
-                           "resolve its required plugins) has no accepted result for that setup")
-    check(prerequisite_reason in normalise(md),
-          f"{label}: what still needs checking names the prerequisite the blocked import waited for")
-    check(prerequisite_reason in html, f"{label}: report.html names it too")
+    # ---- the arm whose prerequisite failed: credited nowhere (that the report names the prerequisite an accepted
+    # import later waited for needed the Python controller run in process, D-A2, and is not tested here)
     check(blocked_arm not in rows and not line_for(blocked_arm),
           f"{label}: the blocked import is not credited and gets no result line "
           f"(got {line_for(blocked_arm)!r})")
-    blocked = finding_where(pres, kind="missing", checkId=check_id, armId=blocked_arm)
-    check(len(blocked) == 1 and prerequisite in str(blocked[0].get("plain")),
-          f"{label}: its evidence-index sentence keeps the prerequisite's own check id")
 
     # ---- an older bundle: no disposition list, the same origins derived from the receipts
     derived, derived_md, _, derived_idx = import_origin_view(bundle, drop_disposition_list=True,
                                                              strip_receipts=False, with_index=True)
     derived_rows = {r.get("armId"): r.get("origin") for r in ((derived.get("imports") or {}).get("rows") or [])}
     expect([(derived.get("imports") or {}).get("source"),
-            [derived_rows.get(a) for a in (fresh_arm, reused_arm, legacy_arm)]],
-           ["receipts", ["fresh", "reused", "unknown"]],
+            [derived_rows.get(a) for a in (fresh_arm, reused_arm)]],
+           ["receipts", ["fresh", "reused"]],
            f"{label}: a bundle whose disposition lists no imports derives the same origins from its receipts")
-    check(normalise(reused_sentence) in normalise(derived_idx)
-          and normalise(unknown_sentence) in normalise(derived_md),
-          f"{label}: that older bundle's report and index carry the same qualifications, each where its result is")
+    check(normalise(reused_sentence) in normalise(derived_idx),
+          f"{label}: that older bundle's index carries the same qualification, where its result is")
 
     # ---- no measured count moves because of any of it
     stripped, stripped_md, _ = import_origin_view(bundle, drop_disposition_list=True, strip_receipts=True)
     stripped_rows = {r.get("armId"): r.get("origin") for r in ((stripped.get("imports") or {}).get("rows") or [])}
-    expect([stripped_rows.get(a) for a in (fresh_arm, reused_arm, legacy_arm)], ["unknown"] * 3,
+    expect([stripped_rows.get(a) for a in (fresh_arm, reused_arm)], ["unknown"] * 2,
            f"{label}: premise - with the origin fields removed every import reads unknown")
     check(normalise(reused_sentence) not in normalise(stripped_md),
           f"{label}: premise - and no result is then called reused")
+    check(normalise(unknown_sentence) in normalise(stripped_md),
+          f"{label}: and a result whose origin is not recorded says so beside it, never that it is fresh")
     with_origin, _, _ = import_origin_view(bundle, drop_disposition_list=False, strip_receipts=False)
     expect(import_origin_skeleton(with_origin), import_origin_skeleton(stripped),
            f"{label}: every finding identity, count, row total and completion number is identical to the same "

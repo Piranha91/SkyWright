@@ -1,0 +1,4782 @@
+{
+ "python": "3.12.6",
+ "placeholders": {
+  "backslash": "<ROOT\\>",
+  "forward": "<ROOT/>",
+  "doubled": "<ROOT\\\\>"
+ },
+ "notProof": "No passing order found within the budget is not proof that none exists.",
+ "defaultProbes": [
+  "navownprobe",
+  "overlapprobe",
+  "contactprobe"
+ ],
+ "rowIdentity": [
+  {
+   "args": [
+    "NAV-EDGE",
+    "000801:Target.esp",
+    null,
+    "Target.esp",
+    null
+   ],
+   "want": "nav-edge|000801:target.esp|target.esp"
+  },
+  {
+   "args": [
+    "Nav-Edge",
+    "000801:TARGET.ESP",
+    null,
+    "TARGET.esp",
+    3
+   ],
+   "want": "nav-edge|000801:target.esp|target.esp"
+  },
+  {
+   "args": [
+    "OVERLAP",
+    "000802:B.esp",
+    "000801:A.esp",
+    "B.esp",
+    null
+   ],
+   "want": "overlap|000801:a.esp|000802:b.esp"
+  },
+  {
+   "args": [
+    "OVERLAP",
+    "000801:A.esp",
+    "000802:B.esp",
+    "B.esp",
+    null
+   ],
+   "want": "overlap|000801:a.esp|000802:b.esp"
+  },
+  {
+   "args": [
+    "OVERLAP",
+    "000801:a.esp",
+    "000801:A.esp",
+    "x",
+    null
+   ],
+   "want": "overlap|000801:a.esp|000801:a.esp"
+  },
+  {
+   "args": [
+    "EDGE-IDX",
+    "000802:B.esp",
+    "000801:A.esp",
+    "B.esp",
+    17
+   ],
+   "want": "edge-idx|000802:b.esp|000801:a.esp|17"
+  },
+  {
+   "args": [
+    "EDGE-IDX",
+    "000801:A.esp",
+    "000802:B.esp",
+    "B.esp",
+    0
+   ],
+   "want": "edge-idx|000801:a.esp|000802:b.esp|0"
+  },
+  {
+   "args": [
+    "CONTACT",
+    "00AB01:\u00c4rger.esp",
+    "00ab01:\u00e4rger.esp",
+    "\u00c9.esp",
+    null
+   ],
+   "want": "contact|00ab01:\u00e4rger.esp|00ab01:\u00e4rger.esp"
+  },
+  {
+   "args": [
+    "CONTACT",
+    "Z",
+    "a",
+    "q",
+    null
+   ],
+   "want": "contact|a|z"
+  },
+  {
+   "args": [
+    "CONTACT",
+    "_",
+    "A",
+    "q",
+    null
+   ],
+   "want": "contact|_|a"
+  }
+ ],
+ "parseDiff": [
+  {
+   "name": "a neutral diff with a delta block",
+   "text": "$ conflictdiff.exe C:\\fixture\\navownprobe\\baseline.json C:\\fixture\\navownprobe\\candidate-02-repair.json\n(exit 0, 0.2s)\n\nbase    : C:\\fixture\\navownprobe\\baseline.json  (1 conflicts, 1 rows; predicates on 1)\nchanged : C:\\fixture\\navownprobe\\candidate-02-repair.json  (1 conflicts, 1 rows; base-row predicates carried: 1, measured against baseline.json)\npopulation: base load-time / state baseline | changed load-time / state baseline\n   configuration (base)   : ca002c555987 (4 plugins, 3 providers, load-time/baseline, candidate:candidate-00-baseline.json)\n   configuration (changed): bfd09d203e4a (4 plugins, 3 providers, load-time/baseline, candidate:candidate-02-repair.json)\n   configuration delta    : this is what the differential below is a difference OF \u2014\n      - plugin order changed: 1 pair(s) flipped, first FixtureOther.esp / FixtureThird.esp\n      - plugin content changed: FixtureThird.esp\nnot indented: the block ends here\n      - not part of the delta\n\n\n   GONE    NAV-EDGE   FixtureTarget.esp  x  FixtureBase.esm   -1 record(s): repaired 1\n   NEW     NAV-EDGE   FixtureThird.esp  x  FixtureOther.esp   +1 record(s): created 1\n\n   repaired     : 1 record(s)   (the physical predicate went Holds -> Gone)\n   reclassified : 0 record(s)   (left the class still holding 0; left with no physical defect to begin with 0; entered reading Gone 0)\n   created      : 1 record(s)   (entered the class with the predicate holding)\n   unmeasured   : 0 record(s)   (a predicate the credit rests on could not be measured \u2014 counted apart)\n   unchanged    : 0 record(s)   (predicate flips beside: Holds -> Gone 0, Gone -> Holds 0)\n\n   verdict : DIFFERENTIAL-NEUTRAL  (repaired 1 - created 1 = net 0; reclassified 0, unmeasured 0)\n",
+   "want": {
+    "verdict": "DIFFERENTIAL-NEUTRAL",
+    "counts": {
+     "repaired": 1,
+     "reclassified": 0,
+     "created": 1,
+     "unmeasured": 0,
+     "unchanged": 0
+    },
+    "refusals": [],
+    "delta": [
+     "- plugin order changed: 1 pair(s) flipped, first FixtureOther.esp / FixtureThird.esp",
+     "- plugin content changed: FixtureThird.esp"
+    ]
+   }
+  },
+  {
+   "name": "an unjudged diff with refusals",
+   "text": "   configuration delta    : none \u2014 the two runs consumed the same plugins, in the same order, over the same providers and overlays.\n\n   ! the base emit carries no physical predicates (written before 2026-09-03?) \u2014 every vanished row reads UNMEASURED\n   repaired     : 0 record(s)\n   reclassified : 12,345 record(s)\n   created      : 1,234,567 record(s)\n   unmeasured   : 7 record(s)\n   unchanged    : 0 record(s)\n   ! REFUSED: the unjudgeable share rose from 0.00% to 40.00%\n      ! REFUSED: a second refusal, indented   \t\n   !! IDENTICAL CONFIGURATIONS PRODUCED DIFFERENT ROWS.\n\n   verdict : DIFFERENTIAL-UNJUDGED   [POPULATION/STATE DIFFERENCE \u2014 not repair credit]  (repaired 0 - created 1 = net -1)\n   verdict : DIFFERENTIAL-VERIFIED  (a second verdict line is not read)\n",
+   "want": {
+    "verdict": "DIFFERENTIAL-UNJUDGED",
+    "counts": {
+     "repaired": 0,
+     "reclassified": 12345,
+     "created": 1234567,
+     "unmeasured": 7,
+     "unchanged": 0
+    },
+    "refusals": [
+     "! REFUSED: the unjudgeable share rose from 0.00% to 40.00%",
+     "! REFUSED: a second refusal, indented"
+    ],
+    "delta": []
+   }
+  },
+  {
+   "name": "empty",
+   "text": "",
+   "want": {
+    "verdict": "(no verdict line)",
+    "counts": {},
+    "refusals": [],
+    "delta": []
+   }
+  },
+  {
+   "name": "no verdict",
+   "text": "conflictdiff: could not read the base emit\n",
+   "want": {
+    "verdict": "(no verdict line)",
+    "counts": {},
+    "refusals": [],
+    "delta": []
+   }
+  },
+  {
+   "name": "verdict without spaces",
+   "text": "verdict:DIFFERENTIAL-HARMFUL123",
+   "want": {
+    "verdict": "DIFFERENTIAL-HARMFUL",
+    "counts": {},
+    "refusals": [],
+    "delta": []
+   }
+  },
+  {
+   "name": "lower-case verdict word is not one",
+   "text": "verdict : differential-neutral",
+   "want": {
+    "verdict": "(no verdict line)",
+    "counts": {},
+    "refusals": [],
+    "delta": []
+   }
+  },
+  {
+   "name": "a count repeated keeps its first place and last value",
+   "text": "created : 1\nrepaired : 2\ncreated : 3\n",
+   "want": {
+    "verdict": "(no verdict line)",
+    "counts": {
+     "created": 3,
+     "repaired": 2
+    },
+    "refusals": [],
+    "delta": []
+   }
+  },
+  {
+   "name": "a count not at a line start",
+   "text": "x repaired : 5\n  \t repaired:6 trailing\nunchanged :\n",
+   "want": {
+    "verdict": "(no verdict line)",
+    "counts": {
+     "repaired": 6
+    },
+    "refusals": [],
+    "delta": []
+   }
+  },
+  {
+   "name": "counts after a carriage return alone are one line to the pattern",
+   "text": "repaired : 1\rcreated : 2\r\nunmeasured : 3",
+   "want": {
+    "verdict": "(no verdict line)",
+    "counts": {
+     "repaired": 1,
+     "unmeasured": 3
+    },
+    "refusals": [],
+    "delta": []
+   }
+  },
+  {
+   "name": "line separators splitlines knows",
+   "text": "a ! REFUSED one\u000bCONFIGURATION DELTA here\f  first\u2028  second\u2029\u001cthird\u0085 ! REFUSED two",
+   "want": {
+    "verdict": "(no verdict line)",
+    "counts": {},
+    "refusals": [
+     "a ! REFUSED one",
+     "! REFUSED two"
+    ],
+    "delta": [
+     "first",
+     "second"
+    ]
+   }
+  },
+  {
+   "name": "the delta block ends at a blank line",
+   "text": "Configuration Delta:\n  a\n   \n  b\n",
+   "want": {
+    "verdict": "(no verdict line)",
+    "counts": {},
+    "refusals": [],
+    "delta": [
+     "a"
+    ]
+   }
+  },
+  {
+   "name": "the delta block ends at a line with no leading space",
+   "text": "configuration delta\n\ttabbed is not a space\n  c\n",
+   "want": {
+    "verdict": "(no verdict line)",
+    "counts": {},
+    "refusals": [],
+    "delta": []
+   }
+  },
+  {
+   "name": "two delta blocks",
+   "text": "configuration delta\n  one\n\nconfiguration delta\n  two\n  configuration delta inside restarts\n  three",
+   "want": {
+    "verdict": "(no verdict line)",
+    "counts": {},
+    "refusals": [],
+    "delta": [
+     "one",
+     "two",
+     "three"
+    ]
+   }
+  },
+  {
+   "name": "unicode digits in a count",
+   "text": "repaired : \u0663\u0664\n",
+   "want": {
+    "verdict": "(no verdict line)",
+    "counts": {
+     "repaired": 34
+    },
+    "refusals": [],
+    "delta": []
+   }
+  }
+ ],
+ "classify": [
+  {
+   "name": "no rows",
+   "rows": [],
+   "want": "PASSES-COMPLETED-CHECKS"
+  },
+  {
+   "name": "one clean row",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    }
+   ],
+   "want": "PASSES-COMPLETED-CHECKS"
+  },
+  {
+   "name": "every verdict that completes",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-VERIFIED",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    },
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-NEUTRAL",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    },
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-HARMFUL",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    },
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    }
+   ],
+   "want": "PASSES-COMPLETED-CHECKS"
+  },
+  {
+   "name": "illegal outranks a new defect",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 3,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    },
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": true,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    }
+   ],
+   "want": "ILLEGAL"
+  },
+  {
+   "name": "one new defect",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    },
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 1,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    }
+   ],
+   "want": "REGRESSION"
+  },
+  {
+   "name": "no new defect at zero",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    }
+   ],
+   "want": "PASSES-COMPLETED-CHECKS"
+  },
+  {
+   "name": "a new defect outranks a refusal",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": true,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    },
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 1,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    }
+   ],
+   "want": "REGRESSION"
+  },
+  {
+   "name": "probe exit non-zero",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 4,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    }
+   ],
+   "want": "UNRESOLVED"
+  },
+  {
+   "name": "probe exit -1",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": -1,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    }
+   ],
+   "want": "UNRESOLVED"
+  },
+  {
+   "name": "probe exit not set",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": null,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    }
+   ],
+   "want": "UNRESOLVED"
+  },
+  {
+   "name": "probe refused",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": true,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    }
+   ],
+   "want": "UNRESOLVED"
+  },
+  {
+   "name": "emit not written",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     },
+     "emitNotWritten": true
+    }
+   ],
+   "want": "UNRESOLVED"
+  },
+  {
+   "name": "emit not written, false",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     },
+     "emitNotWritten": false
+    }
+   ],
+   "want": "PASSES-COMPLETED-CHECKS"
+  },
+  {
+   "name": "verdict unjudged",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-UNJUDGED",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    }
+   ],
+   "want": "UNRESOLVED"
+  },
+  {
+   "name": "no verdict line",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "(no verdict line)",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    }
+   ],
+   "want": "UNRESOLVED"
+  },
+  {
+   "name": "diff not run",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "(not run)",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    }
+   ],
+   "want": "UNRESOLVED"
+  },
+  {
+   "name": "a diff refusal",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [
+       "! REFUSED: x"
+      ],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    }
+   ],
+   "want": "UNRESOLVED"
+  },
+  {
+   "name": "one unmeasured count",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {
+       "unmeasured": 1
+      },
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    }
+   ],
+   "want": "UNRESOLVED"
+  },
+  {
+   "name": "unmeasured count zero",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {
+       "unmeasured": 0,
+       "created": 9,
+       "repaired": 2
+      },
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    }
+   ],
+   "want": "PASSES-COMPLETED-CHECKS"
+  },
+  {
+   "name": "one created row unmeasured",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 1
+     }
+    }
+   ],
+   "want": "UNRESOLVED"
+  },
+  {
+   "name": "a reverse that did not write its emit does not block by itself",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     },
+     "reverseEmitNotWritten": true,
+     "reverseExit": 0
+    }
+   ],
+   "want": "PASSES-COMPLETED-CHECKS"
+  },
+  {
+   "name": "a diff exit code is not read",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     },
+     "diffExit": 3
+    }
+   ],
+   "want": "PASSES-COMPLETED-CHECKS"
+  },
+  {
+   "name": "the second row decides",
+   "rows": [
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    },
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {},
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    },
+    {
+     "probe": "p",
+     "candidate": "c",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {
+       "unmeasured": 2
+      },
+      "refusals": [],
+      "delta": []
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    }
+   ],
+   "want": "UNRESOLVED"
+  }
+ ],
+ "emits": [
+  {
+   "name": "base",
+   "text": "{\n \"Probe\": \"navownprobe\",\n \"Conflicts\": [\n  {\n   \"Kind\": \"NAV-EDGE\",\n   \"A\": \"Target.esp\",\n   \"B\": \"Base.esm\",\n   \"Summary\": \"fixture\",\n   \"Necessary\": [\n    {\n     \"FormKey\": \"000801:Target.esp\",\n     \"Physical\": \"Holds\"\n    },\n    {\n     \"FormKey\": \"000802:Target.esp\",\n     \"Physical\": \"Gone\"\n    }\n   ]\n  },\n  {\n   \"Kind\": \"OVERLAP\",\n   \"A\": \"Other.esp\",\n   \"B\": \"Base.esm\",\n   \"Summary\": \"fixture\",\n   \"Necessary\": [\n    {\n     \"FormKey\": \"000810:Other.esp\",\n     \"Physical\": \"Holds\"\n    }\n   ],\n   \"Alternative\": [\n    {\n     \"FormKey\": \"000811:Base.esm\"\n    }\n   ]\n  }\n ],\n \"Configuration\": {\n  \"SchemaVersion\": 1,\n  \"Fingerprint\": \"ca002c555987aaaabbbbccccddddeeeeffff0000111122223333444455556666\",\n  \"Plugins\": [\n   {\n    \"Name\": \"A.esm\",\n    \"Path\": \"C:/fixture/plugins/A.esm\",\n    \"Sha256\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n    \"Bytes\": 3\n   },\n   {\n    \"Name\": \"B.esp\",\n    \"Path\": \"C:/fixture/plugins/B.esp\",\n    \"Sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\n    \"Bytes\": 4\n   }\n  ],\n  \"Providers\": [\n   {\n    \"Name\": \"overwrite\",\n    \"Kind\": \"overwrite\"\n   }\n  ],\n  \"Overlays\": [\n   {\n    \"Kind\": \"bos\",\n    \"Path\": \"C:/fixture/x_SWAP.ini\",\n    \"Sha256\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"\n   }\n  ],\n  \"Population\": \"load-time\",\n  \"State\": \"baseline\",\n  \"Limits\": [\n   \"a limit sentence\"\n  ]\n }\n}",
+   "rows": [
+    [
+     "nav-edge|000801:target.esp|target.esp",
+     "Holds"
+    ],
+    [
+     "nav-edge|000802:target.esp|target.esp",
+     "Gone"
+    ],
+    [
+     "overlap|000810:other.esp|000811:base.esm",
+     "Holds"
+    ]
+   ],
+   "predicates": [],
+   "identity": {
+    "fingerprint": "ca002c555987aaaabbbbccccddddeeeeffff0000111122223333444455556666",
+    "plugins": [
+     {
+      "path": "C:/fixture/plugins/A.esm",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     },
+     {
+      "path": "C:/fixture/plugins/B.esp",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+     }
+    ],
+    "overlays": [
+     {
+      "path": "C:/fixture/x_SWAP.ini",
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+     }
+    ],
+    "population": "load-time",
+    "state": "baseline",
+    "limits": [
+     "a limit sentence"
+    ]
+   }
+  },
+  {
+   "name": "candidate",
+   "text": "{\n \"Probe\": \"navownprobe\",\n \"Conflicts\": [\n  {\n   \"Kind\": \"NAV-EDGE\",\n   \"A\": \"Target.esp\",\n   \"B\": \"Base.esm\",\n   \"Summary\": \"fixture\",\n   \"Necessary\": [\n    {\n     \"FormKey\": \"000801:Target.esp\",\n     \"Physical\": \"Holds\"\n    }\n   ]\n  },\n  {\n   \"Kind\": \"NAV-EDGE\",\n   \"A\": \"Other.esp\",\n   \"B\": \"Target.esp\",\n   \"Summary\": \"fixture\",\n   \"Necessary\": [\n    {\n     \"FormKey\": \"000820:Other.esp\",\n     \"Physical\": \"Holds\"\n    },\n    {\n     \"FormKey\": \"000821:Other.esp\",\n     \"Physical\": \"Holds\"\n    },\n    {\n     \"FormKey\": \"000822:Other.esp\",\n     \"Physical\": \"Unmeasured\"\n    },\n    {\n     \"FormKey\": \"000823:Other.esp\",\n     \"Physical\": null\n    },\n    {\n     \"FormKey\": \"000824:Other.esp\"\n    },\n    {\n     \"FormKey\": \"000825:Other.esp\",\n     \"Physical\": \"Holds\"\n    },\n    {\n     \"FormKey\": \"000826:Other.esp\",\n     \"Physical\": \"Holds\"\n    },\n    {\n     \"FormKey\": \"000827:Other.esp\",\n     \"Physical\": \"Holds\"\n    },\n    {\n     \"FormKey\": \"000828:Other.esp\",\n     \"Physical\": \"Holds\"\n    },\n    {\n     \"FormKey\": \"000829:Other.esp\",\n     \"Physical\": \"Holds\"\n    },\n    {\n     \"FormKey\": \"00082A:Other.esp\",\n     \"Physical\": \"Holds\"\n    },\n    {\n     \"FormKey\": \"00082B:Other.esp\",\n     \"Physical\": \"Holds\"\n    }\n   ]\n  },\n  {\n   \"Kind\": \"nav-edge\",\n   \"A\": \"OTHER.ESP\",\n   \"B\": \"Target.esp\",\n   \"Summary\": \"fixture\",\n   \"Necessary\": [\n    {\n     \"FormKey\": \"000820:OTHER.esp\",\n     \"Physical\": \"Gone\"\n    }\n   ]\n  },\n  {\n   \"Kind\": \"EDGE-IDX\",\n   \"A\": \"Other.esp\",\n   \"B\": \"Base.esm\",\n   \"Summary\": \"fixture\",\n   \"Necessary\": [\n    {\n     \"FormKey\": \"000830:Other.esp\",\n     \"Physical\": \"Holds\"\n    }\n   ],\n   \"Alternative\": [\n    {\n     \"FormKey\": \"000831:Base.esm\",\n     \"Triangle\": 12\n    },\n    {\n     \"FormKey\": \"ignored\"\n    }\n   ]\n  },\n  {\n   \"Kind\": \"OVERLAP\",\n   \"A\": \"Other.esp\",\n   \"B\": \"Base.esm\",\n   \"Summary\": \"fixture\",\n   \"Necessary\": [\n    {\n     \"FormKey\": \"000811:Base.esm\",\n     \"Physical\": \"Holds\"\n    }\n   ],\n   \"Alternative\": [\n    {\n     \"FormKey\": \"000810:Other.esp\"\n    }\n   ]\n  },\n  {\n   \"Kind\": \"CONTACT\",\n   \"A\": \"Other.esp\",\n   \"B\": \"Base.esm\",\n   \"Summary\": \"fixture\",\n   \"Necessary\": [],\n   \"Alternative\": []\n  }\n ],\n \"Predicates\": [\n  {\n   \"Kind\": \"NAV-EDGE\",\n   \"A\": \"Target.esp\",\n   \"B\": \"Base.esm\",\n   \"FormKey\": \"000801:Target.esp\",\n   \"Other\": null,\n   \"Physical\": \"Holds\"\n  },\n  {\n   \"Kind\": \"NAV-EDGE\",\n   \"A\": \"Target.esp\",\n   \"B\": \"Base.esm\",\n   \"FormKey\": \"000802:Target.esp\",\n   \"Physical\": \"Gone\"\n  },\n  {\n   \"Kind\": \"OVERLAP\",\n   \"A\": \"Other.esp\",\n   \"B\": \"Base.esm\",\n   \"FormKey\": \"000810:Other.esp\",\n   \"Other\": \"000811:Base.esm\"\n  },\n  {\n   \"Kind\": \"EDGE-IDX\",\n   \"A\": \"x\",\n   \"B\": \"y\",\n   \"FormKey\": \"000830:Other.esp\",\n   \"Other\": \"000831:Base.esm\",\n   \"OtherTriangle\": 12,\n   \"Physical\": null\n  },\n  {\n   \"Kind\": \"nav-edge\",\n   \"A\": \"TARGET.esp\",\n   \"B\": \"Base.esm\",\n   \"FormKey\": \"000801:TARGET.esp\",\n   \"Physical\": \"Gone\"\n  }\n ],\n \"configuration\": {\n  \"SchemaVersion\": 1,\n  \"Fingerprint\": \"lower-case key\",\n  \"Plugins\": [\n   {\n    \"Name\": \"A.esm\",\n    \"Path\": \"C:/fixture/plugins/A.esm\",\n    \"Sha256\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n    \"Bytes\": 3\n   },\n   {\n    \"Name\": \"B.esp\",\n    \"Path\": \"C:/fixture/plugins/B.esp\",\n    \"Sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\n    \"Bytes\": 4\n   }\n  ],\n  \"Providers\": [\n   {\n    \"Name\": \"overwrite\",\n    \"Kind\": \"overwrite\"\n   }\n  ],\n  \"Overlays\": [\n   {\n    \"Kind\": \"bos\",\n    \"Path\": \"C:/fixture/x_SWAP.ini\",\n    \"Sha256\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"\n   }\n  ],\n  \"Population\": \"load-time\",\n  \"State\": \"baseline\",\n  \"Limits\": [\n   \"a limit sentence\"\n  ]\n }\n}",
+   "rows": [
+    [
+     "nav-edge|000801:target.esp|target.esp",
+     "Holds"
+    ],
+    [
+     "nav-edge|000820:other.esp|other.esp",
+     "Holds"
+    ],
+    [
+     "nav-edge|000821:other.esp|other.esp",
+     "Holds"
+    ],
+    [
+     "nav-edge|000822:other.esp|other.esp",
+     "Unmeasured"
+    ],
+    [
+     "nav-edge|000823:other.esp|other.esp",
+     null
+    ],
+    [
+     "nav-edge|000824:other.esp|other.esp",
+     null
+    ],
+    [
+     "nav-edge|000825:other.esp|other.esp",
+     "Holds"
+    ],
+    [
+     "nav-edge|000826:other.esp|other.esp",
+     "Holds"
+    ],
+    [
+     "nav-edge|000827:other.esp|other.esp",
+     "Holds"
+    ],
+    [
+     "nav-edge|000828:other.esp|other.esp",
+     "Holds"
+    ],
+    [
+     "nav-edge|000829:other.esp|other.esp",
+     "Holds"
+    ],
+    [
+     "nav-edge|00082a:other.esp|other.esp",
+     "Holds"
+    ],
+    [
+     "nav-edge|00082b:other.esp|other.esp",
+     "Holds"
+    ],
+    [
+     "edge-idx|000830:other.esp|000831:base.esm|12",
+     "Holds"
+    ],
+    [
+     "overlap|000810:other.esp|000811:base.esm",
+     "Holds"
+    ]
+   ],
+   "predicates": [
+    [
+     "nav-edge|000801:target.esp|target.esp",
+     "Holds"
+    ],
+    [
+     "nav-edge|000802:target.esp|target.esp",
+     "Gone"
+    ],
+    [
+     "overlap|000810:other.esp|000811:base.esm",
+     "Unmeasured"
+    ],
+    [
+     "edge-idx|000830:other.esp|000831:base.esm|12",
+     null
+    ]
+   ],
+   "identity": {
+    "fingerprint": "lower-case key",
+    "plugins": [
+     {
+      "path": "C:/fixture/plugins/A.esm",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     },
+     {
+      "path": "C:/fixture/plugins/B.esp",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+     }
+    ],
+    "overlays": [
+     {
+      "path": "C:/fixture/x_SWAP.ini",
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+     }
+    ],
+    "population": "load-time",
+    "state": "baseline",
+    "limits": [
+     "a limit sentence"
+    ]
+   }
+  },
+  {
+   "name": "reverse",
+   "text": "{\n \"Probe\": \"navownprobe\",\n \"Conflicts\": [],\n \"Predicates\": [\n  {\n   \"Kind\": \"NAV-EDGE\",\n   \"A\": \"Other.esp\",\n   \"B\": \"Target.esp\",\n   \"FormKey\": \"000820:Other.esp\",\n   \"Physical\": \"Gone\"\n  },\n  {\n   \"Kind\": \"NAV-EDGE\",\n   \"A\": \"Other.esp\",\n   \"B\": \"Target.esp\",\n   \"FormKey\": \"000821:Other.esp\",\n   \"Physical\": \"Holds\"\n  },\n  {\n   \"Kind\": \"NAV-EDGE\",\n   \"A\": \"Other.esp\",\n   \"B\": \"Target.esp\",\n   \"FormKey\": \"000825:Other.esp\",\n   \"Physical\": \"Unmeasured\"\n  },\n  {\n   \"Kind\": \"NAV-EDGE\",\n   \"A\": \"Other.esp\",\n   \"B\": \"Target.esp\",\n   \"FormKey\": \"000826:Other.esp\",\n   \"Physical\": \"Gone\"\n  },\n  {\n   \"Kind\": \"NAV-EDGE\",\n   \"A\": \"Other.esp\",\n   \"B\": \"Target.esp\",\n   \"FormKey\": \"000827:Other.esp\",\n   \"Physical\": \"Gone\"\n  },\n  {\n   \"Kind\": \"NAV-EDGE\",\n   \"A\": \"Other.esp\",\n   \"B\": \"Target.esp\",\n   \"FormKey\": \"000828:Other.esp\",\n   \"Physical\": \"Gone\"\n  },\n  {\n   \"Kind\": \"NAV-EDGE\",\n   \"A\": \"Other.esp\",\n   \"B\": \"Target.esp\",\n   \"FormKey\": \"000829:Other.esp\",\n   \"Physical\": \"Gone\"\n  },\n  {\n   \"Kind\": \"NAV-EDGE\",\n   \"A\": \"Other.esp\",\n   \"B\": \"Target.esp\",\n   \"FormKey\": \"00082A:Other.esp\",\n   \"Physical\": \"Gone\"\n  },\n  {\n   \"Kind\": \"EDGE-IDX\",\n   \"A\": \"x\",\n   \"B\": \"y\",\n   \"FormKey\": \"000830:Other.esp\",\n   \"Other\": \"000831:Base.esm\",\n   \"OtherTriangle\": 12,\n   \"Physical\": \"Gone\"\n  }\n ]\n}",
+   "rows": [],
+   "predicates": [
+    [
+     "nav-edge|000820:other.esp|other.esp",
+     "Gone"
+    ],
+    [
+     "nav-edge|000821:other.esp|other.esp",
+     "Holds"
+    ],
+    [
+     "nav-edge|000825:other.esp|other.esp",
+     "Unmeasured"
+    ],
+    [
+     "nav-edge|000826:other.esp|other.esp",
+     "Gone"
+    ],
+    [
+     "nav-edge|000827:other.esp|other.esp",
+     "Gone"
+    ],
+    [
+     "nav-edge|000828:other.esp|other.esp",
+     "Gone"
+    ],
+    [
+     "nav-edge|000829:other.esp|other.esp",
+     "Gone"
+    ],
+    [
+     "nav-edge|00082a:other.esp|other.esp",
+     "Gone"
+    ],
+    [
+     "edge-idx|000830:other.esp|000831:base.esm|12",
+     "Gone"
+    ]
+   ],
+   "identity": null
+  },
+  {
+   "name": "bare",
+   "text": "{\n \"Probe\": \"x\"\n}",
+   "rows": [],
+   "predicates": [],
+   "identity": null
+  },
+  {
+   "name": "empty configuration",
+   "text": "{\n \"Configuration\": {},\n \"Conflicts\": [],\n \"Predicates\": null\n}",
+   "rows": [],
+   "predicates": [],
+   "identity": null
+  },
+  {
+   "name": "configuration without lists",
+   "text": "{\n \"Configuration\": {\n  \"Fingerprint\": \"f00d\"\n }\n}",
+   "rows": [],
+   "predicates": [],
+   "identity": {
+    "fingerprint": "f00d",
+    "plugins": [],
+    "overlays": [],
+    "population": null,
+    "state": null,
+    "limits": []
+   }
+  },
+  {
+   "name": "not json",
+   "text": "{not json",
+   "rows": [],
+   "predicates": [],
+   "identity": null
+  },
+  {
+   "name": "a list",
+   "text": "[]",
+   "rows": [],
+   "predicates": [],
+   "identity": null
+  },
+  {
+   "name": "empty object",
+   "text": "{}",
+   "rows": [],
+   "predicates": [],
+   "identity": null
+  },
+  {
+   "name": "absent",
+   "text": null,
+   "rows": [],
+   "predicates": [],
+   "identity": null
+  }
+ ],
+ "created": [
+  {
+   "name": "with a reverse",
+   "base": "base",
+   "candidate": "candidate",
+   "reverse": "reverse",
+   "want": {
+    "created": 10,
+    "newDefect": 7,
+    "attributed": 1,
+    "unmeasured": 2,
+    "newExamples": [
+     "nav-edge|000820:other.esp|other.esp",
+     "nav-edge|000826:other.esp|other.esp",
+     "nav-edge|000827:other.esp|other.esp",
+     "nav-edge|000828:other.esp|other.esp",
+     "nav-edge|000829:other.esp|other.esp"
+    ]
+   }
+  },
+  {
+   "name": "no reverse given",
+   "base": "base",
+   "candidate": "candidate",
+   "reverse": null,
+   "want": {
+    "created": 10,
+    "newDefect": 0,
+    "attributed": 0,
+    "unmeasured": 10,
+    "note": "no reverse measurement: every created row is unmeasured under the baseline order"
+   }
+  },
+  {
+   "name": "the reverse file is absent",
+   "base": "base",
+   "candidate": "candidate",
+   "reverse": "absent",
+   "want": {
+    "created": 10,
+    "newDefect": 0,
+    "attributed": 0,
+    "unmeasured": 10,
+    "note": "no reverse measurement: every created row is unmeasured under the baseline order"
+   }
+  },
+  {
+   "name": "a reverse with no predicates",
+   "base": "base",
+   "candidate": "candidate",
+   "reverse": "bare",
+   "want": {
+    "created": 10,
+    "newDefect": 0,
+    "attributed": 0,
+    "unmeasured": 10,
+    "newExamples": []
+   }
+  },
+  {
+   "name": "nothing created",
+   "base": "candidate",
+   "candidate": "base",
+   "reverse": "reverse",
+   "want": {
+    "created": 0,
+    "newDefect": 0,
+    "attributed": 0,
+    "unmeasured": 0,
+    "newExamples": []
+   }
+  },
+  {
+   "name": "an unreadable candidate",
+   "base": "base",
+   "candidate": "not json",
+   "reverse": "reverse",
+   "want": {
+    "created": 0,
+    "newDefect": 0,
+    "attributed": 0,
+    "unmeasured": 0,
+    "newExamples": []
+   }
+  },
+  {
+   "name": "an unreadable base",
+   "base": "not json",
+   "candidate": "candidate",
+   "reverse": "reverse",
+   "want": {
+    "created": 12,
+    "newDefect": 7,
+    "attributed": 1,
+    "unmeasured": 4,
+    "newExamples": [
+     "nav-edge|000820:other.esp|other.esp",
+     "nav-edge|000826:other.esp|other.esp",
+     "nav-edge|000827:other.esp|other.esp",
+     "nav-edge|000828:other.esp|other.esp",
+     "nav-edge|000829:other.esp|other.esp"
+    ]
+   }
+  }
+ ],
+ "memoryRoute": [
+  {
+   "name": "a lean run under contention",
+   "emit": "memory/0.json",
+   "sidecar": "{\"route\": \"lean\", \"case\": \"contended\", \"unattendedDefault\": true, \"outcome\": \"completed\", \"warning\": \"memory: the fast route needs 10.4 GB and 5.0 GB is free; closing python (pid 4242, 26.0 GB) frees it\"}",
+   "want": {
+    "route": "lean",
+    "case": "contended",
+    "unattendedDefault": true,
+    "warning": "memory: the fast route needs 10.4 GB and 5.0 GB is free; closing python (pid 4242, 26.0 GB) frees it",
+    "outcome": "completed",
+    "sidecar": "<ROOT\\>\\memory\\0.json.memory.json"
+   }
+  },
+  {
+   "name": "no sidecar",
+   "emit": "memory/1.json",
+   "sidecar": null,
+   "want": {
+    "route": "not reported"
+   }
+  },
+  {
+   "name": "an unreadable sidecar",
+   "emit": "memory/2.json",
+   "sidecar": "{not json",
+   "want": {
+    "route": "not reported",
+    "sidecarUnreadable": "<the runtime's own words>"
+   }
+  },
+  {
+   "name": "an empty route reads not reported",
+   "emit": "memory/3.json",
+   "sidecar": "{\"route\": \"\", \"case\": null, \"extra\": 1}",
+   "want": {
+    "route": "not reported",
+    "case": null,
+    "unattendedDefault": null,
+    "warning": null,
+    "outcome": null,
+    "sidecar": "<ROOT\\>\\memory\\3.json.memory.json"
+   }
+  },
+  {
+   "name": "a sidecar with nothing in it",
+   "emit": "memory/4.json",
+   "sidecar": "{}",
+   "want": {
+    "route": "not reported",
+    "case": null,
+    "unattendedDefault": null,
+    "warning": null,
+    "outcome": null,
+    "sidecar": "<ROOT\\>\\memory\\4.json.memory.json"
+   }
+  },
+  {
+   "name": "a sidecar with a byte-order mark",
+   "emit": "memory/5.json",
+   "sidecar": "\ufeff{}",
+   "want": {
+    "route": "not reported",
+    "sidecarUnreadable": "<the runtime's own words>"
+   }
+  },
+  {
+   "name": "no emit",
+   "emit": null,
+   "sidecar": null,
+   "want": {
+    "route": "not reported"
+   }
+  }
+ ],
+ "candidateFiles": [
+  {
+   "name": "one baseline, path order",
+   "folder": "cands/0",
+   "files": [
+    "candidate-10.json",
+    "candidate-02-b.json",
+    "Candidate-01-A.json",
+    "candidate-00-baseline.json",
+    "candidates.json",
+    "candidate-03.JSON",
+    "candidate-.json",
+    "notes.txt",
+    "candidate-04.json.bak"
+   ],
+   "baseline": null,
+   "limit": null,
+   "want": {
+    "baseline": "<ROOT\\>\\cands\\0\\candidate-00-baseline.json",
+    "others": [
+     "<ROOT\\>\\cands\\0\\candidate-.json",
+     "<ROOT\\>\\cands\\0\\Candidate-01-A.json",
+     "<ROOT\\>\\cands\\0\\candidate-02-b.json",
+     "<ROOT\\>\\cands\\0\\candidate-03.JSON",
+     "<ROOT\\>\\cands\\0\\candidate-10.json"
+    ],
+    "stems": [
+     "candidate-",
+     "Candidate-01-A",
+     "candidate-02-b",
+     "candidate-03",
+     "candidate-10"
+    ]
+   }
+  },
+  {
+   "name": "a limit",
+   "folder": "cands/1",
+   "files": [
+    "candidate-00-baseline.json",
+    "candidate-01.json",
+    "candidate-02.json",
+    "candidate-03.json"
+   ],
+   "baseline": null,
+   "limit": 2,
+   "want": {
+    "baseline": "<ROOT\\>\\cands\\1\\candidate-00-baseline.json",
+    "others": [
+     "<ROOT\\>\\cands\\1\\candidate-01.json",
+     "<ROOT\\>\\cands\\1\\candidate-02.json"
+    ],
+    "stems": [
+     "candidate-01",
+     "candidate-02"
+    ]
+   }
+  },
+  {
+   "name": "a limit of zero",
+   "folder": "cands/2",
+   "files": [
+    "candidate-00-baseline.json",
+    "candidate-01.json"
+   ],
+   "baseline": null,
+   "limit": 0,
+   "want": {
+    "baseline": "<ROOT\\>\\cands\\2\\candidate-00-baseline.json",
+    "others": [],
+    "stems": []
+   }
+  },
+  {
+   "name": "a limit above the count",
+   "folder": "cands/3",
+   "files": [
+    "candidate-00-baseline.json",
+    "candidate-01.json"
+   ],
+   "baseline": null,
+   "limit": 9,
+   "want": {
+    "baseline": "<ROOT\\>\\cands\\3\\candidate-00-baseline.json",
+    "others": [
+     "<ROOT\\>\\cands\\3\\candidate-01.json"
+    ],
+    "stems": [
+     "candidate-01"
+    ]
+   }
+  },
+  {
+   "name": "a negative limit counts from the end",
+   "folder": "cands/4",
+   "files": [
+    "candidate-00-baseline.json",
+    "candidate-01.json",
+    "candidate-02.json",
+    "candidate-03.json"
+   ],
+   "baseline": null,
+   "limit": -1,
+   "want": {
+    "baseline": "<ROOT\\>\\cands\\4\\candidate-00-baseline.json",
+    "others": [
+     "<ROOT\\>\\cands\\4\\candidate-01.json",
+     "<ROOT\\>\\cands\\4\\candidate-02.json"
+    ],
+    "stems": [
+     "candidate-01",
+     "candidate-02"
+    ]
+   }
+  },
+  {
+   "name": "a negative limit past the start",
+   "folder": "cands/5",
+   "files": [
+    "candidate-00-baseline.json",
+    "candidate-01.json"
+   ],
+   "baseline": null,
+   "limit": -5,
+   "want": {
+    "baseline": "<ROOT\\>\\cands\\5\\candidate-00-baseline.json",
+    "others": [],
+    "stems": []
+   }
+  },
+  {
+   "name": "a baseline named, other case",
+   "folder": "cands/6",
+   "files": [
+    "candidate-00-baseline.json",
+    "candidate-01.json",
+    "candidate-02-baseline.json"
+   ],
+   "baseline": "<ROOT\\>\\cands\\6\\CANDIDATE-01.JSON",
+   "limit": null,
+   "want": {
+    "baseline": "<ROOT\\>\\cands\\6\\CANDIDATE-01.JSON",
+    "others": [
+     "<ROOT\\>\\cands\\6\\candidate-00-baseline.json",
+     "<ROOT\\>\\cands\\6\\candidate-02-baseline.json"
+    ],
+    "stems": [
+     "candidate-00-baseline",
+     "candidate-02-baseline"
+    ]
+   }
+  },
+  {
+   "name": "a baseline named that is not in the folder",
+   "folder": "cands/7",
+   "files": [
+    "candidate-00-baseline.json",
+    "candidate-01.json"
+   ],
+   "baseline": "<ROOT\\>\\elsewhere.json",
+   "limit": null,
+   "want": {
+    "baseline": "<ROOT\\>\\elsewhere.json",
+    "others": [
+     "<ROOT\\>\\cands\\7\\candidate-00-baseline.json",
+     "<ROOT\\>\\cands\\7\\candidate-01.json"
+    ],
+    "stems": [
+     "candidate-00-baseline",
+     "candidate-01"
+    ]
+   }
+  },
+  {
+   "name": "two baselines",
+   "folder": "cands/8",
+   "files": [
+    "candidate-00-baseline.json",
+    "candidate-01-baseline.json"
+   ],
+   "baseline": null,
+   "limit": null,
+   "want": {
+    "exit": "<ROOT\\>\\cands\\8: expected exactly one candidate-*-baseline.json, found 2; pass --baseline"
+   }
+  },
+  {
+   "name": "no baseline",
+   "folder": "cands/9",
+   "files": [
+    "candidate-01.json",
+    "candidate-02.json"
+   ],
+   "baseline": null,
+   "limit": null,
+   "want": {
+    "exit": "<ROOT\\>\\cands\\9: expected exactly one candidate-*-baseline.json, found 0; pass --baseline"
+   }
+  },
+  {
+   "name": "no candidate files",
+   "folder": "cands/10",
+   "files": [
+    "candidates.json",
+    "other.json"
+   ],
+   "baseline": null,
+   "limit": null,
+   "want": {
+    "exit": "no candidate-*.json in <ROOT\\>\\cands\\10"
+   }
+  },
+  {
+   "name": "the stem must end in baseline",
+   "folder": "cands/11",
+   "files": [
+    "candidate-00-baseline.old.json",
+    "candidate-01-xbaseline.json",
+    "candidate-02.json"
+   ],
+   "baseline": null,
+   "limit": null,
+   "want": {
+    "baseline": "<ROOT\\>\\cands\\11\\candidate-01-xbaseline.json",
+    "others": [
+     "<ROOT\\>\\cands\\11\\candidate-00-baseline.old.json",
+     "<ROOT\\>\\cands\\11\\candidate-02.json"
+    ],
+    "stems": [
+     "candidate-00-baseline.old",
+     "candidate-02"
+    ]
+   }
+  },
+  {
+   "name": "the folder is absent",
+   "folder": "cands/absent",
+   "files": [],
+   "baseline": null,
+   "limit": null,
+   "want": {
+    "exit": "no candidate-*.json in <ROOT\\>\\cands\\absent"
+   }
+  }
+ ],
+ "programKey": {
+  "folders": [
+   {
+    "name": "the build",
+    "files": [
+     {
+      "path": "fakeprobe.exe",
+      "bytes": "YXBwaG9zdA=="
+     },
+     {
+      "path": "fakeprobe.dll",
+      "bytes": "cHJvYmUgY29kZSB2MQ=="
+     },
+     {
+      "path": "housecarl-core.dll",
+      "bytes": "Y29yZSB2MQ=="
+     },
+     {
+      "path": "fakeprobe.runtimeconfig.json",
+      "bytes": "e30="
+     },
+     {
+      "path": "runtimes/win/lib/net9.0/native.dll",
+      "bytes": "bmF0aXZlIHYx"
+     }
+    ],
+    "sameAsTheBuild": true,
+    "want": "folder:7863f4dc53c16693acfba966ad1edeeab8908264b7f9f3c4f8dc0ca84dece877"
+   },
+   {
+    "name": "the same build in another folder",
+    "files": [
+     {
+      "path": "fakeprobe.exe",
+      "bytes": "YXBwaG9zdA=="
+     },
+     {
+      "path": "fakeprobe.dll",
+      "bytes": "cHJvYmUgY29kZSB2MQ=="
+     },
+     {
+      "path": "housecarl-core.dll",
+      "bytes": "Y29yZSB2MQ=="
+     },
+     {
+      "path": "fakeprobe.runtimeconfig.json",
+      "bytes": "e30="
+     },
+     {
+      "path": "runtimes/win/lib/net9.0/native.dll",
+      "bytes": "bmF0aXZlIHYx"
+     }
+    ],
+    "sameAsTheBuild": true,
+    "want": "folder:7863f4dc53c16693acfba966ad1edeeab8908264b7f9f3c4f8dc0ca84dece877"
+   },
+   {
+    "name": "a different probe dll",
+    "files": [
+     {
+      "path": "fakeprobe.exe",
+      "bytes": "YXBwaG9zdA=="
+     },
+     {
+      "path": "fakeprobe.dll",
+      "bytes": "cHJvYmUgY29kZSB2Mg=="
+     },
+     {
+      "path": "housecarl-core.dll",
+      "bytes": "Y29yZSB2MQ=="
+     },
+     {
+      "path": "fakeprobe.runtimeconfig.json",
+      "bytes": "e30="
+     },
+     {
+      "path": "runtimes/win/lib/net9.0/native.dll",
+      "bytes": "bmF0aXZlIHYx"
+     }
+    ],
+    "sameAsTheBuild": false,
+    "want": "folder:d9cedec3449a6bdcb185dba46739cf93a68a05a793caeb7efe61cea17c61f67f"
+   },
+   {
+    "name": "a different housecarl-core.dll",
+    "files": [
+     {
+      "path": "fakeprobe.exe",
+      "bytes": "YXBwaG9zdA=="
+     },
+     {
+      "path": "fakeprobe.dll",
+      "bytes": "cHJvYmUgY29kZSB2MQ=="
+     },
+     {
+      "path": "housecarl-core.dll",
+      "bytes": "Y29yZSB2Mg=="
+     },
+     {
+      "path": "fakeprobe.runtimeconfig.json",
+      "bytes": "e30="
+     },
+     {
+      "path": "runtimes/win/lib/net9.0/native.dll",
+      "bytes": "bmF0aXZlIHYx"
+     }
+    ],
+    "sameAsTheBuild": false,
+    "want": "folder:0a2419f92b7e8b5ed2efa3200391e34b29ab099325a8bcc1282d35e2df141987"
+   },
+   {
+    "name": "a different dll under runtimes/",
+    "files": [
+     {
+      "path": "fakeprobe.exe",
+      "bytes": "YXBwaG9zdA=="
+     },
+     {
+      "path": "fakeprobe.dll",
+      "bytes": "cHJvYmUgY29kZSB2MQ=="
+     },
+     {
+      "path": "housecarl-core.dll",
+      "bytes": "Y29yZSB2MQ=="
+     },
+     {
+      "path": "fakeprobe.runtimeconfig.json",
+      "bytes": "e30="
+     },
+     {
+      "path": "runtimes/win/lib/net9.0/native.dll",
+      "bytes": "bmF0aXZlIHYy"
+     }
+    ],
+    "sameAsTheBuild": false,
+    "want": "folder:5166f13582b510ec90fd8c0000413d9d28968be9465cf12db75ed7c2c312e240"
+   },
+   {
+    "name": "an added dll",
+    "files": [
+     {
+      "path": "fakeprobe.exe",
+      "bytes": "YXBwaG9zdA=="
+     },
+     {
+      "path": "fakeprobe.dll",
+      "bytes": "cHJvYmUgY29kZSB2MQ=="
+     },
+     {
+      "path": "housecarl-core.dll",
+      "bytes": "Y29yZSB2MQ=="
+     },
+     {
+      "path": "fakeprobe.runtimeconfig.json",
+      "bytes": "e30="
+     },
+     {
+      "path": "runtimes/win/lib/net9.0/native.dll",
+      "bytes": "bmF0aXZlIHYx"
+     },
+     {
+      "path": "extra.dll",
+      "bytes": "bmV3IGRlcGVuZGVuY3k="
+     }
+    ],
+    "sameAsTheBuild": false,
+    "want": "folder:6d40a8ae630c5d69c03082c7d3404bfc1938d10cfb70580fbabf33bfd17eca8b"
+   },
+   {
+    "name": "debug symbols",
+    "files": [
+     {
+      "path": "fakeprobe.exe",
+      "bytes": "YXBwaG9zdA=="
+     },
+     {
+      "path": "fakeprobe.dll",
+      "bytes": "cHJvYmUgY29kZSB2MQ=="
+     },
+     {
+      "path": "housecarl-core.dll",
+      "bytes": "Y29yZSB2MQ=="
+     },
+     {
+      "path": "fakeprobe.runtimeconfig.json",
+      "bytes": "e30="
+     },
+     {
+      "path": "runtimes/win/lib/net9.0/native.dll",
+      "bytes": "bmF0aXZlIHYx"
+     },
+     {
+      "path": "fakeprobe.pdb",
+      "bytes": "c3ltYm9scyAx"
+     }
+    ],
+    "sameAsTheBuild": true,
+    "want": "folder:7863f4dc53c16693acfba966ad1edeeab8908264b7f9f3c4f8dc0ca84dece877"
+   },
+   {
+    "name": "other debug symbols",
+    "files": [
+     {
+      "path": "fakeprobe.exe",
+      "bytes": "YXBwaG9zdA=="
+     },
+     {
+      "path": "fakeprobe.dll",
+      "bytes": "cHJvYmUgY29kZSB2MQ=="
+     },
+     {
+      "path": "housecarl-core.dll",
+      "bytes": "Y29yZSB2MQ=="
+     },
+     {
+      "path": "fakeprobe.runtimeconfig.json",
+      "bytes": "e30="
+     },
+     {
+      "path": "runtimes/win/lib/net9.0/native.dll",
+      "bytes": "bmF0aXZlIHYx"
+     },
+     {
+      "path": "fakeprobe.pdb",
+      "bytes": "c3ltYm9scyAy"
+     },
+     {
+      "path": "Other.PDB",
+      "bytes": "eA=="
+     }
+    ],
+    "sameAsTheBuild": true,
+    "want": "folder:7863f4dc53c16693acfba966ad1edeeab8908264b7f9f3c4f8dc0ca84dece877"
+   },
+   {
+    "name": "files a run writes in a subfolder",
+    "files": [
+     {
+      "path": "fakeprobe.exe",
+      "bytes": "YXBwaG9zdA=="
+     },
+     {
+      "path": "fakeprobe.dll",
+      "bytes": "cHJvYmUgY29kZSB2MQ=="
+     },
+     {
+      "path": "housecarl-core.dll",
+      "bytes": "Y29yZSB2MQ=="
+     },
+     {
+      "path": "fakeprobe.runtimeconfig.json",
+      "bytes": "e30="
+     },
+     {
+      "path": "runtimes/win/lib/net9.0/native.dll",
+      "bytes": "bmF0aXZlIHYx"
+     },
+     {
+      "path": "shots/view-fp.png",
+      "bytes": "YSBwaWN0dXJl"
+     },
+     {
+      "path": "extract-123/x.nif",
+      "bytes": "c2NyYXRjaA=="
+     }
+    ],
+    "sameAsTheBuild": true,
+    "want": "folder:7863f4dc53c16693acfba966ad1edeeab8908264b7f9f3c4f8dc0ca84dece877"
+   },
+   {
+    "name": "a copied data file",
+    "files": [
+     {
+      "path": "fakeprobe.exe",
+      "bytes": "YXBwaG9zdA=="
+     },
+     {
+      "path": "fakeprobe.dll",
+      "bytes": "cHJvYmUgY29kZSB2MQ=="
+     },
+     {
+      "path": "housecarl-core.dll",
+      "bytes": "Y29yZSB2MQ=="
+     },
+     {
+      "path": "fakeprobe.runtimeconfig.json",
+      "bytes": "e30="
+     },
+     {
+      "path": "runtimes/win/lib/net9.0/native.dll",
+      "bytes": "bmF0aXZlIHYx"
+     },
+     {
+      "path": "load-settle-exemptions.json",
+      "bytes": "WzFd"
+     }
+    ],
+    "sameAsTheBuild": false,
+    "want": "folder:603a22935e597e57950e9905025cbac309a9f000c122fd2221bc307b58f39858"
+   },
+   {
+    "name": "another copied data file",
+    "files": [
+     {
+      "path": "fakeprobe.exe",
+      "bytes": "YXBwaG9zdA=="
+     },
+     {
+      "path": "fakeprobe.dll",
+      "bytes": "cHJvYmUgY29kZSB2MQ=="
+     },
+     {
+      "path": "housecarl-core.dll",
+      "bytes": "Y29yZSB2MQ=="
+     },
+     {
+      "path": "fakeprobe.runtimeconfig.json",
+      "bytes": "e30="
+     },
+     {
+      "path": "runtimes/win/lib/net9.0/native.dll",
+      "bytes": "bmF0aXZlIHYx"
+     },
+     {
+      "path": "load-settle-exemptions.json",
+      "bytes": "WzJd"
+     }
+    ],
+    "sameAsTheBuild": false,
+    "want": "folder:e44108a32b24de5466cc01934d951d2f2a73ab05e615cc7db4e628d95d47f225"
+   }
+  ],
+  "unverifiable": {
+   "command": "no-such-program-on-path-7f3a fake.py --flag",
+   "want": "probe-cmd:unverifiable:b6397012df00a7751f7aa7c2028fb954918a1abd4865e47f9fa4a705a8f10386"
+  }
+ },
+ "cache": {
+  "files": [
+   {
+    "path": "launch/cache.json",
+    "json": {
+     "k-own": {
+      "cacheVersion": 2,
+      "emit": "p/own.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-own-bad-then-earlier": {
+      "cacheVersion": 1,
+      "emit": "p/own-bad.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     }
+    }
+   },
+   {
+    "path": "launch/p/own-bad.json",
+    "text": "{}"
+   },
+   {
+    "path": "launch/p/own.json",
+    "text": "{}"
+   },
+   {
+    "path": "plugins/A.esm",
+    "text": "plugin bytes A.esm"
+   },
+   {
+    "path": "plugins/B.esp",
+    "text": "plugin bytes B.esp"
+   },
+   {
+    "path": "plugins/Changed.esp",
+    "text": "plugin bytes after"
+   },
+   {
+    "path": "plugins/x_SWAP.ini",
+    "text": "overlay bytes"
+   },
+   {
+    "path": "plugins/y_SWAP.ini",
+    "text": "overlay bytes after"
+   },
+   {
+    "path": "sweep/inv-0001/cache.json",
+    "json": {
+     "k-both": {
+      "cacheVersion": 2,
+      "emit": "p/both.json",
+      "emitSha256": "b2f9ddf21b69f5efc92538daa7a06273ff120cd9da9df95778145ff710e8c456",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-first-bad-then-second": {
+      "cacheVersion": 2,
+      "emit": "p/fb.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-old-version": {
+      "cacheVersion": 1,
+      "emit": "p/a.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-version-as-float": {
+      "cacheVersion": 2.0,
+      "emit": "p/a.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-version-true": {
+      "cacheVersion": true,
+      "emit": "p/a.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-no-hash": {
+      "cacheVersion": 2,
+      "emit": "p/a.json",
+      "emitSha256": "",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-no-emit-name": {
+      "cacheVersion": 2,
+      "emit": "",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-emit-null": {
+      "cacheVersion": 2,
+      "emit": null,
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-absolute": {
+      "cacheVersion": 2,
+      "emit": "<ROOT\\>\\cache\\sweep\\inv-0001\\p\\a.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-rooted": {
+      "cacheVersion": 2,
+      "emit": "/p/a.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-drive-relative": {
+      "cacheVersion": 2,
+      "emit": "C:p/a.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-unc": {
+      "cacheVersion": 2,
+      "emit": "\\\\server\\share\\a.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-dotdot": {
+      "cacheVersion": 2,
+      "emit": "p/../../inv-0002/p/second.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-backslash-dotdot": {
+      "cacheVersion": 2,
+      "emit": "p\\..\\..\\inv-0002\\p\\second.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-dot-and-slashes": {
+      "cacheVersion": 2,
+      "emit": "./p//a.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-backslash-inside": {
+      "cacheVersion": 2,
+      "emit": "p\\a.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-quote-in-name": {
+      "cacheVersion": 2,
+      "emit": "../it's.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-gone": {
+      "cacheVersion": 2,
+      "emit": "p/gone.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-emit-is-a-folder": {
+      "cacheVersion": 2,
+      "emit": "p",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-hash-mismatch": {
+      "cacheVersion": 2,
+      "emit": "p/a.json",
+      "emitSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-hash-upper": {
+      "cacheVersion": 2,
+      "emit": "p/a.json",
+      "emitSha256": "44136FA355B3678A1146AD16F7E8649E94FB4FC21FE77E8310C060F61CAAFF8A",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-no-identity": {
+      "cacheVersion": 2,
+      "emit": "p/a.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": null
+     },
+     "k-empty-identity": {
+      "cacheVersion": 2,
+      "emit": "p/a.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {}
+     },
+     "k-identity-no-lists": {
+      "cacheVersion": 2,
+      "emit": "p/a.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "f"
+      }
+     },
+     "k-plugin-gone": {
+      "cacheVersion": 2,
+      "emit": "p/a.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\Gone.esp",
+         "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-plugin-changed": {
+      "cacheVersion": 2,
+      "emit": "p/a.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\Changed.esp",
+         "sha256": "8986d4a1965c1c4bb1c8367eef52749dee66498f61d11c67ee8eaf7e9a5be7db"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-overlay-changed": {
+      "cacheVersion": 2,
+      "emit": "p/a.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\y_SWAP.ini",
+         "sha256": "9C4A5FEB1EFD89115BF4DEE10A846D0DF388C8B9372F4F9B5B60496473BF2BF3"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-plugin-and-overlay-changed": {
+      "cacheVersion": 2,
+      "emit": "p/a.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\Changed.esp",
+         "sha256": "8986d4a1965c1c4bb1c8367eef52749dee66498f61d11c67ee8eaf7e9a5be7db"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\y_SWAP.ini",
+         "sha256": "9C4A5FEB1EFD89115BF4DEE10A846D0DF388C8B9372F4F9B5B60496473BF2BF3"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     }
+    }
+   },
+   {
+    "path": "sweep/inv-0001/p/a.json",
+    "text": "{}"
+   },
+   {
+    "path": "sweep/inv-0001/p/both.json",
+    "text": "{\"from\": \"the older launch\"}"
+   },
+   {
+    "path": "sweep/inv-0001/p/fb.json",
+    "text": "{}"
+   },
+   {
+    "path": "sweep/inv-0002/cache.json",
+    "json": {
+     "k-second": {
+      "cacheVersion": 2,
+      "emit": "p/second.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-both": {
+      "cacheVersion": 2,
+      "emit": "p/both.json",
+      "emitSha256": "2ab0dc633c83f8a20c5e4ee893743901621378d6ebbfc047692916704c725bc2",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-own-bad-then-earlier": {
+      "cacheVersion": 2,
+      "emit": "p/own-bad.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": {
+       "fingerprint": "ca002c555987aaaabbbbccccdddd",
+       "plugins": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\A.esm",
+         "sha256": "b27038bde7b34ee0cfeabd05f3c4c9afc55665226dfa8296561b45e8579a0be8"
+        },
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\B.esp",
+         "sha256": "7436f206b323386448120195bc5530e299c801e6035891bb03374c970e324c1e"
+        }
+       ],
+       "overlays": [
+        {
+         "path": "<ROOT\\>\\cache\\plugins\\x_SWAP.ini",
+         "sha256": "8ADD9CB428206F5896805AFE968BAF1FB95E2F65D6DA792F8E721E006100FD59"
+        }
+       ],
+       "population": "load-time",
+       "state": "baseline",
+       "limits": []
+      }
+     },
+     "k-first-bad-then-second": {
+      "cacheVersion": 2,
+      "emit": "p/fb.json",
+      "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "label": "recorded-label",
+      "recordedUtc": "2026-11-01T00:00:00Z",
+      "identity": null
+     }
+    }
+   },
+   {
+    "path": "sweep/inv-0002/p/both.json",
+    "text": "{\"from\": \"the newer launch\"}"
+   },
+   {
+    "path": "sweep/inv-0002/p/fb.json",
+    "text": "{}"
+   },
+   {
+    "path": "sweep/inv-0002/p/own-bad.json",
+    "text": "{}"
+   },
+   {
+    "path": "sweep/inv-0002/p/second.json",
+    "text": "{}"
+   },
+   {
+    "path": "sweep/inv-0003/cache.json",
+    "text": "{not json"
+   },
+   {
+    "path": "sweep/inv-0004/cache.json",
+    "text": "[]"
+   },
+   {
+    "path": "launch/navownprobe/recorded.json",
+    "text": "{\n \"Configuration\": {\n  \"SchemaVersion\": 1,\n  \"Fingerprint\": \"ca002c555987aaaabbbbccccddddeeeeffff0000111122223333444455556666\",\n  \"Plugins\": [\n   {\n    \"Name\": \"A.esm\",\n    \"Path\": \"C:/fixture/plugins/A.esm\",\n    \"Sha256\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n    \"Bytes\": 3\n   },\n   {\n    \"Name\": \"B.esp\",\n    \"Path\": \"C:/fixture/plugins/B.esp\",\n    \"Sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\n    \"Bytes\": 4\n   }\n  ],\n  \"Providers\": [\n   {\n    \"Name\": \"overwrite\",\n    \"Kind\": \"overwrite\"\n   }\n  ],\n  \"Overlays\": [\n   {\n    \"Kind\": \"bos\",\n    \"Path\": \"C:/fixture/x_SWAP.ini\",\n    \"Sha256\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"\n   }\n  ],\n  \"Population\": \"load-time\",\n  \"State\": \"baseline\",\n  \"Limits\": [\n   \"a limit sentence\"\n  ]\n }\n}"
+   },
+   {
+    "path": "launch/navownprobe/no-identity.json",
+    "text": "{}"
+   },
+   {
+    "path": "elsewhere/outside.json",
+    "text": "{\"Configuration\": {\"SchemaVersion\": 1, \"Fingerprint\": \"ca002c555987aaaabbbbccccddddeeeeffff0000111122223333444455556666\", \"Plugins\": [{\"Name\": \"A.esm\", \"Path\": \"C:/fixture/plugins/A.esm\", \"Sha256\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Bytes\": 3}, {\"Name\": \"B.esp\", \"Path\": \"C:/fixture/plugins/B.esp\", \"Sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Bytes\": 4}], \"Providers\": [{\"Name\": \"overwrite\", \"Kind\": \"overwrite\"}], \"Overlays\": [{\"Kind\": \"bos\", \"Path\": \"C:/fixture/x_SWAP.ini\", \"Sha256\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}], \"Population\": \"load-time\", \"State\": \"baseline\", \"Limits\": [\"a limit sentence\"]}}"
+   }
+  ],
+  "own": "launch/cache.json",
+  "log": "launch/cache-log.txt",
+  "prior": [
+   "sweep/inv-0005/cache.json",
+   "sweep/inv-0004/cache.json",
+   "sweep/inv-0003/cache.json",
+   "sweep/inv-0002/cache.json",
+   "sweep/inv-0001/cache.json"
+  ],
+  "lookups": [
+   {
+    "key": "k-nowhere",
+    "label": "job-k-nowhere",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: MISS job-k-nowhere: no entry for request key k-nowhere\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nMISS job-k-nowhere: no entry for request key k-nowhere\n"
+   },
+   {
+    "key": "k-absolute",
+    "label": "job-k-absolute",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-absolute: emit path '<ROOT\\\\>\\\\cache\\\\sweep\\\\inv-0001\\\\p\\\\a.json' is not inside the cache's own folder (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-absolute: emit path '<ROOT\\\\>\\\\cache\\\\sweep\\\\inv-0001\\\\p\\\\a.json' is not inside the cache's own folder (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-backslash-dotdot",
+    "label": "job-k-backslash-dotdot",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-backslash-dotdot: emit path 'p\\\\..\\\\..\\\\inv-0002\\\\p\\\\second.json' resolves outside the cache's own folder (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-backslash-dotdot: emit path 'p\\\\..\\\\..\\\\inv-0002\\\\p\\\\second.json' resolves outside the cache's own folder (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-backslash-inside",
+    "label": "job-k-backslash-inside",
+    "want": [
+     "<ROOT\\>\\cache\\sweep\\inv-0001\\p\\a.json",
+     "<ROOT\\>\\cache\\sweep\\inv-0001\\cache.json"
+    ],
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: REUSED job-k-backslash-inside: request key k-backslash- matched; 2 plugin and 1 overlay hashes and the emit's own hash re-verified on disk; emit p\\a.json (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nREUSED job-k-backslash-inside: request key k-backslash- matched; 2 plugin and 1 overlay hashes and the emit's own hash re-verified on disk; emit p\\a.json (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-both",
+    "label": "job-k-both",
+    "want": [
+     "<ROOT\\>\\cache\\sweep\\inv-0002\\p\\both.json",
+     "<ROOT\\>\\cache\\sweep\\inv-0002\\cache.json"
+    ],
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: REUSED job-k-both: request key k-both matched; 2 plugin and 1 overlay hashes and the emit's own hash re-verified on disk; emit p/both.json (earlier launch inv-0002)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nREUSED job-k-both: request key k-both matched; 2 plugin and 1 overlay hashes and the emit's own hash re-verified on disk; emit p/both.json (earlier launch inv-0002)\n"
+   },
+   {
+    "key": "k-dot-and-slashes",
+    "label": "job-k-dot-and-slashes",
+    "want": [
+     "<ROOT\\>\\cache\\sweep\\inv-0001\\p\\a.json",
+     "<ROOT\\>\\cache\\sweep\\inv-0001\\cache.json"
+    ],
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: REUSED job-k-dot-and-slashes: request key k-dot-and-sl matched; 2 plugin and 1 overlay hashes and the emit's own hash re-verified on disk; emit ./p//a.json (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nREUSED job-k-dot-and-slashes: request key k-dot-and-sl matched; 2 plugin and 1 overlay hashes and the emit's own hash re-verified on disk; emit ./p//a.json (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-dotdot",
+    "label": "job-k-dotdot",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-dotdot: emit path 'p/../../inv-0002/p/second.json' is not inside the cache's own folder (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-dotdot: emit path 'p/../../inv-0002/p/second.json' is not inside the cache's own folder (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-drive-relative",
+    "label": "job-k-drive-relative",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-drive-relative: emit path 'C:p/a.json' is not inside the cache's own folder (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-drive-relative: emit path 'C:p/a.json' is not inside the cache's own folder (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-emit-is-a-folder",
+    "label": "job-k-emit-is-a-folder",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-emit-is-a-folder: emit p is gone (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-emit-is-a-folder: emit p is gone (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-emit-null",
+    "label": "job-k-emit-null",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-emit-null: emit path '' is not inside the cache's own folder (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-emit-null: emit path '' is not inside the cache's own folder (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-empty-identity",
+    "label": "job-k-empty-identity",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-empty-identity: the cached emit carries no configuration identity \u2014 missing identity prevents reuse (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-empty-identity: the cached emit carries no configuration identity \u2014 missing identity prevents reuse (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-first-bad-then-second",
+    "label": "job-k-first-bad-then-second",
+    "want": [
+     "<ROOT\\>\\cache\\sweep\\inv-0001\\p\\fb.json",
+     "<ROOT\\>\\cache\\sweep\\inv-0001\\cache.json"
+    ],
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-first-bad-then-second: the cached emit carries no configuration identity \u2014 missing identity prevents reuse (earlier launch inv-0002)\n   cache: REUSED job-k-first-bad-then-second: request key k-first-bad- matched; 2 plugin and 1 overlay hashes and the emit's own hash re-verified on disk; emit p/fb.json (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-first-bad-then-second: the cached emit carries no configuration identity \u2014 missing identity prevents reuse (earlier launch inv-0002)\nREUSED job-k-first-bad-then-second: request key k-first-bad- matched; 2 plugin and 1 overlay hashes and the emit's own hash re-verified on disk; emit p/fb.json (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-gone",
+    "label": "job-k-gone",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-gone: emit p/gone.json is gone (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-gone: emit p/gone.json is gone (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-hash-mismatch",
+    "label": "job-k-hash-mismatch",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-hash-mismatch: emit p/a.json no longer hashes to the value recorded with it (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-hash-mismatch: emit p/a.json no longer hashes to the value recorded with it (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-hash-upper",
+    "label": "job-k-hash-upper",
+    "want": [
+     "<ROOT\\>\\cache\\sweep\\inv-0001\\p\\a.json",
+     "<ROOT\\>\\cache\\sweep\\inv-0001\\cache.json"
+    ],
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: REUSED job-k-hash-upper: request key k-hash-upper matched; 2 plugin and 1 overlay hashes and the emit's own hash re-verified on disk; emit p/a.json (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nREUSED job-k-hash-upper: request key k-hash-upper matched; 2 plugin and 1 overlay hashes and the emit's own hash re-verified on disk; emit p/a.json (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-identity-no-lists",
+    "label": "job-k-identity-no-lists",
+    "want": [
+     "<ROOT\\>\\cache\\sweep\\inv-0001\\p\\a.json",
+     "<ROOT\\>\\cache\\sweep\\inv-0001\\cache.json"
+    ],
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: REUSED job-k-identity-no-lists: request key k-identity-n matched; 0 plugin and 0 overlay hashes and the emit's own hash re-verified on disk; emit p/a.json (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nREUSED job-k-identity-no-lists: request key k-identity-n matched; 0 plugin and 0 overlay hashes and the emit's own hash re-verified on disk; emit p/a.json (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-no-emit-name",
+    "label": "job-k-no-emit-name",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-no-emit-name: emit path '' is not inside the cache's own folder (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-no-emit-name: emit path '' is not inside the cache's own folder (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-no-hash",
+    "label": "job-k-no-hash",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-no-hash: the entry predates folder-relative, hashed entries, so the emit it names cannot be verified \u2014 never reused (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-no-hash: the entry predates folder-relative, hashed entries, so the emit it names cannot be verified \u2014 never reused (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-no-identity",
+    "label": "job-k-no-identity",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-no-identity: the cached emit carries no configuration identity \u2014 missing identity prevents reuse (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-no-identity: the cached emit carries no configuration identity \u2014 missing identity prevents reuse (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-old-version",
+    "label": "job-k-old-version",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-old-version: the entry predates folder-relative, hashed entries, so the emit it names cannot be verified \u2014 never reused (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-old-version: the entry predates folder-relative, hashed entries, so the emit it names cannot be verified \u2014 never reused (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-overlay-changed",
+    "label": "job-k-overlay-changed",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-overlay-changed: overlay y_SWAP.ini content changed since the cached run (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-overlay-changed: overlay y_SWAP.ini content changed since the cached run (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-own",
+    "label": "job-k-own",
+    "want": [
+     "<ROOT\\>\\cache\\launch\\p\\own.json",
+     "<ROOT\\>\\cache\\launch\\cache.json"
+    ],
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: REUSED job-k-own: request key k-own matched; 2 plugin and 1 overlay hashes and the emit's own hash re-verified on disk; emit p/own.json\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nREUSED job-k-own: request key k-own matched; 2 plugin and 1 overlay hashes and the emit's own hash re-verified on disk; emit p/own.json\n"
+   },
+   {
+    "key": "k-own-bad-then-earlier",
+    "label": "job-k-own-bad-then-earlier",
+    "want": [
+     "<ROOT\\>\\cache\\sweep\\inv-0002\\p\\own-bad.json",
+     "<ROOT\\>\\cache\\sweep\\inv-0002\\cache.json"
+    ],
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-own-bad-then-earlier: the entry predates folder-relative, hashed entries, so the emit it names cannot be verified \u2014 never reused\n   cache: REUSED job-k-own-bad-then-earlier: request key k-own-bad-th matched; 2 plugin and 1 overlay hashes and the emit's own hash re-verified on disk; emit p/own-bad.json (earlier launch inv-0002)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-own-bad-then-earlier: the entry predates folder-relative, hashed entries, so the emit it names cannot be verified \u2014 never reused\nREUSED job-k-own-bad-then-earlier: request key k-own-bad-th matched; 2 plugin and 1 overlay hashes and the emit's own hash re-verified on disk; emit p/own-bad.json (earlier launch inv-0002)\n"
+   },
+   {
+    "key": "k-plugin-and-overlay-changed",
+    "label": "job-k-plugin-and-overlay-changed",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-plugin-and-overlay-changed: plugin Changed.esp content changed since the cached run (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-plugin-and-overlay-changed: plugin Changed.esp content changed since the cached run (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-plugin-changed",
+    "label": "job-k-plugin-changed",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-plugin-changed: plugin Changed.esp content changed since the cached run (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-plugin-changed: plugin Changed.esp content changed since the cached run (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-plugin-gone",
+    "label": "job-k-plugin-gone",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-plugin-gone: plugin <ROOT\\>\\cache\\plugins\\Gone.esp no longer exists (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-plugin-gone: plugin <ROOT\\>\\cache\\plugins\\Gone.esp no longer exists (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-quote-in-name",
+    "label": "job-k-quote-in-name",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-quote-in-name: emit path \"../it's.json\" is not inside the cache's own folder (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-quote-in-name: emit path \"../it's.json\" is not inside the cache's own folder (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-rooted",
+    "label": "job-k-rooted",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-rooted: emit path '/p/a.json' is not inside the cache's own folder (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-rooted: emit path '/p/a.json' is not inside the cache's own folder (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-second",
+    "label": "job-k-second",
+    "want": [
+     "<ROOT\\>\\cache\\sweep\\inv-0002\\p\\second.json",
+     "<ROOT\\>\\cache\\sweep\\inv-0002\\cache.json"
+    ],
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: REUSED job-k-second: request key k-second matched; 2 plugin and 1 overlay hashes and the emit's own hash re-verified on disk; emit p/second.json (earlier launch inv-0002)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nREUSED job-k-second: request key k-second matched; 2 plugin and 1 overlay hashes and the emit's own hash re-verified on disk; emit p/second.json (earlier launch inv-0002)\n"
+   },
+   {
+    "key": "k-unc",
+    "label": "job-k-unc",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-unc: emit path '\\\\\\\\server\\\\share\\\\a.json' is not inside the cache's own folder (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-unc: emit path '\\\\\\\\server\\\\share\\\\a.json' is not inside the cache's own folder (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-version-as-float",
+    "label": "job-k-version-as-float",
+    "want": [
+     "<ROOT\\>\\cache\\sweep\\inv-0001\\p\\a.json",
+     "<ROOT\\>\\cache\\sweep\\inv-0001\\cache.json"
+    ],
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: REUSED job-k-version-as-float: request key k-version-as matched; 2 plugin and 1 overlay hashes and the emit's own hash re-verified on disk; emit p/a.json (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nREUSED job-k-version-as-float: request key k-version-as matched; 2 plugin and 1 overlay hashes and the emit's own hash re-verified on disk; emit p/a.json (earlier launch inv-0001)\n"
+   },
+   {
+    "key": "k-version-true",
+    "label": "job-k-version-true",
+    "want": null,
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: INVALIDATED job-k-version-true: the entry predates folder-relative, hashed entries, so the emit it names cannot be verified \u2014 never reused (earlier launch inv-0001)\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nINVALIDATED job-k-version-true: the entry predates folder-relative, hashed entries, so the emit it names cannot be verified \u2014 never reused (earlier launch inv-0001)\n"
+   }
+  ],
+  "records": [
+   {
+    "name": "an emit with an identity",
+    "key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "label": "job-identity",
+    "emit": "launch/navownprobe/recorded.json",
+    "entry": {
+     "cacheVersion": 2,
+     "emit": "navownprobe/recorded.json",
+     "emitSha256": "bee2056dadbea0ce98f606e6fc8a28af13c74c3cdb7cd7008f8442e63d884779",
+     "label": "job-identity",
+     "recordedUtc": "<TIME>",
+     "identity": {
+      "fingerprint": "ca002c555987aaaabbbbccccddddeeeeffff0000111122223333444455556666",
+      "plugins": [
+       {
+        "path": "C:/fixture/plugins/A.esm",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       {
+        "path": "C:/fixture/plugins/B.esp",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+       }
+      ],
+      "overlays": [
+       {
+        "path": "C:/fixture/x_SWAP.ini",
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+       }
+      ],
+      "population": "load-time",
+      "state": "baseline",
+      "limits": [
+       "a limit sentence"
+      ]
+     }
+    },
+    "savedKeys": [
+     "k-own",
+     "k-own-bad-then-earlier",
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: RECORDED job-identity: fingerprint ca002c555987, 2 plugins hashed\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nRECORDED job-identity: fingerprint ca002c555987, 2 plugins hashed\n"
+   },
+   {
+    "name": "an emit with no identity",
+    "key": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "label": "job-identity",
+    "emit": "launch/navownprobe/no-identity.json",
+    "entry": {
+     "cacheVersion": 2,
+     "emit": "navownprobe/no-identity.json",
+     "emitSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+     "label": "job-identity",
+     "recordedUtc": "<TIME>",
+     "identity": null
+    },
+    "savedKeys": [
+     "k-own",
+     "k-own-bad-then-earlier",
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ],
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: RECORDED job-identity: emit carries NO configuration identity \u2014 this entry can never be reused\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nRECORDED job-identity: emit carries NO configuration identity \u2014 this entry can never be reused\n"
+   },
+   {
+    "name": "an emit outside the cache's folder",
+    "key": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "label": "job-folder",
+    "emit": "elsewhere/outside.json",
+    "entry": null,
+    "savedKeys": [
+     "k-own",
+     "k-own-bad-then-earlier"
+    ],
+    "stdout": "   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: PRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\n   cache: NOT-RECORDED job-folder: emit <ROOT\\>\\cache\\elsewhere\\outside.json is not inside this cache's folder, so an entry could not name it relative to the cache\n",
+    "log": "PRIOR <ROOT\\>\\cache\\sweep\\inv-0005\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0004\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nPRIOR <ROOT\\>\\cache\\sweep\\inv-0003\\cache.json: no readable cache file there (that launch recorded nothing); nothing reused from it\nNOT-RECORDED job-folder: emit <ROOT\\>\\cache\\elsewhere\\outside.json is not inside this cache's folder, so an entry could not name it relative to the cache\n"
+   }
+  ],
+  "savedText": "{\r\n \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\": {\r\n  \"cacheVersion\": 2,\r\n  \"emit\": \"navownprobe/recorded.json\",\r\n  \"emitSha256\": \"bee2056dadbea0ce98f606e6fc8a28af13c74c3cdb7cd7008f8442e63d884779\",\r\n  \"label\": \"job-identity\",\r\n  \"recordedUtc\": \"<TIME>\",\r\n  \"identity\": {\r\n   \"fingerprint\": \"ca002c555987aaaabbbbccccddddeeeeffff0000111122223333444455556666\",\r\n   \"plugins\": [\r\n    {\r\n     \"path\": \"C:/fixture/plugins/A.esm\",\r\n     \"sha256\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\r\n    },\r\n    {\r\n     \"path\": \"C:/fixture/plugins/B.esp\",\r\n     \"sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\r\n    }\r\n   ],\r\n   \"overlays\": [\r\n    {\r\n     \"path\": \"C:/fixture/x_SWAP.ini\",\r\n     \"sha256\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"\r\n    }\r\n   ],\r\n   \"population\": \"load-time\",\r\n   \"state\": \"baseline\",\r\n   \"limits\": [\r\n    \"a limit sentence\"\r\n   ]\r\n  }\r\n }\r\n}"
+ },
+ "refused": [
+  {
+   "text": "means only that the two detectors detect different things. REFUSED.",
+   "want": true
+  },
+  {
+   "text": "Unknown or different measurement policies cannot establish repair credit. Re-emit both arms with the same policy. REFUSED.",
+   "want": true
+  },
+  {
+   "text": "anything. Re-emit with the current probe. REFUSED.",
+   "want": true
+  },
+  {
+   "text": "MISSING MASTER",
+   "want": true
+  },
+  {
+   "text": "this configuration was REFUSED and has no identity: Name.esp",
+   "want": true
+  },
+  {
+   "text": "REFUSED",
+   "want": true
+  },
+  {
+   "text": "--order and --enable/--disable are two descriptions of ONE order: --order spells the loaded ",
+   "want": false
+  },
+  {
+   "text": "Name.esp describes an order this run will not evaluate:\n   - ",
+   "want": false
+  },
+  {
+   "text": "MISSING MASTER - 'Name.esp' masters Name.esp, which this order does not loadName.esp, and the game ",
+   "want": true
+  },
+  {
+   "text": "REFUSED: the mandatory rules contradict each other, so no order satisfies them. ",
+   "want": true
+  },
+  {
+   "text": "--population Name.esp: no such file; re-plan the evaluation or drop --population.",
+   "want": false
+  },
+  {
+   "text": "--population Name.esp is not JSON (Name.esp); re-plan the evaluation.",
+   "want": false
+  },
+  {
+   "text": "--population Name.esp: schema is not Name.esp; re-plan the evaluation with this controller.",
+   "want": false
+  },
+  {
+   "text": "--population Name.esp names no plugin and no mod folder; an empty population would judge nothing, so it is refused.",
+   "want": true
+  },
+  {
+   "text": "the population names Name.esp at Name.esp, which does not exist; re-plan the evaluation.",
+   "want": false
+  },
+  {
+   "text": "the population names Name.esp with sha256 Name.esp, but Name.esp hashes to Name.esp; re-plan the evaluation.",
+   "want": false
+  },
+  {
+   "text": "the population names mod folder Name.esp at Name.esp, which does not exist; re-plan the evaluation.",
+   "want": false
+  },
+  {
+   "text": "Name.esp carries a collision-layer record (Name.esp), which changes how every reference collides; run this probe on the whole order (no --population).",
+   "want": false
+  },
+  {
+   "text": "mod folder Name.esp ships a Base Object Swapper ini (Name.esp), whose swaps this population does not model; run this probe on the whole order (no --population).",
+   "want": false
+  },
+  {
+   "text": "accepted + 1,234 refused != 1,234 composed. Refusing to ",
+   "want": false
+  },
+  {
+   "text": "1,234 refused != 1,234 composed. Refusing to write a table ",
+   "want": false
+  },
+  {
+   "text": "the route yield for 1,234 does not close: 1,234 accepted + 1,234 refused + ",
+   "want": false
+  },
+  {
+   "text": "REFUSED to enable 'Name.esp': it masters {string.Join(",
+   "want": true
+  },
+  {
+   "text": "MISSING MASTER: disabling 'Name.esp' orphans 'Name.esp', which masters it",
+   "want": true
+  },
+  {
+   "text": "MISSING MASTER: 'Name.esp' masters 'Name.esp', which is not loaded",
+   "want": true
+  },
+  {
+   "text": "REFUSED to enable 'Name.esp': loadorder.txt does not list it, so it has no load-order ",
+   "want": true
+  },
+  {
+   "text": "REFUSED: Name.esp",
+   "want": true
+  },
+  {
+   "text": "REFUSED: a rule read off a page must be advice. This is a bug in OrderAdvice, not in the page.",
+   "want": true
+  },
+  {
+   "text": "REFUSED: the fragment this run just wrote would be refused by orderprobe \u2014 Name.esp",
+   "want": true
+  },
+  {
+   "text": "the generated fragment does not parse",
+   "want": false
+  },
+  {
+   "text": "   ! REFUSED: the {(bl ? ",
+   "want": true
+  },
+  {
+   "text": "   ! REFUSED: Name.esp",
+   "want": true
+  },
+  {
+   "text": "wrote anchor review: 1,234 pair(s), 1,234 decided, 1,234 undecided, 1,234 refused -> 1,234",
+   "want": false
+  },
+  {
+   "text": "wrote box contact: 1,234 row(s), 1,234 measured, 1,234 refused -> 1,234",
+   "want": false
+  },
+  {
+   "text": "A",
+   "want": false
+  },
+  {
+   "text": "B",
+   "want": false
+  },
+  {
+   "text": "--surface: 1,234 pair(s): 1,234 geometry measurement(s), 1,234 incomplete, 1,234 refused, 1,234 unavailable -> 1,234",
+   "want": false
+  },
+  {
+   "text": "--volume: 1,234 pair(s): 1,234 geometry measurement(s), 1,234 refused, 1,234 unavailable -> 1,234",
+   "want": false
+  },
+  {
+   "text": "--force-enable: 0A1B2C:Name.esp refused: 0A1B2C:Name.esp",
+   "want": true
+  },
+  {
+   "text": "Name.esp: REFUSED \u2014 its floor needs a LAND that gives no heights ({string.Join(",
+   "want": true
+  },
+  {
+   "text": "Name.esp: REFUSED \u2014 its floor needs a LAND that gives no heights (Name.esp); an earlier plugin's heights, or none, would be read in its place.",
+   "want": true
+  },
+  {
+   "text": "shape not modelled: Name.esp",
+   "want": false
+  },
+  {
+   "text": "panel itself changed by the city arm: removed or deleted",
+   "want": false
+  },
+  {
+   "text": "panel itself changed by the city arm: its enable chain is unresolved there",
+   "want": false
+  },
+  {
+   "text": "panel itself changed by the city arm: not present at load",
+   "want": false
+  },
+  {
+   "text": "panel itself changed by the city arm: Name.esp",
+   "want": false
+  },
+  {
+   "text": "REFUSED: the base order's plugins are not a subset of the city order's",
+   "want": true
+  },
+  {
+   "text": "REFUSED (Name.esp arm): Name.esp",
+   "want": true
+  },
+  {
+   "text": "REFUSED (Name.esp arm): the asset view is not exactly the order file's Mods list",
+   "want": true
+  },
+  {
+   "text": "REFUSED: listed panels the records do not have: {string.Join(",
+   "want": true
+  },
+  {
+   "text": "REFUSED: Name.esp stays above --max-memory-gb Name.esp after clearing caches",
+   "want": true
+  },
+  {
+   "text": "REFUSED: class counts do not sum to the panel total",
+   "want": true
+  },
+  {
+   "text": "REFUSED: sensitivity counts do not sum",
+   "want": true
+  },
+  {
+   "text": "REFUSED to read the rules: Name.esp",
+   "want": true
+  },
+  {
+   "text": "units 1,234/1,234/1,234, exhausted 1,234, refused 1,234",
+   "want": false
+  },
+  {
+   "text": "shifted 1,234 / refused 1,234; budget-exhausted 1,234, time-outs 1,234, ",
+   "want": false
+  },
+  {
+   "text": "gate: the BASE emit names no configuration -> REFUSED, saying which side and why",
+   "want": true
+  },
+  {
+   "text": "gate: the CHANGED emit names no configuration -> REFUSED",
+   "want": true
+  },
+  {
+   "text": "gate: NEITHER emit names one -> REFUSED (an unlabelled pair is not a matching pair)",
+   "want": true
+  },
+  {
+   "text": "gate: two DIFFERENT probes -> REFUSED, naming both",
+   "want": true
+  },
+  {
+   "text": "candidate/refuse: a name nothing provides -> REFUSED, naming it",
+   "want": true
+  },
+  {
+   "text": "candidate/refuse: a plugin ahead of its own master -> REFUSED, naming both and their positions",
+   "want": true
+  },
+  {
+   "text": "candidate/refuse: a master absent from the loaded set -> REFUSED, naming the dependent and the master",
+   "want": true
+  },
+  {
+   "text": "candidate/refuse: a non-master plugin ahead of a master-flagged one -> REFUSED, naming both",
+   "want": true
+  },
+  {
+   "text": "candidate/refuse: --order together with --enable -> REFUSED (two descriptions of one order)",
+   "want": true
+  },
+  {
+   "text": "candidate/refuse: the same plugin listed twice -> REFUSED, naming it",
+   "want": true
+  },
+  {
+   "text": "350 profile: Child.esp ticked, its master Parent.esp unticked -> REFUSED in one sentence: switch Parent.esp on or Child.esp off",
+   "want": true
+  },
+  {
+   "text": "MISSING MASTER - 'Child.esp' masters 'Parent.esp', which this order does not load",
+   "want": true
+  },
+  {
+   "text": "351 profile: Gone.esp masters Nowhere.esm, installed nowhere -> REFUSED: install Nowhere.esm or switch Gone.esp off",
+   "want": true
+  },
+  {
+   "text": "MISSING MASTER - 'Gone.esp' masters 'Nowhere.esm'",
+   "want": true
+  },
+  {
+   "text": "352 --disable Parent.esp orphans Child.esp -> REFUSED: also --disable Child.esp or keep Parent.esp",
+   "want": true
+  },
+  {
+   "text": "MISSING MASTER - 'Child.esp' masters 'Parent.esp'",
+   "want": true
+  },
+  {
+   "text": "353 --enable Child.esp with Parent.esp off -> REFUSED (not measured without Child): also --enable Parent.esp",
+   "want": true
+  },
+  {
+   "text": "354 --order candidate [Base.esm, Child.esp] -> REFUSED with the same sentence: add Parent.esp ahead of Child.esp",
+   "want": true
+  },
+  {
+   "text": "1300 --enable Extra.esp, installed in a switched-off folder but not in loadorder.txt -> REFUSED in one sentence: switch it on once in MO2 or give it a position with --order",
+   "want": true
+  },
+  {
+   "text": "1301 --enable Absent.esp, which no layer of the install holds and loadorder.txt does not list -> REFUSED: install it",
+   "want": true
+  },
+  {
+   "text": "1302 --enable Lost.esp, listed in loadorder.txt but provided by no layer -> REFUSED (not measured without it): install it",
+   "want": true
+  },
+  {
+   "text": "1303 --enable of one listed and two unlisted plugins -> REFUSED in ONE sentence naming the first and counting the other",
+   "want": true
+  },
+  {
+   "text": "1310 --order candidate built on profile Q, run under --profile P (the two rank ModA and ModB the other way) -> REFUSED in one sentence, never resolved through P",
+   "want": true
+  },
+  {
+   "text": "1311 --order candidate that names no BaseProfile -> REFUSED: nothing says which profile its names belong to",
+   "want": true
+  },
+  {
+   "text": "1,234 flag changes, 1,234 swaps; the layer read 1,234 lines, 1,234 refused, 1,234 anomalies",
+   "want": false
+  },
+  {
+   "text": "coverage: 10 judged / 0 unjudgeable -> 0 judged / 10 unjudgeable is REFUSED, and the verdict is UNJUDGED, never VERIFIED",
+   "want": true
+  },
+  {
+   "text": "before 1,234; refused 1,234; after 1,234; forced 1,234",
+   "want": false
+  },
+  {
+   "text": "1,234 refused for the extent",
+   "want": false
+  },
+  {
+   "text": "REFUSED: ",
+   "want": true
+  },
+  {
+   "text": "SS-1 MrA.esp without MrMaster.esm: refused in one sentence naming both, starting MISSING MASTER",
+   "want": true
+  },
+  {
+   "text": "MISSING MASTER - 'MrA.esp' masters 'MrMaster.esm'",
+   "want": true
+  },
+  {
+   "text": "PD2-S3 refused: exit 2, stderr starts 'REFUSED: ' with the reason",
+   "want": true
+  },
+  {
+   "text": "REFUSED: a plugin's master is absent",
+   "want": true
+  },
+  {
+   "text": "a plugin's master is absent",
+   "want": false
+  },
+  {
+   "text": "   Name.esp: REFUSED \u2014 Name.esp",
+   "want": true
+  },
+  {
+   "text": "done: 1,234 selected (1,234 refused) in 1,234s; read {Gb(summary[",
+   "want": false
+  },
+  {
+   "text": "))}); with a function the decompiler refused 1,234  (1,234s)",
+   "want": false
+  },
+  {
+   "text": "))}), refused 1,234",
+   "want": false
+  },
+  {
+   "text": "1,234 switches, 1,234 refused; M9 {(bindings.TryGetValue(F.M9, out var b9) ? string.Join(",
+   "want": false
+  },
+  {
+   "text": "viewprobe extraction guard: the rendering library asked to extract '",
+   "want": false
+  },
+  {
+   "text": "viewprobe extraction guard: the rendering library asked to extract to '",
+   "want": false
+  },
+  {
+   "text": "   --nav-z REFUSED: no navmesh triangle lies within Name.esp u of z Name.esp, ",
+   "want": true
+  },
+  {
+   "text": "   route REFUSED: Name.esp of Name.esp waypoint(s) are not on walkable navmesh.",
+   "want": true
+  },
+  {
+   "text": "   route-solve REFUSED: the navmesh graph came out with ZERO edges, so nothing is ",
+   "want": true
+  },
+  {
+   "text": "   route REFUSED: --route-solve found no walkable path for Name.esp of ",
+   "want": true
+  },
+  {
+   "text": "   route REFUSED: Name.esp leg(s) leave walkable navmesh BETWEEN their waypoints.",
+   "want": true
+  },
+  {
+   "text": "--stations (route): REFUSED. Name.esp grid square(s) the loaded set's floor needs lie ",
+   "want": true
+  },
+  {
+   "text": "--stations (route): REFUSED to write the pose file. ",
+   "want": true
+  },
+  {
+   "text": "1,234 refused (",
+   "want": false
+  },
+  {
+   "text": "--stations: REFUSED to write the pose file. ",
+   "want": true
+  },
+  {
+   "text": "composed, 1,234 accepted, 1,234 refused",
+   "want": false
+  },
+  {
+   "text": "the workbench endpoint has no launcher to forward to.",
+   "want": false
+  },
+  {
+   "text": "0A1B2C:Name.esp refused: 0A1B2C:Name.esp",
+   "want": true
+  },
+  {
+   "text": "'Name.esp' is not a FormKey; pick a reference row.",
+   "want": false
+  },
+  {
+   "text": "the bundle does not say which cell Name.esp is in (its names enrichment did not read it), so it cannot be loaded.",
+   "want": false
+  },
+  {
+   "text": "Name.esp is in this cell but the scene did not draw it (no model, a marker, or disabled); nothing to land on.",
+   "want": false
+  },
+  {
+   "text": "Name.esp's cell Name.esp is not one this session can load; reopen the bundle.",
+   "want": false
+  },
+  {
+   "text": "loading cell Name.esp would drop Name.esp staged edit(s); write or undo them first.",
+   "want": false
+  },
+  {
+   "text": "'Name.esp' is not a part of the state; project any of {string.Join(",
+   "want": false
+  },
+  {
+   "text": "limit must be 1 or more and offset 0 or more.",
+   "want": false
+  },
+  {
+   "text": "this scene has no view controls.",
+   "want": false
+  },
+  {
+   "text": "hide needs ref, or a selected reference.",
+   "want": false
+  },
+  {
+   "text": "hide_part needs ref, or a selected reference.",
+   "want": false
+  },
+  {
+   "text": "hide_part needs part, from 0 to Name.esp for Name.esp.",
+   "want": false
+  },
+  {
+   "text": "hide_in_front needs ref, or a selected reference.",
+   "want": false
+  },
+  {
+   "text": "no reference drawn in this scene is won by Name.esp",
+   "want": false
+  },
+  {
+   "text": "see_through needs ref, mod or plugin, or a selected reference.",
+   "want": false
+  },
+  {
+   "text": "isolate needs ref, or a selected reference.",
+   "want": false
+  },
+  {
+   "text": "'Name.esp' is not a view operation; use show_original, show_edited, ghost_on, ghost_off, hide, hide_part, hide_in_front, see_through, isolate or restore.",
+   "want": false
+  },
+  {
+   "text": "revert needs ref, or a selected reference.",
+   "want": false
+  },
+  {
+   "text": "there is nothing staged or written for Name.esp to revert.",
+   "want": false
+  },
+  {
+   "text": "drop needs ref, or a selected reference.",
+   "want": false
+  },
+  {
+   "text": "'Name.esp' is not a verdict; use real problem, intentional or unsure.",
+   "want": false
+  },
+  {
+   "text": "decide needs a reason, a few words saying why (for example: placed on purpose).",
+   "want": false
+  },
+  {
+   "text": "Findings rows are not decided yet; decide takes conflict, a Conflicts row's rank.",
+   "want": false
+  },
+  {
+   "text": "decide needs conflict, a Conflicts row's rank.",
+   "want": false
+  },
+  {
+   "text": "no Work Folder is set, so a decision cannot be kept; set one in the launcher, or WB_OUT for a bundle.",
+   "want": false
+  },
+  {
+   "text": "no instance and profile are bound, so a decision cannot say which load order it is about.",
+   "want": false
+  },
+  {
+   "text": "no conflict ranked Name.esp is listed; read workbench_state with project conflicts to see the ranks listed.",
+   "want": false
+  },
+  {
+   "text": "no scene is open to read the row's objects from; open a conflict first.",
+   "want": false
+  },
+  {
+   "text": "the decisions file could not be written (Name.esp).",
+   "want": false
+  },
+  {
+   "text": "Name.esp needs finding, the rank of a navmesh Findings row (EDGE-IDX, EDGE-NAV, EDGE-NOMATCH, EDGE-ONEWAY or NAV-GROUND) as workbench_state's findings list it.",
+   "want": false
+  },
+  {
+   "text": "no Findings row ranked Name.esp is listed; read workbench_state with project [\"findings\"] to see the ranks.",
+   "want": false
+  },
+  {
+   "text": "repair_write needs patch, the new plugin's name (for example WbNavRepair).",
+   "want": false
+  },
+  {
+   "text": "finding is an input of select only.",
+   "want": false
+  },
+  {
+   "text": "finding Name.esp does not open the viewer: Name.esp.",
+   "want": false
+  },
+  {
+   "text": "nothing is selected; select the reference the others move with first.",
+   "want": false
+  },
+  {
+   "text": "move_with needs refs, the references to move with the selected one.",
+   "want": false
+  },
+  {
+   "text": "nothing is selected; select the reference to find a clear position for.",
+   "want": false
+  },
+  {
+   "text": "this scene cannot run trials: it has no houseCARL server or no bundle to re-check with.",
+   "want": false
+  },
+  {
+   "text": "find_clear needs an open conflict, whose re-check judges each candidate; open one first.",
+   "want": false
+  },
+  {
+   "text": "a Name.esp row has no probe re-run here, so its candidates cannot be judged.",
+   "want": false
+  },
+  {
+   "text": "Name.esp or the open row's other reference is not drawn in this scene, so no candidate can be made.",
+   "want": false
+  },
+  {
+   "text": "max must be 1 to Name.esp.",
+   "want": false
+  },
+  {
+   "text": "there are no candidates; ask for them with find_clear first.",
+   "want": false
+  },
+  {
+   "text": "choose needs n, the candidate's number.",
+   "want": false
+  },
+  {
+   "text": "nothing is selected; select the reference the candidates were made for.",
+   "want": false
+  },
+  {
+   "text": "the reporting skill's scene policy was not found, so there are no scenes to open.",
+   "want": false
+  },
+  {
+   "text": "no scene is numbered Name.esp; read workbench_state with project [\"scenes\"] to see them.",
+   "want": false
+  },
+  {
+   "text": "scene Name.esp has no row that opens.",
+   "want": false
+  },
+  {
+   "text": "select takes exactly one of conflict (a rank) or ref (a reference).",
+   "want": false
+  },
+  {
+   "text": "no conflict ranked Name.esp is listed; read workbench_state with project [\"conflicts\"] to see the ranks listed.",
+   "want": false
+  },
+  {
+   "text": "nothing is selected; select a reference first, or name it with ref.",
+   "want": false
+  },
+  {
+   "text": "give either offset or delta and turn_degrees, not both.",
+   "want": false
+  },
+  {
+   "text": "give either delta and turn_degrees (relative) or position and rotation_degrees (absolute), not both.",
+   "want": false
+  },
+  {
+   "text": "stage needs a move or a turn: delta [dx, dy, dz] and/or turn_degrees, or position and/or rotation_degrees.",
+   "want": false
+  },
+  {
+   "text": "Name.esp must be three finite numbers, [x, y, z].",
+   "want": false
+  },
+  {
+   "text": "snap and angle_snap must be 0 or more.",
+   "want": false
+  },
+  {
+   "text": "commit needs patch, the new plugin's name (for example WbFixBarrel).",
+   "want": false
+  },
+  {
+   "text": "recheck needs patch, the written patch plugin's name.",
+   "want": false
+  },
+  {
+   "text": "a re-check is already running; read workbench_state with wait_seconds for its result.",
+   "want": false
+  },
+  {
+   "text": "the re-check was refused: ",
+   "want": true
+  },
+  {
+   "text": "'Name.esp' is not a verb; use select, stage, undo, revert, drop, view, decide, commit, recheck, repair_preview, repair_write, open_profile, select_mods, select_probes, set_output, set_work_folder or run.",
+   "want": false
+  },
+  {
+   "text": "'Name.esp' is not a reference key; write it as XXXXXX:Plugin.esp, for example 09A3BB:Skyrim.esm.",
+   "want": false
+  },
+  {
+   "text": "   pair-loop timers same: 537,452 pairs (223,553 mesh queries), 497.8s; paths world 537,189 / zero-area skip 123 / shifted 90 / refused 50; budget-exhausted 0, time-outs 0, preparation refusals 0; served from the pair cache 313,887",
+   "want": false
+  },
+  {
+   "text": "   ! population gate: the arm REFUSED.",
+   "want": true
+  },
+  {
+   "text": "      the two configurations differ: Probe overlapprobe vs contactprobe. REFUSED.",
+   "want": true
+  },
+  {
+   "text": "--population x.json names no plugin and no mod folder; an empty population would judge nothing, so it is refused.",
+   "want": true
+  },
+  {
+   "text": "",
+   "want": false
+  },
+  {
+   "text": "refused",
+   "want": true
+  },
+  {
+   "text": "Refused 5",
+   "want": false
+  },
+  {
+   "text": "refused  1,234",
+   "want": false
+  },
+  {
+   "text": "refused,5",
+   "want": false
+  },
+  {
+   "text": "3 refused",
+   "want": false
+  },
+  {
+   "text": "3, refused",
+   "want": false
+  },
+  {
+   "text": "1,2 refused: why",
+   "want": false
+  },
+  {
+   "text": "x refused y",
+   "want": true
+  },
+  {
+   "text": "unrefused",
+   "want": false
+  },
+  {
+   "text": "refusedx",
+   "want": false
+  },
+  {
+   "text": "cannot enable",
+   "want": true
+  },
+  {
+   "text": "Profile Mismatch",
+   "want": true
+  },
+  {
+   "text": "missing  master",
+   "want": false
+  },
+  {
+   "text": "refused\n5",
+   "want": false
+  },
+  {
+   "text": "refused\t\u0663",
+   "want": false
+  },
+  {
+   "text": "\u0663 refused",
+   "want": false
+  },
+  {
+   "text": "refused 1,",
+   "want": false
+  },
+  {
+   "text": "refused ,",
+   "want": true
+  },
+  {
+   "text": "is refused.",
+   "want": true
+  },
+  {
+   "text": "refused-5",
+   "want": true
+  },
+  {
+   "text": "refused (5)",
+   "want": true
+  },
+  {
+   "text": "5\u00a0refused",
+   "want": true
+  },
+  {
+   "text": "pre_refused",
+   "want": false
+  },
+  {
+   "text": "\u00e9refused",
+   "want": false
+  },
+  {
+   "text": "refused\u00e9",
+   "want": false
+  }
+ ],
+ "arguments": [
+  {
+   "argv": [
+    "--candidates",
+    "C",
+    "--out",
+    "O"
+   ],
+   "want": {
+    "values": {
+     "candidates": "C",
+     "out": "O",
+     "probes": "navownprobe,overlapprobe,contactprobe",
+     "instance": null,
+     "profile": null,
+     "game": null,
+     "probe_args": "",
+     "baseline": null,
+     "max_candidates": null,
+     "diff_tolerance": null,
+     "no_reverse": false,
+     "no_pair_results": false,
+     "full_reverse": false,
+     "deadline_seconds": null,
+     "probe_cmd": [],
+     "population": null,
+     "population_probes": "",
+     "reuse_cache": []
+    }
+   }
+  },
+  {
+   "argv": [
+    "--candidates",
+    "C",
+    "--out",
+    "O",
+    "--probes",
+    "a, b ,,c",
+    "--instance",
+    "I",
+    "--profile",
+    "P",
+    "--game",
+    "G",
+    "--probe-args",
+    "--state X  --lean",
+    "--harness",
+    "H",
+    "--baseline",
+    "B",
+    "--max-candidates",
+    "3",
+    "--diff-tolerance",
+    "1.5",
+    "--no-reverse",
+    "--no-pair-results",
+    "--full-reverse",
+    "--deadline-seconds",
+    "5397.833",
+    "--probe-cmd",
+    "a=python a.py",
+    "--probe-cmd",
+    "b=x",
+    "--population",
+    "pop.json",
+    "--population-probes",
+    "a,b",
+    "--reuse-cache",
+    "one",
+    "--reuse-cache",
+    "two"
+   ],
+   "want": {
+    "values": {
+     "candidates": "C",
+     "out": "O",
+     "probes": "a, b ,,c",
+     "instance": "I",
+     "profile": "P",
+     "game": "G",
+     "probe_args": "--state X  --lean",
+     "harness": "H",
+     "baseline": "B",
+     "max_candidates": 3,
+     "diff_tolerance": "1.5",
+     "no_reverse": true,
+     "no_pair_results": true,
+     "full_reverse": true,
+     "deadline_seconds": 5397.833,
+     "probe_cmd": [
+      "a=python a.py",
+      "b=x"
+     ],
+     "population": "pop.json",
+     "population_probes": "a,b",
+     "reuse_cache": [
+      "one",
+      "two"
+     ]
+    }
+   }
+  },
+  {
+   "argv": [
+    "--candidates=C",
+    "--out=O=1",
+    "--max-candidates=-2",
+    "--deadline-seconds=1e3",
+    "--probe-args=--lean",
+    "--harness",
+    "H"
+   ],
+   "want": {
+    "values": {
+     "candidates": "C",
+     "out": "O=1",
+     "probes": "navownprobe,overlapprobe,contactprobe",
+     "instance": null,
+     "profile": null,
+     "game": null,
+     "probe_args": "--lean",
+     "harness": "H",
+     "baseline": null,
+     "max_candidates": -2,
+     "diff_tolerance": null,
+     "no_reverse": false,
+     "no_pair_results": false,
+     "full_reverse": false,
+     "deadline_seconds": 1000.0,
+     "probe_cmd": [],
+     "population": null,
+     "population_probes": "",
+     "reuse_cache": []
+    }
+   }
+  },
+  {
+   "argv": [
+    "--cand",
+    "C",
+    "--o",
+    "O",
+    "--max",
+    " 7 ",
+    "--dead",
+    "-0.5",
+    "--no-r",
+    "--full",
+    "--population",
+    "f",
+    "--population-",
+    "a",
+    "--harness",
+    "H"
+   ],
+   "want": {
+    "values": {
+     "candidates": "C",
+     "out": "O",
+     "probes": "navownprobe,overlapprobe,contactprobe",
+     "instance": null,
+     "profile": null,
+     "game": null,
+     "probe_args": "",
+     "harness": "H",
+     "baseline": null,
+     "max_candidates": 7,
+     "diff_tolerance": null,
+     "no_reverse": true,
+     "no_pair_results": false,
+     "full_reverse": true,
+     "deadline_seconds": -0.5,
+     "probe_cmd": [],
+     "population": "f",
+     "population_probes": "a",
+     "reuse_cache": []
+    }
+   }
+  },
+  {
+   "argv": [
+    "--candidates",
+    "C",
+    "--out",
+    "O",
+    "--out",
+    "O2",
+    "--max-candidates",
+    "1_000",
+    "--deadline-seconds",
+    "inf",
+    "--harness",
+    "H"
+   ],
+   "want": {
+    "values": {
+     "candidates": "C",
+     "out": "O2",
+     "probes": "navownprobe,overlapprobe,contactprobe",
+     "instance": null,
+     "profile": null,
+     "game": null,
+     "probe_args": "",
+     "harness": "H",
+     "baseline": null,
+     "max_candidates": 1000,
+     "diff_tolerance": null,
+     "no_reverse": false,
+     "no_pair_results": false,
+     "full_reverse": false,
+     "deadline_seconds": Infinity,
+     "probe_cmd": [],
+     "population": null,
+     "population_probes": "",
+     "reuse_cache": []
+    }
+   }
+  },
+  {
+   "argv": [
+    "--candidates",
+    "C",
+    "--out",
+    "O",
+    "--deadline-seconds",
+    "nan",
+    "--max-candidates",
+    "-0",
+    "--diff-tolerance",
+    "-1",
+    "--harness",
+    "H"
+   ],
+   "want": {
+    "values": {
+     "candidates": "C",
+     "out": "O",
+     "probes": "navownprobe,overlapprobe,contactprobe",
+     "instance": null,
+     "profile": null,
+     "game": null,
+     "probe_args": "",
+     "harness": "H",
+     "baseline": null,
+     "max_candidates": 0,
+     "diff_tolerance": "-1",
+     "no_reverse": false,
+     "no_pair_results": false,
+     "full_reverse": false,
+     "deadline_seconds": NaN,
+     "probe_cmd": [],
+     "population": null,
+     "population_probes": "",
+     "reuse_cache": []
+    }
+   }
+  },
+  {
+   "argv": [
+    "--candidates",
+    "C",
+    "--out",
+    "O",
+    "--probe-args",
+    "",
+    "--probes",
+    "",
+    "--harness",
+    ""
+   ],
+   "want": {
+    "values": {
+     "candidates": "C",
+     "out": "O",
+     "probes": "",
+     "instance": null,
+     "profile": null,
+     "game": null,
+     "probe_args": "",
+     "harness": "",
+     "baseline": null,
+     "max_candidates": null,
+     "diff_tolerance": null,
+     "no_reverse": false,
+     "no_pair_results": false,
+     "full_reverse": false,
+     "deadline_seconds": null,
+     "probe_cmd": [],
+     "population": null,
+     "population_probes": "",
+     "reuse_cache": []
+    }
+   }
+  },
+  {
+   "argv": [
+    "--candidates",
+    "C",
+    "--out",
+    "-",
+    "--harness",
+    "-5",
+    "--baseline",
+    "-.5",
+    "--instance",
+    "- x"
+   ],
+   "want": {
+    "values": {
+     "candidates": "C",
+     "out": "-",
+     "probes": "navownprobe,overlapprobe,contactprobe",
+     "instance": "- x",
+     "profile": null,
+     "game": null,
+     "probe_args": "",
+     "harness": "-5",
+     "baseline": "-.5",
+     "max_candidates": null,
+     "diff_tolerance": null,
+     "no_reverse": false,
+     "no_pair_results": false,
+     "full_reverse": false,
+     "deadline_seconds": null,
+     "probe_cmd": [],
+     "population": null,
+     "population_probes": "",
+     "reuse_cache": []
+    }
+   }
+  },
+  {
+   "argv": [
+    "--candidates",
+    "C"
+   ],
+   "want": {
+    "error": "the following arguments are required: --out"
+   }
+  },
+  {
+   "argv": [],
+   "want": {
+    "error": "the following arguments are required: --candidates, --out"
+   }
+  },
+  {
+   "argv": [
+    "--candidates",
+    "C",
+    "--out",
+    "O",
+    "stray",
+    "--frobnicate",
+    "more"
+   ],
+   "want": {
+    "error": "unrecognized arguments: stray --frobnicate more"
+   }
+  },
+  {
+   "argv": [
+    "--candidates",
+    "C",
+    "--out",
+    "O",
+    "--probe-args",
+    "--lean"
+   ],
+   "want": {
+    "error": "argument --probe-args: expected one argument"
+   }
+  },
+  {
+   "argv": [
+    "--candidates",
+    "C",
+    "--out",
+    "O",
+    "--max-candidates",
+    "two"
+   ],
+   "want": {
+    "error": "argument --max-candidates: invalid int value: 'two'"
+   }
+  },
+  {
+   "argv": [
+    "--candidates",
+    "C",
+    "--out",
+    "O",
+    "--max-candidates",
+    "1.0"
+   ],
+   "want": {
+    "error": "argument --max-candidates: invalid int value: '1.0'"
+   }
+  },
+  {
+   "argv": [
+    "--candidates",
+    "C",
+    "--out",
+    "O",
+    "--deadline-seconds",
+    "soon"
+   ],
+   "want": {
+    "error": "argument --deadline-seconds: invalid float value: 'soon'"
+   }
+  },
+  {
+   "argv": [
+    "--candidates",
+    "C",
+    "--out",
+    "O",
+    "--pro",
+    "x"
+   ],
+   "want": {
+    "error": "ambiguous option: --pro could match --probes, --profile, --probe-args, --probe-cmd"
+   }
+  },
+  {
+   "argv": [
+    "--candidates",
+    "C",
+    "--out",
+    "O",
+    "--no-reverse=yes"
+   ],
+   "want": {
+    "error": "argument --no-reverse: ignored explicit argument 'yes'"
+   }
+  },
+  {
+   "argv": [
+    "--candidates",
+    "C",
+    "--out",
+    "O",
+    "--harness"
+   ],
+   "want": {
+    "error": "argument --harness: expected one argument"
+   }
+  },
+  {
+   "argv": [
+    "--candidates",
+    "C",
+    "--out",
+    "O",
+    "--harness",
+    "--out"
+   ],
+   "want": {
+    "error": "argument --harness: expected one argument"
+   }
+  },
+  {
+   "argv": [
+    "--candidates",
+    "C",
+    "--out",
+    "O",
+    "-x"
+   ],
+   "want": {
+    "error": "unrecognized arguments: -x"
+   }
+  },
+  {
+   "argv": [
+    "--candidates",
+    "C",
+    "--out",
+    "O",
+    "--no"
+   ],
+   "want": {
+    "error": "ambiguous option: --no could match --no-reverse, --no-pair-results"
+   }
+  }
+ ],
+ "requestKeys": [
+  {
+   "job": "navownprobe-baseline",
+   "probe": "navownprobe",
+   "program": "probe-cmd:3fab974f436e913871532d185afb1ec32f8ff0cc5deb9513c6788bbcc2777746",
+   "orderSha": "87d6cbfd755a9b8e87a908c6460a4f43ea72183b9873d28458478c76471f1102",
+   "baseSha": null,
+   "arguments": [
+    "--profile",
+    "Default",
+    "--state",
+    "baseline",
+    "--note",
+    "x"
+   ],
+   "populationSha": null,
+   "reverseOfSha": null,
+   "want": "4035c1b20007747c58f322fe8ea45efd5773c3c77c0155bf9d28e4f2f9af570a"
+  },
+  {
+   "job": "overlapprobe-baseline",
+   "probe": "overlapprobe",
+   "program": "probe-cmd:11cfbd0a4bcdf293d425c655133be5ccd45f13566e5e78c4c58ecf7e729afd95",
+   "orderSha": "87d6cbfd755a9b8e87a908c6460a4f43ea72183b9873d28458478c76471f1102",
+   "baseSha": null,
+   "arguments": [
+    "--profile",
+    "Default",
+    "--state",
+    "baseline",
+    "--note",
+    "x"
+   ],
+   "populationSha": "5c719b52c72b337599255e1f94eb6de516c3ad2190f33a7a317b124c28a45b11",
+   "reverseOfSha": null,
+   "want": "1b0fd99f344c3e3f6d4fccdae129cac6aca5b34d5842e0c10833e2efa56e5ba4"
+  },
+  {
+   "job": "navownprobe-candidate-01-swap",
+   "probe": "navownprobe",
+   "program": "probe-cmd:3fab974f436e913871532d185afb1ec32f8ff0cc5deb9513c6788bbcc2777746",
+   "orderSha": "3ab3631aa2d7098562b8e197de466881c566f007c63bd6071ccbcda945e31263",
+   "baseSha": "e75b12c89b510b16b116e89eaccebfd5f59660928fc2c2af9d1895a1ca98cc9d",
+   "arguments": [
+    "--profile",
+    "Default",
+    "--state",
+    "baseline",
+    "--note",
+    "x"
+   ],
+   "populationSha": null,
+   "reverseOfSha": null,
+   "want": "f722746e0bf9df39f8f19b19c469af3b1ba01f6f54511c6b8af477ca8830a173"
+  },
+  {
+   "job": "navownprobe-candidate-01-swap-reverse",
+   "probe": "navownprobe",
+   "program": "probe-cmd:3fab974f436e913871532d185afb1ec32f8ff0cc5deb9513c6788bbcc2777746",
+   "orderSha": "87d6cbfd755a9b8e87a908c6460a4f43ea72183b9873d28458478c76471f1102",
+   "baseSha": "a04fbb3509215c5d475c502737b2a36e5369011a98412fd6e610c80caeb9bd7f",
+   "arguments": [
+    "--profile",
+    "Default",
+    "--state",
+    "baseline",
+    "--note",
+    "x"
+   ],
+   "populationSha": null,
+   "reverseOfSha": null,
+   "want": "281ddb525aa988a8bdf5313395bff31457692162f9bfa6ad30ca227d0ef68e9a"
+  },
+  {
+   "job": "overlapprobe-candidate-01-swap",
+   "probe": "overlapprobe",
+   "program": "probe-cmd:11cfbd0a4bcdf293d425c655133be5ccd45f13566e5e78c4c58ecf7e729afd95",
+   "orderSha": "3ab3631aa2d7098562b8e197de466881c566f007c63bd6071ccbcda945e31263",
+   "baseSha": "24a17483ff8c500c6e65550ce8708ac1f49e26b82c4fc092a951ab17177c1449",
+   "arguments": [
+    "--profile",
+    "Default",
+    "--state",
+    "baseline",
+    "--note",
+    "x"
+   ],
+   "populationSha": "5c719b52c72b337599255e1f94eb6de516c3ad2190f33a7a317b124c28a45b11",
+   "reverseOfSha": null,
+   "want": "91b0be811ecff558174236b7e2f8322b2dfff9044400a1cadd666ca005b6cb3a"
+  },
+  {
+   "job": "overlapprobe-candidate-01-swap-reverse",
+   "probe": "overlapprobe",
+   "program": "probe-cmd:11cfbd0a4bcdf293d425c655133be5ccd45f13566e5e78c4c58ecf7e729afd95",
+   "orderSha": "87d6cbfd755a9b8e87a908c6460a4f43ea72183b9873d28458478c76471f1102",
+   "baseSha": "59f2fb32b92507701370224dcf6bfd30fbfee365d073777ff01e60df6d1d5808",
+   "arguments": [
+    "--profile",
+    "Default",
+    "--state",
+    "baseline",
+    "--note",
+    "x"
+   ],
+   "populationSha": "5c719b52c72b337599255e1f94eb6de516c3ad2190f33a7a317b124c28a45b11",
+   "reverseOfSha": "24a17483ff8c500c6e65550ce8708ac1f49e26b82c4fc092a951ab17177c1449",
+   "want": "f40dc3cad53701cb9104f10e05444942f2958c141f149d2a86e6d002fb6a03c9"
+  }
+ ]
+}

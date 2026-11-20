@@ -104,6 +104,8 @@ static class EmptySpaceReview
                                                    ["FloatsAsShipped"] = rows.Count(r => r.Verdict == EmptySpaceVerdict.FloatsAsShipped),
                                                    ["FloorPopulation"] = rows.Count(r => r.Verdict == EmptySpaceVerdict.FloorPopulation) },
                     $"class {cls.Count:N0}"),
+                new("mesh responsibility", 0, new Dictionary<string, long>(), new Dictionary<string, long>(),
+                    "not applied: --empty-space judges fixtures with the plugin rule, so no mod folder's mesh is named as the cause of a row here"),
             };
             if (scope is not null)
                 coverage.Add(new("population scope", rows.Count + absent, new Dictionary<string, long>(),

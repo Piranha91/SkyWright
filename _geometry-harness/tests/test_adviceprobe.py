@@ -180,38 +180,6 @@ def main() -> int:
               f"an unreadable neighbour page is ONE warning naming mod 9003 and --offline, and is not counted as read "
               f"(exit {r3.returncode}, warnings {rep3.get('warnings')})")
 
-        # ---- evalrun: the --with list it builds from a plan
-        sys.path.insert(0, str(HARNESS))
-        import evalrun  # noqa: E402
-        inst = m["instance"]
-        plan = {"options": {"instance": str(inst)},
-                "targets": [{"name": "Beta.esp", "provider": "Beta Shrine", "footprint": {"nexusId": 9002}}],
-                "configuration": {"plugins": [
-                    {"name": "Skyrim.esm", "path": str(m["game"] / "Data" / "Skyrim.esm")},
-                    {"name": "AlphaHalls.esp", "path": str(inst / "mods" / "Alpha Halls" / "AlphaHalls.esp")},
-                    {"name": "Beta.esp", "path": str(inst / "mods" / "Beta Shrine" / "Beta.esp")}]}}
-        neighbours = getattr(evalrun, "advice_neighbour_ids", None)
-        got = neighbours(plan) if neighbours else None
-        check(got == [9001], f"evalrun passes the evaluated mod's neighbours to adviceprobe: --with 9001 from the plan's "
-                             f"configuration and the mod folders' meta.ini (got {got})")
-
-        # ---- evalrun: the clash rows it records next to the rules
-        run_dir = tmp / "evalrun"
-        (run_dir / "outputs").mkdir(parents=True)
-        # A hand-written report in adviceprobe's documented shape, so this check does not depend on the probe run.
-        (run_dir / "outputs" / "report-9002.json").write_text(json.dumps({
-            "modId": 9002, "rules": [{"before": "Beta.esp", "after": "AlphaHalls.esp", "hardness": "advice"}],
-            "clashes": [{"namedModId": 9002, "namedModName": "Beta - A Shrine Overhaul", "pageModId": 9001,
-                         "page": URL.format(9001), "readDate": "2026-11-08",
-                         "line": "-Beta - A Shrine Overhaul: Trapdoor entrance to the catacombs is blocked",
-                         "symptom": "Trapdoor entrance to the catacombs is blocked"}],
-            "pagesRead": ["mod 9002: archive", "mod 9001 (--with): archive"], "warnings": []}), encoding="utf-8")
-        receipt = {"outputs": [{"path": "outputs/report-9002.json"}]}
-        statements = getattr(evalrun, "advice_statements", None)
-        rec = statements(run_dir, receipt) if statements else None
-        check(isinstance(rec, dict) and rec.get("rules") == 1 and rec.get("clashCount") == 1
-              and [c.get("namedModId") for c in rec.get("clashes") or []] == [9002],
-              f"the evaluation records 1 rule and 1 clash row naming 9002 from the advice report (got {rec})")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

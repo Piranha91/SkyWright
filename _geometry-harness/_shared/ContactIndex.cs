@@ -75,7 +75,9 @@ public sealed record GeomSummary(Aabb Box, char HostSrc, char DepSrc, bool HostU
 /// <summary>Why a host's placement changed under its last plugin: moved within its space, relocated to another, or
 /// removed (disabled or deleted after having been placed — by its own record, or through an enable parent a later
 /// plugin disabled).</summary>
-public enum HostChange { Moved, Relocated, Removed }
+/// <summary><see cref="Reshaped"/> (mesh-responsibility): placed where it was, but a mod folder's mesh changes its shape; the arm
+/// without the folder is the host at its winning placement with the mesh that wins without the folder.</summary>
+public enum HostChange { Moved, Relocated, Removed, Reshaped }
 
 /// <summary>A host whose last placement step is a move or a removal. <paramref name="Previous"/> is the snap before the
 /// mover's — the host's placement in the order without the mover (<paramref name="PrevIndex"/> its index in the
@@ -1234,29 +1236,57 @@ public sealed class ContactIndex
             }
             if (excludeMover?.Invoke(mover) == true) { if (tw) Te(key, MH, TraceOutcome.Never, "MoverExcluded", detail: $"mover plugin {mover}"); continue; }
             var prevBase = ArmBase(key, mover, closure);
-            var winBase = WinnerBase(key);
-            if (prevBase.IsNull) { if (tw) Te(key, MH, TraceOutcome.Never, "NoArmBase"); continue; }
-            if (!IsHostType(prevBase))
-            {
-                bool nb = IsBodiless(prevBase);
-                if (nb) skips.Bodiless(BodilessType(prevBase), host: true);
-                if (tw) Te(key, MH, TraceOutcome.Never, nb ? "NoModel" + BodilessType(prevBase) : "NotHostType", detail: $"base {prevBase}");
-                continue;
-            }
-            var armEn = ArmEnable(key, mover, closure);
-            if (!armEn.Resolved) { skips.HostEnableUnresolved++; if (tw) Te(key, MH, TraceOutcome.Unjudgeable, "EnableChainUnresolved"); continue; }
-            if (!armEn.Enabled) { skips.HostRuntimeDisabled++; if (tw) Te(key, MH, TraceOutcome.SetAside, "RuntimeDisabledInArm"); continue; }   // it did not exist before either
-            var box = WorldBox(prevBase, prev);
-            if (box.IsEmpty) { skips.HostNoGeometry++; if (tw) Te(key, MH, TraceOutcome.Unjudgeable, "NoGeometry"); continue; }
-            if (Summary(prevBase) is not { CanHost: true }) { skips.HostNoCollision++; if (tw) Te(key, MH, TraceOutcome.SetAside, "NoSolidCollision"); continue; }
-            float dim = MaxDim(box);
-            if (dim > MaxHostDim) { skips.HostVolume++; if (tw) Te(key, MH, TraceOutcome.SetAside, "VolumeScale", values: Tv("maxDim", dim, "limit", MaxHostDim)); continue; }
-            if (dim < MinHostDim) { skips.HostTooSmall++; if (tw) Te(key, MH, TraceOutcome.SetAside, "TooSmallToHost", values: Tv("maxDim", dim, "limit", MinHostDim)); continue; }
-            if (tw) Te(key, MH, TraceOutcome.Entered, change.ToString(), detail: $"mover plugin {mover}{(viaParent ? ", through its enable parent" : "")}");
-            list.Add(new MovedHost(key, prev, prevIndex, win, change, mover, prevBase, winBase, viaParent));
+            if (HostGates(key, prev, prevIndex, win, change, mover, prevBase, WinnerBase(key), viaParent, closure, skips, tw) is { } host) list.Add(host);
         }
         return list;
     }
+
+    /// <summary>The host gates every changed host passes (type, runtime state in the arm without the change, box, solid collision,
+    /// size), shared by <see cref="MovedHosts"/> and <see cref="ReshapedHost"/>; null, counted, when one fails.</summary>
+    MovedHost? HostGates(FormKey key, Snap prev, int prevIndex, Snap win, HostChange change, int mover, FormKey prevBase, FormKey winBase,
+                         bool viaParent, IReadOnlyList<HashSet<int>> closure, ContactSkips skips, bool tw)
+    {
+        const string MH = TraceRole.MovedHost;
+        if (prevBase.IsNull) { if (tw) Te(key, MH, TraceOutcome.Never, "NoArmBase"); return null; }
+        if (!IsHostType(prevBase))
+        {
+            bool nb = IsBodiless(prevBase);
+            if (nb) skips.Bodiless(BodilessType(prevBase), host: true);
+            if (tw) Te(key, MH, TraceOutcome.Never, nb ? "NoModel" + BodilessType(prevBase) : "NotHostType", detail: $"base {prevBase}");
+            return null;
+        }
+        var armEn = ArmEnable(key, mover, closure);
+        if (!armEn.Resolved) { skips.HostEnableUnresolved++; if (tw) Te(key, MH, TraceOutcome.Unjudgeable, "EnableChainUnresolved"); return null; }
+        if (!armEn.Enabled) { skips.HostRuntimeDisabled++; if (tw) Te(key, MH, TraceOutcome.SetAside, "RuntimeDisabledInArm"); return null; }   // it did not exist before either
+        var box = WorldBox(prevBase, prev);
+        if (box.IsEmpty) { skips.HostNoGeometry++; if (tw) Te(key, MH, TraceOutcome.Unjudgeable, "NoGeometry"); return null; }
+        if (Summary(prevBase) is not { CanHost: true }) { skips.HostNoCollision++; if (tw) Te(key, MH, TraceOutcome.SetAside, "NoSolidCollision"); return null; }
+        float dim = MaxDim(box);
+        if (dim > MaxHostDim) { skips.HostVolume++; if (tw) Te(key, MH, TraceOutcome.SetAside, "VolumeScale", values: Tv("maxDim", dim, "limit", MaxHostDim)); return null; }
+        if (dim < MinHostDim) { skips.HostTooSmall++; if (tw) Te(key, MH, TraceOutcome.SetAside, "TooSmallToHost", values: Tv("maxDim", dim, "limit", MinHostDim)); return null; }
+        if (tw) Te(key, MH, TraceOutcome.Entered, change.ToString(), detail: $"mover plugin {mover}{(viaParent ? ", through its enable parent" : "")}");
+        return new MovedHost(key, prev, prevIndex, win, change, mover, prevBase, winBase, viaParent);
+    }
+
+    /// <summary>A host at its winning placement whose arm without a change has it with <paramref name="authoringBase"/> (the base
+    /// whose geometry is the mesh that wins without a folder, or its own base when the dependent is the reshaped side); the
+    /// <paramref name="mover"/> is a plugin index no closure holds, so every other arm is the winner's. Null when the host is
+    /// deleted or absent under the winner, or fails a host gate.</summary>
+    public MovedHost? ReshapedHost(FormKey key, FormKey authoringBase, int mover, IReadOnlyList<HashSet<int>> closure, ContactSkips skips)
+    {
+        if (Index.History.Of(key) is not { Count: > 0 } snaps) return null;
+        var win = snaps[^1];
+        if (win.Deleted || Index.IsDeletedNow(key) || WinnerEnable(key) is not { Resolved: true, Enabled: true }) return null;
+        return HostGates(key, win, snaps.Count - 1, win, HostChange.Reshaped, mover, authoringBase, WinnerBase(key), false, closure, skips, Tw(key));
+    }
+
+    /// <summary>The dependent's base in the authoring arm when it is not the arm without the host's mover: the folder rule's
+    /// reshaped dependent, whose authoring base reads the mesh that wins without the folder. Null keeps <see cref="ArmBase"/>.</summary>
+    public Func<FormKey, FormKey?>? DependentAuthoringBase { get; set; }
+
+    /// <summary>The folder rule's pass only: the dependents a judged host considers (null: every one). Set and cleared by that
+    /// single-threaded pass.</summary>
+    public Func<FormKey, bool>? DependentFilter { get; set; }
 
     // ---- the two hashes ----------------------------------------------------------------------------
 
@@ -1381,7 +1411,8 @@ public sealed class ContactIndex
     // ---- the best contact of one dependent against a population ------------------------------------
 
     /// <summary>The dependent's best contact against everything in <paramref name="hash"/> (itself excluded) whose box
-    /// is within the box band: the deepest penetration if any penetrates, else the least distance. Null when nothing is
+    /// is within the box band: a contact that touches by the rule before one that does not (<see cref="Better"/>), then the
+    /// deepest penetration if any penetrates, else the least distance. Null when nothing is
     /// within the band, or the dependent has no soup. <paramref name="placementOf"/> gives each neighbour's snap in this
     /// arm; <paramref name="baseOf"/> its base then. The against-ref of the best contact is the one the reported depth
     /// was measured against, and the arm carries how wide that ref is along the contact normal (R4).
@@ -1503,7 +1534,7 @@ public sealed class ContactIndex
                 }
             }
             if (isPre ? bestPre is not null && pen <= bestPre.Contact.EffectivePenetration
-                      : best is not null && !Better(rank, c.FacingDistance, bestRank, best.Contact.FacingDistance)) continue;
+                      : best is not null && !Better(rank, c.FacingDistance, bestRank, best.Contact.FacingDistance, Epsilon)) continue;
             if (isPre) bestPre = arm; else { best = arm; bestRank = rank; }
             if (e is not null) e.Lap(ref e.OtherTicks);
         }
@@ -1540,13 +1571,21 @@ public sealed class ContactIndex
     {
         // "Touches" exactly as the rule reads it: a new depth over ε (Sunk) or a facing gap within ε (ReSupported). A contact that only
         // grazes (0 < depth <= ε) with a facing gap over ε reads Stranded/Orphaned, so it must not displace a pre-existing overlap.
-        bool bestTouches = best is not null && (bestRank > epsilon || best.Contact.FacingDistance <= epsilon);
+        bool bestTouches = best is not null && Touches(bestRank, best.Contact.FacingDistance, epsilon);
         return bestPre is not null && !bestTouches ? bestPre : best;
     }
 
-    /// <summary>Depth first (new depth under the differential rule, raw penetration otherwise), then the facing gap.</summary>
-    static bool Better(float depthA, float facingA, float depthB, float facingB)
+    /// <summary>Whether a contact touches by the rule (<see cref="DetectorModel.PlacementContact"/>): a new depth over ε (Sunk) or a
+    /// facing gap within ε (ReSupported). A graze, 0 &lt; depth &lt;= ε with a facing gap over ε, does not.</summary>
+    public static bool Touches(float depth, float facing, float epsilon) => depth > epsilon || facing <= epsilon;
+
+    /// <summary>The ranking of two plain contacts (A replaces B when true). A contact that touches by the rule beats one that does
+    /// not, so a graze into a neighbour can never stand in for a contact that holds the dependent; among contacts on the same side
+    /// of that line, depth first (new depth under the differential rule, raw penetration otherwise), then the facing gap.</summary>
+    public static bool Better(float depthA, float facingA, float depthB, float facingB, float epsilon)
     {
+        bool ta = Touches(depthA, facingA, epsilon), tb = Touches(depthB, facingB, epsilon);
+        if (ta != tb) return ta;
         if (depthA > 0f || depthB > 0f) return depthA > depthB;
         return facingA < facingB;
     }
@@ -1626,6 +1665,7 @@ public sealed class ContactIndex
             bool tw = Tw(depKey);
             bool lastSnap = si == snaps.Count - 1;
             if (depKey == host.Key) { if (tw && lastSnap) Te(depKey, DR, TraceOutcome.Never, "SelfPair", host.Key); continue; }
+            if (DependentFilter is { } keep && !keep(depKey)) continue;   // the folder rule's pass: only dependents a Blind row can involve
             int ai = AuthoringSnapIndex(snaps, host.Mover, closure);
             if (ai < 0) { if (lastSnap) { skips.DepIntroducedByMover++; if (tw) Te(depKey, DR, TraceOutcome.SetAside, "DepIntroducedByMover", host.Key); } continue; }
             if (ai != si)                                                        // this snap is not the authoring arm's
@@ -1640,7 +1680,7 @@ public sealed class ContactIndex
             var depArmEn = ArmEnable(depKey, host.Mover, closure);
             if (!depArmEn.Resolved) { skips.DepEnableUnresolved++; if (tw) Te(depKey, DR, TraceOutcome.Unjudgeable, "DepEnableChainUnresolved", host.Key); continue; }
             if (!depArmEn.Enabled) { skips.DepAbsentInArm++; if (tw) Te(depKey, DR, TraceOutcome.SetAside, "DepAbsentInArm", host.Key); continue; }   // never there to rest on anything
-            var depBase = ArmBase(depKey, host.Mover, closure);
+            var depBase = DependentAuthoringBase?.Invoke(depKey) ?? ArmBase(depKey, host.Mover, closure);
             if (depBase.IsNull) { skips.DepIntroducedByMover++; if (tw) Te(depKey, DR, TraceOutcome.SetAside, "DepIntroducedByMover", host.Key, detail: "no base in the arm without the mover"); continue; }
             var depArmBox = WorldBox(depBase, depAuth);
             if (depArmBox.IsEmpty) depArmBox = depBox;

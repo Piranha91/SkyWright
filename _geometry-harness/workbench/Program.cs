@@ -49,11 +49,10 @@ internal static class Program
         arm ??= BundleConflicts.DefaultArm(dir);               // the plan's review arm in manual mode, else baseline
         var work = Environment.GetEnvironmentVariable("WB_OUT") is { Length: > 0 } o ? o : outDir ?? Path.Combine(Path.GetTempPath(), "workbench");
         Directory.CreateDirectory(work);
-        var evalrun = FromCheckout("WB_EVALRUN", "evaluation controller evalrun.py", "_geometry-harness", "evalrun.py");
         var sevPath = FromCheckout("WB_SEVERITY", "severity table", ".claude", "skills", "world-edit-compatibility", "references", "workbench-severity.json");
         Shell.Severity = SeverityTable.Load(sevPath);
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        Shell.Bundle = BundleConflicts.Open(dir, arm, Path.Combine(work, "bundle-verify.json"), evalrun);
+        Shell.Bundle = BundleConflicts.Open(dir, arm, Path.Combine(work, "bundle-verify.json"), Shell.Launcher.Engine);
         WorkbenchHost.Say($"bundle {Shell.Bundle.Dir}: plan {Shell.Bundle.PlanId}, arm {arm}; {Shell.Bundle.VerifySummary}; "
                           + FormattableString.Invariant($"verified and read in {sw.Elapsed.TotalSeconds:0.0} s"));
         foreach (var n in Shell.Bundle.Notes) WorkbenchHost.Say("bundle note: " + n);

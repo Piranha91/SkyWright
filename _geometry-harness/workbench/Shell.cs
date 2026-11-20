@@ -28,8 +28,7 @@ internal static class Shell
     {
         var b = Bundle ?? throw new InvalidOperationException("no bundle is open, so the repair has no order to plan on.");
         var t = WorkbenchHost.TargetFromEnv() ?? throw new InvalidOperationException("no write target is set (the launcher's profile, or WB_INSTANCE, WB_PROFILE and WB_GAME_DATA), so the order cannot be read.");
-        var evalrun = Program.FromCheckoutPublic("WB_EVALRUN", "evaluation controller evalrun.py", "_geometry-harness", "evalrun.py");
-        return (BundleConflicts.CandidateFile(b.Dir, b.Arm), t, NavRepairLane.ProbeExe(Path.GetDirectoryName(Path.GetFullPath(evalrun))!), RepairWork());
+        return (BundleConflicts.CandidateFile(b.Dir, b.Arm), t, NavRepairLane.ProbeExe(Launcher.Engine.HarnessDir()), RepairWork());
     }, t => PatchWriter.StartAsync(Environment.GetEnvironmentVariable("WB_SERVER") is { Length: > 0 } s ? s : Program.DefaultServerExe(), t,
                                    Path.Combine(RepairWork(), "housecarl-data-repair"),
                                    Environment.GetEnvironmentVariable("WB_CORPUS") is { Length: > 0 } cp ? cp : Program.DefaultCorpus(), WorkbenchHost.Say));
@@ -85,8 +84,9 @@ internal static class Shell
     internal static IReadOnlyList<RankedRow> Visible => ShowAll ? Ranked : Ranked.Where(r => r.InvolvesTarget).ToList();
 
     internal static string RowText(RankedRow r) =>
-        $"{r.Rank}. {r.Row.Kind}  {r.Row.A} / {r.Row.B}  ref {r.Row.RefKey}{(r.Row.RefBaseEditorId is { } e ? " " + e : "")}"
-        + $"  [physical {r.PhysicalLabel}; check's evidence grade {r.EvidenceLabel}; {r.NewLabel}; severity {r.Severity} ({r.SeverityLabel})]";
+        $"{r.Rank}. {r.Row.Kind}  {r.Row.A} / {r.Row.B}{(r.Row.Mesh is not null ? " (its mesh)" : "")}  ref {r.Row.RefKey}{(r.Row.RefBaseEditorId is { } e ? " " + e : "")}"
+        + $"  [physical {r.PhysicalLabel}; check's evidence grade {r.EvidenceLabel}; {r.NewLabel}; severity {r.Severity} ({r.SeverityLabel})]"
+        + (r.Row.MeshSentence is { } ms ? "\n      " + ms : "");
 
     internal const double MinWidth = 560 + 360, MinHeight = 480;   // the tabs' width plus a 360-wide view; device-independent units
 

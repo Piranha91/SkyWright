@@ -1,0 +1,5037 @@
+{
+ "python": "3.12.6",
+ "placeholders": {
+  "backslash": "<ROOT\\>",
+  "forward": "<ROOT/>"
+ },
+ "normalise": [
+  {
+   "in": {
+    "id": "t",
+    "subject": {
+     "plugin": "Subj.esp"
+    },
+    "partners": [
+     {
+      "plugin": "pa.esp"
+     },
+     {
+      "plugins": [
+       "PB.esp",
+       "SUBJ.ESP"
+      ],
+      "group": "g"
+     }
+    ],
+    "keys": [
+     {
+      "plugin": "KA.esp"
+     }
+    ],
+    "dependencies": [
+     {
+      "plugin": "FIX.esp",
+      "mod": "M"
+     }
+    ],
+    "companionsOf": [
+     {
+      "plugin": "c.esp",
+      "mod": "MC"
+     }
+    ],
+    "baseline": [
+     "base.esm",
+     "Fix.esp"
+    ],
+    "baselineScopeTarget": "BASE.ESM",
+    "companions": {
+     "subj.esp": [
+      "C.esp",
+      "pa.ESP"
+     ]
+    },
+    "extraArms": [
+     {
+      "id": "x",
+      "plugins": [
+       "subj.esp",
+       "PA.esp"
+      ]
+     }
+    ],
+    "orderVariants": [
+     {
+      "id": "v",
+      "of": "combined",
+      "last": [
+       "SUBJ.esp"
+      ]
+     },
+     {
+      "id": "w",
+      "of": "combined",
+      "reverse": true
+     }
+    ],
+    "places": {
+     "LAB.esp": {
+      "after": "pb.esp",
+      "why": "x"
+     },
+     "q.esp": {}
+    },
+    "modNames": {
+     "SUBJ.ESP": "The Subject",
+     "Other.esp": "O"
+    },
+    "lab": {
+     "instance": "X:/lab"
+    },
+    "source": {
+     "instance": "X:/src",
+     "profile": "P"
+    }
+   },
+   "out": {
+    "id": "t",
+    "subject": {
+     "plugin": "Subj.esp"
+    },
+    "partners": [
+     {
+      "plugin": "pa.esp"
+     },
+     {
+      "plugins": [
+       "PB.esp",
+       "Subj.esp"
+      ],
+      "group": "g"
+     }
+    ],
+    "keys": [
+     {
+      "plugin": "KA.esp"
+     }
+    ],
+    "dependencies": [
+     {
+      "plugin": "FIX.esp",
+      "mod": "M"
+     }
+    ],
+    "companionsOf": [
+     {
+      "plugin": "c.esp",
+      "mod": "MC"
+     }
+    ],
+    "baseline": [
+     "base.esm",
+     "FIX.esp"
+    ],
+    "baselineScopeTarget": "base.esm",
+    "companions": {
+     "Subj.esp": [
+      "c.esp",
+      "pa.esp"
+     ]
+    },
+    "extraArms": [
+     {
+      "id": "x",
+      "plugins": [
+       "Subj.esp",
+       "pa.esp"
+      ]
+     }
+    ],
+    "orderVariants": [
+     {
+      "id": "v",
+      "of": "combined",
+      "last": [
+       "Subj.esp"
+      ]
+     },
+     {
+      "id": "w",
+      "of": "combined",
+      "reverse": true
+     }
+    ],
+    "places": {
+     "LAB.esp": {
+      "after": "PB.esp",
+      "why": "x"
+     },
+     "q.esp": {
+      "after": null
+     }
+    },
+    "modNames": {
+     "Subj.esp": "The Subject",
+     "Other.esp": "O"
+    },
+    "lab": {
+     "instance": "X:/lab"
+    },
+    "source": {
+     "instance": "X:/src",
+     "profile": "P"
+    }
+   }
+  },
+  {
+   "in": {
+    "schema": 1,
+    "id": "wb-1",
+    "inPlace": {
+     "instance": "C:\\i",
+     "profile": "P",
+     "game": "C:\\g"
+    },
+    "selection": {
+     "mods": [
+      "Sel",
+      "sel"
+     ]
+    },
+    "evaluation": {
+     "select": [
+      "a.b"
+     ],
+     "depth": "standard"
+    }
+   },
+   "out": {
+    "schema": 1,
+    "id": "wb-1",
+    "inPlace": {
+     "instance": "C:\\i",
+     "profile": "P",
+     "game": "C:\\g"
+    },
+    "selection": {
+     "mods": [
+      "Sel",
+      "sel"
+     ]
+    },
+    "evaluation": {
+     "select": [
+      "a.b"
+     ],
+     "depth": "standard"
+    }
+   }
+  },
+  {
+   "in": {
+    "id": "n",
+    "subject": {
+     "plugins": [
+      "A.esp",
+      "a.ESP",
+      "B.esp"
+     ]
+    },
+    "baseline": null,
+    "companions": {
+     "A.ESP": [
+      "x.esp"
+     ],
+     "a.esp": [
+      "Y.esp"
+     ]
+    },
+    "extraArms": [
+     {
+      "id": "bare"
+     }
+    ],
+    "keys": [],
+    "modNames": {}
+   },
+   "out": {
+    "id": "n",
+    "subject": {
+     "plugins": [
+      "A.esp",
+      "A.esp",
+      "B.esp"
+     ]
+    },
+    "baseline": [],
+    "companions": {
+     "A.esp": [
+      "Y.esp"
+     ]
+    },
+    "extraArms": [
+     {
+      "id": "bare",
+      "plugins": []
+     }
+    ],
+    "keys": [],
+    "modNames": {}
+   }
+  }
+ ],
+ "headers": {
+  "Base.esm": {
+   "masters": [],
+   "esm": true
+  },
+  "Dlc.esm": {
+   "masters": [
+    "Base.esm"
+   ],
+   "esm": true
+  },
+  "Fix.esp": {
+   "masters": [
+    "Base.esm",
+    "Dlc.esm"
+   ],
+   "esm": false
+  },
+  "Subj.esp": {
+   "masters": [
+    "Base.esm"
+   ],
+   "esm": false
+  },
+  "PA.esp": {
+   "masters": [
+    "Base.esm"
+   ],
+   "esm": false
+  },
+  "PB.esp": {
+   "masters": [
+    "Base.esm"
+   ],
+   "esm": false
+  },
+  "PC1.esp": {
+   "masters": [
+    "Base.esm"
+   ],
+   "esm": false
+  },
+  "PC2.esp": {
+   "masters": [
+    "Base.esm"
+   ],
+   "esm": false
+  },
+  "PCP.esp": {
+   "masters": [
+    "PC1.esp",
+    "PC2.esp"
+   ],
+   "esm": false
+  },
+  "KA.esp": {
+   "masters": [
+    "Base.esm",
+    "Subj.esp",
+    "PA.esp"
+   ],
+   "esm": false
+  },
+  "KB.esp": {
+   "masters": [
+    "Base.esm",
+    "Subj.esp",
+    "PB.esp"
+   ],
+   "esm": false
+  },
+  "KS.esp": {
+   "masters": [
+    "Base.esm",
+    "Subj.esp"
+   ],
+   "esm": false
+  },
+  "SubjM.esp": {
+   "masters": [
+    "Base.esm"
+   ],
+   "esm": true
+  },
+  "Lib.esl": {
+   "masters": [
+    "Base.esm"
+   ],
+   "esm": false
+  },
+  "Orphan.esp": {
+   "masters": [
+    "Gone.esm"
+   ],
+   "esm": false
+  }
+ },
+ "derive": [
+  {
+   "entry": {
+    "subject": {
+     "plugin": "Subj.esp"
+    },
+    "partners": [
+     {
+      "plugin": "PA.esp"
+     }
+    ],
+    "keys": [
+     {
+      "plugin": "KA.esp"
+     }
+    ],
+    "extraArms": [],
+    "orderVariants": []
+   },
+   "out": [
+    {
+     "id": "dependencies",
+     "evaluated": [],
+     "keys": [],
+     "role": "vanilla",
+     "variant": null
+    },
+    {
+     "id": "subject",
+     "evaluated": [
+      "Subj.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "unit:0",
+     "evaluated": [
+      "PA.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "combined",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    },
+    {
+     "id": "combined+key:KA.esp",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp",
+      "KA.esp"
+     ],
+     "keys": [
+      "KA.esp"
+     ],
+     "role": "patched",
+     "variant": null
+    }
+   ]
+  },
+  {
+   "entry": {
+    "subject": {
+     "plugin": "Subj.esp"
+    },
+    "partners": [
+     {
+      "plugin": "PA.esp"
+     },
+     {
+      "plugin": "PB.esp"
+     }
+    ],
+    "keys": [
+     {
+      "plugin": "KA.esp"
+     },
+     {
+      "plugin": "KB.esp"
+     }
+    ],
+    "extraArms": [],
+    "orderVariants": []
+   },
+   "out": [
+    {
+     "id": "dependencies",
+     "evaluated": [],
+     "keys": [],
+     "role": "vanilla",
+     "variant": null
+    },
+    {
+     "id": "subject",
+     "evaluated": [
+      "Subj.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "unit:0",
+     "evaluated": [
+      "PA.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "unit:1",
+     "evaluated": [
+      "PB.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "partners",
+     "evaluated": [
+      "PA.esp",
+      "PB.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    },
+    {
+     "id": "combined",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp",
+      "PB.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    },
+    {
+     "id": "subject+unit:0",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    },
+    {
+     "id": "subject+unit:1",
+     "evaluated": [
+      "Subj.esp",
+      "PB.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    },
+    {
+     "id": "combined+key:KA.esp",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp",
+      "PB.esp",
+      "KA.esp"
+     ],
+     "keys": [
+      "KA.esp"
+     ],
+     "role": "patched",
+     "variant": null
+    },
+    {
+     "id": "pair:0+key:KA.esp",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp",
+      "KA.esp"
+     ],
+     "keys": [
+      "KA.esp"
+     ],
+     "role": "patched",
+     "variant": null
+    },
+    {
+     "id": "combined+key:KB.esp",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp",
+      "PB.esp",
+      "KB.esp"
+     ],
+     "keys": [
+      "KB.esp"
+     ],
+     "role": "patched",
+     "variant": null
+    },
+    {
+     "id": "pair:1+key:KB.esp",
+     "evaluated": [
+      "Subj.esp",
+      "PB.esp",
+      "KB.esp"
+     ],
+     "keys": [
+      "KB.esp"
+     ],
+     "role": "patched",
+     "variant": null
+    },
+    {
+     "id": "combined+keys",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp",
+      "PB.esp",
+      "KA.esp",
+      "KB.esp"
+     ],
+     "keys": [
+      "KA.esp",
+      "KB.esp"
+     ],
+     "role": "patched",
+     "variant": null
+    }
+   ]
+  },
+  {
+   "entry": {
+    "subject": {
+     "plugin": "Subj.esp"
+    },
+    "partners": [
+     {
+      "plugin": "PA.esp"
+     },
+     {
+      "plugin": "PC1.esp",
+      "group": "c"
+     },
+     {
+      "plugin": "PC2.esp",
+      "group": "c"
+     },
+     {
+      "plugin": "PCP.esp",
+      "group": "c"
+     }
+    ],
+    "keys": [],
+    "extraArms": [],
+    "orderVariants": []
+   },
+   "out": [
+    {
+     "id": "dependencies",
+     "evaluated": [],
+     "keys": [],
+     "role": "vanilla",
+     "variant": null
+    },
+    {
+     "id": "subject",
+     "evaluated": [
+      "Subj.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "unit:0",
+     "evaluated": [
+      "PA.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "unit:1",
+     "evaluated": [
+      "PC1.esp",
+      "PC2.esp",
+      "PCP.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "partners",
+     "evaluated": [
+      "PA.esp",
+      "PC1.esp",
+      "PC2.esp",
+      "PCP.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    },
+    {
+     "id": "combined",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp",
+      "PC1.esp",
+      "PC2.esp",
+      "PCP.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    },
+    {
+     "id": "subject+unit:0",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    },
+    {
+     "id": "subject+unit:1",
+     "evaluated": [
+      "Subj.esp",
+      "PC1.esp",
+      "PC2.esp",
+      "PCP.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    }
+   ]
+  },
+  {
+   "entry": {
+    "subject": {
+     "plugin": "Subj.esp"
+    },
+    "partners": [
+     {
+      "plugin": "PA.esp"
+     },
+     {
+      "plugin": "PB.esp"
+     }
+    ],
+    "keys": [
+     {
+      "plugin": "KS.esp"
+     }
+    ],
+    "extraArms": [],
+    "orderVariants": []
+   },
+   "out": [
+    {
+     "id": "dependencies",
+     "evaluated": [],
+     "keys": [],
+     "role": "vanilla",
+     "variant": null
+    },
+    {
+     "id": "subject",
+     "evaluated": [
+      "Subj.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "unit:0",
+     "evaluated": [
+      "PA.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "unit:1",
+     "evaluated": [
+      "PB.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "partners",
+     "evaluated": [
+      "PA.esp",
+      "PB.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    },
+    {
+     "id": "combined",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp",
+      "PB.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    },
+    {
+     "id": "subject+unit:0",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    },
+    {
+     "id": "subject+unit:1",
+     "evaluated": [
+      "Subj.esp",
+      "PB.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    },
+    {
+     "id": "combined+key:KS.esp",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp",
+      "PB.esp",
+      "KS.esp"
+     ],
+     "keys": [
+      "KS.esp"
+     ],
+     "role": "patched",
+     "variant": null
+    }
+   ]
+  },
+  {
+   "entry": {
+    "subject": {
+     "plugin": "Subj.esp"
+    },
+    "partners": [
+     {
+      "plugin": "PA.esp"
+     }
+    ],
+    "keys": [],
+    "extraArms": [
+     {
+      "id": "x",
+      "plugins": [
+       "Subj.esp",
+       "PA.esp"
+      ]
+     }
+    ],
+    "orderVariants": [
+     {
+      "id": "combined-reverse",
+      "of": "combined",
+      "reverse": true
+     }
+    ]
+   },
+   "out": [
+    {
+     "id": "dependencies",
+     "evaluated": [],
+     "keys": [],
+     "role": "vanilla",
+     "variant": null
+    },
+    {
+     "id": "subject",
+     "evaluated": [
+      "Subj.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "unit:0",
+     "evaluated": [
+      "PA.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "combined",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    },
+    {
+     "id": "combined-reverse",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": "combined-reverse",
+     "reverse": true
+    }
+   ]
+  },
+  {
+   "entry": {
+    "subject": {
+     "plugin": "Subj.esp"
+    },
+    "partners": [
+     {
+      "plugin": "PA.esp"
+     }
+    ],
+    "keys": [
+     {
+      "plugin": "KA.esp"
+     }
+    ],
+    "extraArms": [
+     {
+      "id": "with-key",
+      "plugins": [
+       "Subj.esp",
+       "KA.esp",
+       "Subj.esp"
+      ]
+     }
+    ],
+    "orderVariants": [
+     {
+      "id": "ka-last",
+      "of": "combined+key:KA.esp",
+      "last": [
+       "PA.esp"
+      ]
+     },
+     {
+      "id": "both",
+      "of": "subject",
+      "reverse": false,
+      "last": []
+     }
+    ]
+   },
+   "out": [
+    {
+     "id": "dependencies",
+     "evaluated": [],
+     "keys": [],
+     "role": "vanilla",
+     "variant": null
+    },
+    {
+     "id": "subject",
+     "evaluated": [
+      "Subj.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "unit:0",
+     "evaluated": [
+      "PA.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "combined",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    },
+    {
+     "id": "combined+key:KA.esp",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp",
+      "KA.esp"
+     ],
+     "keys": [
+      "KA.esp"
+     ],
+     "role": "patched",
+     "variant": null
+    },
+    {
+     "id": "with-key",
+     "evaluated": [
+      "Subj.esp",
+      "KA.esp"
+     ],
+     "keys": [
+      "KA.esp"
+     ],
+     "role": "patched",
+     "variant": null
+    },
+    {
+     "id": "ka-last",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp",
+      "KA.esp"
+     ],
+     "keys": [
+      "KA.esp"
+     ],
+     "role": "patched",
+     "variant": "ka-last",
+     "last": [
+      "PA.esp"
+     ]
+    },
+    {
+     "id": "both",
+     "evaluated": [
+      "Subj.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": "both",
+     "reverse": false,
+     "last": []
+    }
+   ]
+  },
+  {
+   "entry": {
+    "subject": {
+     "plugin": "Subj.esp"
+    },
+    "partners": [],
+    "keys": [],
+    "extraArms": [],
+    "orderVariants": []
+   },
+   "out": [
+    {
+     "id": "dependencies",
+     "evaluated": [],
+     "keys": [],
+     "role": "vanilla",
+     "variant": null
+    },
+    {
+     "id": "subject",
+     "evaluated": [
+      "Subj.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    }
+   ]
+  },
+  {
+   "entry": {
+    "subject": {
+     "plugin": "Subj.esp"
+    },
+    "partners": [
+     {
+      "plugins": [
+       "PA.esp",
+       "PB.esp"
+      ]
+     },
+     {
+      "plugin": "PC1.esp",
+      "group": 1
+     },
+     {
+      "plugins": [
+       "PC2.esp",
+       "PC1.esp"
+      ],
+      "group": 1
+     }
+    ],
+    "keys": [
+     {
+      "plugin": "KA.esp"
+     }
+    ],
+    "extraArms": [],
+    "orderVariants": []
+   },
+   "out": [
+    {
+     "id": "dependencies",
+     "evaluated": [],
+     "keys": [],
+     "role": "vanilla",
+     "variant": null
+    },
+    {
+     "id": "subject",
+     "evaluated": [
+      "Subj.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "unit:0",
+     "evaluated": [
+      "PA.esp",
+      "PB.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "unit:1",
+     "evaluated": [
+      "PC1.esp",
+      "PC2.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "partners",
+     "evaluated": [
+      "PA.esp",
+      "PB.esp",
+      "PC1.esp",
+      "PC2.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    },
+    {
+     "id": "combined",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp",
+      "PB.esp",
+      "PC1.esp",
+      "PC2.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    },
+    {
+     "id": "subject+unit:0",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp",
+      "PB.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    },
+    {
+     "id": "subject+unit:1",
+     "evaluated": [
+      "Subj.esp",
+      "PC1.esp",
+      "PC2.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    },
+    {
+     "id": "combined+key:KA.esp",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp",
+      "PB.esp",
+      "PC1.esp",
+      "PC2.esp",
+      "KA.esp"
+     ],
+     "keys": [
+      "KA.esp"
+     ],
+     "role": "patched",
+     "variant": null
+    },
+    {
+     "id": "pair:0+key:KA.esp",
+     "evaluated": [
+      "Subj.esp",
+      "PA.esp",
+      "PB.esp",
+      "KA.esp"
+     ],
+     "keys": [
+      "KA.esp"
+     ],
+     "role": "patched",
+     "variant": null
+    }
+   ]
+  },
+  {
+   "entry": {
+    "subject": {
+     "plugin": "Subj.esp"
+    },
+    "partners": [
+     {
+      "plugin": "PA.esp"
+     }
+    ],
+    "keys": [],
+    "extraArms": [],
+    "orderVariants": [
+     {
+      "id": "lost",
+      "of": "no-such-arm",
+      "reverse": true
+     }
+    ]
+   },
+   "refusal": "order variant lost names arm no-such-arm, which this entry does not derive; name one of: dependencies, subject, unit:0, combined."
+  },
+  {
+   "entry": {
+    "subject": {
+     "plugins": [
+      "Subj.esp",
+      "SubjM.esp"
+     ]
+    },
+    "partners": [
+     {
+      "plugin": "PA.esp"
+     }
+    ],
+    "keys": [],
+    "extraArms": [],
+    "orderVariants": []
+   },
+   "out": [
+    {
+     "id": "dependencies",
+     "evaluated": [],
+     "keys": [],
+     "role": "vanilla",
+     "variant": null
+    },
+    {
+     "id": "subject",
+     "evaluated": [
+      "Subj.esp",
+      "SubjM.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "unit:0",
+     "evaluated": [
+      "PA.esp"
+     ],
+     "keys": [],
+     "role": "source",
+     "variant": null
+    },
+    {
+     "id": "combined",
+     "evaluated": [
+      "Subj.esp",
+      "SubjM.esp",
+      "PA.esp"
+     ],
+     "keys": [],
+     "role": "combined",
+     "variant": null
+    }
+   ]
+  }
+ ],
+ "order": [
+  {
+   "arm": {
+    "evaluated": [
+     "Subj.esp",
+     "PA.esp",
+     "KA.esp"
+    ],
+    "keys": [
+     "KA.esp"
+    ]
+   },
+   "baseline": [
+    "Base.esm",
+    "Dlc.esm",
+    "Fix.esp"
+   ],
+   "source": [
+    "Base.esm",
+    "Dlc.esm",
+    "PA.esp",
+    "Fix.esp",
+    "PB.esp",
+    "PC1.esp",
+    "PC2.esp",
+    "PCP.esp",
+    "Subj.esp",
+    "KA.esp",
+    "KB.esp",
+    "KS.esp",
+    "SubjM.esp",
+    "Lib.esl",
+    "Orphan.esp"
+   ],
+   "out": [
+    "Base.esm",
+    "Dlc.esm",
+    "PA.esp",
+    "Fix.esp",
+    "Subj.esp",
+    "KA.esp"
+   ]
+  },
+  {
+   "arm": {
+    "evaluated": [
+     "SubjM.esp",
+     "PA.esp"
+    ],
+    "keys": []
+   },
+   "baseline": [
+    "Base.esm",
+    "Dlc.esm",
+    "Fix.esp"
+   ],
+   "source": [
+    "Base.esm",
+    "Dlc.esm",
+    "PA.esp",
+    "Fix.esp",
+    "PB.esp",
+    "PC1.esp",
+    "PC2.esp",
+    "PCP.esp",
+    "Subj.esp",
+    "KA.esp",
+    "KB.esp",
+    "KS.esp",
+    "SubjM.esp",
+    "Lib.esl",
+    "Orphan.esp"
+   ],
+   "out": [
+    "Base.esm",
+    "Dlc.esm",
+    "SubjM.esp",
+    "PA.esp",
+    "Fix.esp"
+   ]
+  },
+  {
+   "arm": {
+    "evaluated": [
+     "Subj.esp",
+     "PA.esp",
+     "KA.esp"
+    ],
+    "keys": [
+     "KA.esp"
+    ]
+   },
+   "baseline": [
+    "Base.esm",
+    "Dlc.esm",
+    "Fix.esp"
+   ],
+   "source": [
+    "Base.esm",
+    "Dlc.esm",
+    "PA.esp",
+    "Fix.esp",
+    "KA.esp",
+    "Subj.esp"
+   ],
+   "refusal": "KA.esp loads before its master Subj.esp in arm ?; fix the source order or the variant."
+  },
+  {
+   "arm": {
+    "evaluated": [
+     "Subj.esp",
+     "Gone.esp"
+    ],
+    "keys": []
+   },
+   "baseline": [
+    "Base.esm",
+    "Dlc.esm",
+    "Fix.esp"
+   ],
+   "source": [
+    "Base.esm",
+    "Dlc.esm",
+    "PA.esp",
+    "Fix.esp",
+    "PB.esp",
+    "PC1.esp",
+    "PC2.esp",
+    "PCP.esp",
+    "Subj.esp",
+    "KA.esp",
+    "KB.esp",
+    "KS.esp",
+    "SubjM.esp",
+    "Lib.esl",
+    "Orphan.esp"
+   ],
+   "refusal": "Gone.esp is not in the source profile's load order; add it there or name its place in the entry's places ({plugin: {after: plugin}})."
+  },
+  {
+   "arm": {
+    "evaluated": [
+     "PC1.esp",
+     "PC2.esp",
+     "PCP.esp"
+    ],
+    "keys": [],
+    "reverse": true
+   },
+   "baseline": [
+    "Base.esm",
+    "Dlc.esm",
+    "Fix.esp"
+   ],
+   "source": [
+    "Base.esm",
+    "Dlc.esm",
+    "PA.esp",
+    "Fix.esp",
+    "PB.esp",
+    "PC1.esp",
+    "PC2.esp",
+    "PCP.esp",
+    "Subj.esp",
+    "KA.esp",
+    "KB.esp",
+    "KS.esp",
+    "SubjM.esp",
+    "Lib.esl",
+    "Orphan.esp"
+   ],
+   "refusal": "PCP.esp loads before its master PC1.esp in arm ?; fix the source order or the variant."
+  },
+  {
+   "arm": {
+    "evaluated": [
+     "Subj.esp",
+     "PA.esp"
+    ],
+    "keys": [],
+    "reverse": true
+   },
+   "baseline": [
+    "Base.esm",
+    "Dlc.esm",
+    "Fix.esp"
+   ],
+   "source": [
+    "Base.esm",
+    "Dlc.esm",
+    "PA.esp",
+    "Fix.esp",
+    "PB.esp",
+    "PC1.esp",
+    "PC2.esp",
+    "PCP.esp",
+    "Subj.esp",
+    "KA.esp",
+    "KB.esp",
+    "KS.esp",
+    "SubjM.esp",
+    "Lib.esl",
+    "Orphan.esp"
+   ],
+   "out": [
+    "Base.esm",
+    "Dlc.esm",
+    "Subj.esp",
+    "Fix.esp",
+    "PA.esp"
+   ]
+  },
+  {
+   "arm": {
+    "id": "a1",
+    "evaluated": [
+     "Subj.esp",
+     "PA.esp",
+     "PB.esp"
+    ],
+    "keys": [],
+    "last": [
+     "PA.esp",
+     "Nope.esp"
+    ]
+   },
+   "baseline": [
+    "Base.esm",
+    "Dlc.esm",
+    "Fix.esp"
+   ],
+   "source": [
+    "Base.esm",
+    "Dlc.esm",
+    "PA.esp",
+    "Fix.esp",
+    "PB.esp",
+    "PC1.esp",
+    "PC2.esp",
+    "PCP.esp",
+    "Subj.esp",
+    "KA.esp",
+    "KB.esp",
+    "KS.esp",
+    "SubjM.esp",
+    "Lib.esl",
+    "Orphan.esp"
+   ],
+   "out": [
+    "Base.esm",
+    "Dlc.esm",
+    "Fix.esp",
+    "PB.esp",
+    "Subj.esp",
+    "PA.esp"
+   ]
+  },
+  {
+   "arm": {
+    "id": "a2",
+    "evaluated": [
+     "Subj.esp",
+     "Lib.esl"
+    ],
+    "keys": []
+   },
+   "baseline": [
+    "Base.esm",
+    "Dlc.esm",
+    "Fix.esp"
+   ],
+   "source": [
+    "Base.esm",
+    "Dlc.esm",
+    "PA.esp",
+    "Fix.esp",
+    "PB.esp",
+    "PC1.esp",
+    "PC2.esp",
+    "PCP.esp",
+    "Subj.esp",
+    "KA.esp",
+    "KB.esp",
+    "KS.esp",
+    "SubjM.esp",
+    "Lib.esl",
+    "Orphan.esp"
+   ],
+   "out": [
+    "Base.esm",
+    "Dlc.esm",
+    "Lib.esl",
+    "Fix.esp",
+    "Subj.esp"
+   ]
+  },
+  {
+   "arm": {
+    "id": "a3",
+    "evaluated": [
+     "Subj.esp",
+     "Orphan.esp"
+    ],
+    "keys": []
+   },
+   "baseline": [
+    "Base.esm",
+    "Dlc.esm",
+    "Fix.esp"
+   ],
+   "source": [
+    "Base.esm",
+    "Dlc.esm",
+    "PA.esp",
+    "Fix.esp",
+    "PB.esp",
+    "PC1.esp",
+    "PC2.esp",
+    "PCP.esp",
+    "Subj.esp",
+    "KA.esp",
+    "KB.esp",
+    "KS.esp",
+    "SubjM.esp",
+    "Lib.esl",
+    "Orphan.esp"
+   ],
+   "refusal": "Orphan.esp needs master Gone.esm, which arm a3 does not load."
+  },
+  {
+   "arm": {
+    "id": "a4",
+    "evaluated": [
+     "Subj.esp",
+     "KB.esp",
+     "KA.esp",
+     "PA.esp",
+     "PB.esp"
+    ],
+    "keys": [
+     "KB.esp",
+     "KA.esp"
+    ]
+   },
+   "baseline": [
+    "Base.esm",
+    "Dlc.esm",
+    "Fix.esp"
+   ],
+   "source": [
+    "Base.esm",
+    "Dlc.esm",
+    "PA.esp",
+    "Fix.esp",
+    "PB.esp",
+    "PC1.esp",
+    "PC2.esp",
+    "PCP.esp",
+    "Subj.esp",
+    "KS.esp",
+    "SubjM.esp",
+    "Lib.esl",
+    "Orphan.esp"
+   ],
+   "out": [
+    "Base.esm",
+    "Dlc.esm",
+    "PA.esp",
+    "Fix.esp",
+    "PB.esp",
+    "Subj.esp",
+    "KB.esp",
+    "KA.esp"
+   ]
+  },
+  {
+   "arm": {
+    "id": "a5",
+    "evaluated": [
+     "subj.esp"
+    ],
+    "keys": []
+   },
+   "baseline": [
+    "BASE.ESM"
+   ],
+   "source": [
+    "Base.esm",
+    "Dlc.esm",
+    "PA.esp",
+    "Fix.esp",
+    "PB.esp",
+    "PC1.esp",
+    "PC2.esp",
+    "PCP.esp",
+    "Subj.esp",
+    "KA.esp",
+    "KB.esp",
+    "KS.esp",
+    "SubjM.esp",
+    "Lib.esl",
+    "Orphan.esp"
+   ],
+   "refusal": "BASE.ESM has no header read; the preparation could not find its file."
+  },
+  {
+   "arm": {
+    "id": "a6",
+    "evaluated": [
+     "Subj.esp",
+     "SubjM.esp"
+    ],
+    "keys": [],
+    "last": [
+     "SubjM.esp"
+    ]
+   },
+   "baseline": [
+    "Base.esm",
+    "Dlc.esm",
+    "Fix.esp"
+   ],
+   "source": [
+    "Base.esm",
+    "Dlc.esm",
+    "PA.esp",
+    "Fix.esp",
+    "PB.esp",
+    "PC1.esp",
+    "PC2.esp",
+    "PCP.esp",
+    "Subj.esp",
+    "KA.esp",
+    "KB.esp",
+    "KS.esp",
+    "SubjM.esp",
+    "Lib.esl",
+    "Orphan.esp"
+   ],
+   "refusal": "SubjM.esp is ESM-flagged but loads after Fix.esp, which the game would reorder; drop the variant that moves it."
+  },
+  {
+   "arm": {
+    "id": "a7",
+    "evaluated": [
+     "Subj.esp",
+     "KS.esp"
+    ],
+    "keys": [
+     "KS.esp"
+    ],
+    "reverse": true
+   },
+   "baseline": [
+    "Base.esm"
+   ],
+   "source": [
+    "Base.esm",
+    "Dlc.esm",
+    "PA.esp",
+    "Fix.esp",
+    "PB.esp",
+    "PC1.esp",
+    "PC2.esp",
+    "PCP.esp",
+    "Subj.esp",
+    "KA.esp",
+    "KB.esp",
+    "KS.esp",
+    "SubjM.esp",
+    "Lib.esl",
+    "Orphan.esp"
+   ],
+   "out": [
+    "Base.esm",
+    "Subj.esp",
+    "KS.esp"
+   ]
+  },
+  {
+   "arm": {
+    "evaluated": [
+     "KA.esp"
+    ],
+    "keys": [
+     "KA.esp"
+    ]
+   },
+   "baseline": [
+    "Base.esm"
+   ],
+   "source": [
+    "Base.esm",
+    "Dlc.esm",
+    "PA.esp",
+    "Fix.esp",
+    "PB.esp",
+    "PC1.esp",
+    "PC2.esp",
+    "PCP.esp",
+    "Subj.esp",
+    "KA.esp",
+    "KB.esp",
+    "KS.esp",
+    "SubjM.esp",
+    "Lib.esl",
+    "Orphan.esp"
+   ],
+   "refusal": "KA.esp needs master Subj.esp, which arm ? does not load."
+  },
+  {
+   "arm": {
+    "id": "a8",
+    "evaluated": [
+     "Subj.esp",
+     "NoHeader.esp"
+    ],
+    "keys": []
+   },
+   "baseline": [
+    "Base.esm"
+   ],
+   "source": [
+    "Base.esm",
+    "Dlc.esm",
+    "PA.esp",
+    "Fix.esp",
+    "PB.esp",
+    "PC1.esp",
+    "PC2.esp",
+    "PCP.esp",
+    "Subj.esp",
+    "KA.esp",
+    "KB.esp",
+    "KS.esp",
+    "SubjM.esp",
+    "Lib.esl",
+    "Orphan.esp",
+    "NoHeader.esp"
+   ],
+   "refusal": "NoHeader.esp has no header read; the preparation could not find its file."
+  }
+ ],
+ "accept": [
+  {
+   "scope": {
+    "complete": true,
+    "walkFailures": [],
+    "unreadableRecords": [],
+    "configuration": {
+     "fingerprint": "f",
+     "plugins": [
+      {
+       "Name": "Base.esm",
+       "Path": "X:/Base.esm",
+       "Sha256": "hBase.esm"
+      },
+      {
+       "Name": "Subj.esp",
+       "Path": "X:/Subj.esp",
+       "Sha256": "hSubj.esp"
+      }
+     ],
+     "providers": [
+      {
+       "Name": "M1",
+       "Kind": "mod"
+      },
+      {
+       "Name": "Data",
+       "Kind": "data"
+      }
+     ]
+    },
+    "targets": [
+     {
+      "name": "Subj.esp",
+      "sha256": "hSubj.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000A:Base.esm",
+          "kind": "interior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "0001:Base.esm",
+          "kind": "persistent"
+         },
+         {
+          "cell": "grid:Tamriel:1,2",
+          "kind": "exterior"
+         }
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "plugins": [
+     {
+      "name": "Base.esm",
+      "path": "X:/Base.esm",
+      "sha256": "hBase.esm"
+     },
+     {
+      "name": "Subj.esp",
+      "path": "X:/Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ],
+    "mods": [
+     "M1"
+    ],
+    "targets": [
+     "Subj.esp"
+    ],
+    "censusCells": {
+     "Subj.esp": [
+      "000A:Base.esm",
+      "000B:Base.esm"
+     ]
+    }
+   },
+   "out": {
+    "targets": {
+     "Subj.esp": {
+      "measuredCells": [
+       "000A:Base.esm",
+       "000B:Base.esm"
+      ],
+      "censusCells": [
+       "000A:Base.esm",
+       "000B:Base.esm"
+      ],
+      "missingCensusCells": [],
+      "additionalCells": []
+     }
+    }
+   }
+  },
+  {
+   "scope": {
+    "complete": false,
+    "walkFailures": [],
+    "unreadableRecords": [],
+    "configuration": {
+     "fingerprint": "f",
+     "plugins": [
+      {
+       "Name": "Base.esm",
+       "Path": "X:/Base.esm",
+       "Sha256": "hBase.esm"
+      },
+      {
+       "Name": "Subj.esp",
+       "Path": "X:/Subj.esp",
+       "Sha256": "hSubj.esp"
+      }
+     ],
+     "providers": [
+      {
+       "Name": "M1",
+       "Kind": "mod"
+      },
+      {
+       "Name": "Data",
+       "Kind": "data"
+      }
+     ]
+    },
+    "targets": [
+     {
+      "name": "Subj.esp",
+      "sha256": "hSubj.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000A:Base.esm",
+          "kind": "interior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "0001:Base.esm",
+          "kind": "persistent"
+         },
+         {
+          "cell": "grid:Tamriel:1,2",
+          "kind": "exterior"
+         }
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "plugins": [
+     {
+      "name": "Base.esm",
+      "path": "X:/Base.esm",
+      "sha256": "hBase.esm"
+     },
+     {
+      "name": "Subj.esp",
+      "path": "X:/Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ],
+    "mods": [
+     "M1"
+    ],
+    "targets": [
+     "Subj.esp"
+    ],
+    "censusCells": {
+     "Subj.esp": [
+      "000A:Base.esm",
+      "000B:Base.esm"
+     ]
+    }
+   },
+   "refusal": "the scope is incomplete (complete flag, walk failures or unreadable records); read its log and rerun the scope after fixing the cause."
+  },
+  {
+   "scope": {
+    "complete": true,
+    "walkFailures": [
+     {
+      "x": 1
+     }
+    ],
+    "unreadableRecords": [],
+    "configuration": {
+     "fingerprint": "f",
+     "plugins": [
+      {
+       "Name": "Base.esm",
+       "Path": "X:/Base.esm",
+       "Sha256": "hBase.esm"
+      },
+      {
+       "Name": "Subj.esp",
+       "Path": "X:/Subj.esp",
+       "Sha256": "hSubj.esp"
+      }
+     ],
+     "providers": [
+      {
+       "Name": "M1",
+       "Kind": "mod"
+      },
+      {
+       "Name": "Data",
+       "Kind": "data"
+      }
+     ]
+    },
+    "targets": [
+     {
+      "name": "Subj.esp",
+      "sha256": "hSubj.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000A:Base.esm",
+          "kind": "interior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "0001:Base.esm",
+          "kind": "persistent"
+         },
+         {
+          "cell": "grid:Tamriel:1,2",
+          "kind": "exterior"
+         }
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "plugins": [
+     {
+      "name": "Base.esm",
+      "path": "X:/Base.esm",
+      "sha256": "hBase.esm"
+     },
+     {
+      "name": "Subj.esp",
+      "path": "X:/Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ],
+    "mods": [
+     "M1"
+    ],
+    "targets": [
+     "Subj.esp"
+    ],
+    "censusCells": {
+     "Subj.esp": [
+      "000A:Base.esm",
+      "000B:Base.esm"
+     ]
+    }
+   },
+   "refusal": "the scope is incomplete (complete flag, walk failures or unreadable records); read its log and rerun the scope after fixing the cause."
+  },
+  {
+   "scope": {
+    "complete": true,
+    "walkFailures": [],
+    "unreadableRecords": [
+     "r"
+    ],
+    "configuration": {
+     "fingerprint": "f",
+     "plugins": [
+      {
+       "Name": "Base.esm",
+       "Path": "X:/Base.esm",
+       "Sha256": "hBase.esm"
+      },
+      {
+       "Name": "Subj.esp",
+       "Path": "X:/Subj.esp",
+       "Sha256": "hSubj.esp"
+      }
+     ],
+     "providers": [
+      {
+       "Name": "M1",
+       "Kind": "mod"
+      },
+      {
+       "Name": "Data",
+       "Kind": "data"
+      }
+     ]
+    },
+    "targets": [
+     {
+      "name": "Subj.esp",
+      "sha256": "hSubj.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000A:Base.esm",
+          "kind": "interior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "0001:Base.esm",
+          "kind": "persistent"
+         },
+         {
+          "cell": "grid:Tamriel:1,2",
+          "kind": "exterior"
+         }
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "plugins": [
+     {
+      "name": "Base.esm",
+      "path": "X:/Base.esm",
+      "sha256": "hBase.esm"
+     },
+     {
+      "name": "Subj.esp",
+      "path": "X:/Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ],
+    "mods": [
+     "M1"
+    ],
+    "targets": [
+     "Subj.esp"
+    ],
+    "censusCells": {
+     "Subj.esp": [
+      "000A:Base.esm",
+      "000B:Base.esm"
+     ]
+    }
+   },
+   "refusal": "the scope is incomplete (complete flag, walk failures or unreadable records); read its log and rerun the scope after fixing the cause."
+  },
+  {
+   "scope": {
+    "complete": true,
+    "walkFailures": [],
+    "unreadableRecords": [],
+    "configuration": {
+     "fingerprint": "f",
+     "plugins": [
+      {
+       "Name": "Base.esm",
+       "Path": "X:/Base.esm",
+       "Sha256": "hBase.esm"
+      },
+      {
+       "Name": "Subj.esp",
+       "Path": "X:/Subj.esp",
+       "Sha256": "other"
+      }
+     ],
+     "providers": [
+      {
+       "Name": "M1",
+       "Kind": "mod"
+      },
+      {
+       "Name": "Data",
+       "Kind": "data"
+      }
+     ]
+    },
+    "targets": [
+     {
+      "name": "Subj.esp",
+      "sha256": "hSubj.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000A:Base.esm",
+          "kind": "interior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "0001:Base.esm",
+          "kind": "persistent"
+         },
+         {
+          "cell": "grid:Tamriel:1,2",
+          "kind": "exterior"
+         }
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "plugins": [
+     {
+      "name": "Base.esm",
+      "path": "X:/Base.esm",
+      "sha256": "hBase.esm"
+     },
+     {
+      "name": "Subj.esp",
+      "path": "X:/Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ],
+    "mods": [
+     "M1"
+    ],
+    "targets": [
+     "Subj.esp"
+    ],
+    "censusCells": {
+     "Subj.esp": [
+      "000A:Base.esm",
+      "000B:Base.esm"
+     ]
+    }
+   },
+   "refusal": "Subj.esp: the scope read other bytes or another provider than the prepared copy."
+  },
+  {
+   "scope": {
+    "complete": true,
+    "walkFailures": [],
+    "unreadableRecords": [],
+    "configuration": {
+     "fingerprint": "f",
+     "plugins": [
+      {
+       "Name": "Base.esm",
+       "Path": "X:/Base.esm",
+       "Sha256": "hBase.esm"
+      },
+      {
+       "Name": "Subj.esp",
+       "Path": "x:\\Subj.esp",
+       "Sha256": "hSubj.esp"
+      }
+     ],
+     "providers": [
+      {
+       "Name": "M1",
+       "Kind": "mod"
+      },
+      {
+       "Name": "Data",
+       "Kind": "data"
+      }
+     ]
+    },
+    "targets": [
+     {
+      "name": "Subj.esp",
+      "sha256": "hSubj.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000A:Base.esm",
+          "kind": "interior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "0001:Base.esm",
+          "kind": "persistent"
+         },
+         {
+          "cell": "grid:Tamriel:1,2",
+          "kind": "exterior"
+         }
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "plugins": [
+     {
+      "name": "Base.esm",
+      "path": "X:/Base.esm",
+      "sha256": "hBase.esm"
+     },
+     {
+      "name": "Subj.esp",
+      "path": "X:/Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ],
+    "mods": [
+     "M1"
+    ],
+    "targets": [
+     "Subj.esp"
+    ],
+    "censusCells": {
+     "Subj.esp": [
+      "000A:Base.esm",
+      "000B:Base.esm"
+     ]
+    }
+   },
+   "out": {
+    "targets": {
+     "Subj.esp": {
+      "measuredCells": [
+       "000A:Base.esm",
+       "000B:Base.esm"
+      ],
+      "censusCells": [
+       "000A:Base.esm",
+       "000B:Base.esm"
+      ],
+      "missingCensusCells": [],
+      "additionalCells": []
+     }
+    }
+   }
+  },
+  {
+   "scope": {
+    "complete": true,
+    "walkFailures": [],
+    "unreadableRecords": [],
+    "configuration": {
+     "fingerprint": "f",
+     "plugins": [
+      {
+       "Name": "Base.esm",
+       "Path": "X:/Base.esm",
+       "Sha256": "hBase.esm"
+      },
+      {
+       "Name": "Subj.esp",
+       "Path": "Y:/Subj.esp",
+       "Sha256": "hSubj.esp"
+      }
+     ],
+     "providers": [
+      {
+       "Name": "M1",
+       "Kind": "mod"
+      },
+      {
+       "Name": "Data",
+       "Kind": "data"
+      }
+     ]
+    },
+    "targets": [
+     {
+      "name": "Subj.esp",
+      "sha256": "hSubj.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000A:Base.esm",
+          "kind": "interior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "0001:Base.esm",
+          "kind": "persistent"
+         },
+         {
+          "cell": "grid:Tamriel:1,2",
+          "kind": "exterior"
+         }
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "plugins": [
+     {
+      "name": "Base.esm",
+      "path": "X:/Base.esm",
+      "sha256": "hBase.esm"
+     },
+     {
+      "name": "Subj.esp",
+      "path": "X:/Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ],
+    "mods": [
+     "M1"
+    ],
+    "targets": [
+     "Subj.esp"
+    ],
+    "censusCells": {
+     "Subj.esp": [
+      "000A:Base.esm",
+      "000B:Base.esm"
+     ]
+    }
+   },
+   "refusal": "Subj.esp: the scope read other bytes or another provider than the prepared copy."
+  },
+  {
+   "scope": {
+    "complete": true,
+    "walkFailures": [],
+    "unreadableRecords": [],
+    "configuration": {
+     "fingerprint": "f",
+     "plugins": [
+      {
+       "Name": "Base.esm",
+       "Path": "X:/Base.esm",
+       "Sha256": "hBase.esm"
+      },
+      {
+       "Name": "Subj.esp",
+       "Path": "X:/Subj.esp",
+       "Sha256": "hSubj.esp"
+      }
+     ],
+     "providers": [
+      {
+       "Name": "M2",
+       "Kind": "mod"
+      }
+     ]
+    },
+    "targets": [
+     {
+      "name": "Subj.esp",
+      "sha256": "hSubj.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000A:Base.esm",
+          "kind": "interior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "0001:Base.esm",
+          "kind": "persistent"
+         },
+         {
+          "cell": "grid:Tamriel:1,2",
+          "kind": "exterior"
+         }
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "plugins": [
+     {
+      "name": "Base.esm",
+      "path": "X:/Base.esm",
+      "sha256": "hBase.esm"
+     },
+     {
+      "name": "Subj.esp",
+      "path": "X:/Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ],
+    "mods": [
+     "M1"
+    ],
+    "targets": [
+     "Subj.esp"
+    ],
+    "censusCells": {
+     "Subj.esp": [
+      "000A:Base.esm",
+      "000B:Base.esm"
+     ]
+    }
+   },
+   "refusal": "the scope's asset provider view differs from the arm's prepared view."
+  },
+  {
+   "scope": {
+    "complete": true,
+    "walkFailures": [],
+    "unreadableRecords": [],
+    "configuration": {
+     "fingerprint": "f",
+     "plugins": [
+      {
+       "Name": "Base.esm",
+       "Path": "X:/Base.esm",
+       "Sha256": "hBase.esm"
+      },
+      {
+       "Name": "Subj.esp",
+       "Path": "X:/Subj.esp",
+       "Sha256": "hSubj.esp"
+      }
+     ],
+     "providers": [
+      {
+       "name": "M1",
+       "kind": "MOD"
+      }
+     ]
+    },
+    "targets": [
+     {
+      "name": "Subj.esp",
+      "sha256": "hSubj.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000A:Base.esm",
+          "kind": "interior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "0001:Base.esm",
+          "kind": "persistent"
+         },
+         {
+          "cell": "grid:Tamriel:1,2",
+          "kind": "exterior"
+         }
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "plugins": [
+     {
+      "name": "Base.esm",
+      "path": "X:/Base.esm",
+      "sha256": "hBase.esm"
+     },
+     {
+      "name": "Subj.esp",
+      "path": "X:/Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ],
+    "mods": [
+     "M1"
+    ],
+    "targets": [
+     "Subj.esp"
+    ],
+    "censusCells": {
+     "Subj.esp": [
+      "000A:Base.esm",
+      "000B:Base.esm"
+     ]
+    }
+   },
+   "out": {
+    "targets": {
+     "Subj.esp": {
+      "measuredCells": [
+       "000A:Base.esm",
+       "000B:Base.esm"
+      ],
+      "censusCells": [
+       "000A:Base.esm",
+       "000B:Base.esm"
+      ],
+      "missingCensusCells": [],
+      "additionalCells": []
+     }
+    }
+   }
+  },
+  {
+   "scope": {
+    "complete": true,
+    "walkFailures": [],
+    "unreadableRecords": [],
+    "configuration": {
+     "fingerprint": "",
+     "plugins": [
+      {
+       "Name": "Base.esm",
+       "Path": "X:/Base.esm",
+       "Sha256": "hBase.esm"
+      },
+      {
+       "Name": "Subj.esp",
+       "Path": "X:/Subj.esp",
+       "Sha256": "hSubj.esp"
+      }
+     ],
+     "providers": [
+      {
+       "Name": "M1",
+       "Kind": "mod"
+      },
+      {
+       "Name": "Data",
+       "Kind": "data"
+      }
+     ]
+    },
+    "targets": [
+     {
+      "name": "Subj.esp",
+      "sha256": "hSubj.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000A:Base.esm",
+          "kind": "interior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "0001:Base.esm",
+          "kind": "persistent"
+         },
+         {
+          "cell": "grid:Tamriel:1,2",
+          "kind": "exterior"
+         }
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "plugins": [
+     {
+      "name": "Base.esm",
+      "path": "X:/Base.esm",
+      "sha256": "hBase.esm"
+     },
+     {
+      "name": "Subj.esp",
+      "path": "X:/Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ],
+    "mods": [
+     "M1"
+    ],
+    "targets": [
+     "Subj.esp"
+    ],
+    "censusCells": {
+     "Subj.esp": [
+      "000A:Base.esm",
+      "000B:Base.esm"
+     ]
+    }
+   },
+   "refusal": "the scope's asset provider view differs from the arm's prepared view."
+  },
+  {
+   "scope": {
+    "complete": true,
+    "walkFailures": [],
+    "unreadableRecords": [],
+    "configuration": {
+     "fingerprint": "f",
+     "plugins": [
+      {
+       "name": "Subj.esp",
+       "path": "X:/Subj.esp",
+       "sha256": "hSubj.esp"
+      },
+      {
+       "name": "Base.esm",
+       "path": "X:/Base.esm",
+       "sha256": "hBase.esm"
+      }
+     ],
+     "providers": [
+      {
+       "Name": "M1",
+       "Kind": "mod"
+      },
+      {
+       "Name": "Data",
+       "Kind": "data"
+      }
+     ]
+    },
+    "targets": [
+     {
+      "name": "Subj.esp",
+      "sha256": "hSubj.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000A:Base.esm",
+          "kind": "interior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "0001:Base.esm",
+          "kind": "persistent"
+         },
+         {
+          "cell": "grid:Tamriel:1,2",
+          "kind": "exterior"
+         }
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "plugins": [
+     {
+      "name": "Base.esm",
+      "path": "X:/Base.esm",
+      "sha256": "hBase.esm"
+     },
+     {
+      "name": "Subj.esp",
+      "path": "X:/Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ],
+    "mods": [
+     "M1"
+    ],
+    "targets": [
+     "Subj.esp"
+    ],
+    "censusCells": {
+     "Subj.esp": [
+      "000A:Base.esm",
+      "000B:Base.esm"
+     ]
+    }
+   },
+   "refusal": "the scope's plugin order differs from the arm's prepared order; the scope read another view."
+  },
+  {
+   "scope": {
+    "complete": true,
+    "walkFailures": [],
+    "unreadableRecords": [],
+    "configuration": {
+     "fingerprint": "f",
+     "plugins": [
+      {
+       "Name": "Base.esm",
+       "Path": "X:/Base.esm",
+       "Sha256": "hBase.esm"
+      },
+      {
+       "Name": "Subj.esp",
+       "Path": "X:/Subj.esp",
+       "Sha256": "hSubj.esp"
+      }
+     ],
+     "providers": [
+      {
+       "Name": "M1",
+       "Kind": "mod"
+      },
+      {
+       "Name": "Data",
+       "Kind": "data"
+      }
+     ]
+    },
+    "targets": [
+     {
+      "name": "Subj.esp",
+      "sha256": "hSubj.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000A:Base.esm",
+          "kind": "interior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "0001:Base.esm",
+          "kind": "persistent"
+         },
+         {
+          "cell": "grid:Tamriel:1,2",
+          "kind": "exterior"
+         }
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "plugins": [
+     {
+      "name": "Base.esm",
+      "path": "X:/Base.esm",
+      "sha256": "hBase.esm"
+     },
+     {
+      "name": "Subj.esp",
+      "path": "X:/Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ],
+    "mods": [
+     "M1"
+    ],
+    "targets": [
+     "Subj.esp"
+    ],
+    "censusCells": {
+     "Subj.esp": [
+      "000A:Base.esm",
+      "000C:Base.esm",
+      "0009:Base.esm"
+     ]
+    }
+   },
+   "refusal": "Subj.esp: the scope misses census cells 0009:Base.esm, 000C:Base.esm; reconcile the census and the arm's view before evaluating."
+  },
+  {
+   "scope": {
+    "complete": true,
+    "walkFailures": [],
+    "unreadableRecords": [],
+    "configuration": {
+     "fingerprint": "f",
+     "plugins": [
+      {
+       "Name": "Base.esm",
+       "Path": "X:/Base.esm",
+       "Sha256": "hBase.esm"
+      },
+      {
+       "Name": "Subj.esp",
+       "Path": "X:/Subj.esp",
+       "Sha256": "hSubj.esp"
+      }
+     ],
+     "providers": [
+      {
+       "Name": "M1",
+       "Kind": "mod"
+      },
+      {
+       "Name": "Data",
+       "Kind": "data"
+      }
+     ]
+    },
+    "targets": []
+   },
+   "expect": {
+    "plugins": [
+     {
+      "name": "Base.esm",
+      "path": "X:/Base.esm",
+      "sha256": "hBase.esm"
+     },
+     {
+      "name": "Subj.esp",
+      "path": "X:/Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ],
+    "mods": [
+     "M1"
+    ],
+    "targets": [
+     "Subj.esp"
+    ],
+    "censusCells": {
+     "Subj.esp": [
+      "000A:Base.esm",
+      "000B:Base.esm"
+     ]
+    }
+   },
+   "refusal": "the scope's target population [] differs from the requested target ['Subj.esp']."
+  },
+  {
+   "scope": {
+    "complete": true,
+    "walkFailures": [],
+    "unreadableRecords": [],
+    "configuration": {
+     "fingerprint": "f",
+     "plugins": [
+      {
+       "Name": "Base.esm",
+       "Path": "X:/Base.esm",
+       "Sha256": "hBase.esm"
+      },
+      {
+       "Name": "Subj.esp",
+       "Path": "X:/Subj.esp",
+       "Sha256": "hSubj.esp"
+      }
+     ],
+     "providers": [
+      {
+       "Name": "M1",
+       "Kind": "mod"
+      },
+      {
+       "Name": "Data",
+       "Kind": "data"
+      }
+     ]
+    },
+    "targets": [
+     {
+      "name": "Subj.esp",
+      "sha256": "moved",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000A:Base.esm",
+          "kind": "interior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "0001:Base.esm",
+          "kind": "persistent"
+         },
+         {
+          "cell": "grid:Tamriel:1,2",
+          "kind": "exterior"
+         }
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "plugins": [
+     {
+      "name": "Base.esm",
+      "path": "X:/Base.esm",
+      "sha256": "hBase.esm"
+     },
+     {
+      "name": "Subj.esp",
+      "path": "X:/Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ],
+    "mods": [
+     "M1"
+    ],
+    "targets": [
+     "Subj.esp"
+    ],
+    "censusCells": {
+     "Subj.esp": [
+      "000A:Base.esm",
+      "000B:Base.esm"
+     ]
+    }
+   },
+   "refusal": "Subj.esp: the scope's target bytes differ from the prepared copy."
+  },
+  {
+   "scope": {
+    "complete": true,
+    "walkFailures": [],
+    "unreadableRecords": [],
+    "configuration": {
+     "fingerprint": "f",
+     "plugins": [
+      {
+       "Name": "Base.esm",
+       "Path": "X:/Base.esm",
+       "Sha256": "hBase.esm"
+      },
+      {
+       "Name": "Subj.esp",
+       "Path": "X:/Subj.esp",
+       "Sha256": "hSubj.esp"
+      }
+     ],
+     "providers": [
+      {
+       "Name": "M1",
+       "Kind": "mod"
+      },
+      {
+       "Name": "Data",
+       "Kind": "data"
+      }
+     ]
+    },
+    "targets": [
+     {
+      "name": "Subj.esp",
+      "sha256": "hSubj.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000A:Base.esm",
+          "kind": "interior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "0001:Base.esm",
+          "kind": "persistent"
+         },
+         {
+          "cell": "grid:Tamriel:1,2",
+          "kind": "exterior"
+         }
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "plugins": [
+     {
+      "name": "Base.esm",
+      "path": "X:/Base.esm",
+      "sha256": "hBase.esm"
+     },
+     {
+      "name": "Subj.esp",
+      "path": "X:/Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ],
+    "mods": [
+     "M1"
+    ],
+    "targets": [
+     "Subj.esp"
+    ],
+    "censusCells": {
+     "Subj.esp": [
+      "000A:Base.esm"
+     ]
+    }
+   },
+   "out": {
+    "targets": {
+     "Subj.esp": {
+      "measuredCells": [
+       "000A:Base.esm",
+       "000B:Base.esm"
+      ],
+      "censusCells": [
+       "000A:Base.esm"
+      ],
+      "missingCensusCells": [],
+      "additionalCells": [
+       "000B:Base.esm"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "scope": {
+    "complete": true,
+    "walkFailures": [],
+    "unreadableRecords": [],
+    "configuration": {
+     "fingerprint": "f",
+     "plugins": [
+      {
+       "Name": "Base.esm",
+       "Path": "X:/Base.esm",
+       "Sha256": "hBase.esm"
+      },
+      {
+       "Name": "Subj.esp",
+       "Path": "X:/Subj.esp",
+       "Sha256": "hSubj.esp"
+      }
+     ],
+     "providers": [
+      {
+       "Name": "M1",
+       "Kind": "mod"
+      },
+      {
+       "Name": "Data",
+       "Kind": "data"
+      }
+     ]
+    },
+    "targets": [
+     {
+      "name": "Subj.esp",
+      "sha256": "hSubj.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000A:Base.esm",
+          "kind": "interior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "0001:Base.esm",
+          "kind": "persistent"
+         },
+         {
+          "cell": "grid:Tamriel:1,2",
+          "kind": "exterior"
+         }
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "plugins": [
+     {
+      "name": "Base.esm",
+      "path": "X:/Base.esm",
+      "sha256": "hBase.esm"
+     },
+     {
+      "name": "Subj.esp",
+      "path": "X:/Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ],
+    "mods": [
+     "M1"
+    ],
+    "targets": [
+     "Subj.esp"
+    ],
+    "censusCells": {}
+   },
+   "out": {
+    "targets": {
+     "Subj.esp": {
+      "measuredCells": [
+       "000A:Base.esm",
+       "000B:Base.esm"
+      ],
+      "censusCells": [],
+      "missingCensusCells": [],
+      "additionalCells": []
+     }
+    }
+   }
+  },
+  {
+   "scope": {
+    "complete": true,
+    "walkFailures": [],
+    "unreadableRecords": [],
+    "configuration": {
+     "fingerprint": "f",
+     "plugins": [
+      {
+       "Name": "Base.esm",
+       "Path": "X:/Base.esm",
+       "Sha256": "hBase.esm"
+      },
+      {
+       "Name": "Subj.esp",
+       "Path": "X:/Subj.esp",
+       "Sha256": "hSubj.esp"
+      }
+     ],
+     "providers": [
+      {
+       "Name": "M1",
+       "Kind": "mod"
+      },
+      {
+       "Name": "Data",
+       "Kind": "data"
+      }
+     ]
+    },
+    "targets": [
+     {
+      "name": "Zed.esp",
+      "sha256": "z",
+      "footprint": {
+       "placed": {}
+      }
+     },
+     {
+      "name": "Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ]
+   },
+   "expect": {
+    "plugins": [
+     {
+      "name": "Base.esm",
+      "path": "X:/Base.esm",
+      "sha256": "hBase.esm"
+     },
+     {
+      "name": "Subj.esp",
+      "path": "X:/Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ],
+    "mods": [
+     "M1"
+    ],
+    "targets": [
+     "Subj.esp",
+     "Zed.esp"
+    ],
+    "censusCells": {
+     "Subj.esp": [
+      "000A:Base.esm",
+      "000B:Base.esm"
+     ]
+    }
+   },
+   "refusal": "Subj.esp: the scope misses census cells 000A:Base.esm, 000B:Base.esm; reconcile the census and the arm's view before evaluating."
+  },
+  {
+   "scope": {
+    "complete": true,
+    "walkFailures": [],
+    "unreadableRecords": [],
+    "configuration": {
+     "fingerprint": "f",
+     "plugins": [
+      {
+       "Name": "Base.esm",
+       "Path": "X:/Base.esm",
+       "Sha256": "hBase.esm"
+      },
+      {
+       "Name": "Subj.esp",
+       "Path": "X:/Subj.esp",
+       "Sha256": "hSubj.esp"
+      }
+     ],
+     "providers": [
+      {
+       "Name": "M1",
+       "Kind": "mod"
+      },
+      {
+       "Name": "Data",
+       "Kind": "data"
+      }
+     ]
+    },
+    "targets": [
+     {
+      "name": "Zed.esp"
+     },
+     {
+      "name": "Subj.esp"
+     }
+    ]
+   },
+   "expect": {
+    "plugins": [
+     {
+      "name": "Base.esm",
+      "path": "X:/Base.esm",
+      "sha256": "hBase.esm"
+     },
+     {
+      "name": "Subj.esp",
+      "path": "X:/Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ],
+    "mods": [
+     "M1"
+    ],
+    "targets": [
+     "Subj.esp"
+    ],
+    "censusCells": {
+     "Subj.esp": [
+      "000A:Base.esm",
+      "000B:Base.esm"
+     ]
+    }
+   },
+   "refusal": "the scope's target population ['Subj.esp', 'Zed.esp'] differs from the requested target ['Subj.esp']."
+  },
+  {
+   "scope": {
+    "complete": true,
+    "walkFailures": [],
+    "unreadableRecords": [],
+    "configuration": null,
+    "targets": [
+     {
+      "name": "Subj.esp",
+      "sha256": "hSubj.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000A:Base.esm",
+          "kind": "interior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "000B:Base.esm",
+          "kind": "exterior"
+         },
+         {
+          "cell": "0001:Base.esm",
+          "kind": "persistent"
+         },
+         {
+          "cell": "grid:Tamriel:1,2",
+          "kind": "exterior"
+         }
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "plugins": [
+     {
+      "name": "Base.esm",
+      "path": "X:/Base.esm",
+      "sha256": "hBase.esm"
+     },
+     {
+      "name": "Subj.esp",
+      "path": "X:/Subj.esp",
+      "sha256": "hSubj.esp"
+     }
+    ],
+    "mods": [
+     "M1"
+    ],
+    "targets": [
+     "Subj.esp"
+    ],
+    "censusCells": {
+     "Subj.esp": [
+      "000A:Base.esm",
+      "000B:Base.esm"
+     ]
+    }
+   },
+   "refusal": "the scope's plugin order differs from the arm's prepared order; the scope read another view."
+  }
+ ],
+ "scopeLine": [
+  {
+   "scope": {
+    "targets": [
+     {
+      "name": "X.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000D74:Skyrim.esm",
+          "kind": "persistent",
+          "worldspace": "Tamriel"
+         },
+         {
+          "cell": "009634:Skyrim.esm",
+          "kind": "exterior",
+          "name": "WatchExterior02",
+          "worldspace": "Tamriel"
+         },
+         {
+          "cell": "009616:Skyrim.esm",
+          "kind": "exterior",
+          "name": null,
+          "worldspace": "Tamriel"
+         },
+         {
+          "cell": "0151F9:Skyrim.esm",
+          "kind": "interior",
+          "name": "Watch01",
+          "worldspace": null
+         }
+        ]
+       }
+      }
+     }
+    ],
+    "locationContributors": {
+     "locations": [
+      {
+       "cell": "009634:Skyrim.esm",
+       "plugins": [
+        {
+         "name": "Skyrim.esm"
+        },
+        {
+         "name": "X.esp"
+        },
+        {
+         "name": "Y.esp"
+        }
+       ]
+      },
+      {
+       "cell": "0151F9:Skyrim.esm",
+       "plugins": [
+        {
+         "name": "Skyrim.esm"
+        },
+        {
+         "name": "ccbgssse001-fish.esm"
+        }
+       ]
+      }
+     ]
+    },
+    "nearby": {
+     "ring": 2,
+     "plugins": [
+      {
+       "name": "Z.esp",
+       "cells": [
+        "009700:Skyrim.esm"
+       ]
+      },
+      {
+       "name": "Update.esm",
+       "cells": []
+      }
+     ],
+     "alsoScanned": [
+      {
+       "name": "Keys.esp",
+       "footprintCells": [
+        "009634:Skyrim.esm"
+       ],
+       "ringCells": []
+      },
+      {
+       "name": "Far.esp",
+       "footprintCells": [],
+       "ringCells": []
+      },
+      {
+       "name": "Broken.esp",
+       "footprintCells": [],
+       "ringCells": [],
+       "unreadable": "bad header"
+      }
+     ]
+    }
+   },
+   "res": {
+    "selection": [
+     "Mod X"
+    ]
+   },
+   "disabled": {
+    "keys.esp": "Mod Keys",
+    "far.esp": "Mod Far"
+   },
+   "out": "Mod X edits 2 cells in Tamriel (WatchExterior02) and 1 interior (Watch01); 2 other enabled plugins touch those cells or the 2 cells around them: Y.esp, Z.esp. Mod Keys (disabled in MO2) also edits these cells; tick it to test them together. 1 disabled plugin could not be read for this (Broken.esp), so whether they edit these cells is not known."
+  },
+  {
+   "scope": {
+    "targets": [
+     {
+      "name": "X.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000D74:Skyrim.esm",
+          "kind": "persistent",
+          "worldspace": "Tamriel"
+         },
+         {
+          "cell": "009634:Skyrim.esm",
+          "kind": "exterior",
+          "name": "WatchExterior02",
+          "worldspace": "Tamriel"
+         },
+         {
+          "cell": "009616:Skyrim.esm",
+          "kind": "exterior",
+          "name": null,
+          "worldspace": "Tamriel"
+         },
+         {
+          "cell": "0151F9:Skyrim.esm",
+          "kind": "interior",
+          "name": "Watch01",
+          "worldspace": null
+         }
+        ]
+       }
+      }
+     }
+    ],
+    "locationContributors": {
+     "complete": true,
+     "locations": []
+    },
+    "nearby": {
+     "ring": 2,
+     "plugins": [],
+     "alsoScanned": []
+    }
+   },
+   "res": {
+    "selection": [
+     "Mod X"
+    ]
+   },
+   "disabled": {},
+   "out": "Mod X edits 2 cells in Tamriel (WatchExterior02) and 1 interior (Watch01); no other enabled plugin besides the base game touches those cells or the 2 cells around them (persistent references placed into those cells are not read)."
+  },
+  {
+   "scope": {
+    "targets": [
+     {
+      "footprint": {
+       "placed": {
+        "cells": []
+       }
+      }
+     }
+    ]
+   },
+   "res": {
+    "selection": [
+     "Mod X"
+    ]
+   },
+   "disabled": {},
+   "out": "Mod X places nothing in any cell, so no other plugin shares its cells."
+  },
+  {
+   "scope": {
+    "targets": [
+     {
+      "name": "X.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000D74:Skyrim.esm",
+          "kind": "persistent",
+          "worldspace": "Tamriel"
+         },
+         {
+          "cell": "009634:Skyrim.esm",
+          "kind": "exterior",
+          "name": "WatchExterior02",
+          "worldspace": "Tamriel"
+         },
+         {
+          "cell": "009616:Skyrim.esm",
+          "kind": "exterior",
+          "name": null,
+          "worldspace": "Tamriel"
+         },
+         {
+          "cell": "0151F9:Skyrim.esm",
+          "kind": "interior",
+          "name": "Watch01",
+          "worldspace": null
+         }
+        ]
+       }
+      }
+     }
+    ],
+    "locationContributors": {
+     "complete": false,
+     "missing": [
+      "'Skyrim.esm' could not be walked xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+     ],
+     "locations": []
+    },
+    "nearby": {
+     "ring": 2,
+     "plugins": [
+      {
+       "name": "Z.esp",
+       "cells": [
+        "009700:Skyrim.esm"
+       ]
+      },
+      {
+       "name": "Update.esm",
+       "cells": []
+      }
+     ],
+     "alsoScanned": [
+      {
+       "name": "Keys.esp",
+       "footprintCells": [
+        "009634:Skyrim.esm"
+       ],
+       "ringCells": []
+      },
+      {
+       "name": "Far.esp",
+       "footprintCells": [],
+       "ringCells": []
+      },
+      {
+       "name": "Broken.esp",
+       "footprintCells": [],
+       "ringCells": [],
+       "unreadable": "bad header"
+      }
+     ]
+    }
+   },
+   "res": {
+    "selection": [
+     "Mod X"
+    ]
+   },
+   "disabled": {},
+   "out": "Mod X edits 2 cells in Tamriel (WatchExterior02) and 1 interior (Watch01); which other plugins touch those cells is not known: 1 plugin(s) could not be read for it ('Skyrim.esm' could not be walked xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)."
+  },
+  {
+   "scope": {
+    "targets": [
+     {
+      "name": "X.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000D74:Skyrim.esm",
+          "kind": "persistent",
+          "worldspace": "Tamriel"
+         },
+         {
+          "cell": "009634:Skyrim.esm",
+          "kind": "exterior",
+          "name": "WatchExterior02",
+          "worldspace": "Tamriel"
+         },
+         {
+          "cell": "009616:Skyrim.esm",
+          "kind": "exterior",
+          "name": null,
+          "worldspace": "Tamriel"
+         },
+         {
+          "cell": "0151F9:Skyrim.esm",
+          "kind": "interior",
+          "name": "Watch01",
+          "worldspace": null
+         }
+        ]
+       }
+      }
+     }
+    ],
+    "locationContributors": {
+     "complete": false,
+     "locations": []
+    },
+    "nearby": {
+     "ring": 2,
+     "plugins": [
+      {
+       "name": "Z.esp",
+       "cells": [
+        "009700:Skyrim.esm"
+       ]
+      },
+      {
+       "name": "Update.esm",
+       "cells": []
+      }
+     ],
+     "alsoScanned": [
+      {
+       "name": "Keys.esp",
+       "footprintCells": [
+        "009634:Skyrim.esm"
+       ],
+       "ringCells": []
+      },
+      {
+       "name": "Far.esp",
+       "footprintCells": [],
+       "ringCells": []
+      },
+      {
+       "name": "Broken.esp",
+       "footprintCells": [],
+       "ringCells": [],
+       "unreadable": "bad header"
+      }
+     ]
+    }
+   },
+   "res": {
+    "selection": []
+   },
+   "disabled": {},
+   "out": "the selection edits 2 cells in Tamriel (WatchExterior02) and 1 interior (Watch01); which other plugins touch those cells is not known: the probe's footprint walk was incomplete."
+  },
+  {
+   "scope": {
+    "targets": [
+     {
+      "name": "X.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000000:Skyrim.esm",
+          "kind": "exterior",
+          "name": null,
+          "worldspace": "Tamriel",
+          "worldspaceKey": null
+         },
+         {
+          "cell": "000001:Skyrim.esm",
+          "kind": "exterior",
+          "name": "Cell1",
+          "worldspace": "Tamriel",
+          "worldspaceKey": null
+         },
+         {
+          "cell": "000002:Skyrim.esm",
+          "kind": "exterior",
+          "name": null,
+          "worldspace": "Tamriel",
+          "worldspaceKey": null
+         },
+         {
+          "cell": "000003:Skyrim.esm",
+          "kind": "exterior",
+          "name": "Cell3",
+          "worldspace": "Tamriel",
+          "worldspaceKey": null
+         },
+         {
+          "cell": "000004:Skyrim.esm",
+          "kind": "exterior",
+          "name": null,
+          "worldspace": "Tamriel",
+          "worldspaceKey": null
+         },
+         {
+          "cell": "000005:Skyrim.esm",
+          "kind": "exterior",
+          "name": "Cell5",
+          "worldspace": null,
+          "worldspaceKey": null
+         },
+         {
+          "cell": "000006:Skyrim.esm",
+          "kind": "exterior",
+          "name": null,
+          "worldspace": null,
+          "worldspaceKey": null
+         },
+         {
+          "cell": "000007:Skyrim.esm",
+          "kind": "exterior",
+          "name": "Cell7",
+          "worldspace": null,
+          "worldspaceKey": "00003C:Skyrim.esm"
+         },
+         {
+          "cell": "000008:Skyrim.esm",
+          "kind": "exterior",
+          "name": null,
+          "worldspace": null,
+          "worldspaceKey": "00003C:Skyrim.esm"
+         },
+         {
+          "cell": "100000:Skyrim.esm",
+          "kind": "interior",
+          "name": null
+         },
+         {
+          "cell": "100001:Skyrim.esm",
+          "kind": "interior",
+          "name": "Room1"
+         },
+         {
+          "cell": "100002:Skyrim.esm",
+          "kind": "interior",
+          "name": "Room2"
+         },
+         {
+          "cell": "100003:Skyrim.esm",
+          "kind": "interior",
+          "name": "Room3"
+         },
+         {
+          "cell": "100004:Skyrim.esm",
+          "kind": "interior",
+          "name": "Room4"
+         },
+         {
+          "cell": "000000:Skyrim.esm",
+          "kind": "exterior",
+          "name": null,
+          "worldspace": "Tamriel",
+          "worldspaceKey": null
+         }
+        ]
+       }
+      }
+     },
+     {
+      "name": "x2.ESP"
+     }
+    ],
+    "locationContributors": {
+     "locations": [
+      {
+       "plugins": [
+        {
+         "name": "b.esp"
+        },
+        {
+         "name": "A.esp"
+        },
+        {
+         "name": "X2.esp"
+        },
+        {
+         "name": "Skyrim.esm"
+        },
+        {
+         "name": "Dragonborn.esm"
+        },
+        {
+         "name": "ccQDRSSE001-SurvivalMode.esl"
+        },
+        {
+         "name": "CC.txt"
+        },
+        {
+         "name": "c.esp"
+        },
+        {
+         "name": "D.esp"
+        },
+        {
+         "name": "e.esp"
+        },
+        {
+         "name": "F.esp"
+        },
+        {
+         "name": "g.esp"
+        }
+       ]
+      }
+     ]
+    },
+    "nearby": {
+     "plugins": [
+      {
+       "name": "A.esp"
+      },
+      {
+       "name": "h.esp"
+      }
+     ],
+     "alsoScanned": [
+      {
+       "name": "Off0.esp",
+       "footprintCells": [],
+       "ringCells": [
+        "c"
+       ]
+      },
+      {
+       "name": "Off1.esp",
+       "footprintCells": [],
+       "ringCells": [
+        "c"
+       ]
+      },
+      {
+       "name": "Off2.esp",
+       "footprintCells": [],
+       "ringCells": [
+        "c"
+       ]
+      },
+      {
+       "name": "Off3.esp",
+       "footprintCells": [],
+       "ringCells": [
+        "c"
+       ]
+      },
+      {
+       "name": "Off4.esp",
+       "footprintCells": [],
+       "ringCells": [
+        "c"
+       ]
+      },
+      {
+       "name": "Off5.esp",
+       "footprintCells": [],
+       "ringCells": [
+        "c"
+       ]
+      },
+      {
+       "name": "Bad0.esp",
+       "unreadable": "x"
+      },
+      {
+       "name": "Bad1.esp",
+       "unreadable": "x"
+      },
+      {
+       "name": "Bad2.esp",
+       "unreadable": "x"
+      },
+      {
+       "name": "Bad3.esp",
+       "unreadable": "x"
+      }
+     ]
+    }
+   },
+   "res": {
+    "selection": [
+     "One",
+     "Two",
+     "Three",
+     "Four"
+    ]
+   },
+   "disabled": {
+    "off0.esp": "Mod Zero",
+    "off1.esp": "Mod One",
+    "off2.esp": "Mod One",
+    "off3.esp": "Mod Three",
+    "off4.esp": "Mod Four",
+    "off5.esp": "Mod Five"
+   },
+   "out": "One, Two, Three and 1 more edits 5 cells in Tamriel (Cell1, Cell3) and 2 cells in a worldspace (Cell5) and 2 cells in 00003C:Skyrim.esm (Cell7) and 5 interiors (100000:Skyrim.esm, Room1, Room2 and 2 more); 9 other enabled plugins touch those cells: A.esp, b.esp, c.esp, CC.txt, D.esp, e.esp and 3 more. Mod Zero (disabled in MO2) also edits these cells; tick it to test them together. Mod One (disabled in MO2) also edits these cells; tick it to test them together. Mod Three (disabled in MO2) also edits these cells; tick it to test them together. 2 more disabled mods also edit them. 4 disabled plugins could not be read for this (Bad0.esp, Bad1.esp, Bad2.esp and 1 more), so whether they edit these cells is not known."
+  },
+  {
+   "scope": {
+    "targets": [
+     {
+      "name": "X.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000D74:Skyrim.esm",
+          "kind": "persistent",
+          "worldspace": "Tamriel"
+         },
+         {
+          "cell": "009634:Skyrim.esm",
+          "kind": "exterior",
+          "name": "WatchExterior02",
+          "worldspace": "Tamriel"
+         },
+         {
+          "cell": "009616:Skyrim.esm",
+          "kind": "exterior",
+          "name": null,
+          "worldspace": "Tamriel"
+         },
+         {
+          "cell": "0151F9:Skyrim.esm",
+          "kind": "interior",
+          "name": "Watch01",
+          "worldspace": null
+         }
+        ]
+       }
+      }
+     }
+    ],
+    "locationContributors": {
+     "locations": [
+      {
+       "cell": "009634:Skyrim.esm",
+       "plugins": [
+        {
+         "name": "Skyrim.esm"
+        },
+        {
+         "name": "X.esp"
+        },
+        {
+         "name": "Y.esp"
+        }
+       ]
+      },
+      {
+       "cell": "0151F9:Skyrim.esm",
+       "plugins": [
+        {
+         "name": "Skyrim.esm"
+        },
+        {
+         "name": "ccbgssse001-fish.esm"
+        }
+       ]
+      }
+     ]
+    },
+    "nearby": {
+     "ring": 0,
+     "plugins": [
+      {
+       "name": "Only.esp"
+      }
+     ]
+    }
+   },
+   "res": {},
+   "disabled": {},
+   "out": "the selection edits 2 cells in Tamriel (WatchExterior02) and 1 interior (Watch01); 2 other enabled plugins touch those cells: Only.esp, Y.esp."
+  },
+  {
+   "scope": {
+    "targets": [
+     {
+      "name": "X.esp",
+      "footprint": {
+       "placed": {
+        "cells": [
+         {
+          "cell": "000D74:Skyrim.esm",
+          "kind": "persistent",
+          "worldspace": "Tamriel"
+         },
+         {
+          "cell": "009634:Skyrim.esm",
+          "kind": "exterior",
+          "name": "WatchExterior02",
+          "worldspace": "Tamriel"
+         },
+         {
+          "cell": "009616:Skyrim.esm",
+          "kind": "exterior",
+          "name": null,
+          "worldspace": "Tamriel"
+         },
+         {
+          "cell": "0151F9:Skyrim.esm",
+          "kind": "interior",
+          "name": "Watch01",
+          "worldspace": null
+         }
+        ]
+       }
+      }
+     }
+    ],
+    "locationContributors": {
+     "locations": []
+    },
+    "nearby": {}
+   },
+   "res": {
+    "selection": [
+     "Mod X"
+    ]
+   },
+   "disabled": {},
+   "out": "Mod X edits 2 cells in Tamriel (WatchExterior02) and 1 interior (Watch01); no other enabled plugin besides the base game touches those cells."
+  }
+ ],
+ "scopeLineBaseGame": {
+  "scope": {
+   "targets": [
+    {
+     "name": "X.esp",
+     "footprint": {
+      "placed": {
+       "cells": [
+        {
+         "cell": "000D74:Skyrim.esm",
+         "kind": "persistent",
+         "worldspace": "Tamriel"
+        },
+        {
+         "cell": "009634:Skyrim.esm",
+         "kind": "exterior",
+         "name": "WatchExterior02",
+         "worldspace": "Tamriel"
+        },
+        {
+         "cell": "009616:Skyrim.esm",
+         "kind": "exterior",
+         "name": null,
+         "worldspace": "Tamriel"
+        },
+        {
+         "cell": "0151F9:Skyrim.esm",
+         "kind": "interior",
+         "name": "Watch01",
+         "worldspace": null
+        }
+       ]
+      }
+     }
+    }
+   ],
+   "locationContributors": {
+    "locations": [
+     {
+      "plugins": [
+       {
+        "name": "SkyrimVR.esm"
+       },
+       {
+        "name": "skyrim.esm"
+       },
+       {
+        "name": "_ResourcePack.esl"
+       },
+       {
+        "name": "X.esp"
+       }
+      ]
+     }
+    ]
+   },
+   "nearby": {}
+  },
+  "res": {
+   "selection": [
+    "Mod X"
+   ]
+  },
+  "disabled": {},
+  "python": "Mod X edits 2 cells in Tamriel (WatchExterior02) and 1 interior (Watch01); 3 other enabled plugins touch those cells: _ResourcePack.esl, skyrim.esm, SkyrimVR.esm."
+ },
+ "candidates": [
+  {
+   "inPlace": false,
+   "id": "ho-x",
+   "profile": "EP-ho-x",
+   "res": {
+    "arms": [
+     {
+      "id": "dependencies",
+      "role": "vanilla",
+      "keys": [],
+      "plugins": [
+       "Base.esm"
+      ],
+      "mods": [],
+      "variant": null
+     },
+     {
+      "id": "combined",
+      "role": "combined",
+      "keys": [
+       "K\u00e9y.esp"
+      ],
+      "plugins": [
+       "Base.esm",
+       "Subj.esp",
+       "K\u00e9y.esp"
+      ],
+      "mods": [
+       "MK",
+       "MS"
+      ],
+      "variant": "v1"
+     },
+     {
+      "id": "without-selection",
+      "role": "the profile without the selected mods",
+      "keys": [],
+      "plugins": [
+       "Base.esm"
+      ],
+      "mods": [
+       "Other"
+      ]
+     }
+    ]
+   },
+   "out": [
+    {
+     "name": "candidate-00-baseline.json",
+     "arm": "combined",
+     "doc": {
+      "SchemaVersion": 1,
+      "Name": "ho-x: combined",
+      "BaseProfile": "EP-ho-x",
+      "Plugins": [
+       "Base.esm",
+       "Subj.esp",
+       "K\u00e9y.esp"
+      ],
+      "Mods": [
+       "MK",
+       "MS"
+      ],
+      "Changes": [
+       "evalpipeline arm combined"
+      ],
+      "Provenance": {
+       "arm": "combined",
+       "role": "combined",
+       "keys": [
+        "K\u00e9y.esp"
+       ],
+       "variant": "v1",
+       "entry": "ho-x"
+      }
+     },
+     "file": "ew0KICAiU2NoZW1hVmVyc2lvbiI6IDEsDQogICJOYW1lIjogImhvLXg6IGNvbWJpbmVkIiwNCiAgIkJhc2VQcm9maWxlIjogIkVQLWhvLXgiLA0KICAiUGx1Z2lucyI6IFsNCiAgICAiQmFzZS5lc20iLA0KICAgICJTdWJqLmVzcCIsDQogICAgIkvDqXkuZXNwIg0KICBdLA0KICAiTW9kcyI6IFsNCiAgICAiTUsiLA0KICAgICJNUyINCiAgXSwNCiAgIkNoYW5nZXMiOiBbDQogICAgImV2YWxwaXBlbGluZSBhcm0gY29tYmluZWQiDQogIF0sDQogICJQcm92ZW5hbmNlIjogew0KICAgICJhcm0iOiAiY29tYmluZWQiLA0KICAgICJyb2xlIjogImNvbWJpbmVkIiwNCiAgICAia2V5cyI6IFsNCiAgICAgICJLw6l5LmVzcCINCiAgICBdLA0KICAgICJ2YXJpYW50IjogInYxIiwNCiAgICAiZW50cnkiOiAiaG8teCINCiAgfQ0KfQ0K"
+    },
+    {
+     "name": "candidate-01.json",
+     "arm": "dependencies",
+     "doc": {
+      "SchemaVersion": 1,
+      "Name": "ho-x: dependencies",
+      "BaseProfile": "EP-ho-x",
+      "Plugins": [
+       "Base.esm"
+      ],
+      "Mods": [],
+      "Changes": [
+       "evalpipeline arm dependencies"
+      ],
+      "Provenance": {
+       "arm": "dependencies",
+       "role": "vanilla",
+       "keys": [],
+       "variant": null,
+       "entry": "ho-x"
+      }
+     },
+     "file": "ew0KICAiU2NoZW1hVmVyc2lvbiI6IDEsDQogICJOYW1lIjogImhvLXg6IGRlcGVuZGVuY2llcyIsDQogICJCYXNlUHJvZmlsZSI6ICJFUC1oby14IiwNCiAgIlBsdWdpbnMiOiBbDQogICAgIkJhc2UuZXNtIg0KICBdLA0KICAiTW9kcyI6IFtdLA0KICAiQ2hhbmdlcyI6IFsNCiAgICAiZXZhbHBpcGVsaW5lIGFybSBkZXBlbmRlbmNpZXMiDQogIF0sDQogICJQcm92ZW5hbmNlIjogew0KICAgICJhcm0iOiAiZGVwZW5kZW5jaWVzIiwNCiAgICAicm9sZSI6ICJ2YW5pbGxhIiwNCiAgICAia2V5cyI6IFtdLA0KICAgICJ2YXJpYW50IjogbnVsbCwNCiAgICAiZW50cnkiOiAiaG8teCINCiAgfQ0KfQ0K"
+    },
+    {
+     "name": "candidate-02.json",
+     "arm": "without-selection",
+     "doc": {
+      "SchemaVersion": 1,
+      "Name": "ho-x: without-selection",
+      "BaseProfile": "EP-ho-x",
+      "Plugins": [
+       "Base.esm"
+      ],
+      "Mods": [
+       "Other"
+      ],
+      "Changes": [
+       "evalpipeline arm without-selection"
+      ],
+      "Provenance": {
+       "arm": "without-selection",
+       "role": "the profile without the selected mods",
+       "keys": [],
+       "variant": null,
+       "entry": "ho-x"
+      }
+     },
+     "file": "ew0KICAiU2NoZW1hVmVyc2lvbiI6IDEsDQogICJOYW1lIjogImhvLXg6IHdpdGhvdXQtc2VsZWN0aW9uIiwNCiAgIkJhc2VQcm9maWxlIjogIkVQLWhvLXgiLA0KICAiUGx1Z2lucyI6IFsNCiAgICAiQmFzZS5lc20iDQogIF0sDQogICJNb2RzIjogWw0KICAgICJPdGhlciINCiAgXSwNCiAgIkNoYW5nZXMiOiBbDQogICAgImV2YWxwaXBlbGluZSBhcm0gd2l0aG91dC1zZWxlY3Rpb24iDQogIF0sDQogICJQcm92ZW5hbmNlIjogew0KICAgICJhcm0iOiAid2l0aG91dC1zZWxlY3Rpb24iLA0KICAgICJyb2xlIjogInRoZSBwcm9maWxlIHdpdGhvdXQgdGhlIHNlbGVjdGVkIG1vZHMiLA0KICAgICJrZXlzIjogW10sDQogICAgInZhcmlhbnQiOiBudWxsLA0KICAgICJlbnRyeSI6ICJoby14Ig0KICB9DQp9DQo="
+    }
+   ]
+  },
+  {
+   "inPlace": true,
+   "id": "wb-\u00e9",
+   "profile": "Default",
+   "res": {
+    "arms": [
+     {
+      "id": "dependencies",
+      "role": "vanilla",
+      "keys": [],
+      "plugins": [
+       "Base.esm"
+      ],
+      "mods": [],
+      "variant": null
+     },
+     {
+      "id": "combined",
+      "role": "combined",
+      "keys": [
+       "K\u00e9y.esp"
+      ],
+      "plugins": [
+       "Base.esm",
+       "Subj.esp",
+       "K\u00e9y.esp"
+      ],
+      "mods": [
+       "MK",
+       "MS"
+      ],
+      "variant": "v1"
+     },
+     {
+      "id": "without-selection",
+      "role": "the profile without the selected mods",
+      "keys": [],
+      "plugins": [
+       "Base.esm"
+      ],
+      "mods": [
+       "Other"
+      ]
+     }
+    ]
+   },
+   "out": [
+    {
+     "name": "candidate-00-baseline.json",
+     "arm": "without-selection",
+     "doc": {
+      "SchemaVersion": 1,
+      "Name": "wb-\u00e9: without-selection",
+      "BaseProfile": "Default",
+      "Plugins": [
+       "Base.esm"
+      ],
+      "Mods": [
+       "Other"
+      ],
+      "Changes": [
+       "evalpipeline arm without-selection"
+      ],
+      "Provenance": {
+       "arm": "without-selection",
+       "role": "the profile without the selected mods",
+       "keys": [],
+       "variant": null,
+       "entry": "wb-\u00e9"
+      }
+     },
+     "file": "ew0KICAiU2NoZW1hVmVyc2lvbiI6IDEsDQogICJOYW1lIjogIndiLcOpOiB3aXRob3V0LXNlbGVjdGlvbiIsDQogICJCYXNlUHJvZmlsZSI6ICJEZWZhdWx0IiwNCiAgIlBsdWdpbnMiOiBbDQogICAgIkJhc2UuZXNtIg0KICBdLA0KICAiTW9kcyI6IFsNCiAgICAiT3RoZXIiDQogIF0sDQogICJDaGFuZ2VzIjogWw0KICAgICJldmFscGlwZWxpbmUgYXJtIHdpdGhvdXQtc2VsZWN0aW9uIg0KICBdLA0KICAiUHJvdmVuYW5jZSI6IHsNCiAgICAiYXJtIjogIndpdGhvdXQtc2VsZWN0aW9uIiwNCiAgICAicm9sZSI6ICJ0aGUgcHJvZmlsZSB3aXRob3V0IHRoZSBzZWxlY3RlZCBtb2RzIiwNCiAgICAia2V5cyI6IFtdLA0KICAgICJ2YXJpYW50IjogbnVsbCwNCiAgICAiZW50cnkiOiAid2Itw6kiDQogIH0NCn0NCg=="
+    },
+    {
+     "name": "candidate-01.json",
+     "arm": "dependencies",
+     "doc": {
+      "SchemaVersion": 1,
+      "Name": "wb-\u00e9: dependencies",
+      "BaseProfile": "Default",
+      "Plugins": [
+       "Base.esm"
+      ],
+      "Mods": [],
+      "Changes": [
+       "evalpipeline arm dependencies"
+      ],
+      "Provenance": {
+       "arm": "dependencies",
+       "role": "vanilla",
+       "keys": [],
+       "variant": null,
+       "entry": "wb-\u00e9"
+      }
+     },
+     "file": "ew0KICAiU2NoZW1hVmVyc2lvbiI6IDEsDQogICJOYW1lIjogIndiLcOpOiBkZXBlbmRlbmNpZXMiLA0KICAiQmFzZVByb2ZpbGUiOiAiRGVmYXVsdCIsDQogICJQbHVnaW5zIjogWw0KICAgICJCYXNlLmVzbSINCiAgXSwNCiAgIk1vZHMiOiBbXSwNCiAgIkNoYW5nZXMiOiBbDQogICAgImV2YWxwaXBlbGluZSBhcm0gZGVwZW5kZW5jaWVzIg0KICBdLA0KICAiUHJvdmVuYW5jZSI6IHsNCiAgICAiYXJtIjogImRlcGVuZGVuY2llcyIsDQogICAgInJvbGUiOiAidmFuaWxsYSIsDQogICAgImtleXMiOiBbXSwNCiAgICAidmFyaWFudCI6IG51bGwsDQogICAgImVudHJ5IjogIndiLcOpIg0KICB9DQp9DQo="
+    },
+    {
+     "name": "candidate-02.json",
+     "arm": "combined",
+     "doc": {
+      "SchemaVersion": 1,
+      "Name": "wb-\u00e9: combined",
+      "BaseProfile": "Default",
+      "Plugins": [
+       "Base.esm",
+       "Subj.esp",
+       "K\u00e9y.esp"
+      ],
+      "Mods": [
+       "MK",
+       "MS"
+      ],
+      "Changes": [
+       "evalpipeline arm combined"
+      ],
+      "Provenance": {
+       "arm": "combined",
+       "role": "combined",
+       "keys": [
+        "K\u00e9y.esp"
+       ],
+       "variant": "v1",
+       "entry": "wb-\u00e9"
+      }
+     },
+     "file": "ew0KICAiU2NoZW1hVmVyc2lvbiI6IDEsDQogICJOYW1lIjogIndiLcOpOiBjb21iaW5lZCIsDQogICJCYXNlUHJvZmlsZSI6ICJEZWZhdWx0IiwNCiAgIlBsdWdpbnMiOiBbDQogICAgIkJhc2UuZXNtIiwNCiAgICAiU3Viai5lc3AiLA0KICAgICJLw6l5LmVzcCINCiAgXSwNCiAgIk1vZHMiOiBbDQogICAgIk1LIiwNCiAgICAiTVMiDQogIF0sDQogICJDaGFuZ2VzIjogWw0KICAgICJldmFscGlwZWxpbmUgYXJtIGNvbWJpbmVkIg0KICBdLA0KICAiUHJvdmVuYW5jZSI6IHsNCiAgICAiYXJtIjogImNvbWJpbmVkIiwNCiAgICAicm9sZSI6ICJjb21iaW5lZCIsDQogICAgImtleXMiOiBbDQogICAgICAiS8OpeS5lc3AiDQogICAgXSwNCiAgICAidmFyaWFudCI6ICJ2MSIsDQogICAgImVudHJ5IjogIndiLcOpIg0KICB9DQp9DQo="
+    }
+   ]
+  }
+ ],
+ "select": {
+  "registry": {
+   "checks": [
+    {
+     "id": "load.order",
+     "prerequisites": [],
+     "adapter": {
+      "kind": "scopeprobe"
+     },
+     "inputs": {
+      "states": "baseline"
+     }
+    },
+    {
+     "id": "geo.overlap",
+     "prerequisites": [
+      "load.order"
+     ],
+     "adapter": {
+      "kind": "ordersweep-probe"
+     },
+     "inputs": {
+      "states": "baseline"
+     }
+    },
+    {
+     "id": "state.census",
+     "prerequisites": [
+      "load.order"
+     ],
+     "adapter": {
+      "kind": "probe-json"
+     },
+     "inputs": {
+      "states": "baseline"
+     }
+    },
+    {
+     "id": "state.geometry",
+     "prerequisites": [
+      "state.census"
+     ],
+     "adapter": {
+      "kind": "probe-emit"
+     },
+     "inputs": {
+      "states": "selected"
+     }
+    },
+    {
+     "id": "patch.discovery-installed",
+     "prerequisites": [
+      "load.order"
+     ],
+     "adapter": {
+      "kind": "patchprobe"
+     },
+     "inputs": {}
+    },
+    {
+     "id": "patch.order-evaluation",
+     "prerequisites": [
+      "load.order"
+     ],
+     "adapter": {
+      "kind": "derived"
+     }
+    },
+    {
+     "id": "patch.candidate-qualification",
+     "prerequisites": [
+      "patch.discovery-installed",
+      "patch.order-evaluation"
+     ],
+     "adapter": {
+      "kind": "derived"
+     }
+    },
+    {
+     "id": "functional.linked",
+     "prerequisites": [
+      "load.order"
+     ],
+     "adapter": {
+      "kind": "derived"
+     }
+    },
+    {
+     "id": "alone",
+     "adapter": {
+      "kind": "probe-json"
+     }
+    }
+   ]
+  },
+  "rows": [
+   {
+    "evaluation": {
+     "select": [
+      "geo.overlap"
+     ],
+     "depth": "standard"
+    },
+    "out": [
+     [
+      "geo.overlap",
+      "load.order",
+      "patch.order-evaluation"
+     ],
+     "standard"
+    ]
+   },
+   {
+    "evaluation": {
+     "select": [
+      "state.geometry"
+     ]
+    },
+    "out": [
+     [
+      "load.order",
+      "patch.order-evaluation",
+      "state.census",
+      "state.geometry"
+     ],
+     "deep"
+    ]
+   },
+   {
+    "evaluation": {
+     "select": [
+      "patch.discovery-installed"
+     ],
+     "depth": "quick"
+    },
+    "out": [
+     [
+      "load.order",
+      "patch.candidate-qualification",
+      "patch.discovery-installed",
+      "patch.order-evaluation"
+     ],
+     "quick"
+    ]
+   },
+   {
+    "evaluation": {
+     "select": [
+      "alone"
+     ],
+     "depth": ""
+    },
+    "out": [
+     [
+      "alone"
+     ],
+     "standard"
+    ]
+   },
+   {
+    "evaluation": {
+     "select": [
+      "nope.b",
+      "geo.overlap",
+      "nope.a"
+     ]
+    },
+    "refusal": "the selection names nope.a, nope.b, which the check registry does not have."
+   },
+   {
+    "evaluation": {
+     "select": []
+    },
+    "out": [
+     [],
+     "standard"
+    ]
+   },
+   {
+    "evaluation": {},
+    "out": [
+     [],
+     "standard"
+    ]
+   }
+  ]
+ },
+ "sizes": [
+  {
+   "bytes": 0,
+   "out": "0.0 KiB"
+  },
+  {
+   "bytes": 1,
+   "out": "0.0 KiB"
+  },
+  {
+   "bytes": 1023,
+   "out": "1.0 KiB"
+  },
+  {
+   "bytes": 1024,
+   "out": "1.0 KiB"
+  },
+  {
+   "bytes": 1536,
+   "out": "1.5 KiB"
+  },
+  {
+   "bytes": 1048575,
+   "out": "1024.0 KiB"
+  },
+  {
+   "bytes": 1048576,
+   "out": "1.0 MiB"
+  },
+  {
+   "bytes": 1073741823,
+   "out": "1024.0 MiB"
+  },
+  {
+   "bytes": 1073741824,
+   "out": "1.0 GiB"
+  },
+  {
+   "bytes": 35000000000,
+   "out": "32.6 GiB"
+  },
+  {
+   "bytes": 123456789.5,
+   "out": "117.7 MiB"
+  },
+  {
+   "bytes": 1000000000000000.0,
+   "out": "931322.6 GiB"
+  }
+ ],
+ "prepKey": {
+  "files": [
+   {
+    "path": "instance/profiles/P/modlist.txt",
+    "bytes": "K0ENCi1CDQo=",
+    "mtimeNs": 1700000000000000000
+   },
+   {
+    "path": "instance/profiles/P/Plugins.txt",
+    "bytes": "KkEuZXNwDQo=",
+    "mtimeNs": 1700000001123456700
+   },
+   {
+    "path": "instance/profiles/P/loadorder.txt",
+    "bytes": "QmFzZS5lc20NCkEuZXNwDQo=",
+    "mtimeNs": 1700000002000000000
+   },
+   {
+    "path": "instance/mods/A/A.esp",
+    "bytes": "VEVTNCBh",
+    "mtimeNs": 1700000003000000100
+   },
+   {
+    "path": "instance/mods/A/Zed.ESM",
+    "bytes": "VEVTNCB6",
+    "mtimeNs": 1700000003500000000
+   },
+   {
+    "path": "instance/mods/A/textures/Stone.dds",
+    "bytes": "ZGRz",
+    "mtimeNs": 1700000004000000000
+   },
+   {
+    "path": "instance/mods/A/textures/a/b.txt",
+    "bytes": "Yg==",
+    "mtimeNs": 1700000004100000000
+   },
+   {
+    "path": "instance/mods/A/Textures2/inner.esp",
+    "bytes": "bm90IGF0IHRoZSB0b3A=",
+    "mtimeNs": 1700000004200000000
+   },
+   {
+    "path": "instance/mods/A/readme.TXT",
+    "bytes": "cmVhZA==",
+    "mtimeNs": 1700000004300000000
+   },
+   {
+    "path": "instance/mods/b/B.esp",
+    "bytes": "VEVTNCBi",
+    "mtimeNs": 1700000005000000000
+   },
+   {
+    "path": "instance/overwrite/Over.esl",
+    "bytes": "VEVTNCBv",
+    "mtimeNs": 1700000006000000000
+   },
+   {
+    "path": "instance/overwrite/logs/x.log",
+    "bytes": "bG9n",
+    "mtimeNs": 1700000006100000000
+   },
+   {
+    "path": "game/Data/Base.esm",
+    "bytes": "VEVTNCBiYXNl",
+    "mtimeNs": 1700000007000000000
+   },
+   {
+    "path": "game/Data/meshes/m.nif",
+    "bytes": "bmlm",
+    "mtimeNs": 1700000007100000000
+   },
+   {
+    "path": "outside/Patch Folder/Patch.esp",
+    "bytes": "VEVTNCBw",
+    "mtimeNs": 1700000008000000000
+   },
+   {
+    "path": "off/Off.esp",
+    "bytes": "VEVTNCBvZmY=",
+    "mtimeNs": 1700000009000000000
+   }
+  ],
+  "links": [],
+  "dirs": [
+   "instance/mods/A/empty"
+  ],
+  "selection": [
+   "Sel B",
+   "a"
+  ],
+  "arms": [
+   {
+    "id": "combined",
+    "mods": [
+     "A",
+     "<ROOT\\>\\outside\\Patch Folder"
+    ]
+   },
+   {
+    "id": "without-selection",
+    "mods": [
+     "b",
+     "A",
+     "Gone"
+    ]
+   },
+   {
+    "id": "bare"
+   }
+  ],
+  "alsoScanned": [
+   "off/Off.esp",
+   "off/Missing.esp"
+  ],
+  "tools": {
+   "tool": "digest"
+  },
+  "key": {
+   "schema": 1,
+   "identity": {
+    "instance": "<ROOT/>/instance",
+    "profile": "p",
+    "game": "<ROOT/>/game",
+    "selection": [
+     "a",
+     "sel b"
+    ]
+   },
+   "profileFiles": {
+    "loadorder.txt": "27203886159b9cf1ec1ea44cccd6beac9fac5ce4a54816b991b773823fd6ca1c",
+    "modlist.txt": "3361ee2ebbfeea9e554c142c657d0d9aa1313223b2d6bc7cc993df55b9c6dd12",
+    "plugins.txt": "ca52dc5c24b33c85b0154e93acdf0cd765832fad624198b674f80f83d50ff844"
+   },
+   "folders": {
+    "mod:a": "e570e32c38c6cef68e93159637221daafaaa0bf123d8d8aaaf56fb6515826d06",
+    "mod:b": "1fc025ed2a5c01a694eaca3f0f12c2e0f745dfdf4a6ea2516c3750bfe4a56ca7",
+    "mod:<ROOT\\>\\outside\\patch folder": "c1af2cc1c512bcddf82cca4e7c886f4c53c7d3040758d2140841bacf805b4f88",
+    "mod:gone": null,
+    "overwrite": "56a5ed309cf436cb3874524c44405e4ee40c10df6e3c180bfb23e548fb201274",
+    "data": "8385889723c52e334ce8b1f1d8e57cbd2408867f3c538f24737f49b051d39041"
+   },
+   "alsoScanned": {
+    "<ROOT/>/off/missing.esp": null,
+    "<ROOT/>/off/off.esp": "e896c031ce2991d3976be849cd4359f235a212d04a4a4224005ec0fc8fc7f185"
+   },
+   "tools": {
+    "tool": "digest"
+   }
+  }
+ },
+ "ownerDifferences": {
+  "lower": [
+   {
+    "name": "\u0391\u03a3 x.esp",
+    "python": "\u03b1\u03c2 x.esp"
+   },
+   {
+    "name": "\u03b1\u03c3 x.esp",
+    "python": "\u03b1\u03c3 x.esp"
+   },
+   {
+    "name": "Plain.ESP",
+    "python": "plain.esp"
+   }
+  ],
+  "header": {
+   "bytes": "VEVTNE0AAAABAgAAAAAAAAAAAAAAAAAASEVEUgwASOHaPwcAAAAACAAATUFTVAkAY2FmgC5lc20AREFUQQgAAAAAAAAAAABNQVNUCgBQbGFpbi5lc20AREFUQQgAAAAAAAAAAAA=",
+   "pythonMasters": [
+    "caf\u20ac.esm",
+    "Plain.esm"
+   ],
+   "esm": true,
+   "esl": true,
+   "records": 7
+  },
+  "oversized": {
+   "bytes": "VEVTNLkRAQAAAAAAAAAAAAAAAAAAAAAASEVEUgwASOHaPwMAAAAACAAATUFTVAkAQmFzZS5lc20AREFUQQgAAAAAAAAAAABYWFhYBABwEQEAT05BTQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAElOVFYEAAAAAAA=",
+   "pythonMasters": [
+    "Base.esm"
+   ],
+   "esm": false,
+   "esl": false,
+   "records": 3
+  },
+  "bomModlist": {
+   "refusal": "Top is not a mod folder of profile P; pick one of the mods its modlist.txt lists."
+  }
+ }
+}

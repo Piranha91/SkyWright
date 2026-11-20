@@ -540,6 +540,8 @@ public sealed class SurfacePairSweep
     public readonly Dictionary<string, (long Intersects, long Unknown, long Checked)> SameByDomain = new();
     /// <summary>Same-responsible queries already measured by the sweep, retained only when requested by a caller.</summary>
     public readonly List<SurfaceOverlapHit> SameResults = new();
+    /// <summary>Same-responsible intersections a caller's keepSame asked for (the folder rule: a side a credited folder reshapes).</summary>
+    public readonly List<SurfaceOverlapHit> SameKept = new();
     /// <summary>Every cross-responsible query reached by the tolerance-aware broad phase, including separation and unknown.</summary>
     public readonly List<SurfaceOverlapHit> CrossResults = new();
     /// <summary>Every cross-responsible actual-shape intersection; unknown is never promoted into this list.</summary>
@@ -953,7 +955,8 @@ public sealed class OverlapIndex
         bool retainSameResults = false, Func<SurfaceOverlapCandidate, SurfaceOverlapCandidate, bool>? includePair = null,
         PairTimer? sameTimer = null, PairTimer? crossTimer = null,
         Action<SurfaceOverlapCandidate, SurfaceOverlapCandidate, SurfaceQueryOutcome, PairPath?, double>? onPair = null,
-        PreparedMeshCache? prepared = null, PairResultCache? results = null, int threads = 1)
+        PreparedMeshCache? prepared = null, PairResultCache? results = null, int threads = 1,
+        Func<SurfaceOverlapCandidate, SurfaceOverlapCandidate, bool>? keepSame = null)
     {
         var timeout = pairTimeout ?? TimeSpan.FromSeconds(120);
         var sweep = new SurfacePairSweep();
@@ -996,6 +999,7 @@ public sealed class OverlapIndex
             if (a.Win.Plugin == b.Win.Plugin)
             {
                 if (retainSameResults) sweep.SameResults.Add(new(a, b, query, true));
+                if (intersects && keepSame?.Invoke(a, b) == true) sweep.SameKept.Add(new(a, b, query, true));
                 sweep.SameChecked++;
                 if (intersects) sweep.SameIntersects++;
                 if (unknown) sweep.SameUnknown++;

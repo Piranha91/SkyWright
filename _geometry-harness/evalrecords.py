@@ -6,7 +6,7 @@
 What this is for. Five registry checks are `mcp-only`: their capability is the houseCARL record and check tools,
 which evalrun cannot call. This module calls them for each planned arm through the built houseCARL server, in its
 explicit-paths mode (the arm's own plugins.txt, loadorder.txt and modlist.txt, and the base profile's INIs, so the
-base archives are read), and writes one schema-1 import document per (check, arm) for `evalrun import-results`.
+base archives are read), and writes one schema-1 import document per (check, arm) for `runcontrol import-results`.
 Every session's `initialize` names `evalrun:<planId>:<armId>`, so each import is `fresh` for its arm.
 
 The selection, per arm: A, every record the arm's evaluated plugins (its plugins minus the dependency baseline) touch.
@@ -527,7 +527,8 @@ def write_view(folder: Path, arm: dict, ini_dir: Path | None):
     plugins = arm["plugins"]
     (folder / "plugins.txt").write_text("".join("*" + p + "\n" for p in plugins), encoding="utf-8")
     (folder / "loadorder.txt").write_text("".join(p + "\n" for p in plugins), encoding="utf-8")
-    (folder / "modlist.txt").write_text("".join("+" + m + "\n" for m in arm["mods"]), encoding="utf-8")
+    # a setup whose plugins all come from the game's Data folder has no mod folder: its mod list is empty
+    (folder / "modlist.txt").write_text("".join("+" + m + "\n" for m in arm.get("mods") or []), encoding="utf-8")
     if ini_dir:
         for f in ini_dir.glob("*.ini"):
             (folder / f.name).write_bytes(f.read_bytes())

@@ -43,4 +43,18 @@ internal static class CollisionLayers
     /// weapons lying about, water, actor layers, and NONCOLLIDABLE. A layer name this file has never seen is
     /// passable too — and counted by the caller, so an unknown layer is visible rather than silently solid.</summary>
     public static bool IsActorSolid(string layer) => ActorSolid.Contains(layer);
+
+    /// <summary>A decoded mesh's two contact roles. The HOST surface: the solid bodies on the layers an actor (and a dropped item)
+    /// meets. The DEPENDENT solid: every solid body but NONCOLLIDABLE. Either falls back to the render soup ('r') when the collision
+    /// is incomplete or empty; '-' when there is neither. 'c' marks collision.</summary>
+    public static (HousecarlCore.TriangleSoup Host, char HostSrc, HousecarlCore.TriangleSoup Dep, char DepSrc) RoleSoups(HousecarlCore.NifGeometryModel m)
+    {
+        var hc = m.CollisionSoupFor(b => b.Solid && IsActorSolid(b.Layer));
+        var dc = m.CollisionSoupFor(b => b.Solid && b.Layer != "SKYL_NONCOLLIDABLE");
+        (HousecarlCore.TriangleSoup, char) Pick(HousecarlCore.TriangleSoup? c) => m.CollisionComplete && c is { TriangleCount: > 0 } ? (c, 'c')
+            : m.Soup is { TriangleCount: > 0 } ? (m.Soup, 'r') : (HousecarlCore.TriangleSoup.Empty, '-');
+        var (h, hs) = Pick(hc);
+        var (d, ds) = Pick(dc);
+        return (h, hs, d, ds);
+    }
 }

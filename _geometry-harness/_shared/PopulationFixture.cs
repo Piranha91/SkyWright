@@ -1,4 +1,7 @@
 using System.Numerics;
+using System.Text;
+using K4os.Compression.LZ4;
+using K4os.Compression.LZ4.Streams;
 using Mutagen.Bethesda;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
@@ -43,16 +46,62 @@ namespace HarnessShared;
 //  K2    cup c2 (PpBase) on slab hs2 (PpBase, E50), moved; Delta  Stranded, WITHOUT only         in: E50's ring (ds2)
 //        places slab ds2 where hs2 stood, so c2 is re-supported
 //  K3    cup c3 on slab hs3 (both PpBase, E600), moved             Stranded, both arms            out
+//
+// Mesh responsibility (mesh-responsibility/GATE-A.md and GATE-B.md): Skyrim.esm (a stand-in for the base game, first in the
+// order, its own interior SkRoom) so the core-master exclusion is exercised by name; folder PpStrongMod, ABOVE PpMeshMod and
+// in both arms, outside the population; PpBase.bsa (LZ4-compressed, loads with PpBase.esm) holding pp\mshz.nif; the folder
+// PpDelta ships pp\msho.nif (a replacement) and pp\dnew.nif (new). The population names the PpMeshMod and PpDelta folders.
+// Every first object below is a box +-h at y 100 against a box +-50 (x given from E30's x0 = 3*4096, SkRoom from 0).
+//  case  refs (plugin, base)                      mesh that wins / mesh without it        with PpMeshMod (scoped folders)
+//  M1    s1 (A, MeshB) 200 x s2 (A, Box) 300       PpMeshMod +-60 / PpBase +-20 (gap 30)   folder row PpMeshMod, same plugin
+//  M2    v1 (Skyrim, SkB) 200 x v2 (Skyrim, SkBox) 300, SkRoom   as M1                    folder row PpMeshMod, base game
+//  M3    c1 (A, MeshB) 1200 x c2 (B, Box) 1260     crosses with either mesh                plugin row A x B, both arms
+//  M4    t1 (A, MeshS) 1700 x t2 (A, Box) 1800     PpStrongMod +-30 (gap 20) over PpMeshMod +-60   no row
+//  M5    e1 (Skyrim, SkE) 1200 x e2 (Skyrim, SkBox) 1300, SkRoom   PpMeshMod +-60 = PpBase +-60 byte for byte   no row
+//  M5b   e3 (Skyrim, SkZ) 2200 x e4 (Skyrim, SkBox) 2300, SkRoom   PpMeshMod loose +-60 = PpBase.bsa entry   no row
+//  M6    o2 (PpBase, MeshO) 2200 x o1 (Delta, Box) 2300   PpDelta folder +-60 / PpBase +-20   no row: Seen (the folder ships PpDelta.esp)
+//  M7    n1 (Delta, DNew) 3200 x n2 (Delta, DNew) 3260    only PpDelta's folder has dnew       no row: a new mesh, same-plugin floor
+//  M9    o3 (PpBase, MeshO) 3700 x o4 (PpBase, Box) 3800   PpDelta folder +-60 / PpBase +-20   no row: Seen, the folder's
+//                                                         PpDelta.esp masters PpBase, so both placements were in its editor (M2's mirror)
+//  M8    u1 (Delta, MeshT) 2700 x u2 (A, Box) 2800  PpStrongMod +-60 / PpBase +-20          scoped: plugin row A x Delta (PpStrongMod
+//                                                                                         is not a population folder); every folder: PpStrongMod
+//  M10   w1 (Skyrim, SkU) 3200 x w2 (Update, SkBox) 3300, SkRoom   PpSkyMod +-60 / PpBase +-20   folder row PpSkyMod: its plugin
+//        PpSkyMod.esp masters Skyrim.esm but not Update.esm, so the pair is Blind; both are base-game references that come back in
+//        (Gate B review condition A: a plugin-carrying folder does not make every base-game partner Seen)
+//  M11   q1 (A, PpShell) x q2 (A, Cup), E30 (x0+500, 1000): q2 (+-20) sits inside q1. PpBase's shell is a +-60 box with its +x face
+//        missing (open: no containment); PpMeshMod's is the closed box. The surfaces never meet (40 u apart) and the folder changes
+//        only the far face, yet the pair is contained only with PpMeshMod's mesh: folder row PpMeshMod (containment is decided
+//        over the whole shell, so it never takes the changed-region shortcut)
+//  M12   r1 (A, PpTouch) x r2 (A, Box), E30 (x0+1500, 1000) and (x0+1600, 1100): with PpMeshMod's +-50 the two boxes meet only
+//        along an edge (x 1550, y 1050); PpBase's +-20 leaves them apart. Touching: no row (a folder is never credited for it)
+//  K4    cup c4 on slab hs4 (both PpBase, SlabM), E35   PpMeshMod +-60 / PpBase +-100      Stranded, reshaped host, PpMeshMod
+//  K5    cup c5 (PpBase, CupM) on slab hs5 (PpBase), E35  PpMeshMod +-5 / PpBase +-20      Stranded, reshaped dependent, PpMeshMod
+//  K6    cup c6 on slab hs6 (both PpBase, SlabK), E35 (x0+4500), inside a closed +-23 box n6 (PpBase, Encl): PpMeshMod's slabk
+//        drops a render face (other bytes) and keeps the same collision, so the cup still rests on the slab; it also sits 3 u
+//        inside n6 with no face facing it (a graze, within the 4 u epsilon). No row: a graze never stands in for the slab
+// A copy the folder rule cannot read as a shape (fold-review-fix/GATE-A.md): PpBase's pp\mshv.nif, slabv.nif and cupv.nif are bytes
+// that are not a NIF; PpSkyMod ships a real box for each, so the folder is credited but the shape without it is unknown.
+//  M13   x13 (A, MeshV) 0 x y13 (B, Box) 80, interior IM13   PpSkyMod +-60 / PpBase not a NIF   the counterfactual is unknown;
+//        the crossing is cross-plugin, so the plugin rule judges it: plugin row A x B, with the mod's mesh only (without it, x13
+//        has no geometry); counted MeshUnknownJudgedByPluginRule
+//  K7    cup c7 (PpBase) on slab hs7 (PpBase, SlabV), E35 (x0+6500)   the reshaped host's fallback has no geometry: no row,
+//        counted HostNoGeometry on contact's mesh line
+//  K8    cup c8 (PpBase, CupV) on slab hs8 (PpBase), E35 (x0+8500)   the reshaped dependent's fallback has no geometry: no row,
+//        counted on contact's mesh line by its blocker
+// Extras (pp\extras, never in the fixture's own instance): PpMeshModEsp.esp and PpSameEsp.esp, plugins that place nothing (one
+// GLOB each), for the in-place runs of a mesh folder that ships a plugin (tests/test_asset_only_selection.py).
 public static class PopulationFixture
 {
     public const SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
     public static readonly ModKey BaseKey = new("PpBase", ModType.Master), AKey = new("PpA", ModType.Plugin), BKey = new("PpB", ModType.Plugin),
-        MoverKey = new("PpMover", ModType.Plugin), DeltaKey = new("PpDelta", ModType.Plugin);
-    public const string MeshModName = "PpMeshMod";
+        MoverKey = new("PpMover", ModType.Plugin), DeltaKey = new("PpDelta", ModType.Plugin), SkKey = new("Skyrim", ModType.Master),
+        UpKey = new("Update", ModType.Master), SkyModKey = new("PpSkyMod", ModType.Plugin);
+    public const string MeshModName = "PpMeshMod", StrongModName = "PpStrongMod", SkyModName = "PpSkyMod";
     static FormKey K(uint id) => new(BaseKey, id);
     static FormKey KA(uint id) => new(AKey, id);
     static FormKey KB(uint id) => new(BKey, id);
     static FormKey KD(uint id) => new(DeltaKey, id);
+    static FormKey KS(uint id) => new(SkKey, id);
     public static readonly FormKey Box = K(0x801), Slab = K(0x802), Cup = K(0x803), StatX = K(0x804), MeshB = K(0x805), Marker = K(0x806), Huge = K(0x807);
     public static readonly FormKey IPop = K(0x810), IOther = K(0x811), IOut = K(0x812), World = K(0x830), T = K(0x831),
         E00 = K(0x840), E10 = K(0x841), E50 = K(0x842), E90 = K(0x843), E200 = K(0x844), E600 = K(0x845);
@@ -62,10 +111,26 @@ public static class PopulationFixture
     public static readonly FormKey B1 = KB(0x901), B2 = KB(0x902), BE = KB(0x903), BP = KB(0x904), BP2 = KB(0x905), B7 = KB(0x906), B8 = KB(0x907),
         B9 = KB(0x908), B6 = KB(0x909);
     public static readonly FormKey D0 = KD(0x901), D3 = KD(0x902), DE = KD(0x903), Dc1 = KD(0x904), Ds2 = KD(0x905);
-    public static readonly string[] Order = { "PpBase.esm", "PpA.esp", "PpB.esp", "PpMover.esp", "PpDelta.esp" };
+    // mesh responsibility
+    public static readonly FormKey Shell = K(0x80E), Q1 = KA(0x911), Q2 = KA(0x912), Touch = K(0x80F), R1 = KA(0x913), R2 = KA(0x914);
+    public static readonly FormKey MeshS = K(0x808), MeshO = K(0x80A), SlabM = K(0x80B), CupM = K(0x80C), MeshT = K(0x80D), E30 = K(0x846), E35 = K(0x847);
+    public static readonly FormKey O2 = K(0x909), Hs4 = K(0x90A), C4 = K(0x90B), Hs5 = K(0x90C), C5 = K(0x90D), O3 = K(0x90E), O4 = K(0x90F);
+    public static readonly FormKey SlabK = K(0x820), Encl = K(0x821), Hs6 = K(0x916), C6 = K(0x917), N6 = K(0x918);
+    public static readonly FormKey S1 = KA(0x90B), S2 = KA(0x90C), C1 = KA(0x90D), T1 = KA(0x90E), T2 = KA(0x90F), U2 = KA(0x910), C2b = KB(0x90A);
+    public static readonly FormKey DNew = KD(0x801), O1 = KD(0x906), N1 = KD(0x907), N2 = KD(0x908), U1 = KD(0x909);
+    public static readonly FormKey SkB = KS(0x801), SkBox = KS(0x802), SkE = KS(0x803), SkZ = KS(0x804), SkRoom = KS(0x810),
+        V1 = KS(0x901), V2 = KS(0x902), E1 = KS(0x903), E2 = KS(0x904), E3 = KS(0x905), E4 = KS(0x906), SkU = KS(0x805), W1 = KS(0x907);
+    public static readonly FormKey W2 = new(UpKey, 0x901);
+    // unreadable fallback copies
+    public static readonly FormKey MeshV = K(0x822), SlabV = K(0x823), CupV = K(0x824), IM13 = K(0x813),
+        Hs7 = K(0x919), C7 = K(0x91A), Hs8 = K(0x91B), C8 = K(0x91C), X13 = KA(0x915), Y13 = KB(0x90B);
+    /// <summary>Bytes that are not a NIF: a copy the folder rule cannot read as a shape.</summary>
+    public static readonly byte[] NotANif = Encoding.ASCII.GetBytes("not a NIF file: the fixture's unreadable fallback copy\n");
+    public static readonly string[] Order = { "Skyrim.esm", "Update.esm", "PpBase.esm", "PpA.esp", "PpB.esp", "PpMover.esp", "PpDelta.esp", "PpSkyMod.esp" };
+    const float X30 = 3 * 4096f, X35 = 35 * 4096f;
     const float C = 4096f;
 
-    /// <summary>The plugins in load order, and the mods folder (one folder per plugin stem, plus PpMeshMod).</summary>
+    /// <summary>The plugins in load order, and the mods folder (one folder per plugin stem, plus PpMeshMod and PpStrongMod).</summary>
     public sealed record Written(IReadOnlyList<string> Order, string ModsDir);
 
     static PlacedObject Ref(FormKey key, FormKey baseKey, float x, float y, float z, FormKey? parent = null)
@@ -93,7 +158,10 @@ public static class PopulationFixture
     }
 
     /// <summary>A closed render box (+-half) and, when asked, a collision box of the same size.</summary>
-    public static byte[] Mesh(float half, bool collision)
+    public static byte[] Mesh(float half, bool collision) => Mesh(half, collision, false);
+
+    /// <summary>The same box; <paramref name="openPlusX"/> leaves out its +x face (an open shell).</summary>
+    public static byte[] Mesh(float half, bool collision, bool openPlusX)
     {
         var f = new NifFile();
         var version = new NiVersion { FileVersion = NiVersion.ToFile("20.2.0.7"), UserVersion = 12, StreamVersion = 100 };
@@ -108,6 +176,7 @@ public static class PopulationFixture
             new(0, 2, 1), new(1, 2, 3), new(4, 5, 6), new(5, 7, 6), new(0, 1, 4), new(1, 5, 4),
             new(2, 6, 3), new(3, 6, 7), new(0, 4, 2), new(2, 4, 6), new(1, 3, 5), new(3, 7, 5),
         };
+        if (openPlusX) t.RemoveRange(t.Count - 2, 2);
         var shape = new BSTriShape { Name = new("render"), Flags_ui = 0xEu, Scale = 1f };
         shape.Create(version, v, t, new(), new());
         shape.IsSkinned = false;
@@ -135,6 +204,25 @@ public static class PopulationFixture
             return c;
         }
 
+        // ---- Skyrim.esm: a stand-in for the base game (its own bases and interior, masters nothing) ----
+        var sk = new SkyrimMod(SkKey, Rel);
+        sk.ModHeader.Flags |= SkyrimModHeader.HeaderFlag.Master;
+        sk.Statics.Add(new Static(SkB, Rel) { EditorID = "SkMeshB", Model = new Model { File = "pp\\mshb.nif" } });
+        sk.Statics.Add(new Static(SkBox, Rel) { EditorID = "SkBox", Model = new Model { File = "pp\\box.nif" } });
+        sk.Statics.Add(new Static(SkE, Rel) { EditorID = "SkMeshE", Model = new Model { File = "pp\\mshe.nif" } });
+        sk.Statics.Add(new Static(SkZ, Rel) { EditorID = "SkMeshZ", Model = new Model { File = "pp\\mshz.nif" } });
+        sk.Statics.Add(new Static(SkU, Rel) { EditorID = "SkMeshU", Model = new Model { File = "pp\\mshu.nif" } });
+        Room(sk, SkRoom, "SkRoom", Ref(V1, SkB, 200, 100, 0), Ref(V2, SkBox, 300, 100, 0), Ref(E1, SkE, 1200, 100, 0),
+             Ref(E2, SkBox, 1300, 100, 0), Ref(E3, SkZ, 2200, 100, 0), Ref(E4, SkBox, 2300, 100, 0), Ref(W1, SkU, 3200, 100, 0));
+        var skPath = Save(sk);
+        using var skOv = SkyrimMod.CreateFromBinaryOverlay(skPath, Rel);
+
+        // ---- Update.esm: a second core-named master; it places w2 into SkRoom ----
+        var up = new SkyrimMod(UpKey, Rel);
+        up.ModHeader.Flags |= SkyrimModHeader.HeaderFlag.Master;
+        Room(up, SkRoom, "SkRoom", Ref(W2, SkBox, 3300, 100, 0));
+        Save(up, skOv);
+
         // ---- PpBase.esm ----
         var b = new SkyrimMod(BaseKey, Rel);
         b.ModHeader.Flags |= SkyrimModHeader.HeaderFlag.Master;
@@ -144,6 +232,18 @@ public static class PopulationFixture
         b.Statics.Add(new Static(StatX, Rel) { EditorID = "PpStatX", Model = new Model { File = "pp\\box.nif" } });
         b.Statics.Add(new Static(MeshB, Rel) { EditorID = "PpMeshB", Model = new Model { File = "pp\\mshb.nif" } });
         b.Statics.Add(new Static(Marker, Rel) { EditorID = "PpMarker" });
+        b.Statics.Add(new Static(MeshS, Rel) { EditorID = "PpMeshS", Model = new Model { File = "pp\\mshs.nif" } });
+        b.Statics.Add(new Static(MeshO, Rel) { EditorID = "PpMeshO", Model = new Model { File = "pp\\msho.nif" } });
+        b.Statics.Add(new Static(SlabM, Rel) { EditorID = "PpSlabM", Model = new Model { File = "pp\\slabm.nif" } });
+        b.Statics.Add(new Static(CupM, Rel) { EditorID = "PpCupM", Model = new Model { File = "pp\\cupm.nif" } });
+        b.Statics.Add(new Static(MeshT, Rel) { EditorID = "PpMeshT", Model = new Model { File = "pp\\msht.nif" } });
+        b.Statics.Add(new Static(Shell, Rel) { EditorID = "PpShell", Model = new Model { File = "pp\\shell.nif" } });
+        b.Statics.Add(new Static(SlabK, Rel) { EditorID = "PpSlabK", Model = new Model { File = "pp\\slabk.nif" } });
+        b.Statics.Add(new Static(Encl, Rel) { EditorID = "PpEncl", Model = new Model { File = "pp\\encl.nif" } });
+        b.Statics.Add(new Static(Touch, Rel) { EditorID = "PpTouch", Model = new Model { File = "pp\\touch.nif" } });
+        b.Statics.Add(new Static(MeshV, Rel) { EditorID = "PpMeshV", Model = new Model { File = "pp\\mshv.nif" } });
+        b.Statics.Add(new Static(SlabV, Rel) { EditorID = "PpSlabV", Model = new Model { File = "pp\\slabv.nif" } });
+        b.Statics.Add(new Static(CupV, Rel) { EditorID = "PpCupV", Model = new Model { File = "pp\\cupv.nif" } });
         b.Statics.Add(new Static(Huge, Rel)
         {
             EditorID = "PpHuge", Model = new Model { File = "pp\\huge.nif" },
@@ -152,13 +252,23 @@ public static class PopulationFixture
         Room(b, IPop, "PpRoomPop");
         Room(b, IOther, "PpRoomOther", Ref(B4, Box, 2000, 500, 0), Ref(Hs1, Slab, 5000, 0, 0));
         Room(b, IOut, "PpRoomOut");
+        Room(b, IM13, "PpRoomM13");
         {
             var top = Top();
             top.Persistent.Add(Ref(PA, Box, 9 * C + 100, 2000, 0));
             top.Persistent.Add(Ref(Mk, Marker, 30 * C + 100, 100, 0));
             var e50 = Ext(E50, 5, 0); e50.Temporary.Add(Ref(Hs2, Slab, 5 * C + 500, 500, 0)); e50.Temporary.Add(Ref(C2, Cup, 5 * C + 500, 500, 120));
             var e600 = Ext(E600, 60, 0); e600.Temporary.Add(Ref(Hs3, Slab, 60 * C + 500, 500, 0)); e600.Temporary.Add(Ref(C3, Cup, 60 * C + 500, 500, 120));
-            b.Worldspaces.Add(Wrld(top, Ext(E00, 0, 0), Ext(E10, 1, 0), e50, Ext(E90, 9, 0), Ext(E200, 20, 0), e600));
+            var e30 = Ext(E30, 3, 0); e30.Temporary.Add(Ref(O2, MeshO, X30 + 2200, 100, 0));
+            e30.Temporary.Add(Ref(O3, MeshO, X30 + 3700, 100, 0)); e30.Temporary.Add(Ref(O4, Box, X30 + 3800, 100, 0));
+            var e35 = Ext(E35, 35, 0);
+            e35.Temporary.Add(Ref(Hs4, SlabM, X35 + 500, 500, 0)); e35.Temporary.Add(Ref(C4, Cup, X35 + 500, 500, 120));
+            e35.Temporary.Add(Ref(Hs5, Slab, X35 + 2500, 500, 0)); e35.Temporary.Add(Ref(C5, CupM, X35 + 2500, 500, 120));
+            e35.Temporary.Add(Ref(Hs6, SlabK, X35 + 4500, 500, 0)); e35.Temporary.Add(Ref(C6, Cup, X35 + 4500, 500, 120));
+            e35.Temporary.Add(Ref(N6, Encl, X35 + 4500, 500, 120));
+            e35.Temporary.Add(Ref(Hs7, SlabV, X35 + 6500, 500, 0)); e35.Temporary.Add(Ref(C7, Cup, X35 + 6500, 500, 120));
+            e35.Temporary.Add(Ref(Hs8, Slab, X35 + 8500, 500, 0)); e35.Temporary.Add(Ref(C8, CupV, X35 + 8500, 500, 120));
+            b.Worldspaces.Add(Wrld(top, Ext(E00, 0, 0), Ext(E10, 1, 0), e50, Ext(E90, 9, 0), Ext(E200, 20, 0), e600, e30, e35));
         }
         var bPath = Save(b);
         using var bOv = SkyrimMod.CreateFromBinaryOverlay(bPath, Rel);
@@ -168,6 +278,7 @@ public static class PopulationFixture
         Room(a, IPop, "PpRoomPop", Ref(A1, Box, 0, 0, 0));
         Room(a, IOut, "PpRoomOut", Ref(A2, Box, 0, 0, 0));
         Room(a, IOther, "PpRoomOther", Ref(A3, Box, 1050, 30, 20), Ref(A4, Box, 2050, 30, 20));
+        Room(a, IM13, "PpRoomM13", Ref(X13, MeshV, 0, 0, 0));
         {
             var top = Top(); top.Persistent.Add(Ref(PA2, Box, 9 * C + 1000, 100, 0));
             var e10 = Ext(E10, 1, 0); e10.Temporary.Add(Ref(HA, Huge, 4200, 100, 0));
@@ -175,7 +286,13 @@ public static class PopulationFixture
             e90.Temporary.Add(Ref(X7, StatX, 9 * C + 2000, 100, 0)); e90.Temporary.Add(Ref(M8, MeshB, 9 * C + 3000, 100, 0));
             e90.Temporary.Add(Ref(A9, Box, 9 * C + 3500, 100, 0));
             var e200 = Ext(E200, 20, 0); e200.Temporary.Add(Ref(Kc, Box, 20 * C + 100, 100, 0, Mk));
-            a.Worldspaces.Add(Wrld(top, e10, e90, e200));
+            var e30 = Ext(E30, 3, 0);
+            foreach (var r in new[] { Ref(S1, MeshB, X30 + 200, 100, 0), Ref(S2, Box, X30 + 300, 100, 0), Ref(C1, MeshB, X30 + 1200, 100, 0),
+                                      Ref(T1, MeshS, X30 + 1700, 100, 0), Ref(T2, Box, X30 + 1800, 100, 0), Ref(U2, Box, X30 + 2800, 100, 0),
+                                      Ref(Q1, Shell, X30 + 500, 1000, 0), Ref(Q2, Cup, X30 + 500, 1000, 0),
+                                      Ref(R1, Touch, X30 + 1500, 1000, 0), Ref(R2, Box, X30 + 1600, 1100, 0) })
+                e30.Temporary.Add(r);
+            a.Worldspaces.Add(Wrld(top, e10, e90, e200, e30));
         }
         Save(a, bOv);
 
@@ -183,6 +300,7 @@ public static class PopulationFixture
         var bb = new SkyrimMod(BKey, Rel);
         Room(bb, IPop, "PpRoomPop", Ref(B1, Box, 50, 30, 20));
         Room(bb, IOut, "PpRoomOut", Ref(B2, Box, 50, 30, 20));
+        Room(bb, IM13, "PpRoomM13", Ref(Y13, Box, 80, 0, 0));
         {
             var e10 = Ext(E10, 1, 0); e10.Temporary.Add(Ref(BE, Box, 5000, 100, 0));
             var e90 = Ext(E90, 9, 0);
@@ -190,7 +308,8 @@ public static class PopulationFixture
             e90.Temporary.Add(Ref(B7, Box, 9 * C + 2120, 100, 0)); e90.Temporary.Add(Ref(B8, Box, 9 * C + 3080, 100, 0));
             e90.Temporary.Add(Ref(B9, Box, 9 * C + 3550, 130, 20));
             var e200 = Ext(E200, 20, 0); e200.Temporary.Add(Ref(B6, Box, 20 * C + 150, 130, 20));
-            bb.Worldspaces.Add(Wrld(null, e10, e90, e200));
+            var e30 = Ext(E30, 3, 0); e30.Temporary.Add(Ref(C2b, Box, X30 + 1260, 100, 0));
+            bb.Worldspaces.Add(Wrld(null, e10, e90, e200, e30));
         }
         Save(bb, bOv);
 
@@ -207,6 +326,7 @@ public static class PopulationFixture
         // ---- PpDelta.esp ----
         var dl = new SkyrimMod(DeltaKey, Rel);
         dl.Statics.Add(new Static(StatX, Rel) { EditorID = "PpStatX", Model = new Model { File = "pp\\big.nif" } });
+        dl.Statics.Add(new Static(DNew, Rel) { EditorID = "PpDNew", Model = new Model { File = "pp\\dnew.nif" } });
         Room(dl, IPop, "PpRoomPop", Ref(D0, Box, 3000, 0, 0));
         Room(dl, IOther, "PpRoomOther", Ref(D3, Box, 1000, 0, 0), Ref(B4, Box, 2000, 0, 0), Ref(Dc1, Cup, 5000, 0, 120));
         {
@@ -217,9 +337,18 @@ public static class PopulationFixture
             top.Persistent.Add(mk);
             var e00 = Ext(E00, 0, 0); e00.Temporary.Add(Ref(DE, Box, 100, 100, 0));
             var e50 = Ext(E50, 5, 0); e50.Temporary.Add(Ref(Ds2, Slab, 5 * C + 500, 500, 0));
-            dl.Worldspaces.Add(Wrld(top, e00, e50));
+            var e30 = Ext(E30, 3, 0);
+            foreach (var r in new[] { Ref(O1, Box, X30 + 2300, 100, 0), Ref(N1, DNew, X30 + 3200, 100, 0), Ref(N2, DNew, X30 + 3260, 100, 0),
+                                      Ref(U1, MeshT, X30 + 2700, 100, 0) })
+                e30.Temporary.Add(r);
+            dl.Worldspaces.Add(Wrld(top, e00, e50, e30));
         }
         Save(dl, bOv);
+
+        // ---- PpSkyMod.esp: masters Skyrim.esm only (it restates SkBox); its folder reshapes pp\\mshu.nif ----
+        var skm = new SkyrimMod(SkyModKey, Rel);
+        skm.Statics.Add(new Static(SkBox, Rel) { EditorID = "SkBox", Model = new Model { File = "pp\\box.nif" } });
+        Save(skm, skOv);
 
         // ---- meshes: one folder per plugin stem (the base's meshes under PpBase), and PpMeshMod ----
         var mods = Path.Combine(d, "mods");
@@ -231,12 +360,99 @@ public static class PopulationFixture
         File.WriteAllBytes(Path.Combine(bm, "big.nif"), Mesh(100, true));
         File.WriteAllBytes(Path.Combine(bm, "mshb.nif"), Mesh(20, true));
         File.WriteAllBytes(Path.Combine(bm, "huge.nif"), Mesh(4200, false));
+        File.WriteAllBytes(Path.Combine(bm, "mshs.nif"), Mesh(20, true));
+        File.WriteAllBytes(Path.Combine(bm, "mshe.nif"), Mesh(60, true));
+        File.WriteAllBytes(Path.Combine(bm, "msho.nif"), Mesh(20, true));
+        File.WriteAllBytes(Path.Combine(bm, "slabm.nif"), Mesh(100, true));
+        File.WriteAllBytes(Path.Combine(bm, "cupm.nif"), Mesh(20, true));
+        File.WriteAllBytes(Path.Combine(bm, "msht.nif"), Mesh(20, true));
+        // pp\mshz.nif is in PpBase only inside its archive, LZ4-compressed: the same file PpMeshMod ships loose
+        File.WriteAllBytes(Path.Combine(mods, "PpBase", "PpBase.bsa"), CompressedBsa(("meshes\\pp", new[] { ("mshz.nif", Mesh(60, true)) })));
         var mm = Path.Combine(mods, MeshModName, "meshes", "pp"); Directory.CreateDirectory(mm);
         File.WriteAllBytes(Path.Combine(mm, "mshb.nif"), Mesh(60, true));
+        File.WriteAllBytes(Path.Combine(mm, "mshs.nif"), Mesh(60, true));
+        File.WriteAllBytes(Path.Combine(mm, "mshe.nif"), Mesh(60, true));
+        File.WriteAllBytes(Path.Combine(mm, "mshz.nif"), Mesh(60, true));
+        File.WriteAllBytes(Path.Combine(mm, "slabm.nif"), Mesh(60, true));
+        File.WriteAllBytes(Path.Combine(mm, "cupm.nif"), Mesh(5, true));   // +-5: 15 u clear of the slab, more than the collision radii and the 4 u epsilon
+        var sm = Path.Combine(mods, StrongModName, "meshes", "pp"); Directory.CreateDirectory(sm);
+        File.WriteAllBytes(Path.Combine(sm, "mshs.nif"), Mesh(30, true));
+        File.WriteAllBytes(Path.Combine(sm, "msht.nif"), Mesh(60, true));
+        File.WriteAllBytes(Path.Combine(bm, "mshu.nif"), Mesh(20, true));
+        File.WriteAllBytes(Path.Combine(bm, "shell.nif"), Mesh(60, false, true));
+        File.WriteAllBytes(Path.Combine(mods, MeshModName, "meshes", "pp", "shell.nif"), Mesh(60, false, false));
+        File.WriteAllBytes(Path.Combine(bm, "touch.nif"), Mesh(20, true));
+        File.WriteAllBytes(Path.Combine(bm, "slabk.nif"), Mesh(100, true));
+        File.WriteAllBytes(Path.Combine(mods, MeshModName, "meshes", "pp", "slabk.nif"), Mesh(100, true, true));   // same collision box
+        File.WriteAllBytes(Path.Combine(bm, "encl.nif"), Mesh(23, true));
+        File.WriteAllBytes(Path.Combine(mods, MeshModName, "meshes", "pp", "touch.nif"), Mesh(50, true));
+        var um = Path.Combine(mods, SkyModName, "meshes", "pp"); Directory.CreateDirectory(um);
+        File.WriteAllBytes(Path.Combine(um, "mshu.nif"), Mesh(60, true));
+        var dm = Path.Combine(mods, "PpDelta", "meshes", "pp"); Directory.CreateDirectory(dm);
+        File.WriteAllBytes(Path.Combine(dm, "msho.nif"), Mesh(60, true));
+        File.WriteAllBytes(Path.Combine(dm, "dnew.nif"), Mesh(60, true));
+        // M13, K7, K8: PpBase's copy is not a NIF, PpSkyMod's is a real box. PpSkyMod.esp masters neither placement's plugin, so every
+        // pair is Blind for it; the asset-only instances carry no PpSkyMod, so there these meshes are the same on both arms
+        // (tests/test_asset_only_selection.py)
+        File.WriteAllBytes(Path.Combine(bm, "mshv.nif"), NotANif);
+        File.WriteAllBytes(Path.Combine(bm, "slabv.nif"), NotANif);
+        File.WriteAllBytes(Path.Combine(bm, "cupv.nif"), NotANif);
+        File.WriteAllBytes(Path.Combine(um, "mshv.nif"), Mesh(60, true));
+        File.WriteAllBytes(Path.Combine(um, "slabv.nif"), Mesh(100, true));
+        File.WriteAllBytes(Path.Combine(um, "cupv.nif"), Mesh(20, true));
+        // extras: plugins that place nothing, outside the fixture's order
+        var ex = Path.Combine(d, "extras"); Directory.CreateDirectory(ex);
+        foreach (var name in new[] { "PpMeshModEsp", "PpSameEsp" })
+        {
+            var key = new ModKey(name, ModType.Plugin);
+            var m = new SkyrimMod(key, Rel);
+            m.Globals.Add(new GlobalShort(new FormKey(key, 0x800), Rel) { EditorID = name + "Loaded" });
+            m.BeginWrite.ToPath(Path.Combine(ex, name + ".esp")).WithNoLoadOrder().Write();
+        }
         return new Written(paths, mods);
     }
 
-    /// <summary>A population file naming PpDelta.esp and the PpMeshMod folder, as evalrun writes it.</summary>
+    /// <summary>A version-105 BSA with folder and file names, compressed by default (archive flag 0x4): each entry is its
+    /// uncompressed size then an LZ4 frame, the layout Mutagen's BsaFileRecord reads (size field = 4 + frame length). The
+    /// uncompressed layout is src/housecarl-generator/BsaBuilder.cs's; hashes are left 0 as there.</summary>
+    public static byte[] CompressedBsa(params (string Folder, (string Name, byte[] Data)[] Files)[] folders)
+    {
+        static byte[] Frame(byte[] data)
+        {
+            using var ms = new MemoryStream();
+            using (var enc = LZ4Stream.Encode(ms, LZ4Level.L00_FAST, 0, true)) enc.Write(data, 0, data.Length);
+            var frame = ms.ToArray();
+            var blob = new byte[4 + frame.Length];
+            BitConverter.GetBytes((uint)data.Length).CopyTo(blob, 0);
+            frame.CopyTo(blob, 4);
+            return blob;
+        }
+        var blobs = folders.Select(f => f.Files.Select(x => Frame(x.Data)).ToArray()).ToArray();
+        uint fileCount = (uint)folders.Sum(f => f.Files.Length);
+        uint folderNames = (uint)folders.Sum(f => f.Folder.Length + 1), fileNames = (uint)folders.SelectMany(f => f.Files).Sum(x => x.Name.Length + 1);
+        long recordsEnd = 36 + folders.Length * 24L;
+        var blockSizes = folders.Select(f => 1L + f.Folder.Length + 1 + f.Files.Length * 16L).ToArray();
+        long dataStart = recordsEnd + blockSizes.Sum() + fileNames;
+        using var o = new MemoryStream();
+        using var bw = new BinaryWriter(o, Encoding.ASCII);
+        bw.Write(0x00415342u); bw.Write(105u); bw.Write(36u); bw.Write(0x1u | 0x2u | 0x4u);
+        bw.Write((uint)folders.Length); bw.Write(fileCount); bw.Write(folderNames); bw.Write(fileNames); bw.Write(0u);
+        long block = recordsEnd;
+        for (int i = 0; i < folders.Length; i++) { bw.Write(0UL); bw.Write((uint)folders[i].Files.Length); bw.Write(0u); bw.Write((ulong)(block + fileNames)); block += blockSizes[i]; }
+        long cursor = dataStart;
+        for (int i = 0; i < folders.Length; i++)
+        {
+            var fn = Encoding.ASCII.GetBytes(folders[i].Folder);
+            bw.Write((byte)(fn.Length + 1)); bw.Write(fn); bw.Write((byte)0);
+            foreach (var blob in blobs[i]) { bw.Write(0UL); bw.Write((uint)blob.Length); bw.Write((uint)cursor); cursor += blob.Length; }
+        }
+        foreach (var f in folders) foreach (var (name, _) in f.Files) { bw.Write(Encoding.ASCII.GetBytes(name)); bw.Write((byte)0); }
+        foreach (var bl in blobs) foreach (var blob in bl) bw.Write(blob);
+        bw.Flush();
+        return o.ToArray();
+    }
+
+    /// <summary>A population file naming PpDelta.esp and the PpMeshMod and PpDelta folders, as evalrun writes it.</summary>
     public static string WritePopulation(Written w, string path)
     {
         var delta = w.Order.First(p => Path.GetFileName(p) == "PpDelta.esp");
@@ -244,7 +460,9 @@ public static class PopulationFixture
         string sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(s)).ToLowerInvariant();
         string Esc(string x) => x.Replace("\\", "\\\\");
         File.WriteAllText(path, "{\n \"schema\": 1,\n \"plugins\": [{\"name\": \"PpDelta.esp\", \"path\": \"" + Esc(delta) + "\", \"sha256\": \"" + sha + "\"}],\n"
-                              + " \"mods\": [{\"name\": \"" + MeshModName + "\", \"path\": \"" + Esc(Path.Combine(w.ModsDir, MeshModName)) + "\"}],\n"
+                              + " \"mods\": [{\"name\": \"" + MeshModName + "\", \"path\": \"" + Esc(Path.Combine(w.ModsDir, MeshModName)) + "\"},"
+                              + " {\"name\": \"PpDelta\", \"path\": \"" + Esc(Path.Combine(w.ModsDir, "PpDelta")) + "\"},"
+                              + " {\"name\": \"" + SkyModName + "\", \"path\": \"" + Esc(Path.Combine(w.ModsDir, SkyModName)) + "\"}],\n"
                               + " \"targets\": [\"PpDelta.esp\"]\n}\n");
         return path;
     }

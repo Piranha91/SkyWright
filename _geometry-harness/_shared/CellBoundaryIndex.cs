@@ -34,10 +34,9 @@ public static class PluginKinds
 
     /// <summary>The base-game files (<see cref="BaseGamePlugins"/>) plus Creation Club (`cc*.es*`): Bethesda-on-Bethesda is a
     /// population of its own (rule 12), reported apart.</summary>
-    public static bool IsBethesda(string fileName) => BaseGamePlugins.IsBaseGame(fileName) || fileName.StartsWith("cc", StringComparison.OrdinalIgnoreCase) && IsPluginName(fileName);
+    public static bool IsBethesda(string fileName) => BaseGamePlugins.IsBaseGame(fileName) || BaseGamePlugins.IsCreationClub(fileName);
     public static bool IsUssep(string fileName) => BaseGamePlugins.IsUssep(fileName);
     public static bool IsGenerated(string fileName) => Generated.Contains(fileName);
-    static bool IsPluginName(string f) => f.EndsWith(".esm", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".esp", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".esl", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>By name alone: Bethesda / Ussep / Generated / Other. WaterMod is the index's call (KindOf).</summary>
     public static PluginKind ByName(string fileName)

@@ -2,8 +2,8 @@
 
     python test_records_keep_work.py [PREFIX]     KEEP_HARNESS names the _geometry-harness copy under test.
 
-Real evalrun, ordersweep and conflictdiff over the fixtures with fake probes; real evalrecords with a stand-in reader;
-real evalpipeline.cmd_run with recording stage bodies. No game, no lab, no houseCARL server.
+The built-in controller (runcontrol), real ordersweep and conflictdiff over the fixtures with fake probes; real
+evalrecords with a stand-in reader. No game, no lab, no houseCARL server.
 """
 import hashlib
 import importlib.util
@@ -13,7 +13,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import types
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -263,112 +262,10 @@ def case_r9_a_master_missing_from_disk_is_counted_by_name(tmp):
              "r9: each of its three removals is counted under its own reason, not dropped as 'no masters'")
 
 
-# ---------------------------------------------------------------- the pipeline's stage bindings
-
-ENTRY = {"id": "t", "source": {"instance": "i", "profile": "p"}, "lab": {"instance": "i", "game": "g"},
-         "subject": {"plugin": "S.esp", "mod": "M"}, "evaluation": {"depth": "deep", "budgetMinutes": 105, "optIn": []}}
-
-
-class Pipe:
-    def __init__(self, tmp: Path):
-        self.EP = load_module("ep_under_test", HARNESS / "evalpipeline.py")
-        self.out, self.ran, self.argv = tmp / "out", [], []
-        self.entry = tmp / "entry.json"
-        self.out.mkdir(parents=True)
-        EP = self.EP
-        EP.Context.resolve = lambda s: {"arms": [], "subject": ["S.esp"], "partners": [], "keys": [], "baseline": []}
-        for stage in EP.STAGES:
-            if stage != "scenes":
-                EP.STAGE_BODIES[stage] = self.recorder(stage)
-        real = EP.stage_evaluate
-
-        def evaluate(ctx, res, sdir):
-            self.ran.append("evaluate")
-            return real(ctx, res, sdir)
-        EP.STAGE_BODIES["evaluate"] = evaluate
-        EP.evalrun = lambda *a: [str(x) for x in a]
-
-        def child(ctx, ledger_dir, op, argv, **k):
-            self.argv.append(argv)
-            led = json.loads((self.out / "evaluation/ledger.json").read_text(encoding="utf-8"))
-            led.setdefault("runIds", []).append({"runId": "x"})
-            (self.out / "evaluation/ledger.json").write_text(json.dumps(led), encoding="utf-8")
-            return {"exitCode": 0, "stopped": None}
-        EP.child = child
-
-    def recorder(self, stage):
-        def body(ctx, res, sdir):
-            self.ran.append(stage)
-            if stage == "plan":
-                (self.out / "evaluation").mkdir(exist_ok=True)
-                minutes = ctx.entry["evaluation"]["budgetMinutes"]
-                (self.out / "evaluation/plan.json").write_text(json.dumps({"budgets": {"minutes": float(minutes)}}), encoding="utf-8")
-                (self.out / "evaluation/ledger.json").write_text('{"runIds": [], "entries": {}}', encoding="utf-8")
-            return {}, []
-        return body
-
-    def run(self, budget):
-        self.ran.clear()
-        self.argv.clear()
-        e = json.loads(json.dumps(ENTRY))
-        e["evaluation"]["budgetMinutes"] = budget
-        self.entry.write_text(json.dumps(e), encoding="utf-8")
-        a = types.SimpleNamespace(entry=str(self.entry), machine=None, out=str(self.out), through="records")
-        rc = self.EP.cmd_run(a)
-        T.expect(rc, 0, "the pipeline run finished")
-        return list(self.ran)
-
-
-def case_p1_a_budget_only_change_keeps_the_plan(tmp):
-    p = Pipe(tmp / "p1")
-    first = p.run(105)
-    T.expect(first, ["census", "prepare", "scope", "plan", "evaluate", "records"], "p1: a first run runs every stage")
-    T.check(not any("--budget-minutes" in x for x in p.argv), "p1: an unchanged budget passes no limit")
-    T.expect(p.run(105), [], "p1: the same entry reuses every stage")
-    second = p.run(425)
-    T.expect(second, ["evaluate", "records"], "p1: a raised budget reruns evaluate and what follows it, not the plan")
-    T.check(p.argv and p.argv[0][:1] == ["resume"] and p.argv[0][-2:] == ["--budget-minutes", "425"],
-            f"p1: evaluate resumes under the raised limit (argv {p.argv[:1]})")
-    plan = json.loads((p.out / "evaluation/plan.json").read_text(encoding="utf-8"))
-    T.expect(plan["budgets"]["minutes"], 105.0, "p1: the plan is not rewritten")
-
-
-def case_p2_an_unchanged_budget_hashes_as_it_always_did(tmp):
-    """Round 2's stages.json files were written by the old hash; a different shape makes them rerun from census."""
-    p = Pipe(tmp / "p2")
-    p.run(105)
-    EP = p.EP
-    stages = json.loads((p.out / "stages.json").read_text(encoding="utf-8"))["stages"]
-    measured = json.loads(json.dumps(ENTRY))
-    want = EP.sha256_json({"entry": EP.sha256_json(measured), "upstream": {}})
-    T.expect(stages["census"]["inputsSha256"], want, "p2: census's binding is the entry's plain hash")
-    p.run(425)
-    stages = json.loads((p.out / "stages.json").read_text(encoding="utf-8"))["stages"]
-    T.expect(stages["census"]["inputsSha256"], want, "p2: and stays so after a raised budget")
-
-
-def case_p3_the_records_stage_names_no_comparison_cells(tmp):
-    p = Pipe(tmp / "p3")
-    EP, out = p.EP, p.out
-    (out / "evaluation").mkdir()
-    (out / "scope").mkdir()
-    (out / "records").mkdir()
-    (out / "scope/scopes.json").write_text(json.dumps({"a": {"targets": {"S.esp": {"measuredCells": ["0000D1:Base.esm"]}}}}), encoding="utf-8")
-    (out / "evaluation/ledger.json").write_text(json.dumps({"entries": {"records.contested-fields__baseline": {"status": "mcp-only"}}}), encoding="utf-8")
-    ctx = types.SimpleNamespace(out=out, id="t", machine={"readerCmd": "reader"}, game=Path("g"), instance=Path("i"), profile="p", entry={})
-    res = {"subject": ["S.esp"], "partners": [], "keys": []}
-    try:
-        EP.stage_records(ctx, res, out / "records")
-    except EP.Refusal:
-        pass    # the stand-in child writes no summary; only the command line is read
-    T.check(p.argv and "--cells" not in p.argv[0], "p3: the capture command names no comparison cells")
-    T.check(not (out / "records/cells.json").exists(), "p3: no cells.json is written")
-
-
 # ---------------------------------------------------------------- a stopped sweep
 
 def ev(args, env, timeout=300):
-    return subprocess.run([sys.executable, str(T.EVALRUN)] + [str(a) for a in args], capture_output=True, text=True,
+    return subprocess.run(T.CONTROLLER + [str(a) for a in args], capture_output=True, text=True, encoding="utf-8", errors="replace",
                           env=dict(os.environ, **env), timeout=timeout)
 
 
@@ -528,28 +425,6 @@ def case_e6_a_finished_job_that_fails_validation_earns_no_credit(tmp):
     for part in ("arm", "reverse", "diff"):
         T.check((s.receipt(C1, part).get("validation") or {}).get("accepted") is not True and s.status(C1, part) not in ("completed", "reused"),
                 f"e6: {C1}/{part} earns no credit over a rejected baseline (got {s.status(C1, part)})")
-
-
-def case_e7_a_sweep_nobody_stopped_writes_the_same_summary(tmp):
-    """Against KEEP_REFERENCE_HARNESS when set: the writes along the way leave the finished summary.json as it was."""
-    ref = os.environ.get("KEEP_REFERENCE_HARNESS")
-    if not ref:
-        print("   (no reference harness named: nothing to compare)")
-        return
-    docs = []
-    mine = T.EVALRUN
-    for tag, evalrun_py in (("ref", Path(ref) / "evalrun.py"), ("new", mine)):
-        T.EVALRUN = evalrun_py
-        d = tmp / "same" / tag
-        d.mkdir(parents=True)
-        s = Sweep(d, "e7", budget=5)
-        T.expect(s.go("run").returncode, 0, f"e7: the {tag} run exits 0")
-        text = (T.last_sweep(s.run) / "summary.json").read_text(encoding="utf-8")
-        for spelling in (str(d), str(d).replace(chr(92), chr(92) * 2), str(d).replace(chr(92), "/")):
-            text = text.replace(spelling, "ROOT")
-        docs.append(json.loads(text))
-    T.EVALRUN = mine
-    T.check(docs[0] == docs[1], f"e7: the finished summary is unchanged ({json.dumps(docs[0])[:300]} against {json.dumps(docs[1])[:300]})")
 
 
 def case_e4_an_import_survives_a_raised_budget(tmp):

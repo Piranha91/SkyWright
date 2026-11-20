@@ -24,6 +24,7 @@ HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
 FIXT = HERE / "fixtures" / "evalrun"
 EVALRUN = HARNESS / "evalrun.py"
+from test_evalrun import CONTROLLER  # noqa: E402  (the built-in controller, runcontrol, as test_evalrun starts it)
 EVALSETTINGS = HARNESS / "evalsettings.py"
 CASE = "case-01-geometry-and-quest"
 PROBES = ["navownprobe", "overlapprobe", "contactprobe", "bosprobe", "switchprobe", "stateprobe",
@@ -210,7 +211,7 @@ class Ctl:
         env = dict(os.environ)
         env["EVALRUN_FAKE_SCENARIO"] = str(scen)
         env.update(env_extra or {})
-        return subprocess.run([sys.executable, str(EVALRUN)] + [str(a) for a in args], capture_output=True,
+        return subprocess.run(CONTROLLER + [str(a) for a in args], capture_output=True,
                               text=True, env=env, timeout=600)
 
     def plan(self, run, scen, extra=(), registry="fixture-check-registry.json", env_extra=None):

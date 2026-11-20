@@ -1,0 +1,1287 @@
+{
+ "schemaVersion": 2,
+ "planId": "c861fe61c438",
+ "createdUtc": "2026-11-20T03:03:06Z",
+ "registryVersion": 4,
+ "runIds": [
+  {
+   "runId": "evalrun-checks-20261120T030300732-ea35bded",
+   "parentRunId": null,
+   "command": "run",
+   "startedUtc": "2026-11-20T03:03:00Z",
+   "sweepFolders": [
+    "sweep/inv-0001"
+   ]
+  }
+ ],
+ "derivedFrom": {
+  "ledgerSha256": "248cee560ef1535cab7c463939ac10a79500e374fe60f30e59d16a58349e70f4",
+  "receipts": "7b055e12bba3b9c9bf31e1f9bac01d9f49a64bc7e984adc0bcb6c2a281ff4358",
+  "journalLines": 66
+ },
+ "evaluation": {
+  "complete": false,
+  "claim": "incomplete",
+  "missing": [
+   {
+    "checkId": "loadability.dangling-references",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "loadability",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "loadability.dangling-references",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "loadability",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "loadability.dangling-references",
+    "armId": "baseline",
+    "part": null,
+    "status": "mcp-only",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "loadability"
+   },
+   {
+    "checkId": "loadability.dangling-references",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "mcp-only",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "loadability"
+   },
+   {
+    "checkId": "loadability.missing-assets",
+    "armId": "baseline",
+    "part": null,
+    "status": "mcp-only",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "loadability"
+   },
+   {
+    "checkId": "loadability.missing-assets",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "mcp-only",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "loadability"
+   },
+   {
+    "checkId": "records.contested-fields",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "records",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "records.contested-fields",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "records",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "records.contested-fields",
+    "armId": "baseline",
+    "part": null,
+    "status": "mcp-only",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "records"
+   },
+   {
+    "checkId": "records.contested-fields",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "mcp-only",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "records"
+   },
+   {
+    "checkId": "records.cell-attributes",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "records",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "records.cell-attributes",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "records",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "records.cell-attributes",
+    "armId": "baseline",
+    "part": null,
+    "status": "mcp-only",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "records"
+   },
+   {
+    "checkId": "records.cell-attributes",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "mcp-only",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "records"
+   },
+   {
+    "checkId": "records.registration-and-dialogue",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "records",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "records.registration-and-dialogue",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "records",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "records.registration-and-dialogue",
+    "armId": "baseline",
+    "part": null,
+    "status": "mcp-only",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "records"
+   },
+   {
+    "checkId": "records.registration-and-dialogue",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "mcp-only",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "records"
+   },
+   {
+    "checkId": "geometry.navmesh-ownership",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "geometry",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "geometry.navmesh-ownership",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "geometry",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "geometry.navmesh-ownership",
+    "armId": "baseline",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "geometry"
+   },
+   {
+    "checkId": "geometry.navmesh-ownership",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "geometry"
+   },
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "geometry",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "geometry",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "geometry.placement-contact",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "geometry",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "geometry.placement-contact",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "geometry",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "geometry.placement-contact",
+    "armId": "baseline",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "geometry"
+   },
+   {
+    "checkId": "geometry.placement-contact",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "geometry"
+   },
+   {
+    "checkId": "geometry.fixture-empty-space",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "geometry",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "geometry.fixture-empty-space",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "geometry",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "geometry.fixture-empty-space",
+    "armId": "baseline",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "geometry"
+   },
+   {
+    "checkId": "geometry.fixture-empty-space",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "geometry"
+   },
+   {
+    "checkId": "geometry.terrain-support",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "geometry",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "geometry.terrain-support",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "geometry",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "geometry.terrain-support",
+    "armId": "baseline",
+    "part": null,
+    "status": "unsupported",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "geometry"
+   },
+   {
+    "checkId": "geometry.terrain-support",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unsupported",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "geometry"
+   },
+   {
+    "checkId": "geometry.declared-dependencies",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": false,
+    "family": "geometry",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "geometry.declared-dependencies",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": false,
+    "family": "geometry",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "geometry.bos-overlay",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "geometry",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "geometry.bos-overlay",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "geometry",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "geometry.bos-overlay",
+    "armId": "baseline",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "geometry"
+   },
+   {
+    "checkId": "geometry.bos-overlay",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "geometry"
+   },
+   {
+    "checkId": "geometry.route-cut",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "geometry",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "geometry.route-cut",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "geometry",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "geometry.route-cut",
+    "armId": "baseline",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "geometry"
+   },
+   {
+    "checkId": "geometry.route-cut",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "geometry"
+   },
+   {
+    "checkId": "functional.quest-alias-split",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "functional",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "functional.quest-alias-split",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "functional",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "functional.quest-alias-split",
+    "armId": "baseline",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "functional"
+   },
+   {
+    "checkId": "functional.quest-alias-split",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "functional"
+   },
+   {
+    "checkId": "functional.linked-dependencies",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "functional",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "functional.linked-dependencies",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "functional",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "functional.linked-dependencies",
+    "armId": "baseline",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "functional"
+   },
+   {
+    "checkId": "functional.linked-dependencies",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "functional"
+   },
+   {
+    "checkId": "functional.collective-route-connectivity",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "functional",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "functional.collective-route-connectivity",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "functional",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "functional.collective-route-connectivity",
+    "armId": "baseline",
+    "part": null,
+    "status": "unsupported",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "functional"
+   },
+   {
+    "checkId": "functional.collective-route-connectivity",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unsupported",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "functional"
+   },
+   {
+    "checkId": "state.switch-census",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "state",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "state.switch-census",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "state",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "state.switch-census",
+    "armId": "baseline",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "state"
+   },
+   {
+    "checkId": "state.switch-census",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "state"
+   },
+   {
+    "checkId": "state.conditional-geometry",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "state",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "state.conditional-geometry",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "state",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "state.conditional-geometry",
+    "armId": "baseline",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "state"
+   },
+   {
+    "checkId": "state.conditional-geometry",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "state"
+   },
+   {
+    "checkId": "environment.water-boundaries",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "environment",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "environment.water-boundaries",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "environment",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "environment.water-boundaries",
+    "armId": "baseline",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "environment"
+   },
+   {
+    "checkId": "environment.water-boundaries",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "environment"
+   },
+   {
+    "checkId": "environment.land-seams",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "environment",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "environment.land-seams",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "environment",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "environment.land-seams",
+    "armId": "baseline",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "environment"
+   },
+   {
+    "checkId": "environment.land-seams",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "environment"
+   },
+   {
+    "checkId": "environment.occlusion",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": false,
+    "family": "environment",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "environment.generated-output-regeneration",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "environment",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "environment.generated-output-regeneration",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "environment",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "environment.generated-output-regeneration",
+    "armId": "baseline",
+    "part": null,
+    "status": "manual",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "environment"
+   },
+   {
+    "checkId": "environment.generated-output-regeneration",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "manual",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "environment"
+   },
+   {
+    "checkId": "patch.discovery-installed",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "patch",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "patch.discovery-installed",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "patch",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "patch.discovery-installed",
+    "armId": "baseline",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "patch"
+   },
+   {
+    "checkId": "patch.discovery-installed",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "patch"
+   },
+   {
+    "checkId": "patch.author-advice",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "patch",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: no scope.json was measured, so this trigger could not be read."
+   },
+   {
+    "checkId": "patch.author-advice",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "patch"
+   },
+   {
+    "checkId": "patch.candidate-qualification",
+    "armId": "baseline",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "patch"
+   },
+   {
+    "checkId": "patch.candidate-qualification",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "patch"
+   }
+  ],
+  "unknownApplicability": [
+   {
+    "checkId": "loadability.dangling-references",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "records.contested-fields",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "records.cell-attributes",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "records.registration-and-dialogue",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "geometry.navmesh-ownership",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "geometry.object-overlap",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "geometry.placement-contact",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "geometry.fixture-empty-space",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "geometry.terrain-support",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "geometry.declared-dependencies",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "geometry.bos-overlay",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "geometry.route-cut",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "functional.quest-alias-split",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "functional.linked-dependencies",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "functional.collective-route-connectivity",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "state.switch-census",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "state.conditional-geometry",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "environment.water-boundaries",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "environment.land-seams",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "environment.occlusion",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "environment.generated-output-regeneration",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "patch.discovery-installed",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   },
+   {
+    "checkId": "patch.author-advice",
+    "evidence": "no scope.json was measured, so this trigger could not be read.",
+    "effect": "keeps evaluation.complete false"
+   }
+  ],
+  "integrity": {
+   "ok": true,
+   "defects": []
+  },
+  "refused": null,
+  "toolIdentity": {
+   "guarantee": "verified",
+   "detail": "every accepted local result is bound, per role, to the program identity this plan froze; evaluation.integrity lists any receipt that is not"
+  },
+  "findings": [
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "candidate-01",
+    "part": "arm",
+    "findings": 1,
+    "verdict": null,
+    "strength": "calibrated-inference"
+   },
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "candidate-01",
+    "part": "diff",
+    "findings": 1,
+    "verdict": "DIFFERENTIAL-HARMFUL",
+    "strength": "calibrated-inference"
+   },
+   {
+    "checkId": "patch.order-evaluation",
+    "armId": "candidate-01",
+    "part": null,
+    "findings": 1,
+    "verdict": null,
+    "strength": "calibrated-inference"
+   }
+  ],
+  "completedNullChecks": [
+   {
+    "checkId": "loadability.masters-and-order",
+    "armId": "baseline",
+    "part": null,
+    "coverage": 0
+   },
+   {
+    "checkId": "loadability.masters-and-order",
+    "armId": "candidate-01",
+    "part": null,
+    "coverage": 0
+   },
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "baseline",
+    "part": "arm",
+    "coverage": 6
+   },
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "candidate-01",
+    "part": "reverse",
+    "coverage": 6
+   }
+  ],
+  "completedCatalogues": [],
+  "claimVocabulary": [
+   "no-findings-in-completed-checks",
+   "findings",
+   "incomplete"
+  ],
+  "note": "the words pass, compatible and clean are not claims this finalizer makes; a completed check that found a defect is a completed check with a finding"
+ },
+ "arms": {
+  "baseline": {
+   "kind": "baseline",
+   "candidateFile": "candidate-00-baseline.json",
+   "loadedInGame": null,
+   "loadedInGameNote": "offline hypothetical configuration; not verified loaded in game",
+   "payload": {
+    "espOnly": false,
+    "staged": [],
+    "note": "the candidate reorders plugins already present in the configuration"
+   },
+   "orderEvaluation": {
+    "classification": null,
+    "probes": [],
+    "regression": false,
+    "perProbe": {},
+    "scope": "ordersweep's own classification, verbatim, about the probes named and the population and state they ran in"
+   }
+  },
+  "candidate-01": {
+   "kind": "candidate",
+   "candidateFile": "candidate-01.json",
+   "loadedInGame": null,
+   "loadedInGameNote": "offline hypothetical configuration; not verified loaded in game",
+   "payload": {
+    "espOnly": false,
+    "staged": [],
+    "note": "the candidate reorders plugins already present in the configuration"
+   },
+   "orderEvaluation": {
+    "classification": "REGRESSION",
+    "classificationSource": {
+     "launch": "sweep/inv-0001",
+     "note": "the newest launch among the accepted diffs measured every one of them again with the same emits and the same rows"
+    },
+    "probes": [
+     "overlapprobe"
+    ],
+    "regression": true,
+    "perProbe": {
+     "overlapprobe": {
+      "verdict": "DIFFERENTIAL-HARMFUL",
+      "repaired": 0,
+      "reclassified": 0,
+      "created": 1,
+      "newDefect": 1,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    },
+    "scope": "ordersweep's own classification, verbatim, about the probes named and the population and state they ran in"
+   }
+  }
+ },
+ "reviewArm": "candidate-01",
+ "manualDecisions": [],
+ "unassessed": {
+  "statesNotExplored": [],
+  "candidatesHeldBack": {
+   "byMaxCandidates": [],
+   "count": 0,
+   "fromManifestBudget": null
+  },
+  "unjudgeablePopulations": [],
+  "familiesUnsupportedOrManual": [
+   "environment",
+   "functional",
+   "geometry",
+   "loadability",
+   "records",
+   "runtime"
+  ],
+  "scopeUnmeasured": [],
+  "mediaUnassessed": "media is identified and assessed by `bundle --media`; see the bundle manifest",
+  "runtimeObservations": "no runtime observation was supplied to this run: nothing here says what the engine did at play time",
+  "notOptedIn": [
+   "runtime.state-switch-flip"
+  ]
+ },
+ "explicitDecisions": {
+  "select": [
+   "geometry.object-overlap",
+   "loadability.masters-and-order",
+   "patch.order-evaluation"
+  ],
+  "selectRaw": [
+   "geometry.object-overlap",
+   "loadability.masters-and-order",
+   "patch.order-evaluation"
+  ],
+  "selectImplied": {},
+  "exclude": {},
+  "settings": {
+   "path": "<machine settings file>",
+   "sha256": null,
+   "schemaVersion": null,
+   "source": "built-in defaults",
+   "options": {
+    "evaluation.depth": {
+     "value": "standard",
+     "source": "flag"
+    },
+    "evaluation.liveSwitchCheck": {
+     "value": "off",
+     "source": "built-in default"
+    },
+    "evaluation.reverseComparison": {
+     "value": true,
+     "source": "built-in default"
+    },
+    "evaluation.budgetMinutes": {
+     "value": 90.0,
+     "source": "flag"
+    },
+    "evaluation.nexusLookups": {
+     "value": true,
+     "source": "built-in default"
+    },
+    "liveSwitchCheck.instance": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "liveSwitchCheck.shortcut": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "liveSwitchCheck.gameExe": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "liveSwitchCheck.crashDir": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "liveSwitchCheck.devbenchPort": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "liveSwitchCheck.minFreeGb": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "liveSwitchCheck.launchMinutes": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "report.mode": {
+     "value": "concise",
+     "source": "built-in default"
+    },
+    "report.pdf": {
+     "value": "when-browser-found",
+     "source": "built-in default"
+    },
+    "report.maxPages": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "report.rowsPerGroup": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "report.figuresPerFinding": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "video.make": {
+     "value": "off",
+     "source": "built-in default"
+    },
+    "video.maxSeconds": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "video.footage": {
+     "value": "offline-renders",
+     "source": "built-in default"
+    },
+    "video.narration.engine": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "video.narration.voice": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "video.narration.device": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "video.narration.modelDir": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "video.narration.modelRevision": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "video.ffmpeg": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "models.recordChecks": {
+     "value": "session",
+     "source": "built-in default"
+    },
+    "models.imageReview": {
+     "value": "session",
+     "source": "built-in default"
+    },
+    "models.flipPlan": {
+     "value": "session",
+     "source": "built-in default"
+    },
+    "models.rewriteExplanations": {
+     "value": "off",
+     "source": "built-in default"
+    },
+    "models.checkExplanations": {
+     "value": "session",
+     "source": "built-in default"
+    }
+   },
+   "newOptions": []
+  },
+  "touched": {
+   "loadability.dangling-references": "not in --select, but the status is mcp-only (it could not have run anyway)",
+   "loadability.missing-assets": "not in --select, but the status is mcp-only (it could not have run anyway)",
+   "records.contested-fields": "not in --select, but the status is mcp-only (it could not have run anyway)",
+   "records.cell-attributes": "not in --select, but the status is mcp-only (it could not have run anyway)",
+   "records.registration-and-dialogue": "not in --select, but the status is mcp-only (it could not have run anyway)",
+   "geometry.navmesh-ownership": "not in --select",
+   "geometry.placement-contact": "not in --select",
+   "geometry.fixture-empty-space": "not in --select",
+   "geometry.terrain-support": "not in --select, but the status is unsupported (it could not have run anyway)",
+   "geometry.declared-dependencies": "not in --select",
+   "geometry.bos-overlay": "not in --select",
+   "geometry.route-cut": "not in --select",
+   "functional.quest-alias-split": "not in --select",
+   "functional.linked-dependencies": "not in --select",
+   "functional.collective-route-connectivity": "not in --select, but the status is unsupported (it could not have run anyway)",
+   "state.switch-census": "not in --select",
+   "state.conditional-geometry": "not in --select",
+   "environment.water-boundaries": "not in --select",
+   "environment.land-seams": "not in --select",
+   "environment.occlusion": "not in --select, but the status is unsupported (it could not have run anyway)",
+   "environment.generated-output-regeneration": "not in --select, but the status is manual (it could not have run anyway)",
+   "patch.discovery-installed": "not in --select",
+   "patch.discovery-fomod": "not in --select",
+   "patch.discovery-pool": "not in --select",
+   "patch.author-advice": "not in --select",
+   "patch.candidate-qualification": "not in --select",
+   "runtime.supplied-observations": "not in --select",
+   "runtime.state-switch-flip": "not in --select, but the status is not-opted-in (it could not have run anyway)",
+   "runtime.crash-performance-appearance": "not in --select, but the status is unsupported (it could not have run anyway)"
+  },
+  "note": "--select narrows what RUNS, never what is PLANNED: a check that was not selected is skipped-user and stays visible, and a required one keeps the evaluation incomplete. An exe name in --select expands to every check that runs it."
+ },
+ "discovery": {
+  "sourcesSearched": [],
+  "sourcesNotSearched": [
+   "the Nexus network API (this runner never fetches; advice is read offline from the catalogue snapshot)"
+  ],
+  "notRelevant": {},
+  "candidates": [],
+  "advice": [
+   {
+    "checkId": "patch.author-advice",
+    "armId": "candidate-01",
+    "provenance": "candidate:candidate-01.json",
+    "staleness": "read offline from the stored catalogue snapshot; the cached source's age is not the date this report was assembled",
+    "rules": null,
+    "clashCount": null,
+    "clashes": [],
+    "statementsNote": "the receipt's report could not be read, so its rules and clashes are unknown here"
+   }
+  ],
+  "listings": [],
+  "relevance": {},
+  "note": "a Nexus hit is a lead: a downloadable file stays unqualified until its actual payload was in an evaluated arm"
+ },
+ "catalogues": [],
+ "importedEvidence": [],
+ "ledgerCounts": {
+  "completed": 7,
+  "manual": 2,
+  "mcp-only": 10,
+  "not-applicable": 1,
+  "skipped-user": 35,
+  "unsupported": 7
+ }
+}

@@ -388,34 +388,16 @@ def advice_doc(rules=0, clashes=1):
             * clashes, "statements": []}
 
 
-def c1809_advice_count_includes_stated_clashes():
-    """Item 4 (item 23 ruling R1: the registry still counts rules): the count the evaluator takes for
-    patch.author-advice, by the registry's own result spec, is not 0 for a page that states one clash and no order
-    rule."""
-    import evalrun
-    reg = json.loads(REGISTRY.read_text(encoding="utf-8"))
-    chk = next(c for c in reg["checks"] if c.get("id") == ADVICE)
-    spec = (chk.get("adapter") or {}).get("result") or {}
-    got, why = evalrun.resolve_spec(spec.get("findings"), advice_doc(), "")
-    ok = got == 1
-    return ok, f"result.findings {spec.get('findings')!r} gives {got!r} {why}"
-
-
 def c1813_registry_v3_bundle_unchanged():
     """Item 4, the D4 condition: a bundle frozen at registry v3 (findings "rules") whose disposition predates the
-    clash count compiles, and its author-advice line is the catalogue line it always was; the v3 registry still
-    validates beside the v4 one."""
-    import evalregistry
+    clash count compiles, and its author-advice line is the catalogue line it always was (that the v3 registry still
+    validates is runcontrol's registry case)."""
     v4 = json.loads(REGISTRY.read_text(encoding="utf-8"))
-    v3 = copy.deepcopy(v4)
-    v3["registryVersion"] = 3
-    next(c for c in v3["checks"] if c["id"] == ADVICE)["adapter"]["result"]["findings"] = "rules"
-    probs = {n: evalregistry.validate(d) for n, d in (("v3", v3), ("v4", v4))}
     f_, _ = advice_bundle(advice=[{"checkId": ADVICE, "armId": "baseline", "provenance": None, "staleness": "x"}])
     want = ("0 rows catalogued on arm baseline. A catalogue is evidence, not a defect; it completes its check and is "
             "never a finding.")
-    ok = f_.get("plain") == want and not any(probs.values()) and v4.get("registryVersion") == 4
-    return ok, f"the v3 bundle's line {f_.get('plain')!r}; registry problems {probs}"
+    ok = f_.get("plain") == want and v4.get("registryVersion") == 4
+    return ok, f"the v3 bundle's line {f_.get('plain')!r}"
 
 
 def advice_bundle(advice):
@@ -548,7 +530,6 @@ CASES = [
     ("C1807-unrecorded-unread-no-none", c1807_unrecorded_listings_never_say_no_patch),
     ("C1808-recorder-contents", c1808_recorder_keeps_listings_paths_and_build),
     ("C1812-recorder-unread-by-construction", c1812_recorder_never_records_unread_as_none),
-    ("C1809-advice-count-clashes", c1809_advice_count_includes_stated_clashes),
     ("C1810-index-says-clash", c1810_index_says_the_stated_clash),
     ("C1813-registry-v3-bundle", c1813_registry_v3_bundle_unchanged),
     ("C1811-sibling-media", c1811_reel_reads_media_of_the_sibling_holding_the_setup),

@@ -61,7 +61,20 @@ public sealed record Conflict(
     string B,
     string Summary,
     IReadOnlyList<ConflictRecord> Necessary,
-    IReadOnlyList<ConflictRecord>? Alternative = null);
+    IReadOnlyList<ConflictRecord>? Alternative = null,
+    MeshCause? Mesh = null);
+
+/// <summary>On a row a mod folder's mesh alone creates (mesh-responsibility): <see cref="Conflict.B"/> is then the folder, and
+/// <see cref="Conflict.A"/> the plugin that placed the other object. Its presence, never the name's shape, says B is a folder.
+/// <paramref name="Swapped"/>: each reference the folder reshapes; <paramref name="PlacedBy"/>: the plugins that set the two
+/// placements (the Necessary reference's first); <paramref name="AlsoFolders"/>: other folders' meshes on the pair, which a
+/// joint swap needed.</summary>
+public sealed record MeshCause(string Folder, IReadOnlyList<MeshSwap> Swapped, IReadOnlyList<string> PlacedBy, string Sight,
+                               string Why, bool Joint = false, IReadOnlyList<string>? AlsoFolders = null);
+
+/// <summary>One reshaped reference: its model path, the folder's copy's sha256, and the copy that wins without the folder
+/// (its MO2 layer, the archive it is in if any, and its sha256).</summary>
+public sealed record MeshSwap(string Reference, string Model, string Sha256, string ReplacesFolder, string? ReplacesArchive, string ReplacesSha256);
 
 /// <summary>A base emit's record re-measured under THIS emit's arm (the probe's <c>--base</c>). Keyed the way
 /// <see cref="ConflictIo.RowIdentity"/> keys a row; <paramref name="A"/>/<paramref name="B"/> are the base

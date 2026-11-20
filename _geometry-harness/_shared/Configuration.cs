@@ -42,6 +42,22 @@ public sealed record PluginHeader(IReadOnlyList<string> Masters, bool MasterFlag
 {
     const uint EsmBit = 0x1, EslBit = 0x200;
 
+    /// <summary>The record count the header states (HEDR), or null when it states none.</summary>
+    public uint? Records { get; init; }
+
+    /// <summary>The header's flags word as the file holds it. <see cref="MasterFlag"/> and <see cref="LightFlag"/> also count the
+    /// extension; these two are the header bits alone, for a caller that records what the file states.</summary>
+    public uint Flags { get; init; }
+    public bool EsmBitSet => (Flags & EsmBit) != 0;
+    public bool EslBitSet => (Flags & EslBit) != 0;
+
+    /// <summary>An <c>.esm</c> or <c>.esl</c> file name: the engine loads such a file with the masters whatever its header says.</summary>
+    public static bool MasterExtension(string fileName)
+    {
+        var ext = Path.GetExtension(fileName);
+        return ext.Equals(".esm", StringComparison.OrdinalIgnoreCase) || ext.Equals(".esl", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>Read the header off disk. Header-only, dependency-free (the same read SyntheticOrder.TryReadMasters
     /// makes, plus the flags word at offset 8). Returns null when the file is not a readable TES4 plugin.</summary>
     public static PluginHeader? TryRead(string path)
@@ -59,6 +75,7 @@ public sealed record PluginHeader(IReadOnlyList<string> Masters, bool MasterFlag
             if (f.Read(body, 0, size) != size) return null;
 
             var masters = new List<string>();
+            uint? records = null;
             int i = 0;
             while (i + 6 <= body.Length)
             {
@@ -70,11 +87,13 @@ public sealed record PluginHeader(IReadOnlyList<string> Masters, bool MasterFlag
                     while (stop > i + 6 && body[stop - 1] == 0) stop--;
                     masters.Add(Encoding.Latin1.GetString(body, i + 6, stop - (i + 6)));
                 }
+                else if (len >= 8 && body[i] == (byte)'H' && body[i + 1] == (byte)'E' && body[i + 2] == (byte)'D' && body[i + 3] == (byte)'R')
+                    records = BitConverter.ToUInt32(body, i + 6 + 4);
                 i += 6 + len;
             }
             var ext = Path.GetExtension(path);
-            bool extMaster = ext.Equals(".esm", StringComparison.OrdinalIgnoreCase) || ext.Equals(".esl", StringComparison.OrdinalIgnoreCase);
-            return new PluginHeader(masters, (flags & EsmBit) != 0 || extMaster, (flags & EslBit) != 0 || ext.Equals(".esl", StringComparison.OrdinalIgnoreCase));
+            bool extMaster = MasterExtension(path);
+            return new PluginHeader(masters, (flags & EsmBit) != 0 || extMaster, (flags & EslBit) != 0 || ext.Equals(".esl", StringComparison.OrdinalIgnoreCase)) { Records = records, Flags = flags };
         }
         catch { return null; }
     }

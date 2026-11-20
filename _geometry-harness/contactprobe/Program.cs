@@ -180,6 +180,11 @@ See contactprobe/Program.cs usage documentation for those modes. Help performs n
 """);
     return 0;
 }
+// A MOD FOLDER'S MESH (mesh-responsibility, 2026-11-19): a host whose shape a credited folder's mesh changes (Reshaped), and a
+// dependent whose own shape it changes, are judged by the same Judge as a moved host, the folder as the mover: the arm without
+// it keeps every placement and reads the mesh that wins without the folder (_shared/MeshResponsibility.cs). Rows name the folder
+// (B) and carry Mesh; sight and the folders credited are overlapprobe's rule (overlapprobe/Program.cs header). --mesh-folder
+// NAME (repeatable, * = every folder) names them for a whole-order run. --empty-space keeps the plugin rule.
 using var __run = RunLog.BeginProcess("contactprobe", args);
 // Known answers for the emit's class and the physical predicate (ContactSelfTest.cs, over ContactCredit.cs).
 if (args.Length >= 1 && args[0] == "--self-test") return ContactSelfTest.Run();
@@ -219,6 +224,9 @@ string? orderFile = null;
 // --population FILE (P25): the plan's population (_shared/PopulationScope.cs), default pass only; --population-audit EMIT OUT
 // writes, for every row of EMIT, whether it is in that population (the equivalence check reads it).
 string? populationPath = null, populationAuditEmit = null, populationAuditOut = null;
+// --mesh-folder NAME (repeatable; "*" = every folder): the folders a whole-order run may credit with a shape
+// (_shared/MeshResponsibility.cs); with --population, the population's folders; with neither, none.
+var meshFolderNames = new List<string>();
 string? boxContactOut = null;   // --box-contact FILE (with --overlap-json): does a supplied world box meet a member's render surface (lane 3b)
 string? emptySpaceOut = null;   // --empty-space FILE: the LEFT IN EMPTY SPACE pass (_shared/ContactAssembly.cs), its own mode
 string? traceOut = null, traceKeysPath = null, volumeOut = null, surfaceOut = null, anchorOut = null;   // --surface FILE: measured surface contact (with --overlap-json); --anchor FILE: the anchor body test (G1 build list row 2)
@@ -332,6 +340,7 @@ try
         }
         else if (flag == "--switch-map") { switchMapPath = NeedValue(i, flag); i++; }
         else if (flag == "--population") { populationPath = NeedValue(i, flag); i++; }
+        else if (flag == "--mesh-folder") { meshFolderNames.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--population-audit")
         {
             populationAuditEmit = NeedValue(i, flag);
@@ -516,15 +525,8 @@ RefGeometry? DecodeMesh(string full, byte[] bytes, bool first)
         // The HOST surface: the solid bodies on the layers an actor (and a dropped item) meets — a canopy
         // leaves, a trunk stays. The DEPENDENT solid: every solid body but NONCOLLIDABLE (an item's WEAPON
         // or CLUTTER body is its shape). Either falls back to the render soup, labelled 'r'.
-        var hc = m.CollisionSoupFor(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
-        var dc = m.CollisionSoupFor(b => b.Solid && b.Layer != "SKYL_NONCOLLIDABLE");
-        TriangleSoup host, dep; char hs, ds;
-        if (m.CollisionComplete && hc is { TriangleCount: > 0 }) { host = hc; hs = 'c'; if (first) hostColl++; }
-        else if (m.Soup is { TriangleCount: > 0 }) { host = m.Soup; hs = 'r'; if (first) hostRender++; }
-        else { host = TriangleSoup.Empty; hs = '-'; }
-        if (m.CollisionComplete && dc is { TriangleCount: > 0 }) { dep = dc; ds = 'c'; if (first) depColl++; }
-        else if (m.Soup is { TriangleCount: > 0 }) { dep = m.Soup; ds = 'r'; if (first) depRender++; }
-        else { dep = TriangleSoup.Empty; ds = '-'; }
+        var (host, hs, dep, ds) = CollisionLayers.RoleSoups(m);
+        if (first) { if (hs == 'c') hostColl++; else if (hs == 'r') hostRender++; if (ds == 'c') depColl++; else if (ds == 'r') depRender++; }
         var box = SpatialOverlap.SoupBounds(host).Union(SpatialOverlap.SoupBounds(dep));
         var bodies = m.CollisionBodies?.Where(b => b.Solid).Select(b => (b.Layer, b.MotionSystem)).ToList() ?? new List<(string, string)>();
         bool phantom = m.HasCollision && !m.HasSolidCollision;
@@ -602,9 +604,19 @@ RefGeometry? DecodeMeshTraced(string full, byte[] bytes, bool first)
 }
 var meshReader = new MeshGeometryReader(ReadMesh, DecodeMeshTraced);
 var basesCounted = new HashSet<FormKey>();   // the OBND and no-geometry counters count a base once, however often it is asked for
+// The folder rule: a base key that addresses the copy of a mesh that wins without the folder (never emitted).
+var fallbackSource = new Dictionary<FormKey, PlacementSource>();
+var meshFallbackMod = new ModKey("MeshFallback", ModType.Plugin);
 RefGeometry? GeomOf(FormKey baseKey)
 {
     RefGeometry? g = null;
+    if (fallbackSource.TryGetValue(baseKey, out var fsrc))
+    {
+        var (fbytes, _) = AssetResolver.ReadPlacementSource(fsrc);
+        var frel = cidx!.Index.BaseMesh[baseKey];
+        var ffull = (frel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? frel : Path.Combine("meshes", frel)) + "#without " + MeshResponsibility.FolderOf(fsrc);
+        return fbytes is null ? null : DecodeMesh(ffull, fbytes, true);
+    }
     if (cidx!.Index.BaseMesh.TryGetValue(baseKey, out var rel))
     {
         var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
@@ -1112,7 +1124,14 @@ List<Predicate> MeasureBasePredicates(string path)
     return list;
 }
 
-string sweepPopulation = population?.Identity("load-time") ?? "load-time";
+bool meshEvery = population is null && meshFolderNames.Contains("*");
+var meshOwners = new MeshResponsibility(assets, population is not null ? population.Mods : meshEvery ? null : meshFolderNames);
+bool meshActive = population is not null ? population.Mods.Count > 0 : meshEvery || meshFolderNames.Count > 0;
+string meshScope = population is not null ? $"the population's folders ({string.Join(", ", population.Mods)})"
+    : meshEvery ? "every folder of the view (--mesh-folder *)" : meshFolderNames.Count > 0 ? $"the folders --mesh-folder names ({string.Join(", ", meshFolderNames)})"
+    : "no folder: neither --population nor --mesh-folder names one, so no contact is credited to a mesh";
+string meshIdentity = population is not null || !meshActive ? "" : PopulationRules.MeshIdentity("", meshFolderNames);
+string sweepPopulation = (population?.Identity("load-time") ?? "load-time") + meshIdentity;
 string sweepState = cidx.State?.Name ?? EnablePopulation.BaselineStateName;
 string sweepPolicy = ContactCredit.SweepPolicy(eps, reach, radiusOn, bosOn, allRows, forceEnable);
 // --reverse-of: the baseline order's rows and coverage are the baseline emit's, once it is shown to be this run's own; only the
@@ -1237,6 +1256,122 @@ var mstt = idx.BaseInfo.Where(kv => kv.Value.Type == "MoveableStatic").Select(kv
 var motions = mstt.SelectMany(g => g!.SolidBodies.Select(b => b.MotionSystem == "" ? "(unread)" : b.MotionSystem)).GroupBy(x => x).OrderByDescending(g => g.Count()).ToList();
 Console.WriteLine($"   MoveableStatic bases with geometry: {mstt.Count:N0}; their solid bodies' motion systems: " + string.Join(", ", motions.Select(g => $"{g.Key} {g.Count():N0}"))
                 + $"; classified movable {idx.BaseInfo.Count(kv => kv.Value.Type == "MoveableStatic" && cidx.MotionOf(kv.Key) == DependentMotion.Movable):N0}, fixed {idx.BaseInfo.Count(kv => kv.Value.Type == "MoveableStatic" && cidx.MotionOf(kv.Key) == DependentMotion.Fixed):N0}");
+
+// THE FOLDER RULE for contact (mesh-responsibility/GATE-B.md): a host a credited folder's mesh reshapes, and a dependent whose
+// own mesh it reshapes, judged by the same Judge as a changed host. The mover is the folder (a plugin index no closure holds,
+// so every other arm is the winner's); the arm without it is the winning placement with the mesh that wins without the folder.
+var meshRows = new List<(ContactRow Row, MeshOwner Owner, bool DependentSide)>();
+var meshSkips = new ContactSkips();
+var meshUnjudged = new Dictionary<string, long>(StringComparer.Ordinal);
+long meshHosts = 0, meshDeps = 0;
+long meshSeenNotTested = 0;
+var meshFolderPlugins = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+for (int i = 0; i < cfg.Plugins.Count; i++)
+{
+    if (!meshFolderPlugins.TryGetValue(cfg.Plugins[i].Provider, out var l)) meshFolderPlugins[cfg.Plugins[i].Provider] = l = new();
+    l.Add(i);
+}
+if (meshActive)
+{
+    int pseudo = closure.Length;
+    var extClosure = closure.Append(new HashSet<int>()).ToList();
+    var fallbackKey = new Dictionary<FormKey, FormKey>();
+    MeshOwner? Owner(FormKey b) => !b.IsNull && idx.BaseMesh.TryGetValue(b, out var m) && !string.IsNullOrWhiteSpace(m)
+        && meshOwners.Of(MeshResponsibility.FullModelPath(m)) is { Shape: MeshShape.Credited } o ? o : null;
+    FormKey FallbackOf(FormKey b, MeshOwner o)
+    {
+        if (fallbackKey.TryGetValue(b, out var k)) return k;
+        k = new FormKey(meshFallbackMod, (uint)(0x800 + fallbackKey.Count));
+        fallbackKey[b] = k; fallbackSource[k] = o.Fallback!;
+        if (idx.BaseInfo.TryGetValue(b, out var bi)) idx.BaseInfo[k] = bi;
+        idx.BaseMesh[k] = idx.BaseMesh[b];
+        return k;
+    }
+    var seenPairs = new HashSet<(FormKey, FormKey)>();
+    var unjudgedPairs = new HashSet<(FormKey, FormKey)>();
+    void Keep(ContactRow r, MeshOwner o, bool depSide)
+    {
+        // a pair the pass could not judge is counted once by its blocker, whatever its relation (the rows kept are unchanged)
+        if (r.Verdict == ContactVerdict.Unjudgeable && unjudgedPairs.Add((r.Dependent, r.Host.Key)))
+            meshUnjudged["Row" + r.Reason] = meshUnjudged.GetValueOrDefault("Row" + r.Reason) + 1;
+        if (r.Relation == ContactRelation.None || !seenPairs.Add((r.Dependent, r.Host.Key))) return;
+        meshRows.Add((r, o, depSide));
+    }
+    foreach (var (key, snaps) in idx.History.Refs.OrderBy(kv => kv.Key.ToString(), StringComparer.Ordinal))
+    {
+        var b = cidx.WinnerBase(key);
+        if (Owner(b) is not { } o || (population is not null && !RefInPopulation(key))) continue;
+        var fb = FallbackOf(b, o);
+        if (cidx.ReshapedHost(key, fb, pseudo, extClosure, meshSkips) is { } host)
+        {
+            meshHosts++;
+            // sight before cost: only dependents whose row with this host could be Blind for the folder
+            var hostSnaps = snaps;
+            cidx.DependentFilter = d => MeshBlindPossible(o.Folder!, idx.History.Of(d), hostSnaps);
+            try { foreach (var r in cidx.Judge(host, depHash, winHash, extClosure, meshSkips)) Keep(r, o, false); }
+            finally { cidx.DependentFilter = null; }
+        }
+        if (!cidx.IsDependentType(b) || snaps[^1].Deleted) continue;
+        var depBox = cidx.WorldBox(b, snaps[^1]);
+        if (depBox.IsEmpty) continue;
+        meshDeps++;
+        cidx.DependentAuthoringBase = k => k == key ? fb : null;
+        cidx.DependentFilter = k => k == key;   // a neighbour host is judged for this one dependent only
+        try
+        {
+            foreach (var (hk, _, _) in winHash.Near(snaps[^1].Space, depBox, cidx.Reach).ToList())
+            {
+                if (hk == key || !MeshBlindPossible(o.Folder!, snaps, idx.History.Of(hk))) continue;
+                var hb = cidx.WinnerBase(hk);
+                var hostAuthoring = Owner(hb) is { } ho ? FallbackOf(hb, ho) : hb;
+                if (cidx.ReshapedHost(hk, hostAuthoring, pseudo, extClosure, meshSkips) is not { } h2) continue;
+                foreach (var r in cidx.Judge(h2, depHash, winHash, extClosure, meshSkips))
+                    if (r.Dependent == key) Keep(r, o, true);
+            }
+        }
+        finally { cidx.DependentAuthoringBase = null; cidx.DependentFilter = null; }
+    }
+}
+// Sight before cost: false only when every placement plugin either side has makes the row Seen (MeshSight below), so the pass
+// never judges a pair whose folder row would be set aside; such candidates are counted, not tested.
+
+bool MeshBlindPossible(string folder, IReadOnlyList<Snap>? dep, IReadOnlyList<Snap>? host)
+{
+    if (dep is not { Count: > 0 } || host is not { Count: > 0 }) return true;
+    bool In(int owner, int x) => owner == x || (owner >= 0 && owner < closure.Length && closure[owner].Contains(x));
+    var plugins = meshFolderPlugins.TryGetValue(folder, out var l) ? l : new List<int>();
+    if (plugins.Count == 0) return true;
+    foreach (var pd in dep.Select(x => x.Plugin).Distinct())
+        foreach (var ph in host.Select(x => x.Plugin).Distinct())
+        {
+            int later = Math.Max(pd, ph), earlier = Math.Min(pd, ph);
+            if (!(In(later, earlier) && plugins.Any(p => In(later, p))) && !plugins.Any(p => In(p, pd) && In(p, ph))) return true;
+        }
+    meshSeenNotTested++;
+    return false;
+}
+// Sight (DetectorModel.MeshProvenance): (a) the later placement's plugin was made with the folder's plugin as a master; (b) a
+// plugin the folder ships masters both placements' plugins.
+(OverlapOrigin Origin, OverlapSight Sight, string Why) MeshSight(ContactRow r, string folder)
+{
+    int pd = r.DepAuthoring.Plugin, ph = r.Host.Winner.Plugin;
+    int later = Math.Max(pd, ph), earlier = Math.Min(pd, ph);
+    bool In(int owner, int x) => owner == x || (owner >= 0 && owner < closure.Length && closure[owner].Contains(x));
+    var plugins = meshFolderPlugins.TryGetValue(folder, out var l) ? l : new List<int>();
+    return DetectorModel.MeshProvenance(new DetectorModel.MeshFacts(false, In(later, earlier) && plugins.Any(p => In(later, p)),
+                                                                   plugins.Any(p => In(p, pd) && In(p, ph)), false));
+}
+var meshClass = meshRows.Where(m => m.Row.Motion == DependentMotion.Fixed && m.Row.Verdict is ContactVerdict.Stranded or ContactVerdict.Orphaned
+                                    && MeshSight(m.Row, m.Owner.Folder!).Sight == OverlapSight.Blind)
+                        .OrderBy(m => m.Row.Dependent.ToString(), StringComparer.Ordinal).ThenBy(m => m.Row.Host.Key.ToString(), StringComparer.Ordinal).ToList();
+Console.WriteLine($"\n==== MESH RESPONSIBILITY — a contact only a credited folder's mesh changes ====");
+Console.WriteLine($"   credited {meshScope}; reshaped hosts judged {meshHosts:N0}, reshaped dependents judged {meshDeps:N0}; relationships {meshRows.Count:N0}; "
+                + $"class (Fixed, Stranded or Orphaned, Blind) {meshClass.Count:N0}; by verdict: " + string.Join(", ", meshRows.GroupBy(m => m.Row.Verdict).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}")));
+foreach (var (r, o, depSide) in meshClass.Take(20))
+{
+    Console.WriteLine($"      {r.Verdict,-12} {r.Relation,-9} dependent {BaseLabel(r.DepBase)} {r.Dependent} on {BaseLabel(r.Host.WinBase)} {r.Host.Key}, {(depSide ? "its own" : "the host's")} mesh from {o.Folder}");
+    Console.WriteLine($"         authoring {Contact(r.Authoring)} [{Src(r.Authoring)}]; winner {Contact(r.Winner)}{(r.Winner is { } w ? (w.Against == r.Host.Key ? " (the host)" : $" (against {BaseLabel(cidx!.WinnerBase(w.Against))} {w.Against})") : "")} [{Src(r.Winner)}]");
+}
 
 var rel = rows.Where(r => r.Relation != ContactRelation.None).ToList();
 var near = rows.Where(r => r.Relation == ContactRelation.None && r.Verdict == ContactVerdict.NoRelation).ToList();
@@ -1503,6 +1638,22 @@ if (emitPath is not null)
             new List<ConflictRecord> { new(r.Dependent.ToString(), "placed-ref", CellOf(r.DepAuthoring.Cell), st, why, Wind: WindNoteOf(r.DepBase)) },
             new List<ConflictRecord> { new(r.Host.Key.ToString(), "placed-ref", null) }));
     }
+    foreach (var (r, o, depSide) in meshClass)
+    {
+        var (st, why) = ContactPhysical(r.Facts.WinnerMeasured, r.Facts.WinnerDistance, r.Facts.WinnerPenetration, r.Winner is { } w ? BaseLabel(cidx!.WinnerBase(w.Against)) : "(nothing)");
+        var reshaped = depSide ? r.Dependent : r.Host.Key;
+        var (_, sight, sightWhy) = MeshSight(r, o.Folder!);
+        var cause = new MeshCause(o.Folder!, new[] { new MeshSwap(reshaped.ToString(), o.Path, o.WinnerSha256!, MeshResponsibility.FolderOf(o.Fallback!),
+                                                                  o.Fallback!.Kind == AssetKind.Bsa ? o.Fallback.ProviderName : null, o.FallbackSha256!) },
+                                  new[] { PluginName(r.DepAuthoring.Plugin), PluginName(r.Host.Winner.Plugin) }, sight.ToString(), sightWhy);
+        string whose = depSide ? BaseLabel(cidx!.WinnerBase(r.Dependent)) : BaseLabel(r.Host.WinBase);
+        string nearNow = r.Facts.WinnerDistance >= cidx!.Reach ? $"nothing within {cidx.Reach:0.#}u" : $"nearest thing {r.Facts.WinnerDistance:0.#}u";
+        conflicts.Add(new Conflict("CONTACT", PluginName(r.DepAuthor), o.Folder!,
+            $"{r.Verdict}: {BaseLabel(cidx!.WinnerBase(r.Dependent))} is {r.Relation} on {BaseLabel(r.Host.WinBase)} with the mesh that wins without {o.Folder}; "
+            + $"with {o.Folder}'s mesh for {whose} ({o.Path}), {nearNow}  {r.Dependent} / {r.Host.Key} in {CellOf(r.DepAuthoring.Cell)}",
+            new List<ConflictRecord> { new(r.Dependent.ToString(), "placed-ref", CellOf(r.DepAuthoring.Cell), st, why, Wind: WindNoteOf(cidx.WinnerBase(r.Dependent))) },
+            new List<ConflictRecord> { new(r.Host.Key.ToString(), "placed-ref", null) }, cause));
+    }
     List<Predicate>? predicates = basePath is not null ? MeasureBasePredicates(basePath) : null;
     var coverage = new List<CoverageLine>
     {
@@ -1519,6 +1670,23 @@ if (emitPath is not null)
             $"relationships {rel.Count:N0}, class {classRows.Count:N0}"),
     };
     coverage.InsertRange(1, PreLoopLines());
+    // what the mesh pass could not judge, classed as the main pass classes it (PreLoopLines), non-zero only as overlap's line does
+    var meshUnj = new Dictionary<string, long>(StringComparer.Ordinal)
+    {
+        ["HostNoGeometry"] = meshSkips.HostNoGeometry, ["HostEnableChainUnresolved"] = meshSkips.HostEnableUnresolved,
+        ["DepNoGeometry"] = meshSkips.DepNoGeometry, ["DepEnableChainUnresolved"] = meshSkips.DepEnableUnresolved,
+        ["WinnerEnableChainUnresolved"] = meshSkips.WinnerEnableUnresolved,
+        ["MeshCopyUnreadable"] = meshOwners.Answered.Count(x => x.Shape == MeshShape.Unreadable),
+    };
+    foreach (var (k, v) in meshUnjudged) meshUnj[k] = v;
+    coverage.Add(new("mesh responsibility", meshHosts + meshDeps, meshUnj.Where(kv => kv.Value > 0).ToDictionary(kv => kv.Key, kv => kv.Value),
+        new Dictionary<string, long> { ["HostNoSolidCollision"] = meshSkips.HostNoCollision, ["HostVolumeScale"] = meshSkips.HostVolume,
+                                       ["HostTooSmall"] = meshSkips.HostTooSmall, ["HostRuntimeDisabled"] = meshSkips.HostRuntimeDisabled,
+                                       ["MeshEqualsReplaced"] = meshOwners.Answered.Count(x => x.Shape == MeshShape.EqualBytes),
+                                       ["NewMeshNoFallback"] = meshOwners.Answered.Count(x => x.Shape == MeshShape.NoFallback),
+                                       ["SeenNotTested"] = meshSeenNotTested,
+                                       ["SeenFolderRows"] = meshRows.Count(m => m.Row.Verdict is ContactVerdict.Stranded or ContactVerdict.Orphaned && MeshSight(m.Row, m.Owner.Folder!).Sight == OverlapSight.Seen) },
+        $"credited: {meshScope}; reshaped hosts {meshHosts:N0} and dependents {meshDeps:N0} judged; relationships {meshRows.Count:N0}, class {meshClass.Count:N0}"));
     string populationIdentity = sweepPopulation;
     if (population is not null)
         coverage.Add(new("population scope", hosts.Count - hostsOutsidePopulation, new Dictionary<string, long>(),

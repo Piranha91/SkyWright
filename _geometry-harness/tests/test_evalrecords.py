@@ -342,15 +342,6 @@ def case_55_a_line_the_winner_branch_cannot_read_is_counted_not_dropped():
     # a real failed read: nothing readable at all is still judged 0 with its lines counted, so it stays refused
     cov = cell_capture({f: [odd] for f in CELL_LINES})
     assert cov["Judged"] == 0 and cov["Unjudgeable"] == {why: 2}, (cov["Judged"], cov["Unjudgeable"])
-    try:
-        sys.path.insert(0, str(HERE.parent))
-        import evalrun
-    except Exception:  # noqa: BLE001
-        return
-    refused, why_not = evalrun.empty_population({"targets": [{"name": "COTN - Morthal.esp"}]},
-                                                {"plugins": ["COTN - Morthal.esp"]}, [cov["Members"]],
-                                                sum(cov["Unjudgeable"].values()))
-    assert refused is None and "failed extraction" in why_not, (refused, why_not)
 
 
 def case_64_a_winning_records_flags_in_both_views_are_judged_once():
@@ -561,6 +552,24 @@ def case_63_the_per_type_view_alone_is_read_only_as_numbers():
     assert rows == [], f"MajorFlags differing only in Compressed, as numbers, gave {rows}"
     rows, _, _ = flag_edits("PlacedNpc", ["MajorFlags=Persistent (Base.esm 263168)"], ["MajorFlags=Persistent (Win.esp 263168)"])
     assert [r["Field"] for r in rows] == ["MajorFlags"], f"a per-type name is not read, so the row stays, got {rows}"
+
+
+def case_65_a_setup_with_no_mod_folder_gets_an_empty_modlist():
+    """A setup whose plugins all come from the game's Data folder has no mod folder: its arm's `mods` is null. The
+    reader's view of it is the plugins in order and an empty mod list (2026-11-16: write_view raised TypeError here, so
+    that setup's capture process ended with exit 1 and its record rows stayed open)."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        for i, arm in enumerate(({"plugins": ["Skyrim.esm", "Update.esm"], "mods": None}, {"plugins": ["Skyrim.esm"]},
+                                 {"plugins": ["Skyrim.esm"], "mods": []})):
+            view = Path(tmp) / f"view{i}"
+            ER.write_view(view, arm, None)
+            assert (view / "modlist.txt").read_text(encoding="utf-8") == "", f"a setup with no mod folder, arm {i}: modlist.txt is not empty"
+            assert (view / "plugins.txt").read_text(encoding="utf-8") == "".join("*" + p + "\n" for p in arm["plugins"]), f"arm {i}: plugins.txt"
+            assert (view / "loadorder.txt").read_text(encoding="utf-8") == "".join(p + "\n" for p in arm["plugins"]), f"arm {i}: loadorder.txt"
+        view = Path(tmp) / "mods"
+        ER.write_view(view, {"plugins": ["Skyrim.esm", "A.esp"], "mods": ["Mod A", "Mod B"]}, None)
+        assert (view / "modlist.txt").read_text(encoding="utf-8") == "+Mod A\n+Mod B\n", "a setup with mod folders keeps its mod list"
 
 
 def main():

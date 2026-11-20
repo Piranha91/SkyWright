@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>runcontrol</AssemblyName>
+    <RootNamespace>RunControl</RootNamespace>
+    <NoWarn>CA1416</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
+    <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
+    <Compile Include="..\_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />
+    <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
+    <Compile Include="..\_shared\OrderMasters.cs" Link="OrderMasters.cs" />
+    <Compile Include="..\_shared\BaseGamePlugins.cs" Link="BaseGamePlugins.cs" />
+    <Compile Include="..\_shared\PopulationRules.cs" Link="PopulationRules.cs" />
+    <EmbeddedResource Include="known-answers\foundations.json" LogicalName="foundations.json" />
+    <EmbeddedResource Include="known-answers\pipeline.json" LogicalName="pipeline.json" />
+    <EmbeddedResource Include="known-answers\plan-modules.json" LogicalName="plan-modules.json" />
+    <EmbeddedResource Include="known-answers\plan-command.json" LogicalName="plan-command.json" />
+    <EmbeddedResource Include="known-answers\sweep.json" LogicalName="sweep.json" />
+    <EmbeddedResource Include="known-answers\finalize.json" LogicalName="finalize.json" />
+    <EmbeddedResource Include="known-answers\evaluate.json" LogicalName="evaluate.json" />
+    <EmbeddedResource Include="known-answers\bundle.json" LogicalName="bundle.json" />
+    <EmbeddedResource Include="known-answers\rows.json" LogicalName="rows.json" />
+    <EmbeddedResource Include="known-answers\import.json" LogicalName="import.json" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,576 @@
+{
+ "schemaVersion": 2,
+ "planId": "ce898da1367b",
+ "createdUtc": "2026-11-20T11:29:20Z",
+ "registryVersion": 4,
+ "runIds": [
+  {
+   "runId": "evalrun-checks-20261120T112912477-d82e6a7c",
+   "parentRunId": null,
+   "command": "run",
+   "startedUtc": "2026-11-20T11:29:12Z",
+   "sweepFolders": [
+    "sweep/inv-0001"
+   ]
+  }
+ ],
+ "derivedFrom": {
+  "ledgerSha256": "d9a3f82588e3b86f0c89b1d57b26b9cf70167f91d513f0dd684e5c5e7db85d24",
+  "receipts": "a5d0e9668c6d3218dca5a537a61f4b54d9d2530872520a1579191aba8686d3f0",
+  "journalLines": 66
+ },
+ "evaluation": {
+  "complete": false,
+  "claim": "incomplete",
+  "missing": [
+   {
+    "checkId": "loadability.missing-assets",
+    "armId": "baseline",
+    "part": null,
+    "status": "mcp-only",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "loadability"
+   },
+   {
+    "checkId": "loadability.missing-assets",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "mcp-only",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "loadability"
+   },
+   {
+    "checkId": "geometry.placement-contact",
+    "armId": "baseline",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "geometry"
+   },
+   {
+    "checkId": "geometry.placement-contact",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "geometry"
+   },
+   {
+    "checkId": "functional.linked-dependencies",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "functional",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: the scope lists script-placement under unmeasured: \"a Papyrus script can place, move or delete references at runtime; this probe reads records only, so the placement footprint omits anything a script puts there.\"."
+   },
+   {
+    "checkId": "functional.linked-dependencies",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "functional",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: the scope lists script-placement under unmeasured: \"a Papyrus script can place, move or delete references at runtime; this probe reads records only, so the placement footprint omits anything a script puts there.\"."
+   },
+   {
+    "checkId": "functional.linked-dependencies",
+    "armId": "baseline",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "functional"
+   },
+   {
+    "checkId": "functional.linked-dependencies",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "functional"
+   },
+   {
+    "checkId": "patch.candidate-qualification",
+    "armId": "baseline",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "patch"
+   },
+   {
+    "checkId": "patch.candidate-qualification",
+    "armId": "candidate-01",
+    "part": null,
+    "status": "skipped-user",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "patch"
+   }
+  ],
+  "unknownApplicability": [
+   {
+    "checkId": "functional.linked-dependencies",
+    "evidence": "the scope lists script-placement under unmeasured: \"a Papyrus script can place, move or delete references at runtime; this probe reads records only, so the placement footprint omits anything a script puts there.\".",
+    "effect": "keeps evaluation.complete false"
+   }
+  ],
+  "integrity": {
+   "ok": true,
+   "defects": []
+  },
+  "refused": null,
+  "toolIdentity": {
+   "guarantee": "verified",
+   "detail": "every accepted local result is bound, per role, to the program identity this plan froze; evaluation.integrity lists any receipt that is not"
+  },
+  "findings": [
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "baseline",
+    "part": "arm",
+    "findings": 1,
+    "verdict": null,
+    "strength": "calibrated-inference"
+   },
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "candidate-01",
+    "part": "arm",
+    "findings": 5,
+    "verdict": null,
+    "strength": "calibrated-inference"
+   },
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "candidate-01",
+    "part": "reverse",
+    "findings": 1,
+    "verdict": null,
+    "strength": "calibrated-inference"
+   },
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "candidate-01",
+    "part": "diff",
+    "findings": 4,
+    "verdict": "DIFFERENTIAL-HARMFUL",
+    "strength": "calibrated-inference"
+   },
+   {
+    "checkId": "patch.order-evaluation",
+    "armId": "candidate-01",
+    "part": null,
+    "findings": 1,
+    "verdict": null,
+    "strength": "calibrated-inference"
+   }
+  ],
+  "completedNullChecks": [
+   {
+    "checkId": "loadability.masters-and-order",
+    "armId": "baseline",
+    "part": null,
+    "coverage": 1
+   },
+   {
+    "checkId": "loadability.masters-and-order",
+    "armId": "candidate-01",
+    "part": null,
+    "coverage": 0
+   }
+  ],
+  "completedCatalogues": [],
+  "claimVocabulary": [
+   "no-findings-in-completed-checks",
+   "findings",
+   "incomplete"
+  ],
+  "note": "the words pass, compatible and clean are not claims this finalizer makes; a completed check that found a defect is a completed check with a finding"
+ },
+ "arms": {
+  "baseline": {
+   "kind": "baseline",
+   "candidateFile": "candidate-00-baseline.json",
+   "loadedInGame": null,
+   "loadedInGameNote": "offline hypothetical configuration; not verified loaded in game",
+   "payload": {
+    "espOnly": false,
+    "staged": [],
+    "note": "the candidate reorders plugins already present in the configuration"
+   },
+   "orderEvaluation": {
+    "classification": null,
+    "probes": [],
+    "regression": false,
+    "perProbe": {},
+    "scope": "ordersweep's own classification, verbatim, about the probes named and the population and state they ran in"
+   }
+  },
+  "candidate-01": {
+   "kind": "candidate",
+   "candidateFile": "candidate-01.json",
+   "loadedInGame": null,
+   "loadedInGameNote": "offline hypothetical configuration; not verified loaded in game",
+   "payload": {
+    "espOnly": false,
+    "staged": [],
+    "note": "the candidate reorders plugins already present in the configuration"
+   },
+   "orderEvaluation": {
+    "classification": "REGRESSION",
+    "classificationSource": {
+     "launch": "sweep/inv-0001",
+     "note": "the newest launch among the accepted diffs measured every one of them again with the same emits and the same rows"
+    },
+    "probes": [
+     "overlapprobe"
+    ],
+    "regression": true,
+    "perProbe": {
+     "overlapprobe": {
+      "verdict": "DIFFERENTIAL-HARMFUL",
+      "repaired": 0,
+      "reclassified": 0,
+      "created": 4,
+      "newDefect": 4,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    },
+    "scope": "ordersweep's own classification, verbatim, about the probes named and the population and state they ran in"
+   }
+  }
+ },
+ "reviewArm": "candidate-01",
+ "manualDecisions": [],
+ "unassessed": {
+  "statesNotExplored": [],
+  "candidatesHeldBack": {
+   "byMaxCandidates": [],
+   "count": 0,
+   "fromManifestBudget": null
+  },
+  "unjudgeablePopulations": [
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "baseline",
+    "population": "base records (strict render geometry)",
+    "judged": 16,
+    "unjudgeable": {
+     "parse_error": 3
+    }
+   },
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "baseline",
+    "population": "candidate refs",
+    "judged": 58,
+    "unjudgeable": {
+     "NoGeometry": 3,
+     "InvalidTransform": 0,
+     "DegenerateTransform": 0
+    }
+   },
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "candidate-01",
+    "population": "base records (strict render geometry)",
+    "judged": 18,
+    "unjudgeable": {
+     "parse_error": 3
+    }
+   },
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "candidate-01",
+    "population": "candidate refs",
+    "judged": 60,
+    "unjudgeable": {
+     "NoGeometry": 3,
+     "InvalidTransform": 0,
+     "DegenerateTransform": 0
+    }
+   },
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "candidate-01",
+    "population": "base records (strict render geometry)",
+    "judged": 18,
+    "unjudgeable": {
+     "parse_error": 3
+    }
+   },
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "candidate-01",
+    "population": "candidate refs",
+    "judged": 58,
+    "unjudgeable": {
+     "NoGeometry": 3,
+     "InvalidTransform": 0,
+     "DegenerateTransform": 0
+    }
+   },
+   {
+    "checkId": "loadability.masters-and-order",
+    "armId": "baseline",
+    "population": "target footprints",
+    "judged": 0,
+    "unjudgeable": {
+     "not-loaded-by-this-arm": 1
+    }
+   }
+  ],
+  "familiesUnsupportedOrManual": [
+   "environment",
+   "functional",
+   "geometry",
+   "loadability",
+   "records",
+   "runtime"
+  ],
+  "scopeUnmeasured": [
+   {
+    "extent": "script-placement",
+    "why": "a Papyrus script can place, move or delete references at runtime; this probe reads records only, so the placement footprint omits anything a script puts there."
+   },
+   {
+    "extent": "alias-fill",
+    "why": "a quest alias resolves to a reference chosen at runtime, so the actor or object a quest actually moves is not in this footprint."
+   },
+   {
+    "extent": "bos-swaps",
+    "why": "a *_SWAP.ini replaces a reference's base object at load; the record types and model paths counted here are the RECORD's, not the swapped base's."
+   },
+   {
+    "extent": "asset-replacers",
+    "why": "a mod that only ships meshes or textures has no records to enumerate and so no footprint here, though it changes what the game draws; model paths are read off records and never resolved against the VFS."
+   },
+   {
+    "extent": "generated-output",
+    "why": "LOD, occlusion and patcher output generated from an earlier placement is not read, so whether any of it is now stale is outside this measurement."
+   }
+  ],
+  "mediaUnassessed": "media is identified and assessed by `bundle --media`; see the bundle manifest",
+  "runtimeObservations": "no runtime observation was supplied to this run: nothing here says what the engine did at play time",
+  "notOptedIn": []
+ },
+ "explicitDecisions": {
+  "select": [
+   "geometry.object-overlap",
+   "loadability.masters-and-order",
+   "patch.order-evaluation"
+  ],
+  "selectRaw": [
+   "geometry.object-overlap",
+   "loadability.masters-and-order",
+   "patch.order-evaluation"
+  ],
+  "selectImplied": {},
+  "exclude": {},
+  "settings": {
+   "path": "<machine settings file>",
+   "sha256": null,
+   "schemaVersion": null,
+   "source": "built-in defaults",
+   "options": {
+    "evaluation.depth": {
+     "value": "standard",
+     "source": "flag"
+    },
+    "evaluation.liveSwitchCheck": {
+     "value": "off",
+     "source": "built-in default"
+    },
+    "evaluation.reverseComparison": {
+     "value": true,
+     "source": "built-in default"
+    },
+    "evaluation.budgetMinutes": {
+     "value": 90.0,
+     "source": "flag"
+    },
+    "evaluation.nexusLookups": {
+     "value": true,
+     "source": "built-in default"
+    },
+    "liveSwitchCheck.instance": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "liveSwitchCheck.shortcut": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "liveSwitchCheck.gameExe": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "liveSwitchCheck.crashDir": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "liveSwitchCheck.devbenchPort": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "liveSwitchCheck.minFreeGb": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "liveSwitchCheck.launchMinutes": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "report.mode": {
+     "value": "concise",
+     "source": "built-in default"
+    },
+    "report.pdf": {
+     "value": "when-browser-found",
+     "source": "built-in default"
+    },
+    "report.maxPages": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "report.rowsPerGroup": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "report.figuresPerFinding": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "video.make": {
+     "value": "off",
+     "source": "built-in default"
+    },
+    "video.maxSeconds": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "video.footage": {
+     "value": "offline-renders",
+     "source": "built-in default"
+    },
+    "video.narration.engine": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "video.narration.voice": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "video.narration.device": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "video.narration.modelDir": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "video.narration.modelRevision": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "video.ffmpeg": {
+     "value": null,
+     "source": "built-in default"
+    },
+    "models.recordChecks": {
+     "value": "session",
+     "source": "built-in default"
+    },
+    "models.imageReview": {
+     "value": "session",
+     "source": "built-in default"
+    },
+    "models.flipPlan": {
+     "value": "session",
+     "source": "built-in default"
+    },
+    "models.rewriteExplanations": {
+     "value": "off",
+     "source": "built-in default"
+    },
+    "models.checkExplanations": {
+     "value": "session",
+     "source": "built-in default"
+    }
+   },
+   "newOptions": []
+  },
+  "touched": {
+   "loadability.dangling-references": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "loadability.missing-assets": "not in --select, but the status is mcp-only (it could not have run anyway)",
+   "records.contested-fields": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "records.cell-attributes": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "records.registration-and-dialogue": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "geometry.navmesh-ownership": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "geometry.placement-contact": "not in --select",
+   "geometry.fixture-empty-space": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "geometry.terrain-support": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "geometry.declared-dependencies": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "geometry.bos-overlay": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "geometry.route-cut": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "functional.quest-alias-split": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "functional.linked-dependencies": "not in --select",
+   "functional.collective-route-connectivity": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "state.switch-census": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "state.conditional-geometry": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "environment.water-boundaries": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "environment.land-seams": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "environment.occlusion": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "environment.generated-output-regeneration": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "patch.discovery-installed": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "patch.discovery-fomod": "not in --select",
+   "patch.discovery-pool": "not in --select",
+   "patch.author-advice": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "patch.candidate-qualification": "not in --select",
+   "runtime.supplied-observations": "not in --select",
+   "runtime.state-switch-flip": "not in --select, but the status is not-applicable (it could not have run anyway)",
+   "runtime.crash-performance-appearance": "not in --select, but the status is unsupported (it could not have run anyway)"
+  },
+  "note": "--select narrows what RUNS, never what is PLANNED: a check that was not selected is skipped-user and stays visible, and a required one keeps the evaluation incomplete. An exe name in --select expands to every check that runs it."
+ },
+ "discovery": {
+  "sourcesSearched": [],
+  "sourcesNotSearched": [
+   "the Nexus network API (this runner never fetches; advice is read offline from the catalogue snapshot)"
+  ],
+  "notRelevant": {},
+  "candidates": [],
+  "advice": [
+   {
+    "checkId": "patch.author-advice",
+    "armId": "candidate-01",
+    "provenance": "candidate:candidate-01.json",
+    "staleness": "read offline from the stored catalogue snapshot; the cached source's age is not the date this report was assembled",
+    "rules": null,
+    "clashCount": null,
+    "clashes": [],
+    "statementsNote": "the receipt's report could not be read, so its rules and clashes are unknown here"
+   }
+  ],
+  "listings": [],
+  "relevance": {},
+  "note": "a Nexus hit is a lead: a downloadable file stays unqualified until its actual payload was in an evaluated arm"
+ },
+ "catalogues": [],
+ "importedEvidence": [],
+ "ledgerCounts": {
+  "completed": 7,
+  "mcp-only": 2,
+  "not-applicable": 41,
+  "skipped-user": 10,
+  "unsupported": 2
+ }
+}

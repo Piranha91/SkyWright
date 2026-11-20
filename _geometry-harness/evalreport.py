@@ -60,7 +60,6 @@ except ImportError:  # pragma: no cover - stated, never worked around
 TEMPLATES = HERE / "evalreport_templates"
 PRIORITIES = HERE.parent / ".claude" / "skills" / "evaluation-reporting" / "references" / "report-priorities.json"
 NARRATION = PRIORITIES.parent / "narration.json"
-EVALRUN = HERE / "evalrun.py"
 
 PRESENTATION_SCHEMA = 1
 BUNDLE_SCHEMA = 2
@@ -1037,14 +1036,19 @@ def relative_pdf_links(pdf: Path, folder: Path) -> str | None:
 # ------------------------------------------------------------------------------ bundle verification --
 
 def run_verify_bundle(bundle: Path, out: Path) -> tuple[dict | None, int, str]:
-    """D1: `evalrun.py verify-bundle DIR` is the authority. It reads the bundle in place and writes its result to
-    OUT/verify.json (`--out`), so the bundle is never written and nothing is copied. An earlier OUT/verify.json is
-    removed first, so a verify that dies before writing cannot be read as this run's verdict."""
+    """D1: the built-in controller's `runcontrol verify-bundle DIR` is the authority (HOUSECARL_RUNCONTROL, else this
+    checkout's build). It reads the bundle in place and writes its result to OUT/verify.json (`--out`), so the bundle is
+    never written and nothing is copied. An earlier OUT/verify.json is removed first, so a verify that dies before
+    writing cannot be read as this run's verdict."""
+    import evalpipeline
     result = out / "verify.json"
     result.unlink(missing_ok=True)
     try:
-        r = subprocess.run([sys.executable, str(EVALRUN), "verify-bundle", str(bundle), "--out", str(result)],
-                           capture_output=True, text=True, timeout=900)
+        argv = evalpipeline.verify_bundle_argv(None, bundle) + ["--out", str(result)]
+    except evalpipeline.Refusal as ex:
+        return None, EXIT_REFUSED_INPUT, f"verify-bundle could not run: {ex}"
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=900)
     except (OSError, subprocess.SubprocessError) as ex:
         return None, EXIT_REFUSED_INPUT, f"verify-bundle could not run: {ex}"
     verify = load_json(result)
@@ -9640,12 +9644,23 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 rows.extend(conflict_rows(c, eid_by_path.get(emit_path)))
             rows.sort(key=lambda x: (x.get("formKey") or "", x.get("summary") or ""))
             g = group_for(check_id, kind, a_, b_)
+            # a row a mod folder's mesh alone creates carries Mesh, and B is then that folder (mesh-responsibility)
+            mesh_ = [c.get("Mesh") for c in cs if isinstance(c.get("Mesh"), dict)]
+            if mesh_ and templates.get("finding-mesh"):
+                models_ = sorted({str(s_.get("Model")) for m_ in mesh_ for s_ in (m_.get("Swapped") or []) if s_.get("Model")})
+                plain_ = bind(templates["finding-mesh"], {
+                    "rowsTotal": len(rows), "A": a_, "B": b_, "armId": arm_id, "part": part or "arm", "strength": r.get("strength"),
+                    "models": ", ".join(models_[:3]) + (f" and {len(models_) - 3} more" if len(models_) > 3 else ""),
+                    "meshEffect": "are left resting on nothing" if kind == "CONTACT" else "pass through another object",
+                    "meshWithout": "rest as placed" if kind == "CONTACT" else "do not touch"})
+            else:
+                plain_ = bind(templates.get("finding", ""), {"rowsTotal": len(rows), "groupKind": kind, "A": a_, "B": b_,
+                                                             "armId": arm_id, "part": part or "arm",
+                                                             "findingsInPart": r.get("findings"), "strength": r.get("strength")})
             f = add({"id": None, "kind": "finding", "priority": 3, "checkId": check_id, "family": b.check_family(check_id),
                      "armId": arm_id, "part": part, "title": b.check_title(check_id), "strength": r.get("strength"),
                      "verdict": verdict,
-                     "plain": bind(templates.get("finding", ""), {"rowsTotal": len(rows), "groupKind": kind, "A": a_, "B": b_,
-                                                                  "armId": arm_id, "part": part or "arm",
-                                                                  "findingsInPart": r.get("findings"), "strength": r.get("strength")}),
+                     "plain": plain_,
                      "counts": {"groupKind": kind, "A": a_, "B": b_, "conflicts": len(cs), "rows": len(rows),
                                 "findingsInPart": r.get("findings"), "coverage": coverage,
                                 "population": emit.get("Population"), "state": emit.get("State")},
@@ -9857,6 +9872,22 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                         if c.get("readerRepairedNoBody") else "")
                                      + f"; those repairs do not cancel the new {noun(new_count, 'problem')}."
                                      if repaired_count else ""))
+            # mesh-responsibility: the rows a mod folder's mesh alone makes on this setup, by folder, in a modder's words
+            mesh_by_ = collections.Counter()
+            for part_ in ("arm", None):
+                ep_ = b.output_emit_path(f.get("checkId"), f.get("armId"), part_)
+                em_ = b.emit(ep_) if ep_ else None
+                if isinstance(em_, dict):
+                    for cf_ in em_.get("Conflicts") or []:
+                        if isinstance(cf_, dict) and isinstance(cf_.get("Mesh"), dict) and cf_["Mesh"].get("Folder"):
+                            mesh_by_[str(cf_["Mesh"]["Folder"])] += len(cf_.get("Necessary") or [])
+                    break
+            if mesh_by_ and (reader_comparison_templates.get("meshRows")):
+                for folder_, n_ in sorted(mesh_by_.items()):
+                    f["readerPlain"] += bind(reader_comparison_templates["meshRows"], {
+                        "count": fmt_n(n_), "folder": folder_,
+                        "effect": ("rest on nothing" if f.get("checkId") == "geometry.placement-contact" else "pass through another object"),
+                        "without": ("they rest as placed" if f.get("checkId") == "geometry.placement-contact" else "they do not touch")})
         elif f["kind"] == "finding" and c.get("A") and c.get("B"):
             sample = next((r.get("label") for r in f.get("rows") or [] if r.get("label")
                            and not (f.get("rowsNoBody") and row_has_no_body(names_doc0, r, bodiless_types))

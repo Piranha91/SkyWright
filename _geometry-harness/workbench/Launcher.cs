@@ -40,6 +40,8 @@ internal sealed class Launcher : IAsyncDisposable
     internal string? PrepNote { get; private set; }
     /// <summary>The pipeline's scope line: the cells the ticked mods edit, who else touches them, disabled mods to tick.</summary>
     internal string? ScopeNote { get; private set; }
+    /// <summary>What the ticked checks did, from the bundle's disposition: found something, found nothing, did not complete.</summary>
+    internal string? RunTally { get; private set; }
     internal string? RunFolder { get; private set; }
     internal Task? RunTask { get; private set; }
     /// <summary>Raised on the run's thread with the verified bundle's folder when a run is done (the window opens it).</summary>
@@ -61,6 +63,20 @@ internal sealed class Launcher : IAsyncDisposable
     /// <summary>The current run's own run-log store, where its probes record their progress: the pipeline keeps it under
     /// its output folder (<c>run/runlog</c>).</summary>
     internal string? RunStore => RunFolder is null ? null : Path.Combine(RunFolder, "run", "runlog");
+    /// <summary>The engine every command of a run and of a review goes through: the built-in one, the only one.</summary>
+    internal RunEngine Engine => RunEngine.OfBuiltIn();
+
+    /// <summary>One sentence when a remembered setting or WB_CONTROLLER still names the Python run engine, which is gone;
+    /// null when nothing does. A remembered csharp means what it always meant and is dropped without a word.</summary>
+    static string? GoneEngineNote(LauncherSettings? saved)
+    {
+        var env = Environment.GetEnvironmentVariable("WB_CONTROLLER");
+        if (env is { Length: > 0 }) return $"WB_CONTROLLER is set to '{env}', but there is no choice of run engine any more: runs use the built-in one.";
+        var name = saved?.Controller?.Trim().ToLowerInvariant();
+        if (name is null or "" or "csharp" or "built-in" or "builtin") return null;
+        return $"the saved run engine '{saved!.Controller}' is gone: runs use the built-in engine, and the setting is dropped the next time the settings are saved.";
+    }
+
     readonly Dictionary<string, HousecarlCore.Progress.RunEstimate> _first = new(StringComparer.OrdinalIgnoreCase);
     (double Seconds, int Runs)? _prepGuess;
 
@@ -157,12 +173,14 @@ internal sealed class Launcher : IAsyncDisposable
         SettingsNote = LauncherSettings.CannotWrite(SettingsPath);
         var (s, why) = LauncherSettings.Load(SettingsPath);
         if (why is not null) { SettingsNote = why; return why; }
-        if (s?.Instance is null) return "no saved instance to restore.";
+        var gone = GoneEngineNote(s);                                 // read before anything is written back
+        if (s?.Instance is null) { SettingsNote ??= gone; return gone ?? "no saved instance to restore."; }
         var said = new List<string>();
         try { said.Add(await OpenProfileAsync("free", s.Instance, s.Profile, s.Game)); }
-        catch (InvalidOperationException ex) { return "the saved instance could not be opened: " + ex.Message; }
+        catch (InvalidOperationException ex) { SettingsNote ??= gone; return "the saved instance could not be opened: " + ex.Message + (gone is null ? "" : " " + gone); }
         if (s.Output is not null) { try { said.Add(SetOutput(s.Output)); } catch (InvalidOperationException ex) { said.Add("the saved Output Folder was not set: " + ex.Message.TrimEnd('.')); } }
         if (s.WorkFolder is not null) { try { said.Add(SetWorkFolder(s.WorkFolder)); } catch (InvalidOperationException ex) { said.Add("the saved Work Folder was not set: " + ex.Message.TrimEnd('.')); } }
+        if (gone is not null) { SettingsNote ??= gone; said.Add(gone.TrimEnd('.')); }
         return "restored from the last session: " + string.Join("; ", said);
     }
 
@@ -323,8 +341,8 @@ internal sealed class Launcher : IAsyncDisposable
         return line is not null && int.TryParse(line[6..].Trim(), out var id) ? id : null;
     }
 
-    /// <summary>Start a run of the selection through the existing pipeline: an in-place entry under
-    /// the Work Folder, <c>evalpipeline.py run --through bundle</c>, and the bundle it verifies. Returns at once.</summary>
+    /// <summary>Start a run of the selection through the chosen run engine (<see cref="RunEngine"/>): an in-place entry
+    /// under the Work Folder, its <c>run --through bundle</c>, and the bundle it verifies. Returns at once.</summary>
     internal string Run() => Run(null);
 
     /// <summary>The checks a run of <paramref name="only"/> needs: each must be a probe that can run here; the switch census
@@ -405,6 +423,8 @@ internal sealed class Launcher : IAsyncDisposable
         if (Output is null) throw new InvalidOperationException("choose an Output Folder first.");
         if (WorkFolder is null) throw new InvalidOperationException("with the Output Folder at the instance's mods folder there is no default Work Folder; choose one outside the instance and the game folder.");
         if (WorkFolderRule.Check(WorkFolder, Instance, Profile!, Game!) is { } bad) throw new InvalidOperationException(bad);
+        var engine = Engine;
+        engine.NeedProgram();                                           // before any file of the run is written
         var stamp = DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'");
         var dir = Path.Combine(WorkFolder, stamp);
         Directory.CreateDirectory(dir);
@@ -424,12 +444,11 @@ internal sealed class Launcher : IAsyncDisposable
             m["readerCmd"] = "\"" + exe + "\"";
         }
         File.WriteAllText(machine, m.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
-        var pipeline = Environment.GetEnvironmentVariable("WB_PIPELINE_CMD") is { Length: > 0 } pc ? pc
-            : Program.FromCheckoutPublic("WB_PIPELINE", "evaluation pipeline evalpipeline.py", "_geometry-harness", "evalpipeline.py");
         var run = Path.Combine(dir, "run");
+        var psi = engine.Pipeline(entry, machine, run, WorkFolder, Path.Combine(dir, "runlog"));
         lock (_gate)
         {
-            RunState = "running"; RunRefusal = null; RunBundle = null; RunLine = null; PrepNote = null; ScopeNote = null; RunFolder = dir;
+            RunState = "running"; RunRefusal = null; RunBundle = null; RunLine = null; PrepNote = null; ScopeNote = null; RunTally = null; RunFolder = dir;
             RunChecks.Clear(); RunChecks.AddRange(checks); AbortedChecks.Clear(); _groupAborted = false;
             // the first guess per probe: the run-log estimator over earlier runs' histories (this Work Folder's runs and the default store)
             _first.Clear();
@@ -448,10 +467,6 @@ internal sealed class Launcher : IAsyncDisposable
         }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
         RunTask = Task.Run(() =>
         {
-            var psi = new System.Diagnostics.ProcessStartInfo("python") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-            foreach (var a in new[] { "-I", pipeline, "run", "--entry", entry, "--machine", machine, "--out", run, "--through", "bundle", "--reuse-preparation-from", WorkFolder }) psi.ArgumentList.Add(a);
-            psi.Environment["PYTHONIOENCODING"] = "utf-8";
-            psi.Environment["HOUSECARL_RUNLOG_DIR"] = Path.Combine(dir, "runlog");      // set, not left to a default
             var log = Path.Combine(dir, "pipeline.log");
             try
             {
@@ -474,7 +489,8 @@ internal sealed class Launcher : IAsyncDisposable
                 if (_groupAborted) { }                                                     // AbortRun said so already
                 else if (p.ExitCode == 0 && File.Exists(Path.Combine(bundle, "manifest.json")))
                 {
-                    lock (_gate) { RunState = "done"; RunBundle = bundle; }
+                    var tally = Tally(Path.Combine(bundle, "disposition.json"), checks);
+                    lock (_gate) { RunState = "done"; RunBundle = bundle; RunTally = tally; }
                     BundleReady?.Invoke(bundle);
                 }
                 else lock (_gate) { RunState = "refused"; RunRefusal = $"the run stopped (exit code {p.ExitCode}) without making results: {RunLine?.Trim()} (its log: {log})"; }
@@ -482,6 +498,61 @@ internal sealed class Launcher : IAsyncDisposable
             catch (Exception ex) { lock (_gate) { RunState = "refused"; RunRefusal = $"the run could not be started: {ex.Message}"; } }
         });
         return $"running {(checks.Count == 1 ? ProbeNames.Of(checks[0]) : $"{checks.Count} probes")} on {sel.Count} mod(s){(depth == "deep" ? ", thorough" : "")} in profile '{Profile}'; its files go under '{dir}'";
+    }
+
+    /// <summary>One sentence on the ticked checks from a disposition (FOLD-REVIEW finding 2). A check with any finding found
+    /// something, else one with a completed null result found nothing, else it did not complete; either of the first two is
+    /// marked not complete when a part or arm of it is listed missing. What it could not judge is the disposition's own
+    /// unjudgeablePopulations on the review arm (the rows repeat per part, so the largest per population); a check whose only
+    /// missing rows are an unknown applicability says so, since that is a measurement the controller could not make, not a fault.</summary>
+    internal static string Tally(string disposition, IReadOnlyCollection<string> checks)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllBytes(disposition));
+            var root = doc.RootElement;
+            var ev = root.GetProperty("evaluation");
+            static string Str(JsonElement x, string k) => x.ValueKind == JsonValueKind.Object && x.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+            IEnumerable<JsonElement> Rows(JsonElement at, string key) => at.TryGetProperty(key, out var a) && a.ValueKind == JsonValueKind.Array ? a.EnumerateArray() : [];
+            HashSet<string> Ids(string key) => Rows(ev, key).Select(x => Str(x, "checkId")).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var found = Ids("findings"); var nothing = Ids("completedNullChecks");
+            var missing = Rows(ev, "missing").GroupBy(x => Str(x, "checkId"), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.Select(x => Str(x, "status")).ToList(), StringComparer.OrdinalIgnoreCase);
+            string review = Str(root, "reviewArm");
+            var unj = root.TryGetProperty("unassessed", out var ua) ? Rows(ua, "unjudgeablePopulations").ToList() : new List<JsonElement>();
+            if (unj.Any(x => Str(x, "armId") == review)) unj = unj.Where(x => Str(x, "armId") == review).ToList();
+            static long Total(JsonElement x) => x.TryGetProperty("unjudgeable", out var u) && u.ValueKind == JsonValueKind.Object
+                ? u.EnumerateObject().Sum(p => p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetInt64(out var v) ? v : 0) : 0;
+            int f = 0, n = 0, m = 0, fInc = 0, nInc = 0, judgedShort = 0, onlyUnknown = 0;
+            var unjudged = new SortedDictionary<string, long>(StringComparer.Ordinal);
+            foreach (var c in checks)
+            {
+                var miss = missing.GetValueOrDefault(c);
+                bool incomplete = miss is { Count: > 0 };
+                if (found.Contains(c)) { f++; if (incomplete) fInc++; }
+                else if (nothing.Contains(c)) { n++; if (incomplete) nInc++; }
+                else { m++; continue; }
+                if (incomplete && miss!.All(s => s == "unknown-applicability")) onlyUnknown++;
+                var mine = unj.Where(x => string.Equals(Str(x, "checkId"), c, StringComparison.OrdinalIgnoreCase))
+                              .GroupBy(x => Str(x, "population")).Select(g => (pop: g.Key, n: g.Max(Total))).Where(p => p.n > 0).ToList();
+                if (mine.Count > 0) judgedShort++;
+                foreach (var (pop, k) in mine) unjudged[pop] = unjudged.GetValueOrDefault(pop) + k;
+            }
+            string Of(int k) => k == 1 ? "1 check" : $"{k} checks";
+            string Inc(int k) => k > 0 ? $" ({k} not complete)" : "";
+            var line = $"{Of(f)} found something{Inc(fInc)}, {Of(n)} found nothing{Inc(nInc)}, {Of(m)} did not complete";
+            if (m > 0 || fInc + nInc > 0) line += f + n == 0 ? ", so nothing was measured" : ", so this is not a full result";
+            if (judgedShort > 0)
+                line += $"; {judgedShort} could not judge every object ({string.Join(", ", unjudged.Select(kv => $"{kv.Key} {kv.Value}"))})";
+            if (onlyUnknown > 0)
+                line += $"; {onlyUnknown} {(onlyUnknown == 1 ? "is" : "are")} not complete only because whether {(onlyUnknown == 1 ? "it applies" : "they apply")} "
+                        + "to this mod could not be measured, which is not a fault in the mod";
+            return line;
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            return $"what the checks did could not be read from {disposition} ({ex.Message})";
+        }
     }
 
     static string StateServerExe() { try { return Program.DefaultServerExe(); } catch (InvalidOperationException) { return "housecarl-mcp.exe"; } }
@@ -564,7 +635,7 @@ internal sealed class Launcher : IAsyncDisposable
                 settings = new { path = SettingsPath, note = SettingsNote },
                 output = Output, outputVerdict = verdict, workFolder = WorkFolder,
                 depth = Depth,
-                run = new { state = RunState, refusal = RunRefusal, line = RunLine, folder = RunFolder, bundle = RunBundle, preparation = PrepNote, scope = ScopeNote },
+                run = new { state = RunState, refusal = RunRefusal, line = RunLine, folder = RunFolder, bundle = RunBundle, preparation = PrepNote, scope = ScopeNote, tally = RunTally },
             };
         }
     }

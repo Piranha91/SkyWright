@@ -238,9 +238,9 @@ def main() -> int:
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
-    # 1324: the controllers recognise both sentences as a refusal, as they recognise MISSING MASTER, so an evaluation arm
-    # refused this way is classed by its cause and the child's sentence is quoted (evalrun) or the arm is set aside
-    # (ordersweep), never read as an ordinary non-zero exit.
+    # 1324: ordersweep recognises both sentences as a refusal, as it recognises MISSING MASTER, so an arm refused this
+    # way is set aside, never read as an ordinary non-zero exit (the controller's own marker is runcontrol's
+    # Validator.RefusedRe).
     import importlib.util
     lines = ["CANNOT ENABLE - 'Ghost.esp' has no load-order position: loadorder.txt does not list it, so this run would "
              "measure the order without it; switch 'Ghost.esp' on once in MO2 so loadorder.txt lists it, or give it a "
@@ -248,7 +248,7 @@ def main() -> int:
              "PROFILE MISMATCH - candidate BaseProfile 'Other' does not match --profile 'Good' ('cand-other.json'), so "
              "its plugins and mod folders would be resolved through the lists of profile 'Good', not the profile it was "
              "built on; run with --profile 'Other', or rebuild the candidate on profile 'Good', then run again."]
-    for mod_name in ("evalrun", "ordersweep"):
+    for mod_name in ("ordersweep",):
         spec = importlib.util.spec_from_file_location(f"{mod_name}_1324", HARNESS / f"{mod_name}.py")
         mod = importlib.util.module_from_spec(spec)
         sys.path.insert(0, str(HARNESS))

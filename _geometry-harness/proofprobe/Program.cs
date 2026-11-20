@@ -1897,6 +1897,24 @@ Console.WriteLine("\nPROOF — overlap provenance (_shared/DetectorModel.cs + _s
        && DetectorModel.OverlapProvenance(OF(without: true, seen: false)).Sight == OverlapSight.Blind
        && DetectorModel.OverlapProvenance(OF(without: false, seen: false)).Sight == OverlapSight.Blind, "four quadrants");
 
+    // the folder rule (mesh-responsibility): origin by the mesh counterfactual, sight by (a) or (b)
+    static DetectorModel.MeshFacts MF(bool without = false, bool a = false, bool b = false, bool joint = false) => new(without, a, b, joint);
+    var mib = DetectorModel.MeshProvenance(MF());
+    Check("mesh: separated with the mesh that wins without the folder, no folder plugin -> INTRODUCED + BLIND",
+          mib.Origin == OverlapOrigin.Introduced && mib.Sight == OverlapSight.Blind && mib.Why.Contains("only with the folder's mesh"), mib.Why);
+    var mia = DetectorModel.MeshProvenance(MF(a: true));
+    Check("mesh: (a) the later placement's plugin masters the folder's plugin -> INTRODUCED + SEEN",
+          mia.Origin == OverlapOrigin.Introduced && mia.Sight == OverlapSight.Seen && mia.Why.Contains("in its editor"), mia.Why);
+    var mibb = DetectorModel.MeshProvenance(MF(b: true));
+    Check("mesh: (b) the folder's plugin masters both placements' plugins -> INTRODUCED + SEEN",
+          mibb.Origin == OverlapOrigin.Introduced && mibb.Sight == OverlapSight.Seen && mibb.Why.Contains("mesh author's editor"), mibb.Why);
+    var mih = DetectorModel.MeshProvenance(MF(without: true));
+    Check("mesh: still crossing with the meshes that win without the folder -> INHERITED (not credited)",
+          mih.Origin == OverlapOrigin.Inherited && mih.Why.Contains("without the folder too"), mih.Why);
+    var mij = DetectorModel.MeshProvenance(MF(joint: true));
+    Check("mesh: a joint swap is introduced and says the other folders' meshes were needed",
+          mij.Origin == OverlapOrigin.Introduced && mij.Why.Contains("other folders' meshes"), mij.Why);
+
     Check("ovl: population — both Bethesda -> BETHESDA FLOOR; USSEP on either side -> USSEP INVOLVED; else MOD-ON-MOD",
           DetectorModel.ClassifyOverlapPopulation(true, true, false, false) == OverlapPopulation.BethesdaFloor
        && DetectorModel.ClassifyOverlapPopulation(false, true, false, true) == OverlapPopulation.UssepInvolved

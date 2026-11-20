@@ -9,6 +9,9 @@ without it, whole-order and with --population, and checks:
   - the scoped emit is exactly the whole-order emit's rows that the probe's own audit puts in the population (every field);
   - the rows in and out of the population are the ones the fixture's table names, in both arms;
   - conflictdiff refuses a scoped emit against an unscoped one, and two scoped emits give the whole-order diff's counts.
+Mesh responsibility (cases M1-M8, K4, K5 of the fixture's table; mesh-responsibility/GATE-B.md): the rows a folder's mesh alone
+creates name the folder; the whole-order runs credit the population's folders (--mesh-folder, so scoped = whole holds), and one
+more whole-order run on the arm with the delta credits every folder (--mesh-folder *).
 Each test names the wrong answer it rejects. Probes come from this checkout's Release builds unless HC_POP_HARNESS names
 another harness folder (the red run points it at a build without --population).
 """
@@ -49,7 +52,9 @@ def run(argv, **kw):
                           timeout=600, **kw)
 
 
-ORDER = ["PpBase.esm", "PpA.esp", "PpB.esp", "PpMover.esp", "PpDelta.esp"]
+ORDER = ["Skyrim.esm", "Update.esm", "PpBase.esm", "PpA.esp", "PpB.esp", "PpMover.esp", "PpDelta.esp", "PpSkyMod.esp"]
+MESH_FOLDERS = ["PpMeshMod", "PpDelta", "PpSkyMod"]   # the population's folders
+DELTA = ("PpDelta.esp", "PpSkyMod.esp")                 # the plugins the arm without the delta drops
 
 
 def fk(hexid, plugin):
@@ -68,19 +73,37 @@ R = {
     "bP2": fk("000905", "PpB.esp"), "b7": fk("000906", "PpB.esp"), "b8": fk("000907", "PpB.esp"), "b9": fk("000908", "PpB.esp"),
     "b6": fk("000909", "PpB.esp"),
     "d3": fk("000902", "PpDelta.esp"), "dE": fk("000903", "PpDelta.esp"), "dc1": fk("000904", "PpDelta.esp"),
+    # mesh responsibility
+    "s1": fk("00090B", "PpA.esp"), "s2": fk("00090C", "PpA.esp"), "c1": fk("00090D", "PpA.esp"), "t1": fk("00090E", "PpA.esp"),
+    "t2": fk("00090F", "PpA.esp"), "u2": fk("000910", "PpA.esp"), "c2b": fk("00090A", "PpB.esp"),
+    "o1": fk("000906", "PpDelta.esp"), "n1": fk("000907", "PpDelta.esp"), "n2": fk("000908", "PpDelta.esp"), "u1": fk("000909", "PpDelta.esp"),
+    "o2": fk("000909", "PpBase.esm"), "o3": fk("00090E", "PpBase.esm"), "o4": fk("00090F", "PpBase.esm"), "hs4": fk("00090A", "PpBase.esm"), "c4": fk("00090B", "PpBase.esm"),
+    "hs5": fk("00090C", "PpBase.esm"), "c5": fk("00090D", "PpBase.esm"),
+    "hs6": fk("000916", "PpBase.esm"), "c6": fk("000917", "PpBase.esm"), "n6": fk("000918", "PpBase.esm"),
+    "v1": fk("000901", "Skyrim.esm"), "v2": fk("000902", "Skyrim.esm"), "e1": fk("000903", "Skyrim.esm"),
+    "e2": fk("000904", "Skyrim.esm"), "e3": fk("000905", "Skyrim.esm"), "e4": fk("000906", "Skyrim.esm"),
+    "w1": fk("000907", "Skyrim.esm"), "w2": fk("000901", "Update.esm"), "q1": fk("000911", "PpA.esp"), "q2": fk("000912", "PpA.esp"),
+    "r1": fk("000913", "PpA.esp"), "r2": fk("000914", "PpA.esp"),
+    # an unreadable fallback copy (fold-review-fix)
+    "x13": fk("000915", "PpA.esp"), "y13": fk("00090B", "PpB.esp"), "hs7": fk("000919", "PpBase.esm"), "c7": fk("00091A", "PpBase.esm"),
+    "hs8": fk("00091B", "PpBase.esm"), "c8": fk("00091C", "PpBase.esm"),
 }
 OVERLAP = {"O1": ("a1", "b1"), "O2": ("a2", "b2"), "O3": ("d3", "a3"), "O3b": ("b4", "a4"), "O4": ("dE", "hA"),
            "O4b": ("hA", "bE"), "O5": ("pA", "bP"), "O5b": ("pA2", "bP2"), "O6": ("Kc", "b6"), "O7": ("x7", "b7"),
-           "O8": ("m8", "b8"), "O9": ("a9", "b9")}
-CONTACT = {"K1": ("dc1", "hs1"), "K2": ("c2", "hs2"), "K3": ("c3", "hs3")}
+           "O8": ("m8", "b8"), "O9": ("a9", "b9"),
+           "M1": ("s1", "s2"), "M2": ("v1", "v2"), "M3": ("c1", "c2b"), "M4": ("t1", "t2"), "M5": ("e1", "e2"), "M5b": ("e3", "e4"),
+           "M6": ("o2", "o1"), "M7": ("n1", "n2"), "M8": ("u1", "u2"), "M9": ("o3", "o4"), "M10": ("w1", "w2"), "M11": ("q1", "q2"), "M12": ("r1", "r2"),
+           "M13": ("x13", "y13")}
+CONTACT = {"K1": ("dc1", "hs1"), "K2": ("c2", "hs2"), "K3": ("c3", "hs3"), "K4": ("c4", "hs4"), "K5": ("c5", "hs5"),
+           "K6": ("c6", "hs6"), "K6n": ("c6", "n6")}
 # What each arm holds, whole-order and in the population (the fixture's table).
 WANT = {
-    ("overlapprobe", "with", "whole"): {"O1", "O2", "O3", "O3b", "O4", "O4b", "O5", "O5b", "O7", "O8", "O9"},
-    ("overlapprobe", "with", "scoped"): {"O1", "O3", "O3b", "O4", "O5", "O7", "O8"},
-    ("overlapprobe", "without", "whole"): {"O1", "O2", "O4b", "O5b", "O6", "O9"},
-    ("overlapprobe", "without", "scoped"): {"O1", "O6"},
-    ("contactprobe", "with", "whole"): {"K1", "K3"},
-    ("contactprobe", "with", "scoped"): {"K1"},
+    ("overlapprobe", "with", "whole"): {"O1", "O2", "O3", "O3b", "O4", "O4b", "O5", "O5b", "O7", "O8", "O9", "M1", "M2", "M3", "M8", "M10", "M11", "M13"},
+    ("overlapprobe", "with", "scoped"): {"O1", "O3", "O3b", "O4", "O5", "O7", "O8", "M1", "M2", "M3", "M8", "M10", "M11", "M13"},
+    ("overlapprobe", "without", "whole"): {"O1", "O2", "O4b", "O5b", "O6", "O9", "M3"},
+    ("overlapprobe", "without", "scoped"): {"O1", "O6", "M3"},
+    ("contactprobe", "with", "whole"): {"K1", "K3", "K4", "K5"},
+    ("contactprobe", "with", "scoped"): {"K1", "K4", "K5"},
     ("contactprobe", "without", "whole"): {"K2", "K3"},
     ("contactprobe", "without", "scoped"): {"K2"},
 }
@@ -134,14 +157,16 @@ class Lab:
             shutil.copytree(pp / "mods" / stem, self.inst / "mods" / stem)
             shutil.copyfile(pp / n, self.inst / "mods" / stem / n)
         shutil.copytree(pp / "mods" / "PpMeshMod", self.inst / "mods" / "PpMeshMod")
-        mods_with = ["PpMeshMod", "PpDelta", "PpMover", "PpB", "PpA", "PpBase"]
+        shutil.copytree(pp / "mods" / "PpStrongMod", self.inst / "mods" / "PpStrongMod")
+        shutil.copytree(pp / "mods" / "PpSkyMod", self.inst / "mods" / "PpSkyMod", dirs_exist_ok=True)
+        mods_with = ["PpStrongMod", "PpMeshMod", "PpSkyMod", "PpDelta", "PpMover", "PpB", "PpA", "PpBase", "Update", "Skyrim"]
         (prof / "plugins.txt").write_text("".join("*" + n + "\n" for n in ORDER), encoding="utf-8")
         (prof / "loadorder.txt").write_text("".join(n + "\n" for n in ORDER), encoding="utf-8")
         (prof / "modlist.txt").write_text("".join("+" + m + "\n" for m in mods_with), encoding="utf-8")
         self.cand = {}
         for arm, plugins, mods in (("with", ORDER, mods_with),
-                                   ("without", [n for n in ORDER if n != "PpDelta.esp"],
-                                    [m for m in mods_with if m not in ("PpDelta", "PpMeshMod")])):
+                                   ("without", [n for n in ORDER if n not in DELTA],
+                                    [m for m in mods_with if m not in ("PpDelta", "PpMeshMod", "PpSkyMod")])):
             p = tmp / f"candidate-{arm}.json"
             p.write_text(json.dumps({"SchemaVersion": 1, "Name": arm, "BaseProfile": "P", "Plugins": plugins, "Mods": mods,
                                      "Changes": []}), encoding="utf-8")
@@ -152,14 +177,14 @@ class Lab:
         self.population = tmp / "population.json"
         self.population.write_text(json.dumps({"schema": 1,
                                                "plugins": [{"name": "PpDelta.esp", "path": str(delta), "sha256": sha}],
-                                               "mods": [{"name": "PpMeshMod", "path": str(self.inst / "mods" / "PpMeshMod")}],
+                                               "mods": [{"name": m, "path": str(self.inst / "mods" / m)} for m in MESH_FOLDERS],
                                                "targets": ["PpDelta.esp"]}, indent=1), encoding="utf-8")
         self.out = {}
         self.logs = {}
         for probe in ("overlapprobe", "contactprobe"):
             for arm in ("with", "without"):
                 whole = tmp / f"{probe}-{arm}-whole.json"
-                r = self.probe(probe, arm, ["--emit", whole])
+                r = self.probe(probe, arm, ["--emit", whole] + self.mesh_flags())
                 self.logs[(probe, arm, "whole")] = r
                 scoped = tmp / f"{probe}-{arm}-scoped.json"
                 audit = tmp / f"{probe}-{arm}-audit.json"
@@ -167,6 +192,14 @@ class Lab:
                                              "--population-audit", whole, audit])
                 self.logs[(probe, arm, "scoped")] = r2
                 self.out[(probe, arm)] = (whole, scoped, audit)
+            # the arm with the delta, whole-order, every folder credited
+            every = tmp / f"{probe}-with-every.json"
+            self.logs[(probe, "with", "every")] = self.probe(probe, "with", ["--emit", every, "--mesh-folder", "*"])
+            self.out[(probe, "every")] = every
+
+    @staticmethod
+    def mesh_flags():
+        return [x for m in MESH_FOLDERS for x in ("--mesh-folder", m)]
 
     def probe(self, probe, arm, extra):
         return run([exe(PROBES, probe), "--order", self.cand[arm], "--instance", self.inst, "--game", self.game,
@@ -219,7 +252,8 @@ def scoped_is_whole_in_scope(probe, arm):
             assert sr[i] == wr[i], f"row {i} differs: scoped {json.dumps(sr[i])[:400]} vs whole {json.dumps(wr[i])[:400]}"
         pop = s.get("Population") or ""
         assert pop.startswith("load-time+population:") and len(pop) == len("load-time+population:") + 12, pop
-        assert (w.get("Population") or "") == "load-time", w.get("Population")
+        # the whole-order runs credit the population's folders by --mesh-folder, which their identity carries
+        assert (w.get("Population") or "").startswith("load-time+mesh:") and len(w["Population"]) == len("load-time+mesh:") + 12, w.get("Population")
         assert s["Configuration"]["Population"] == pop, "the configuration identity carries the scoped population"
     return t
 
@@ -260,6 +294,153 @@ def refused_outside_default_pass():
     assert r.returncode == 2 and "--population scopes the emit pass" in r.stderr, (r.returncode, r.stderr[-300:])
 
 
+def row_of(probe, doc, case):
+    rows = [c for c in doc.get("Conflicts", []) if row_name(probe, c) == case]
+    assert len(rows) == 1, f"{case}: {len(rows)} row(s) where the fixture's table has one: {[c['Summary'][:160] for c in rows]}"
+    return rows[0]
+
+
+def emit_of(probe, arm, which):
+    L = lab()
+    path = L.out[(probe, "every")] if which == "every" else L.out[(probe, arm)][0 if which == "whole" else 1]
+    doc = L.load(path)
+    assert doc is not None, f"{probe} {arm} {which}: no emit; {L.logs[(probe, arm, which)].stderr[-600:]}"
+    return doc
+
+
+# (case, A, B, the reference whose mesh the folder provides) for every row a folder's mesh alone creates
+FOLDER_ROWS = {"overlapprobe": [("O8", "PpB.esp", "PpMeshMod", "m8"), ("M1", "PpA.esp", "PpMeshMod", "s1"),
+                                ("M2", "Skyrim.esm", "PpMeshMod", "v1"), ("M10", "Update.esm", "PpSkyMod", "w1"),
+                                ("M11", "PpA.esp", "PpMeshMod", "q1")],
+               "contactprobe": [("K4", "PpBase.esm", "PpMeshMod", "c4"), ("K5", "PpBase.esm", "PpMeshMod", "c5")]}
+
+
+def folder_rows_name_the_folder(probe, which):
+    """Rejects: a row a provided mesh alone creates named by the plugins that placed the objects (O8 today: PpA.esp x
+    PpB.esp), or not reported at all (a same-plugin or base-game pair, a reshaped host or dependent)."""
+    def t():
+        doc = emit_of(probe, "with", which)
+        for case, a, b, ref in FOLDER_ROWS[probe]:
+            c = row_of(probe, doc, case)
+            mesh = c.get("Mesh") or {}
+            assert (c["A"], c["B"], mesh.get("Folder")) == (a, b, b), \
+                f"{case}: named {c['A']} x {c['B']} (mesh folder {mesh.get('Folder')}); the table says {a} x {b}, the mesh from {b}"
+            assert c["Necessary"][0]["FormKey"].lower() == R[ref].lower(), f"{case}: the fix target is {c['Necessary'][0]['FormKey']}, not {ref}"
+    return t
+
+
+def held_host_gives_no_row(which):
+    """Rejects: a row for K6, whose reshaped slab still holds the cup, because the cup also grazes the box it sits in (3 u deep,
+    nothing facing) and that graze was taken as the cup's contact under the winner (it touches nothing by the rule)."""
+    def t():
+        doc = emit_of("contactprobe", "with", which)
+        rows = [c for c in doc.get("Conflicts", []) if row_name("contactprobe", c) in ("K6", "K6n")]
+        assert not rows, f"K6: {len(rows)} row(s) where the cup still rests on the slab: {[c['Summary'][:200] for c in rows]}"
+    return t
+
+
+def plugin_rows_stay_plugin_rows(which):
+    """Rejects: a folder credited for a crossing that exists without its mesh (M3), or for a folder outside the population (M8)."""
+    def t():
+        doc = emit_of("overlapprobe", "with", which)
+        for case, pair in (("M3", {"PpA.esp", "PpB.esp"}), ("M8", {"PpA.esp", "PpDelta.esp"})):
+            c = row_of("overlapprobe", doc, case)
+            assert {c["A"], c["B"]} == pair and "Mesh" not in c, f"{case}: {c['A']} x {c['B']}, mesh {c.get('Mesh')}; the table says {sorted(pair)}, no mesh"
+    return t
+
+
+def every_folder_credits_the_outside_folder():
+    """Rejects: a whole-order run that names no folder, or the folder a stronger one overrides (M4), when every folder may be
+    credited: M8's crossing exists only with PpStrongMod's mesh."""
+    doc = emit_of("overlapprobe", "with", "every")
+    c = row_of("overlapprobe", doc, "M8")
+    assert (c["A"], c["B"], (c.get("Mesh") or {}).get("Folder")) == ("PpA.esp", "PpStrongMod", "PpStrongMod"), \
+        f"M8 with every folder credited: {c['A']} x {c['B']}, mesh {(c.get('Mesh') or {}).get('Folder')}; the table says PpA.esp x PpStrongMod"
+    got = names("overlapprobe", doc)
+    want = WANT[("overlapprobe", "with", "whole")]
+    assert got == want, f"every-folder rows {sorted(got)}, the table says {sorted(want)} (the same cases, M8 renamed)"
+
+
+def coverage(doc, population):
+    lines = [c for c in doc.get("Coverage") or [] if c.get("Population") == population]
+    return lines[0] if lines else {}
+
+
+def mesh_counts_are_the_tables(arm, which):
+    """Rejects: equal bytes read as a replacement (M5 loose, M5b loose against a compressed archive entry), a new mesh read
+    as one (M7), and a base-game pair never readmitted (M2): the counts the fixture's table gives."""
+    def t():
+        doc = emit_of("overlapprobe", arm, which)
+        m = coverage(doc, "mesh responsibility")
+        aside = m.get("SetAside") or {}
+        # with: O8, M1, M2, M3, M6, M10, M11, and K6's slab with its cup and with the box n6 (both meet the slab's top with either copy) given a
+        # counterfactual; M9 (Seen by its folder's plugin) counted, not tested; and the three pairs whose fallback copy is not a NIF:
+        # M13 (cross-plugin, so judged by the plugin rule) and K7's and K8's cup with its slab (PpBase both, so withheld)
+        want = {"with": (12, {"CrossesWithoutTheFolderMesh": 3, "MeshEqualsReplaced": 2, "NewMeshNoFallback": 1, "BaseGameReadmitted": 4,
+                              "SeenNotTested": 1, "TouchingNotCredited": 1, "MeshUnknownJudgedByPluginRule": 1}),
+                "without": (0, {"CrossesWithoutTheFolderMesh": 0, "MeshEqualsReplaced": 0, "NewMeshNoFallback": 0, "BaseGameReadmitted": 0,
+                                "SeenNotTested": 0, "TouchingNotCredited": 0, "MeshUnknownJudgedByPluginRule": 0})}[arm]
+        cand = coverage(doc, "candidate refs").get("SetAside") or {}
+        # eight base-game references set aside (seven Skyrim.esm, one Update.esm); with the mods, v1, v2, w1 and w2 come back in
+        want = want + ({"with": 4, "without": 8}[arm],)
+        got = (m.get("Judged", -1), {k: aside.get(k, -1) for k in want[1]}, cand.get("BaseGameResponsible"))
+        assert got == want, (f"{arm} {which}: (pairs given a mesh counterfactual, counts, base-game references set aside) {got}, "
+                             f"the table says {want}")
+    return t
+
+
+def unknown_counterfactual_keeps_the_plugin_row(which):
+    """Rejects: a cross-plugin crossing dropped because the folder's counterfactual is unknown (M13: the copy below PpMeshMod's is
+    not a NIF). The crossing is measured; the plugin rule reports it as before the folder rule, and the unknown is counted."""
+    def t():
+        doc = emit_of("overlapprobe", "with", which)
+        c = row_of("overlapprobe", doc, "M13")
+        assert {c["A"], c["B"]} == {"PpA.esp", "PpB.esp"} and "Mesh" not in c, f"M13: {c['A']} x {c['B']}, mesh {c.get('Mesh')}"
+        m = coverage(doc, "mesh responsibility")
+        got = ((m.get("SetAside") or {}).get("MeshUnknownJudgedByPluginRule"), (m.get("Unjudgeable") or {}).get("MeshCounterfactualUnknown"))
+        # one cross-plugin unknown (M13) judged by the plugin rule; three unknowns in all (M13, K7's and K8's cup with its slab)
+        assert got == (1, 3), f"(unknown judged by the plugin rule, unknown in all) {got}, the table says (1, 3)"
+    return t
+
+
+def contact_mesh_pass_counts_the_unjudged(arm, which):
+    """Rejects: a mesh pass whose coverage line says it judged everything (Unjudgeable {}) when a reshaped host's or dependent's
+    fallback copy could not be read. With: three hosts with no fallback geometry (K7's slab hs7, K8's cup c8 and M13's x13, each
+    tried as a reshaped host) and two dependents whose fallback is unreadable on a real host (c8 on hs8, x13 on y13)."""
+    def t():
+        doc = emit_of("contactprobe", arm, which)
+        m = coverage(doc, "mesh responsibility")
+        want = {"with": {"HostNoGeometry": 3, "RowNoDependentGeometry": 2}, "without": {}}[arm]
+        assert (m.get("Unjudgeable") or {}) == want, f"{arm} {which}: the mesh line's unjudgeable {m.get('Unjudgeable')}, the table says {want}"
+    return t
+
+
+def mesh_reach_counts_are_the_tables():
+    """Rejects: a reach that counts files instead of placed references, credits equal bytes (e1, e3), a stronger folder's shape
+    (t1) or a new mesh (n1, n2), or loses an unreadable fallback (x13, hs7, c8 are PpSkyMod's: its copy wins and differs)."""
+    L = lab()
+    out = L.tmp / "mesh-reach-with.json"
+    r = L.probe("overlapprobe", "with", ["--population", L.population, "--mesh-reach", out])
+    assert r.returncode == 0 and out.exists(), f"exit {r.returncode}: {r.stderr[-600:]}"
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    got = {f["name"]: (f["references"], f["credited"], f["equalBytes"], f["overriddenBy"], f["noFallback"]) for f in doc["folders"]}
+    want = {
+        # mshb (m8, v1, s1, c1), mshs (t1: PpStrongMod's wins), mshe (e1, equal), mshz (e3, equal to PpBase.bsa's), slabm (hs4),
+        # cupm (c5), shell (q1), slabk (hs6), touch (r1)
+        "PpMeshMod": (12, 9, 2, {"PpStrongMod": 1}, 0),
+        "PpDelta": (4, 2, 0, {}, 2),     # msho (o2, o3), dnew (n1, n2: only PpDelta's folder has it)
+        "PpSkyMod": (4, 4, 0, {}, 0),    # mshu (w1), mshv (x13), slabv (hs7), cupv (c8)
+    }
+    assert got == want, f"(references, credited, equal, overridden by, no fallback) {got}, the table says {want}"
+    assert doc["credited"] == 15 and doc["complete"] is True, (doc["credited"], doc["complete"], doc["why"])
+
+
+def mesh_reach_needs_a_population():
+    L = lab()
+    r = L.probe("overlapprobe", "with", ["--mesh-reach", L.tmp / "no-population.json"])
+    assert r.returncode == 2 and "--mesh-reach needs --population" in r.stderr, (r.returncode, r.stderr[-300:])
+
+
 TESTS = [
     ("C409 overlap, arm with the delta, whole-order rows are the fixture's", expect_rows("overlapprobe", "with", "whole")),
     ("C409 overlap, arm without the delta, whole-order rows are the fixture's", expect_rows("overlapprobe", "without", "whole")),
@@ -279,6 +460,32 @@ TESTS = [
     ("C410 contact, arm without: scoped = whole restricted to the probe's audit", scoped_is_whole_in_scope("contactprobe", "without")),
     ("C411 conflictdiff refuses scoped vs unscoped; two scoped emits give the whole-order diff's verdict and counts", diff_gate_and_counts),
     ("C411 --population is refused outside the pass it scopes", refused_outside_default_pass),
+    ("C412 overlap, arm with, whole: a row a provided mesh alone creates names the folder (O8, M1 same plugin, M2 base game)",
+     folder_rows_name_the_folder("overlapprobe", "whole")),
+    ("C412 overlap, arm with, scoped: the same rows name the folder", folder_rows_name_the_folder("overlapprobe", "scoped")),
+    ("C413 contact, arm with, whole: a host (K4) and a dependent (K5) a provided mesh reshapes name the folder",
+     folder_rows_name_the_folder("contactprobe", "whole")),
+    ("C413 contact, arm with, scoped: the same rows name the folder", folder_rows_name_the_folder("contactprobe", "scoped")),
+    ("C417 contact, arm with, whole: a reshaped host that still holds its dependent (K6) gives no row, though the dependent grazes a neighbour",
+     held_host_gives_no_row("whole")),
+    ("C417 contact, arm with, scoped: the same", held_host_gives_no_row("scoped")),
+    ("C414 overlap, arm with, whole: a crossing without the mesh (M3) and one a non-population folder makes (M8) keep the plugins",
+     plugin_rows_stay_plugin_rows("whole")),
+    ("C414 overlap, arm with, scoped: the same", plugin_rows_stay_plugin_rows("scoped")),
+    ("C415 overlap, every folder credited: M8 names PpStrongMod", every_folder_credits_the_outside_folder),
+    ("C416 overlap, arm with, whole: mesh counts and base-game readmission are the table's", mesh_counts_are_the_tables("with", "whole")),
+    ("C416 overlap, arm with, scoped: the same", mesh_counts_are_the_tables("with", "scoped")),
+    ("C416 overlap, arm without, whole: nothing credited, nothing readmitted", mesh_counts_are_the_tables("without", "whole")),
+    ("C440 overlap, arm with, whole: a cross-plugin crossing whose folder counterfactual is unknown (M13) is the plugin rule's row, counted",
+     unknown_counterfactual_keeps_the_plugin_row("whole")),
+    ("C440 overlap, arm with, scoped: the same", unknown_counterfactual_keeps_the_plugin_row("scoped")),
+    ("C441 contact, arm with, whole: the mesh pass counts what it could not judge (K7's host, K8's and x13's fallback copies)",
+     contact_mesh_pass_counts_the_unjudged("with", "whole")),
+    ("C441 contact, arm with, scoped: the same", contact_mesh_pass_counts_the_unjudged("with", "scoped")),
+    ("C441 contact, arm without, whole: nothing credited, nothing unjudged", contact_mesh_pass_counts_the_unjudged("without", "whole")),
+    ("C442 overlapprobe --mesh-reach: per folder, the placed references its meshes reach and the ones it wins with and changes",
+     mesh_reach_counts_are_the_tables),
+    ("C442 overlapprobe --mesh-reach is refused without --population", mesh_reach_needs_a_population),
 ]
 
 

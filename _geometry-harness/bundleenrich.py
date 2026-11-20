@@ -12,8 +12,9 @@ Reached through `evalrun enrich --bundle DIR --kind record-rows|names`. An enric
                scope's Nexus id (offline), else the plugin name; each says which. No network read.
 
 What an enrichment may not do: change the disposition, a receipt, the ledger, a claim or a count. It records the
-disposition's sha256 beside its outputs, and verify-bundle refuses a bundle whose disposition no longer matches, whose
-enrichment rows lack their sources, or whose cited sources do not hash as cited. A bundle is enriched once per kind.
+disposition's sha256 beside its outputs, and `runcontrol verify-bundle` (EnrichmentVerify.cs) refuses a bundle whose
+disposition no longer matches, whose enrichment rows lack their sources, or whose cited sources do not hash as cited. A
+bundle is enriched once per kind.
 """
 from __future__ import annotations
 
@@ -961,95 +962,3 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
             "mods": {m: v["source"] for m, v in mods.items()},
             "counts": {"objectsNamed": len(fks), "objectsUnread": len(unread["objects"]),
                        "bases": len(set(bases.values())), "basesUnread": len(unread["bases"])}}
-
-
-# --------------------------------------------------------------------------------------------- verify
-
-def verify(d: Path, manifest: dict, plan: dict, defect, memo_sha) -> None:
-    """verify-bundle's enrichment checks: sources present and hashing as cited, every row citing its reads, plugin
-    sources matching the plan's recorded bytes, and the disposition unchanged since enrichment."""
-    plan_shas = {str(x.get("sha256") or "").lower() for a in plan.get("arms") or []
-                 for x in (a.get("requested") or {}).get("plugins") or []}
-    disp_now = memo_sha(d / "disposition.json") if (d / "disposition.json").exists() else None
-    for e in manifest.get("evidence") or []:
-        if e.get("kind") != "enrichment" or not (d / e["path"]).exists():
-            continue
-        doc = _load(d / e["path"])
-        if e.get("role") == "record":
-            if not isinstance(doc, dict) or doc.get("dispositionSha256") != disp_now:
-                defect("enrichment-stale", e["path"],
-                       "the disposition is not the one this enrichment was derived beside, so a count or claim "
-                       "changed after enrichment")
-            continue
-        if e.get("role") == "capture":
-            continue
-        if e.get("enrichment") in ("record-rows", "order-variant"):
-            src = (doc or {}).get("derivedFrom") if isinstance(doc, dict) else None
-            if not src:
-                defect("enrichment-source-missing", e["path"], "the derived rows do not cite the bytes they came from")
-                continue
-            for x in src:
-                p = d / str(x.get("path") or "")
-                if not x.get("path") or not p.is_file() or memo_sha(p) != x.get("sha256"):
-                    defect("enrichment-source-changed", e["path"],
-                           f"a cited source {x.get('path')} is absent from the bundle or does not hash as cited")
-            bare = sum(1 for c in (doc.get("Conflicts") or []) for n in c.get("Necessary") or [] if not n.get("Reads"))
-            # a reversed setup derived from a 2.0 tree capture cites the transcripts, not single reads (item 18)
-            if bare and not (e.get("enrichment") == "order-variant" and doc.get("readForm") == "tree"):
-                defect("enrichment-source-missing", e["path"], f"{bare} derived row(s) do not cite the reads they came from")
-        elif e.get("enrichment") == "order-geometry":
-            for x in ((doc or {}).get("derivedFrom") if isinstance(doc, dict) else None) or [None]:
-                p = d / str((x or {}).get("path") or "")
-                if not x or not x.get("path") or not p.is_file() or memo_sha(p) != x.get("sha256"):
-                    defect("enrichment-source-changed", e["path"],
-                           f"a cited emit {(x or {}).get('path')} is absent from the bundle or does not hash as cited")
-        elif e.get("enrichment") == "names":
-            for x in ((doc or {}).get("derivedFrom") if isinstance(doc, dict) else None) or []:
-                if str(x.get("sha256") or "").lower() not in plan_shas:
-                    defect("enrichment-source-foreign", e["path"],
-                           f"names were read from {x.get('plugin')} with bytes the plan does not record")
-    verify_names_status(d, manifest, defect)
-
-
-#: The names step's statuses (evalrun bundle, bundle standard §8): what the bundle's manifest says about its names.
-NAMES_STATUSES = ("enriched", "partial", "refused", "skipped")
-
-
-def verify_names_status(d: Path, manifest: dict, defect) -> None:
-    """The names step's statement against the files: a status from the closed set with one sentence; enriched or
-    partial only with the names files, refused or skipped only without them; partial exactly when names.json lists
-    something unread, with the statement's counts equal to its lists. A manifest with no statement predates the step."""
-    st = (manifest.get("enrichmentStatus") or {}).get("names")
-    if st is None:
-        return
-    sentence = str((st or {}).get("sentence") or "") if isinstance(st, dict) else ""
-    status = st.get("status") if isinstance(st, dict) else None
-    if status not in NAMES_STATUSES or not sentence.strip() or "\n" in sentence:
-        defect("enrichment-status-unstated", "manifest.json",
-               f"the names step's statement has status {status!r} and no one-sentence reason, so a reader cannot tell "
-               f"why the bundle has or lacks names")
-        return
-    row = next((e for e in manifest.get("evidence") or []
-                if e.get("kind") == "enrichment" and e.get("enrichment") == "names" and not e.get("role")), None)
-    if (status in ("enriched", "partial")) != (row is not None):
-        defect("enrichment-status-contradiction", "manifest.json",
-               f"the names step says {status} but the bundle {'lists' if row else 'does not list'} the names files")
-        return
-    if row is None:
-        return
-    doc = _load(d / row["path"]) or {}
-    unread = doc.get("unread") if isinstance(doc, dict) else None
-    counts = st.get("counts") or {}
-    if not isinstance(unread, dict):
-        defect("enrichment-status-mismatch", row["path"], "names.json does not list what it could not read")
-        return
-    got = {"objectsUnread": len(unread.get("objects") or []), "basesUnread": len(unread.get("bases") or [])}
-    want_status = "partial" if any(got.values()) else "enriched"
-    if status != want_status or any(counts.get(k) != v for k, v in got.items()):
-        defect("enrichment-status-mismatch", "manifest.json",
-               f"the names step says {status} with {canonical_counts(counts)}, names.json lists "
-               f"{got['objectsUnread']} unread object(s) and {got['basesUnread']} unread base record(s)")
-
-
-def canonical_counts(counts: dict) -> str:
-    return ", ".join(f"{k} {counts.get(k)}" for k in ("objectsUnread", "basesUnread"))

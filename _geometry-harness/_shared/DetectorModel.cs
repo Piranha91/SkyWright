@@ -769,6 +769,35 @@ public static class DetectorModel
         return (OverlapOrigin.Introduced, sight, $"the later plugin {how}; {saw}");
     }
 
+    /// <summary>One intersecting pair under the folder rule (mesh-responsibility/GATE-A.md, GATE-B.md): the pair crosses in
+    /// the arm, and one side's (or both sides') shape is a credited folder F's mesh (it wins, another folder's copy would win
+    /// without F, and the bytes differ). The caller has rebuilt the sides F reshapes with the mesh that wins without F, at
+    /// the same placements.</summary>
+    /// <param name="WithoutFolderMeshCrosses">the rebuilt pair still crosses: the crossing does not need F's mesh.</param>
+    /// <param name="FolderPluginInLaterClosure">(a) the later placement's plugin masters (or is) a plugin F ships, and the
+    /// earlier placement is in its closure: that placement was authored with F's mesh and the other object in its editor.</param>
+    /// <param name="FolderPluginMastersBoth">(b) a plugin F ships masters (or is) both placements' plugins: F's author had
+    /// both placements in the editor when making the mesh.</param>
+    /// <param name="Joint">no single folder's mesh was enough; the crossing needed the meshes of every folder on the pair.</param>
+    public readonly record struct MeshFacts(bool WithoutFolderMeshCrosses, bool FolderPluginInLaterClosure, bool FolderPluginMastersBoth, bool Joint);
+
+    /// <summary>The folder rule's decision. <b>Origin:</b> Introduced when the pair is separated with the meshes that win
+    /// without the folder, Inherited when it still crosses (the folder is not credited and the plugin rule judges the pair).
+    /// <b>Sight:</b> Seen when (a) or (b) holds, the same in-principle sight the plugin rule grants a plugin whose closure
+    /// holds the other placement; a folder that ships no plugin is a master of nothing and is always Blind. The class is
+    /// Introduced + Blind, and the base game's own floor does not withhold it: a folder row is never Bethesda on Bethesda.</summary>
+    public static (OverlapOrigin Origin, OverlapSight Sight, string Why) MeshProvenance(MeshFacts f)
+    {
+        var sight = f.FolderPluginInLaterClosure || f.FolderPluginMastersBoth ? OverlapSight.Seen : OverlapSight.Blind;
+        string saw = f.FolderPluginInLaterClosure ? "the later placement's plugin was made with the folder's plugin as a master, so the mesh was in its editor"
+                   : f.FolderPluginMastersBoth ? "the folder ships a plugin that masters both placements' plugins, so both placements were in the mesh author's editor"
+                   : "neither placement was made with the folder installed, and the folder ships no plugin that masters both";
+        if (f.WithoutFolderMeshCrosses)
+            return (OverlapOrigin.Inherited, sight, $"the objects cross with the meshes that win without the folder too; {saw}");
+        return (OverlapOrigin.Introduced, sight,
+                $"the objects cross only with the folder's mesh{(f.Joint ? " (together with the other folders' meshes on the pair)" : "")}; {saw}");
+    }
+
     /// <summary>Rule 12 applied to an overlap: which population does a (responsible A, responsible B) pair belong to?
     /// Both Bethesda (Dawnguard × HearthFires, a DLC into a base-game cell) is the floor's shape — the same shape as the
     /// clobber floor. USSEP on either side is its own row: it moves vanilla objects deliberately and everything loads

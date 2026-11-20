@@ -16,8 +16,13 @@ fixtures go (default: the system temp folder); it needs about 200 MiB.
     C2233  a failure mid-verify leaves no large tree and a one-sentence refusal: (i) ENOSPC once 64 MiB is copied, the
            2026-11-14 04:18 failure; (ii) verify-bundle timing out; (iii) verify-bundle dying without a result while
            an earlier complete verdict sits in OUT, which must not be read as this run's
-    C2234  evalrun verify-bundle DIR --out FILE writes the verdict to FILE only: the same bundle verdict as an in-place
-           run, DIR unchanged; on a damaged copy exit 3, complete false, the file under mismatched, DIR unchanged
+    C2234  runcontrol verify-bundle DIR --out FILE writes the verdict to FILE only: the same bundle verdict as an
+           in-place run, DIR unchanged; on a damaged copy exit 3, complete false, the file under mismatched, DIR unchanged
+    C2235  every caller checks a bundle with the built-in controller, its one owner: evalreport plan starts
+           `runcontrol verify-bundle`, the pipeline's media check is the same command, evalrun.py has no verify-bundle,
+           and no harness module starts the Python verb
+
+The controller is HOUSECARL_RUNCONTROL, else the harness's own build (`runcontrol/bin/Release/net9.0`).
 
 Each case names the wrong answer it rejects. A crash is a failure, never a skip. Exit 0: every case passed; 1: a case
 failed.
@@ -57,9 +62,15 @@ os.environ.setdefault("HOUSECARL_EVAL_SETTINGS",
                       str(Path(tempfile.gettempdir()) / "hc-tests-no-eval-settings" / "houseCARL.evaluation.json"))
 
 import evalreport as R                                     # noqa: E402
+import evalpipeline as P                                   # noqa: E402
 
 EVALREPORT = HARNESS / "evalreport.py"
 EVALRUN = HARNESS / "evalrun.py"
+
+
+def verify_cmd(*args) -> list[str]:
+    """`runcontrol verify-bundle ARGS`, the command every caller starts."""
+    return [str(P.runcontrol_exe(None)), "verify-bundle", *[str(a) for a in args]]
 MIB = 1024 * 1024
 BLOB_MIB, LINKS = 16, 8
 FAILS: list[str] = []
@@ -157,7 +168,7 @@ class Fixture:
         index = MF.generate(work / "fixtures", "R1")
         self.source = Path(index["R1-intact-incomplete"]["bundle"])
         # a built bundle has been verified in place, so it carries a verify.json of its own
-        r = subprocess.run([sys.executable, str(EVALRUN), "verify-bundle", str(self.source)],
+        r = subprocess.run(verify_cmd(self.source),
                            capture_output=True, text=True, encoding="utf-8", errors="replace")
         if r.returncode != 0 or not (load(self.source / "verify.json") or {}).get("bundle", {}).get("complete"):
             raise SystemExit(f"the R1 fixture does not verify complete (exit {r.returncode}): {r.stderr[-300:]}")
@@ -301,9 +312,9 @@ def case_2234(fx: Fixture):
     d1, d2 = fx.bundle(linked=False), fx.bundle(linked=False)
     f1 = fx.out("2234") / "v1.json"
     before = snapshot(d1)
-    r1 = subprocess.run([sys.executable, str(EVALRUN), "verify-bundle", str(d1), "--out", str(f1)],
+    r1 = subprocess.run(verify_cmd(d1, "--out", f1),
                         capture_output=True, text=True, encoding="utf-8", errors="replace")
-    r2 = subprocess.run([sys.executable, str(EVALRUN), "verify-bundle", str(d2)],
+    r2 = subprocess.run(verify_cmd(d2),
                         capture_output=True, text=True, encoding="utf-8", errors="replace")
     v1, v2 = load(f1) or {}, load(d2 / "verify.json") or {}
     check(case, r1.returncode == 0 and bool(v1), "verify-bundle DIR --out FILE exits 0 and writes FILE",
@@ -325,7 +336,7 @@ def case_2234(fx: Fixture):
     p.write_bytes(bytes(data))
     before3 = snapshot(d3)
     f3 = fx.out("2234") / "v3.json"
-    r3 = subprocess.run([sys.executable, str(EVALRUN), "verify-bundle", str(d3), "--out", str(f3)],
+    r3 = subprocess.run(verify_cmd(d3, "--out", f3),
                         capture_output=True, text=True, encoding="utf-8", errors="replace")
     b3 = (load(f3) or {}).get("bundle") or {}
     mism = [m.get("path") for m in b3.get("mismatched") or []]
@@ -336,7 +347,41 @@ def case_2234(fx: Fixture):
     check(case, not d, "verify-bundle --out leaves a damaged DIR unchanged too", "; ".join(d[:6]))
 
 
-CASES = {"C2230": case_2230, "C2231": case_2231, "C2232": case_2232, "C2233": case_2233, "C2234": case_2234}
+def case_2235(fx: Fixture):
+    case = "C2235"
+    exe, b, o = P.fwd(P.runcontrol_exe(None)), fx.bundle(linked=False), fx.out("2235")
+    seen: list[list[str]] = []
+    real_run = subprocess.run
+
+    def spy(argv, *a, **k):
+        if any(str(x) == "verify-bundle" for x in argv):
+            seen.append([str(x) for x in argv])
+        return real_run(argv, *a, **k)
+
+    with mock.patch.object(R.subprocess, "run", spy):
+        code, err, raised = plan_in_process(["--bundle", b, "--out", o])
+    check(case, code == 0 and raised is None, "plan completes", f"exit {code}, {raised}, {err[-300:]}")
+    check(case, len(seen) == 1 and seen[0] == [exe, "verify-bundle", P.fwd(b), "--out", str(o / "verify.json")],
+          "evalreport plan checks the bundle with `runcontrol verify-bundle DIR --out OUT/verify.json`", f"started {seen}")
+    check(case, not any(x.endswith("evalrun.py") or x == sys.executable for argv in seen for x in argv),
+          "evalreport plan starts no Python for the bundle check", f"started {seen}")
+    build = getattr(P, "verify_bundle_argv", None)
+    m = build(None, b) if build else None
+    check(case, m == [exe, "verify-bundle", P.fwd(b)], "the pipeline's media check is `runcontrol verify-bundle DIR`",
+          f"{m}" if build else "evalpipeline builds no verify_bundle_argv")
+    r = subprocess.run([sys.executable, str(EVALRUN), "verify-bundle", str(b)], capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+    check(case, r.returncode == 2 and "invalid choice" in r.stderr,
+          "evalrun.py has no verify-bundle: Python's copy of the check is gone", f"exit {r.returncode}: {r.stderr[-200:]}")
+    # a module that still builds `python evalrun.py verify-bundle` would be caught here before it ran
+    starts = [f"{f.name}:{i}" for f in sorted(HARNESS.glob("*.py")) if f.name != "evalrun.py"
+              for i, ln in enumerate(f.read_text(encoding="utf-8", errors="replace").splitlines(), 1)
+              if "verify-bundle" in ln and ("evalrun" in ln.lower() or "EVALRUN" in ln)]
+    check(case, not starts, "no harness module names evalrun beside verify-bundle", "; ".join(starts[:6]))
+
+
+CASES = {"C2230": case_2230, "C2231": case_2231, "C2232": case_2232, "C2233": case_2233, "C2234": case_2234,
+         "C2235": case_2235}
 
 
 def main() -> int:

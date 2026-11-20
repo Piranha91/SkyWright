@@ -741,10 +741,9 @@ public sealed class InPlaceRunTests
         roots.SelectMany(r => Directory.EnumerateFileSystemEntries(r, "*", SearchOption.AllDirectories))
              .ToDictionary(p => p, p => File.Exists(p) ? (new FileInfo(p).Length, File.GetLastWriteTimeUtc(p)) : (-1L, Directory.GetLastWriteTimeUtc(p)));
 
-    [Fact]
-    public void B4_an_in_place_run_through_the_bundle_writes_only_under_its_work_folder()
+    /// <summary>The synthetic world with a selection: mod folder SelMod, whose plugin places one reference in the master's cell.</summary>
+    static ModKey SelWorld(TiltedRefWorld w)
     {
-        using var w = new TiltedRefWorld();
         var sel = new ModKey("HcWbSel", ModType.Plugin);
         var m = new SkyrimMod(sel, SkyrimRelease.SkyrimSE);
         using (var master = SkyrimMod.CreateFromBinaryOverlay(Path.Combine(w.Instance, "mods", "WorldMod", TiltedRefWorld.Master.FileName), SkyrimRelease.SkyrimSE))
@@ -770,6 +769,14 @@ public sealed class InPlaceRunTests
         File.WriteAllText(Path.Combine(prof, "modlist.txt"), "+SelMod\r\n+WorldMod\r\n");
         File.WriteAllText(Path.Combine(w.Instance, "ModOrganizer.ini"), "[General]\r\ngameName=Skyrim Special Edition\r\nselected_profile=@ByteArray(Default)\r\n");
         Directory.CreateDirectory(Path.Combine(w.Instance, "overwrite"));
+        return sel;
+    }
+
+    [Fact]
+    public void B4_an_in_place_run_through_the_bundle_writes_only_under_its_work_folder()
+    {
+        using var w = new TiltedRefWorld();
+        var sel = SelWorld(w);
         var game = Path.GetDirectoryName(w.DataDir)!;
         var work = Path.Combine(w.Root, "work");
         var entry = Path.Combine(w.Root, "entry.json");
@@ -786,10 +793,8 @@ public sealed class InPlaceRunTests
         }));
         var decoy = Path.Combine(w.Root, "decoy-runlog"); Directory.CreateDirectory(decoy);
         var before = Listing(w.Root);                                 // the whole world root, not only instance and game
-        var psi = new ProcessStartInfo("python") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (var a in new[] { "-I", Path.Combine(R3Bundle.Checkout(), "_geometry-harness", "evalpipeline.py"), "run", "--entry", entry,
-                                  "--machine", machine, "--out", work, "--through", "bundle" }) psi.ArgumentList.Add(a);
-        psi.Environment["PYTHONIOENCODING"] = "utf-8";
+        var psi = new ProcessStartInfo(R3Bundle.Runcontrol) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var a in new[] { "run", "--entry", entry, "--machine", machine, "--out", work, "--through", "bundle" }) psi.ArgumentList.Add(a);
         psi.Environment["HOUSECARL_RUNLOG_DIR"] = decoy;              // the run must set its own, under the work folder (not setdefault)
         using var p = Process.Start(psi)!;
         var o = p.StandardOutput.ReadToEndAsync(); var e = p.StandardError.ReadToEndAsync();
@@ -801,7 +806,7 @@ public sealed class InPlaceRunTests
         var changed = before.Keys.Union(after.Keys).Where(k => !before.TryGetValue(k, out var b) || !after.TryGetValue(k, out var a) || b != a)
                             .Where(k => !Under(k, work) && !string.Equals(Path.GetFullPath(k), Path.GetFullPath(w.Root), StringComparison.OrdinalIgnoreCase)).ToList();
         Assert.True(changed.Count == 0, $"the run wrote outside its work folder: {string.Join("; ", changed.Take(5))}");
-        Assert.True(p.ExitCode == 0, $"evalpipeline run --through bundle exited {p.ExitCode}: {text[^Math.Min(800, text.Length)..]}");
+        Assert.True(p.ExitCode == 0, $"runcontrol run --through bundle exited {p.ExitCode}: {text[^Math.Min(800, text.Length)..]}");
         Assert.Empty(Directory.EnumerateFileSystemEntries(decoy));
         var bundle = Path.Combine(work, "bundle", "evidence");
         Assert.True(File.Exists(Path.Combine(bundle, "manifest.json")), "no bundle under the work folder");
@@ -811,6 +816,154 @@ public sealed class InPlaceRunTests
         Assert.DoesNotContain(baseArm.GetProperty("plugins").EnumerateArray(), x => x.GetString() == sel.FileName.String);
         var names = Directory.GetFiles(bundle, "names.json", SearchOption.AllDirectories).Single();
         Assert.DoesNotContain("000800:HcWbSel.esp", File.ReadAllText(names).Split("\"unread\"")[1], StringComparison.OrdinalIgnoreCase);
+    }
+
+    static int FreePort() { var l = new TcpListener(IPAddress.Loopback, 0); l.Start(); int p = ((IPEndPoint)l.LocalEndpoint).Port; l.Stop(); return p; }
+
+    /// <summary>B5: the workbench itself, started with no Python anywhere on its PATH and with its one run engine, the built-in one,
+    /// driven through its own tools, runs the selection to done: the engine builds the bundle and the workbench checks and opens
+    /// it, still with no Python. A run that stops before the bundle fails the test. The engine is this
+    /// checkout's runcontrol.exe (or WB_RUNCONTROL); set WB_TEST_SHOTS to a folder to keep pictures of the window.</summary>
+    [Fact]
+    public async Task B5_with_the_built_in_engine_the_workbench_runs_with_no_python_on_its_path()
+    {
+        using var w = new TiltedRefWorld();
+        SelWorld(w);
+        // WB_TEST_INSTANCE, with WB_TEST_PROFILE, WB_TEST_GAME and WB_TEST_MOD, points the same run at a real profile
+        var real = Environment.GetEnvironmentVariable("WB_TEST_INSTANCE") is { Length: > 0 } ri ? ri : null;
+        string Real(string name) => Environment.GetEnvironmentVariable(name) is { Length: > 0 } v ? v : throw new InvalidOperationException($"WB_TEST_INSTANCE is set, so {name} must be set too.");
+        var instance = real ?? w.Instance;
+        var profile = real is null ? "Default" : Real("WB_TEST_PROFILE");
+        var mod = real is null ? "SelMod" : Real("WB_TEST_MOD");
+        var game = real is null ? Path.GetDirectoryName(w.DataDir)! : Real("WB_TEST_GAME");
+        // a real instance is too large to list whole: its profile folder and the chosen mod's folder are watched
+        var watched = real is null ? new[] { instance, game } : new[] { Path.Combine(instance, "profiles", profile), Path.Combine(instance, "mods", mod) };
+        var minutes = int.TryParse(Environment.GetEnvironmentVariable("WB_TEST_RUN_MINUTES"), out var m) ? m : 20;
+        var gh = Path.Combine(R3Bundle.Checkout(), "_geometry-harness");
+        var exe = Environment.GetEnvironmentVariable("WB_TEST_WORKBENCH") is { Length: > 0 } we ? we
+            : Directory.GetFiles(Path.Combine(gh, "workbench", "bin", "Release"), "workbench.exe", SearchOption.AllDirectories).Single();
+        var engine = Environment.GetEnvironmentVariable("WB_RUNCONTROL") is { Length: > 0 } rc ? rc
+            : Path.Combine(gh, "runcontrol", "bin", "Release", "net9.0", "runcontrol.exe");
+        Assert.True(File.Exists(engine), $"the built-in run engine is not built at {engine}");
+
+        // a PATH with every folder that holds a python*.exe taken out, and proof that it starts no Python
+        var path = string.Join(';', (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries)
+            .Where(d => !(Directory.Exists(d) && Directory.EnumerateFiles(d, "python*.exe").Any())));
+        var ask = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe")) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = w.Root };
+        foreach (var a in new[] { "/d", "/c", "python --version" }) ask.ArgumentList.Add(a);
+        ask.Environment["PATH"] = path;
+        using (var q = Process.Start(ask)!)
+        {
+            var said = q.StandardOutput.ReadToEnd() + q.StandardError.ReadToEnd(); q.WaitForExit();
+            Assert.True(q.ExitCode != 0 && said.Contains("not recognized"), $"python still starts on the stripped PATH (exit {q.ExitCode}): {said}");
+        }
+
+        int port = FreePort();
+        var settings = Path.Combine(w.Root, "settings", LauncherSettings.FileName); Directory.CreateDirectory(Path.GetDirectoryName(settings)!);
+        var decoy = Path.Combine(w.Root, "decoy-runlog"); Directory.CreateDirectory(decoy);
+        var outDir = Path.Combine(w.Root, "out");
+        var psi = new ProcessStartInfo(exe) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = w.Root };
+        psi.Environment["PATH"] = path;
+        psi.Environment["WB_MCP_PORT"] = port.ToString();
+        psi.Environment["WB_SETTINGS"] = settings;
+        psi.Environment["WB_RUNCONTROL"] = engine;
+        psi.Environment["HOUSECARL_RUNLOG_DIR"] = decoy;                 // the run must keep its own run log, not this one
+        foreach (var k in new[] { "WB_CONTROLLER", "WB_PIPELINE_CMD", "WB_HARNESS", "WB_OUT", "WB_SCRIPT", "WB_MACHINE" }) psi.Environment.Remove(k);
+        var before = Listing(watched);
+        using var wb = Process.Start(psi)!;
+        var console = new System.Text.StringBuilder();
+        wb.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (console) console.AppendLine(e.Data); };
+        wb.ErrorDataReceived += (_, e) => { if (e.Data is not null) lock (console) console.AppendLine(e.Data); };
+        wb.BeginOutputReadLine(); wb.BeginErrorReadLine();
+        string Console() { lock (console) return console.ToString(); }
+        try
+        {
+            McpClient? client = null;
+            for (var until = DateTime.UtcNow.AddSeconds(90); client is null; )
+            {
+                Assert.False(wb.HasExited, $"the workbench exited before its tools answered: {Console()}");
+                try { client = await McpClient.CreateAsync(new HttpClientTransport(new HttpClientTransportOptions { Endpoint = new Uri($"http://127.0.0.1:{port}/"), TransportMode = HttpTransportMode.StreamableHttp })); }
+                catch (Exception) when (DateTime.UtcNow < until) { await Task.Delay(500); }
+            }
+            await using var _ = client;
+            async Task<JsonElement> Ok(string tool, params (string K, object? V)[] kv)
+            {
+                var r = await client.CallToolAsync(tool, kv.ToDictionary(x => x.K, x => x.V));
+                var text = string.Join("\n", r.Content.OfType<TextContentBlock>().Select(c => c.Text));
+                Assert.False(r.IsError == true, $"{tool} {kv.FirstOrDefault().V} refused: {text}");
+                using var d = JsonDocument.Parse(text);
+                return d.RootElement.Clone();
+            }
+            var shots = Environment.GetEnvironmentVariable("WB_TEST_SHOTS") is { Length: > 0 } sd ? Directory.CreateDirectory(sd).FullName : null;
+            async Task Shot(string name) { if (shots is not null) { await Task.Delay(1500); await Ok("workbench_act", ("verb", "capture_window"), ("path", Path.Combine(shots, name + ".png"))); } }
+
+            await Ok("workbench_act", ("verb", "open_profile"), ("mode", "free"), ("instance", instance), ("profile", profile), ("game", game));
+            await Ok("workbench_act", ("verb", "select_mods"), ("mods", new[] { mod }));
+            await Ok("workbench_act", ("verb", "select_probes"), ("checks", new[] { "geometry.object-overlap" }));
+            var set = await Ok("workbench_act", ("verb", "set_output"), ("path", outDir));
+            Assert.False(set.GetProperty("launcher").TryGetProperty("controller", out var engineChoice));   // there is no run engine to choose
+            await Shot("start-tab");
+
+            var started = await Ok("workbench_act", ("verb", "run"));
+            Assert.Equal("running", started.GetProperty("launcher").GetProperty("run").GetProperty("state").GetString());
+            var folder = started.GetProperty("launcher").GetProperty("run").GetProperty("folder").GetString()!;
+            JsonElement run = default; int pictures = 0, busy = 0;
+            for (var until = DateTime.UtcNow.AddMinutes(minutes); DateTime.UtcNow < until; )
+            {
+                // with pictures asked for, the window is captured about once a second while the run goes (its line refreshes each second)
+                if (shots is not null && pictures < 12) { await Task.Delay(1100); await Ok("workbench_act", ("verb", "capture_window"), ("path", Path.Combine(shots, $"run-in-progress-built-in-{++pictures}.png"))); }
+                // on a real profile the window can be busy longer than a call waits; the tool says so and the poll asks again
+                try { run = (await Ok("workbench_state", ("project", new[] { "launcher" }), ("wait_seconds", shots is not null && pictures < 12 ? 0 : 20))).GetProperty("launcher").GetProperty("run"); }
+                catch (Xunit.Sdk.XunitException e) when (e.Message.Contains("its thread is busy")) { busy++; await Task.Delay(2000); continue; }
+                if (run.GetProperty("state").GetString() != "running") break;
+            }
+            await Shot("run-ended-built-in");
+            if (busy > 0) System.Console.WriteLine($"B5: the window was too busy to answer {busy} state call(s) during the run");
+            string state = run.GetProperty("state").GetString()!, refusal = run.GetProperty("refusal").GetString() ?? "";
+            var log = File.ReadAllText(Path.Combine(folder, "pipeline.log"));
+
+            // what the engine itself says of the run: every stage's standing, by its own status command
+            var st = new ProcessStartInfo(engine) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (var a in new[] { "status", "--out", Path.Combine(folder, "run") }) st.ArgumentList.Add(a);
+            st.Environment["HOUSECARL_RUNLOG_DIR"] = Path.Combine(folder, "status-runlog");
+            using var sp = Process.Start(st)!;
+            var stages = sp.StandardOutput.ReadToEnd().Split('\n').Select(l => l.Trim().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                           .Where(x => x.Length == 2 && !x[0].StartsWith('{')).ToList();
+            sp.WaitForExit();
+            var accepted = stages.TakeWhile(x => x[1].StartsWith("accepted")).Select(x => x[0]).ToList();
+            Assert.True(accepted.Count >= 4 && accepted.Take(4).SequenceEqual(new[] { "census", "prepare", "scope", "plan" }),
+                $"the run did not get through plan ({state}; {refusal}); stages: {string.Join(", ", stages.Select(x => x[0] + " " + x[1]))}; log: {log}");
+
+            // no Python anywhere in what the run said, and the run's own run log holds the pipeline's record
+            Assert.DoesNotContain("python", log, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("python", refusal, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"op\":\"evalpipeline\"", File.ReadAllText(Path.Combine(folder, "run", "runlog", "history.jsonl")).Replace(" ", ""));
+            // on a real profile the window draws the opened finding with viewprobe, which is the window's own call and
+            // rightly logs to the ambient store; any other record there would be the run's
+            var strays = Directory.EnumerateFiles(decoy, "*", SearchOption.AllDirectories).Select(x => Path.GetRelativePath(decoy, x))
+                .Where(x => !Path.GetFileName(x).StartsWith("viewprobe-")).ToList();
+            var strayOps = strays.Where(x => x.EndsWith(".jsonl")).SelectMany(x => File.ReadLines(Path.Combine(decoy, x)).Take(40)).Select(l => l.Length > 300 ? l[..300] : l).ToList();
+            Assert.True(strays.Count == 0, $"something wrote its run log outside the run: {string.Join("; ", strays.Take(12))} :: {string.Join(" | ", strayOps.Take(12))}");
+            Assert.StartsWith(Path.Combine(outDir, "workbench-runs"), folder);
+
+            // the scenes stage is always a stated, non-blocking refusal, so bundle is looked for by name, not by position
+            Assert.True(stages.Any(x => x[0] == "bundle" && x[1].StartsWith("accepted")),
+                $"the engine did not build the bundle ({state}; {refusal}); stages: {string.Join(", ", stages.Select(x => x[0] + " " + x[1]))}");
+            // the engine built the bundle: the run is done, and the workbench checked and opened it with the same engine
+            Assert.True(state == "done", $"the engine's bundle stage is accepted but the run is '{state}': {refusal}");
+            var bundle = run.GetProperty("bundle").GetString()!;
+            Assert.True(File.Exists(Path.Combine(bundle, "manifest.json")), "no bundle under the work folder");
+            var verdict = Path.Combine(folder, "workbench", "bundle-verify.json");
+            for (var until = DateTime.UtcNow.AddSeconds(120); !File.Exists(verdict) && DateTime.UtcNow < until; ) await Task.Delay(500);
+            Assert.True(File.Exists(verdict), $"the finished bundle was not checked: {Console()}");
+            using var v = JsonDocument.Parse(File.ReadAllText(verdict));
+            Assert.True(v.RootElement.GetProperty("bundle").GetProperty("complete").GetBoolean());
+            Assert.DoesNotContain("could not be opened", Console());
+            var after = Listing(watched);
+            var changed = before.Keys.Union(after.Keys).Where(k => !before.TryGetValue(k, out var b) || !after.TryGetValue(k, out var a) || b != a).ToList();
+            Assert.True(changed.Count == 0, $"the run changed the instance or the game folder: {string.Join("; ", changed.Take(5))}");
+        }
+        finally { try { if (!wb.HasExited) wb.Kill(entireProcessTree: true); wb.WaitForExit(10_000); } catch (InvalidOperationException) { } }
     }
 }
 
@@ -961,7 +1114,7 @@ public sealed class ManualWriteTests
             "patchFolder" => folder,                                 // the patch's folder by its full path
             "patchMod" => Path.GetFileName(folder),                  // the base: the folder's name, which the window found under the instance's mods
             "instance" => w.Instance, "profile" => "Default", "game" => game, "workDir" => work,
-            "evalrunPy" => Path.Combine(harness, "evalrun.py"), "conflictdiffExe" => Path.Combine(harness, "conflictdiff", "bin", "Release", "net9.0", "conflictdiff.exe"),
+            "engine" => RunEngine.OfBuiltIn(Path.Combine(harness, "runcontrol", "bin", "Release", "net9.0", "runcontrol.exe")), "conflictdiffExe" => Path.Combine(harness, "conflictdiff", "bin", "Release", "net9.0", "conflictdiff.exe"),
             "buildDirs" => Array.Empty<string>(), "localProbesRoot" => harness, "say" => (Action<string>)(_ => { }),
             _ => throw new Xunit.Sdk.XunitException($"Recheck.RunAll has a parameter {p.Name} this test does not know"),
         }).ToArray();

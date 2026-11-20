@@ -23,10 +23,19 @@ internal sealed record ConflictRow(
     string Identity, string CheckId, string Kind, string A, string B, string Summary,
     string RefKey, string? OtherKey, PhysicalState? Physical,
     string? Cell, string? RefBaseType, string? RefBaseEditorId, string? OtherBaseType, string? OtherBaseEditorId,
-    string EvidenceStrength, bool? NewOnArm);
+    string EvidenceStrength, bool? NewOnArm, MeshCause? Mesh = null)
+{
+    /// <summary>For a row a mod folder's mesh alone creates (<see cref="Mesh"/> set): what happens, in a modder's words.</summary>
+    internal string? MeshSentence => Mesh is not { } m ? null
+        : Kind == "CONTACT"
+            ? $"The mesh {m.Folder} provides ({string.Join(", ", m.Swapped.Select(s => s.Model).Distinct())}) leaves this object resting on nothing; "
+              + $"without {m.Folder} the next mesh in priority order is used and it rests where {m.PlacedBy[0]} placed it."
+            : $"The mesh {m.Folder} provides for this object ({string.Join(", ", m.Swapped.Select(s => s.Model).Distinct())}) makes it pass through "
+              + $"an object {A} places; without {m.Folder} the next mesh in priority order is used and they do not touch.";
+}
 
 /// <summary>A verified evaluation bundle, read for the Conflicts tab (DESIGN.md section 3). The bundle is verified by
-/// the controller's own verb (<c>evalrun.py verify-bundle DIR --out FILE</c>) and every file a receipt names is read
+/// the run engine's own verb (<c>verify-bundle DIR --out FILE</c>, see <see cref="RunEngine"/>) and every file a receipt names is read
 /// from the path that verb resolved and checked (<c>receiptOutputs</c> in its verdict), never from a guessed root.
 /// Anything the app cannot read that way is refused in one sentence.</summary>
 /// <summary>A ticked check's state on the arm: ran (with its rows), rejected, blocked, not-applicable, and why. In a manual
@@ -89,30 +98,27 @@ internal sealed class BundleConflicts
 
     /// <summary>Verify <paramref name="dir"/> with the controller and write its verdict to <paramref name="verifyOut"/>
     /// (deleted first, so a verdict from an earlier run is never read as this one's).</summary>
-    internal static string Verify(string dir, string verifyOut, string evalrunPy, string python = "python")
+    internal static string Verify(string dir, string verifyOut, RunEngine engine)
     {
         if (File.Exists(verifyOut)) File.Delete(verifyOut);
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(verifyOut))!);
-        var psi = new ProcessStartInfo(python) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-        psi.ArgumentList.Add(evalrunPy); psi.ArgumentList.Add("verify-bundle"); psi.ArgumentList.Add(dir);
-        psi.ArgumentList.Add("--out"); psi.ArgumentList.Add(verifyOut);
-        psi.Environment["PYTHONIOENCODING"] = "utf-8"; psi.Environment["PYTHONUTF8"] = "1";
-        using var p = Process.Start(psi) ?? throw new InvalidOperationException($"'{python}' could not be started to verify the bundle; put Python on PATH.");
+        var psi = engine.Verify(dir, verifyOut);
+        using var p = Process.Start(psi) ?? throw new InvalidOperationException($"{engine.CannotStart}, so the bundle was not verified.");
         var outTask = p.StandardOutput.ReadToEndAsync(); var errTask = p.StandardError.ReadToEndAsync();
         p.WaitForExit();
         var said = (outTask.Result + errTask.Result).Trim();
         if (!File.Exists(verifyOut))
-            throw new InvalidOperationException($"evalrun verify-bundle wrote no verdict for '{dir}' (exit {p.ExitCode}): {Last(said)}");
+            throw new InvalidOperationException($"{engine.Controller} verify-bundle wrote no verdict for '{dir}' (exit {p.ExitCode}): {Last(said)}");
         return Last(said);
     }
 
     static string Last(string s) => s.Split('\n').Select(l => l.Trim()).LastOrDefault(l => l.StartsWith("verify:")) ?? s.Split('\n').Last().Trim();
 
     /// <summary>Open a bundle: verify it, then read the arm's placed-object rows. Throws a one-sentence refusal.</summary>
-    internal static BundleConflicts Open(string dir, string arm, string verifyOut, string evalrunPy, string python = "python")
+    internal static BundleConflicts Open(string dir, string arm, string verifyOut, RunEngine engine)
     {
         dir = Path.GetFullPath(dir);
-        var said = Verify(dir, verifyOut, evalrunPy, python);
+        var said = Verify(dir, verifyOut, engine);
         return Read(dir, arm, verifyOut, said);
     }
 
@@ -127,13 +133,13 @@ internal sealed class BundleConflicts
             string why = b.GetProperty("defects").EnumerateArray().Select(d => d.GetProperty("detail").GetString()).FirstOrDefault()
                          ?? (b.GetProperty("mismatched").GetArrayLength() > 0 ? $"{b.GetProperty("mismatched").GetArrayLength()} file(s) do not hash to what the manifest recorded"
                          : b.GetProperty("missing").GetArrayLength() > 0 ? $"{b.GetProperty("missing").GetArrayLength()} file(s) the manifest lists are missing" : "it is not structurally valid");
-            throw new InvalidOperationException($"the bundle at '{dir}' does not verify ({why}); open a bundle that evalrun verify-bundle passes.");
+            throw new InvalidOperationException($"the bundle at '{dir}' does not verify ({why}); open a bundle that runcontrol verify-bundle passes.");
         }
         var guarantee = v.GetProperty("toolIdentity").GetProperty("guarantee").GetString();
         if (guarantee != "verified")
             throw new InvalidOperationException($"the bundle at '{dir}' has tool identity '{guarantee}', not 'verified', so which build produced its rows cannot be checked; open a bundle made under the identity contract.");
         if (!v.TryGetProperty("receiptOutputs", out var ro))
-            throw new InvalidOperationException("this evalrun's verify-bundle lists no receiptOutputs, so the receipts' files cannot be resolved; use the evalrun of this checkout.");
+            throw new InvalidOperationException("this runcontrol's verify-bundle lists no receiptOutputs, so the receipts' files cannot be resolved; use the runcontrol of this checkout.");
 
         // receipt key -> (recorded path -> resolved entry)
         var resolved = new Dictionary<string, Dictionary<string, JsonElement>>(StringComparer.Ordinal);
@@ -150,6 +156,10 @@ internal sealed class BundleConflicts
         if (!plan.GetProperty("arms").EnumerateArray().Any(a => a.GetProperty("armId").GetString() == arm))
             throw new InvalidOperationException($"the bundle's plan has no arm '{arm}'; name one of {string.Join(", ", plan.GetProperty("arms").EnumerateArray().Select(a => a.GetProperty("armId").GetString()))}.");
         var targets = plan.GetProperty("targets").EnumerateArray().Select(t => t.GetProperty("name").GetString()!).ToList();
+        // a row a selected mod folder's mesh creates names the folder: the population's folders are targets too
+        if (plan.TryGetProperty("population", out var popBlock) && popBlock.ValueKind == JsonValueKind.Object
+            && popBlock.TryGetProperty("mods", out var popMods) && popMods.ValueKind == JsonValueKind.Array)
+            targets.AddRange(popMods.EnumerateArray().Select(m => m.GetString()!).Where(m => !targets.Contains(m, StringComparer.OrdinalIgnoreCase)));
         // a manual run's plan names its review arm (the profile with the selected mods); opened on that arm, the bundle
         // reports only what the selection brings
         bool manual = plan.TryGetProperty("reviewArm", out var revArm) && revArm.ValueKind == JsonValueKind.String && revArm.GetString() == arm;
@@ -235,7 +245,7 @@ internal sealed class BundleConflicts
                         var rn = names?.Ref(r.FormKey); var on = other is null ? null : names?.Ref(other);
                         rows.Add(new ConflictRow(id, check, c.Kind, c.A, c.B, c.Summary, r.FormKey, other, r.Physical,
                             CellRule.Drawable(rn?.Cell, on?.Cell), rn?.BaseType, rn?.BaseEditorId, on?.BaseType, on?.BaseEditorId,
-                            strength.GetValueOrDefault(check, "unknown"), newOnArm is null ? null : newOnArm.Contains(id)));
+                            strength.GetValueOrDefault(check, "unknown"), newOnArm is null ? null : newOnArm.Contains(id), c.Mesh));
                     }
                 }
             }

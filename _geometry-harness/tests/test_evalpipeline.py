@@ -1,14 +1,11 @@
-"""Known answers for evalpipeline.py's rules: arms from a selection entry, arm order, scope acceptance, stage reuse
-and stage outcomes.
+"""Known answers for evalpipeline.py, the driver of the stages after the bundle: stage reuse and outcomes, the child
+launch and its machine slot, the capture rounds, the report and reel stages, the stage tools, the entry keys each stage
+binds, the disk forecast, the patch-search pairs, and the continuation of a run folder the built-in controller carried
+through the bundle.
 
 Dependency-free: `python _geometry-harness/tests/test_evalpipeline.py`. EVALPIPELINE_PATH, if set, loads the module
-from that file instead (the sabotage arms use it). Plugins are synthetic.
-
-The arm rule (`derive_arms`): dependencies; subject; each partner unit; partners together (more than one unit);
-combined; subject with each partner unit (more than one unit); per key, combined + key and, when the key masters
-exactly one partner unit, subject + that unit + key; combined + every key (more than one key); then the entry's extra
-arms and order variants. A partner unit is one plugin, or every partner sharing a `group`. Duplicates (same plugins,
-same order rule) collapse to the first.
+from that file instead (the sabotage arms use it). The arms, their order, scope acceptance and the measuring stages are
+the built-in controller's (runcontrol --self-test holds their known answers).
 """
 import importlib.util
 import json
@@ -28,32 +25,6 @@ try:
 except (FileNotFoundError, ImportError, OSError) as _ex:
     EP, LOAD_ERROR = None, f"{type(_ex).__name__}: {_ex}"
 PASSED, FAILURES = [], []
-
-BASE = ["Base.esm", "Dlc.esm", "Fix.esp"]
-
-
-def hdr(masters, esm=False):
-    return {"masters": masters, "esm": esm}
-
-
-HEADERS = {"Base.esm": hdr([], True), "Dlc.esm": hdr(["Base.esm"], True), "Fix.esp": hdr(["Base.esm", "Dlc.esm"]),
-           "Subj.esp": hdr(["Base.esm"]), "PA.esp": hdr(["Base.esm"]), "PB.esp": hdr(["Base.esm"]),
-           "PC1.esp": hdr(["Base.esm"]), "PC2.esp": hdr(["Base.esm"]), "PCP.esp": hdr(["PC1.esp", "PC2.esp"]),
-           "KA.esp": hdr(["Base.esm", "Subj.esp", "PA.esp"]), "KB.esp": hdr(["Base.esm", "Subj.esp", "PB.esp"]),
-           "KS.esp": hdr(["Base.esm", "Subj.esp"]), "SubjM.esp": hdr(["Base.esm"], True)}
-SOURCE = ["Base.esm", "Dlc.esm", "PA.esp", "Fix.esp", "PB.esp", "PC1.esp", "PC2.esp", "PCP.esp",
-          "Subj.esp", "KA.esp", "KB.esp", "KS.esp", "SubjM.esp"]
-
-
-def entry(partners, keys, **kw):
-    e = {"subject": {"plugin": "Subj.esp"}, "partners": [{"plugin": p} if isinstance(p, str) else p for p in partners],
-         "keys": [{"plugin": k} for k in keys], "extraArms": [], "orderVariants": []}
-    e.update(kw)
-    return e
-
-
-def sets(arms):
-    return sorted((tuple(sorted(a["evaluated"])), a.get("variant") or "") for a in arms)
 
 
 def check(name, fn):
@@ -77,135 +48,6 @@ def refuses(fn, needle):
         assert needle in str(r), f"refused, but the sentence lacks {needle!r}: {r}"
         return
     raise AssertionError(f"expected a refusal naming {needle!r}; it was accepted")
-
-
-# ---- arms ----
-
-def case_1_one_partner_one_key_is_five_arms():
-    arms = EP.derive_arms(entry(["PA.esp"], ["KA.esp"]), HEADERS)
-    want = sorted([((), ""), (("Subj.esp",), ""), (("PA.esp",), ""), (("PA.esp", "Subj.esp"), ""),
-                   (("KA.esp", "PA.esp", "Subj.esp"), "")])
-    assert sets(arms) == want, f"five arms (pair + key collapses into combined + key), got {sets(arms)}"
-
-
-def case_2_two_partners_two_keys_is_thirteen_arms():
-    arms = EP.derive_arms(entry(["PA.esp", "PB.esp"], ["KA.esp", "KB.esp"]), HEADERS)
-    s = sets(arms)
-    assert len(s) == 13, f"13 arms for two partners and two keys, got {len(s)}: {s}"
-    for want in [(("PA.esp", "PB.esp"), ""), (("PA.esp", "Subj.esp"), ""), (("KA.esp", "PA.esp", "Subj.esp"), ""),
-                 (("KA.esp", "KB.esp", "PA.esp", "PB.esp", "Subj.esp"), "")]:
-        assert want in s, f"missing arm {want}"
-
-
-def case_3_partner_group_is_one_unit():
-    arms = EP.derive_arms(entry(["PA.esp", {"plugin": "PC1.esp", "group": "c"}, {"plugin": "PC2.esp", "group": "c"},
-                                 {"plugin": "PCP.esp", "group": "c"}], []), HEADERS)
-    s = sets(arms)
-    assert (("PC1.esp", "PC2.esp", "PCP.esp"), "") in s, f"the group is one partner arm, got {s}"
-    assert (("PC1.esp",), "") not in s, "a group member never stands alone"
-    assert len(s) == 8, f"8 arms for two partner units and no key, got {len(s)}"
-
-
-def case_4_key_without_partner_master_has_no_pair_arm():
-    s = sets(EP.derive_arms(entry(["PA.esp", "PB.esp"], ["KS.esp"]), HEADERS))
-    assert len(s) == 9, f"two units, one key mastering no partner: 8 + combined+key = 9, got {len(s)}: {s}"
-
-
-def case_5_extra_arm_and_order_variant():
-    e = entry(["PA.esp"], [], extraArms=[{"id": "x", "plugins": ["Subj.esp", "PA.esp"]}],
-              orderVariants=[{"id": "combined-reverse", "of": "combined", "reverse": True}])
-    s = sets(EP.derive_arms(e, HEADERS))
-    assert (("PA.esp", "Subj.esp"), "combined-reverse") in s, f"the order variant is its own arm, got {s}"
-    assert len(s) == 5, f"the extra arm duplicates combined and collapses: 4 + 1 variant = 5, got {len(s)}"
-
-
-# ---- order ----
-
-def case_7_order_follows_source_with_masters_first():
-    arm = {"evaluated": ["Subj.esp", "PA.esp", "KA.esp"], "keys": ["KA.esp"]}
-    got = EP.order_arm(arm, BASE, SOURCE, HEADERS)
-    assert got == ["Base.esm", "Dlc.esm", "PA.esp", "Fix.esp", "Subj.esp", "KA.esp"], got
-
-
-def case_9_esm_flagged_esp_loads_before_esps():
-    arm = {"evaluated": ["SubjM.esp", "PA.esp"], "keys": []}
-    got = EP.order_arm(arm, BASE, SOURCE, HEADERS)
-    assert got.index("SubjM.esp") < got.index("Fix.esp"), f"an ESM-flagged plugin loads with the masters, got {got}"
-
-
-def case_11_late_master_refused():
-    src = [p for p in SOURCE if p != "KA.esp"]
-    src.insert(src.index("Subj.esp"), "KA.esp")   # key before its master
-    arm = {"evaluated": ["Subj.esp", "PA.esp", "KA.esp"], "keys": ["KA.esp"]}
-    refuses(lambda: EP.order_arm(arm, BASE, src, HEADERS), "KA.esp")
-
-
-def case_13_missing_from_source_refused():
-    arm = {"evaluated": ["Subj.esp", "Gone.esp"], "keys": []}
-    refuses(lambda: EP.order_arm(arm, BASE, SOURCE, {**HEADERS, "Gone.esp": hdr(["Base.esm"])}), "Gone.esp")
-
-
-def case_15_reverse_variant_that_breaks_masters_refused():
-    arm = {"evaluated": ["PC1.esp", "PC2.esp", "PCP.esp"], "keys": [], "reverse": True}
-    refuses(lambda: EP.order_arm(arm, BASE, SOURCE, HEADERS), "PCP.esp")
-
-
-def case_16_reverse_variant_swaps_independent_plugins():
-    arm = {"evaluated": ["Subj.esp", "PA.esp"], "keys": [], "reverse": True}
-    got = EP.order_arm(arm, BASE, SOURCE, HEADERS)
-    assert got.index("Subj.esp") < got.index("PA.esp"), f"reverse puts the subject before the partner, got {got}"
-    assert got[:2] == ["Base.esm", "Dlc.esm"], f"the baseline keeps its place, got {got}"
-
-
-# ---- scope acceptance ----
-
-def scope_doc(**over):
-    d = {"complete": True, "walkFailures": [], "unreadableRecords": [],
-         "configuration": {"fingerprint": "f", "plugins": [{"Name": n, "Path": f"X:/{n}", "Sha256": "h" + n}
-                                                           for n in ["Base.esm", "Subj.esp"]],
-                           "providers": [{"Name": "M1", "Kind": "mod"}]},
-         "targets": [{"name": "Subj.esp", "sha256": "hSubj.esp",
-                      "footprint": {"placed": {"cells": [{"cell": "000A:Base.esm", "kind": "interior"},
-                                                         {"cell": "000B:Base.esm", "kind": "exterior"}]}}}]}
-    d.update(over)
-    return d
-
-
-EXPECT = {"plugins": [{"name": n, "path": f"X:/{n}", "sha256": "h" + n} for n in ["Base.esm", "Subj.esp"]],
-          "mods": ["M1"], "targets": ["Subj.esp"], "censusCells": {"Subj.esp": ["000A:Base.esm", "000B:Base.esm"]}}
-
-
-def case_17_scope_accepted():
-    try:
-        r = EP.accept_scope(scope_doc(), EXPECT)
-    except EP.Refusal as ex:
-        raise AssertionError(f"a good scope must be accepted, refused: {ex}")
-    assert r["targets"]["Subj.esp"]["missingCensusCells"] == [], r
-
-
-def case_19_incomplete_scope_refused():
-    refuses(lambda: EP.accept_scope(scope_doc(complete=False), EXPECT), "incomplete")
-    refuses(lambda: EP.accept_scope(scope_doc(walkFailures=[{"x": 1}]), EXPECT), "incomplete")
-
-
-def case_21_provider_or_bytes_swap_refused():
-    d = scope_doc()
-    d["configuration"]["plugins"][1]["Sha256"] = "other"
-    refuses(lambda: EP.accept_scope(d, EXPECT), "Subj.esp")
-    d = scope_doc()
-    d["configuration"]["providers"] = [{"Name": "M2", "Kind": "mod"}]
-    refuses(lambda: EP.accept_scope(d, EXPECT), "provider")
-
-
-def case_23_missing_census_cell_refused():
-    exp = dict(EXPECT, censusCells={"Subj.esp": ["000A:Base.esm", "000C:Base.esm"]})
-    refuses(lambda: EP.accept_scope(scope_doc(), exp), "000C:Base.esm")
-
-
-def case_25_empty_target_footprint_refused():
-    d = scope_doc()
-    d["targets"] = []
-    refuses(lambda: EP.accept_scope(d, EXPECT), "target")
 
 
 # ---- stage reuse and outcomes ----
@@ -274,16 +116,6 @@ def case_39_precedent_script_absent_is_a_visible_refusal():
         ctx = types.SimpleNamespace(machine={"precedentCmd": ["python", f"{t}/absent/precedent_stage.py", "--bundle",
                                                               "{bundle}", "--out", "{out}"]}, out=Path(t), id="x")
         refuses(lambda: EP.stage_precedent(ctx, {}, Path(t) / "precedent"), "stage script absent")
-
-
-def case_41_unbuilt_scene_stage_is_a_stated_refusal():
-    try:
-        EP.stage_scenes(None, {}, Path("."))
-    except EP.Refusal as r:
-        assert "not built" in str(r), f"the refusal says what was not done, got {r}"
-        assert isinstance(r, EP.NonBlockingRefusal), "it does not block the report"
-        return
-    raise AssertionError("an unbuilt stage must refuse visibly, never accept with nothing done")
 
 
 def case_43_captured_frames_reach_the_media_bundle():
@@ -376,31 +208,6 @@ def case_51_a_round_captures_at_most_the_cap():
 
 # ---- plugin identity and placed plugins (Context.resolve over a small synthetic lab) ----
 
-def write_plugin(path: Path, masters, esm=False):
-    """A minimal TES4 header: the flags word and one MAST subrecord per master (all plugin_header reads)."""
-    body = b""
-    for m in masters:
-        z = m.encode("cp1252") + b"\0"
-        body += b"MAST" + len(z).to_bytes(2, "little") + z + b"DATA" + (8).to_bytes(2, "little") + bytes(8)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b"TES4" + len(body).to_bytes(4, "little") + (1 if esm else 0).to_bytes(4, "little")
-                     + bytes(12) + body)
-
-
-def lab_context(t: Path, files: dict, source: list, ent: dict):
-    """files: {(mod or None, plugin): (masters, esm)}; None is the game's Data."""
-    for (mod, plugin), (masters, esm) in files.items():
-        write_plugin((t / "game" / "Data" / plugin) if mod is None else (t / "lab" / "mods" / mod / plugin),
-                     masters, esm)
-    (t / "lab" / "mods").mkdir(parents=True, exist_ok=True)
-    lo = t / "src" / "profiles" / "P" / "loadorder.txt"
-    lo.parent.mkdir(parents=True, exist_ok=True)
-    lo.write_text("".join(p + "\n" for p in source), encoding="utf-8")
-    e = {"schema": 1, "id": "t", "source": {"instance": str(t / "src"), "profile": "P"},
-         "lab": {"instance": str(t / "lab"), "game": str(t / "game")}, "extraArms": [], "orderVariants": [], **ent}
-    (t / "entry.json").write_text(json.dumps(e), encoding="utf-8")
-    return EP.Context(t / "entry.json", None, t / "out")
-
 
 MIXED_FILES = {(None, "Base.esm"): ([], True), (None, "Dlc.esm"): (["Base.esm"], True),
                ("MFix", "Fix.esp"): (["Base.esm", "Dlc.esm"], False),
@@ -416,63 +223,10 @@ MIXED_ENTRY = {"subject": {"plugin": "Subj.esp", "mod": "MS"},
                "dependencies": [{"plugin": "Fix.esp", "mod": "MFix"}], "baseline": ["Base.esm", "Dlc.esm", "Fix.esp"]}
 
 
-def case_52_a_master_named_in_another_case_is_one_plugin():
-    with tempfile.TemporaryDirectory() as t:
-        res = lab_context(Path(t), MIXED_FILES, MIXED_SOURCE, MIXED_ENTRY).resolve()
-        assert len({p.lower() for p in res["baseline"]}) == len(res["baseline"]) == 3, (
-            f"the baseline names each plugin once, got {res['baseline']}")
-        assert sorted(res["headers"]) == sorted({p for (_, p) in MIXED_FILES}), (
-            f"each plugin's header is read once, under one spelling, got {sorted(res['headers'])}")
-        for arm in res["arms"]:
-            low = [p.lower() for p in arm["plugins"]]
-            assert len(low) == len(set(low)), f"arm {arm['id']} loads a plugin twice: {arm['plugins']}"
-            assert all(p in res["headers"] for p in arm["plugins"]), (
-                f"arm {arm['id']} names a plugin in another spelling: {arm['plugins']}")
-        units = {a["id"]: a["evaluated"] for a in res["arms"]}
-        assert units["unit:0"] == ["PA.esp"] and units["unit:1"] == ["PB.esp"], (
-            f"a partner unit carries no baseline plugin under another spelling, got {units}")
-        assert "pair:0+key:KA.esp" in units, f"the key's lower-case master still names partner PA, got {list(units)}"
-
-
 PLACED_FILES = {(None, "Base.esm"): ([], True), ("MS", "Subj.esp"): (["Base.esm"], False),
                 ("MA", "PA.esp"): (["Base.esm"], False), ("MB", "PB.esp"): (["Base.esm"], False),
                 ("ML", "Lab.esp"): (["Base.esm", "PB.esp"], False)}
 PLACED_SOURCE = ["Base.esm", "PA.esp", "PB.esp", "Subj.esp"]
-
-
-def placed_entry(places):
-    return {"subject": {"plugin": "Subj.esp", "mod": "MS"},
-            "partners": [{"plugin": "PA.esp", "mod": "MA"}, {"plugin": "Lab.esp", "mod": "ML"}],
-            "keys": [], "dependencies": [{"plugin": "PB.esp", "mod": "MB"}], "baseline": ["Base.esm", "PB.esp"],
-            "places": places}
-
-
-def case_53_a_plugin_the_source_does_not_load_takes_its_named_place():
-    with tempfile.TemporaryDirectory() as t:
-        res = lab_context(Path(t), PLACED_FILES, PLACED_SOURCE, placed_entry({"lab.esp": {"after": "PB.esp"}})).resolve()
-        comb = next(a for a in res["arms"] if a["id"] == "combined")
-        assert comb["plugins"] == ["Base.esm", "PA.esp", "PB.esp", "Lab.esp", "Subj.esp"], comb["plugins"]
-    with tempfile.TemporaryDirectory() as t:
-        refuses(lambda: lab_context(Path(t), PLACED_FILES, PLACED_SOURCE, placed_entry({})).resolve(), "Lab.esp")
-
-
-def case_54_a_place_before_the_plugins_own_master_is_refused():
-    with tempfile.TemporaryDirectory() as t:
-        refuses(lambda: lab_context(Path(t), PLACED_FILES, PLACED_SOURCE,
-                                    placed_entry({"Lab.esp": {"after": "PA.esp"}})).resolve(), "its master PB.esp")
-
-
-def case_55_a_place_after_a_plugin_the_source_does_not_load_is_refused():
-    with tempfile.TemporaryDirectory() as t:
-        refuses(lambda: lab_context(Path(t), PLACED_FILES, PLACED_SOURCE,
-                                    placed_entry({"Lab.esp": {"after": "Gone.esp"}})).resolve(), "Gone.esp")
-
-
-def case_56_a_place_for_a_plugin_the_source_loads_is_refused():
-    with tempfile.TemporaryDirectory() as t:
-        refuses(lambda: lab_context(Path(t), PLACED_FILES, PLACED_SOURCE,
-                                    placed_entry({"Lab.esp": {"after": "PB.esp"}, "PA.esp": {"after": "PB.esp"}})
-                                    ).resolve(), "PA.esp is in the source profile's load order already")
 
 
 def case_57_the_report_stage_plans_with_the_capture_closed():
@@ -493,47 +247,6 @@ def case_57_the_report_stage_plans_with_the_capture_closed():
         assert "--captures-final" not in EP.report_plan_argv(ctx, {"keys": []}, out / "p"), \
             "a plan inside the capture rounds still asks for captures"
     assert "final=True" in inspect.getsource(EP.stage_report), "the report stage plans with the capture closed"
-
-
-def case_58_the_records_stage_keeps_finished_arms_and_scales_its_deadline():
-    import inspect
-    per_arm = getattr(EP, "RECORDS_ARM_MINUTES", None)
-    assert isinstance(per_arm, (int, float)) and 60 <= per_arm <= 600, f"a per-arm record deadline is set, got {per_arm}"
-    src = inspect.getsource(EP.stage_records)
-    assert "--checkpoints" in src and "--arm-deadline-min" in src, "the records stage keeps finished arms and stops a hung arm"
-    assert "RECORDS_ARM_MINUTES * len(open_arms)" in src, "the stage's backstop scales with the open arms"
-    assert "deadline_min=240" not in src, "no fixed stage deadline"
-
-
-def case_59_the_records_stage_takes_the_machine_slot_for_its_backstop():
-    import types
-    calls = []
-    saved = EP.child, EP.reader_cmd
-    with tempfile.TemporaryDirectory() as t:
-        out = Path(t)
-        for d in ("scope", "evaluation", "prepare", "records"):
-            (out / d).mkdir()
-        (out / "scope" / "scopes.json").write_text("{}", encoding="utf-8")
-        (out / "prepare" / "preparation.json").write_text('{"arms": []}', encoding="utf-8")
-        led = {f"row{i}__{a}": {"status": "mcp-only"} for i, a in enumerate(("baseline", "candidate-01", "candidate-02"))}
-        (out / "evaluation" / "ledger.json").write_text(json.dumps({"entries": led}), encoding="utf-8")
-        ctx = types.SimpleNamespace(out=out, game=out, instance=out, profile="p", id="m", machine={})
-        try:
-            EP.child = lambda *a, **k: calls.append((a, k)) or {"exitCode": 0}
-            EP.reader_cmd = lambda c: "reader"
-            try:
-                EP.stage_records(ctx, {}, out / "records")
-            except EP.Refusal:
-                pass
-        finally:
-            EP.child, EP.reader_cmd = saved
-    cap = [k for a, k in calls if len(a) > 2 and a[2] == "records-capture"]
-    assert cap, "the records stage reads its arms through one child"
-    k = cap[0]
-    assert k.get("heavy") is True, f"the records stage takes the machine slot, got heavy={k.get('heavy')}"
-    want = EP.RECORDS_ARM_MINUTES * 3 + 10
-    assert k.get("hold_min") == want, f"the slot is held for the stage's backstop ({want} min), got {k.get('hold_min')}"
-    assert k.get("deadline_min") == want, f"the stage's backstop is {want} min, got {k.get('deadline_min')}"
 
 
 def case_60_a_heavy_child_holds_the_slot_for_its_own_hold_minutes():
@@ -566,37 +279,6 @@ def case_60_a_heavy_child_holds_the_slot_for_its_own_hold_minutes():
     assert a1[i + 1] == "460" and a1.count("--max-min") == 1, f"the hold is 460 min, once, got {a1[:12]}"
     assert a2[a2.index("--max-min") + 1] == "180", "a child with no hold of its own keeps the machine's hold"
     assert a1[a1.index("--") + 1:] == ["x"], "the job's own argv follows the prefix"
-
-
-def case_61_evaluate_stops_itself_at_its_budget_with_the_slot_held_that_long():
-    import types
-    def run(budget):
-        calls = []
-        saved = EP.child, EP.evalrun
-        with tempfile.TemporaryDirectory() as t:
-            out = Path(t)
-            (out / "evaluation").mkdir()
-            (out / "evaluate").mkdir()
-            (out / "evaluation" / "ledger.json").write_text('{"runIds": [], "entries": {}}', encoding="utf-8")
-            (out / "evaluation" / "plan.json").write_text("{}", encoding="utf-8")
-            ctx = types.SimpleNamespace(out=out, id="m", machine={}, entry={"evaluation": {"budgetMinutes": budget}})
-            try:
-                def fake(*a, **k):
-                    calls.append(k)
-                    return {"exitCode": 0, "stopped": None}
-                EP.child = fake
-                EP.evalrun = lambda *a: list(a)
-                EP.stage_evaluate(ctx, {}, out / "evaluate")
-            finally:
-                EP.child, EP.evalrun = saved
-        return calls
-    k = run(325)[0]
-    assert k.get("deadline_min", 0) > 325, f"evalrun's own 325-minute budget stops it first, got an outer deadline of {k.get('deadline_min')}"
-    assert k.get("hold_min") == k.get("deadline_min"), f"the slot is held as long as the stage's deadline, got {k.get('hold_min')}"
-    assert k.get("heavy") is True, "evaluate takes the machine slot"
-    k = run(105)[0]
-    assert k.get("deadline_min", 0) > 105, f"a short budget also stops by itself, got {k.get('deadline_min')}"
-    assert len(run(325)) == 1, "one invocation when evalrun ends by itself"
 
 
 # ---- runner defects after round 2 (cases 62-67) ----
@@ -835,67 +517,6 @@ def case_66_capture_holds_the_machine_slot_once_across_its_rounds():
     assert float(argv[argv.index("--max-min") + 1]) >= bound, f"its hold covers every round ({bound} min), got {argv[:12]}"
 
 
-def case_67_an_evaluation_stopped_at_its_budget_is_resumed_by_the_next_run_not_reused():
-    import types
-    saved = EP.Context, dict(EP.STAGE_BODIES), EP.child
-    calls, problems = [], []
-    with tempfile.TemporaryDirectory() as t:
-        out = Path(t) / "run"
-        os.environ["HOUSECARL_RUNLOG_DIR"] = str(Path(t) / "runlog")
-
-        class FakeCtx:
-            def __init__(self, entry, machine, o):
-                self.entry, self.machine, self.out, self.id = {"evaluation": {"budgetMinutes": 105}}, {}, Path(o), "m"
-
-            def resolve(self):
-                return {"arms": [], "subject": ["S.esp"], "keys": []}
-
-        def light(name):
-            def body(ctx, res, sdir):
-                f = sdir / f"{name}.json"
-                f.write_text("{}", encoding="utf-8")
-                if name == "plan":
-                    (ctx.out / "evaluation").mkdir(exist_ok=True)
-                    (ctx.out / "evaluation" / "plan.json").write_text('{"budgets": {"minutes": 105}}', encoding="utf-8")
-                    (ctx.out / "evaluation" / "ledger.json").write_text('{"runIds": [], "entries": {}}', encoding="utf-8")
-                return {}, [f]
-            return body
-
-        def fake_child(ctx, ledger_dir, op, argv, **k):
-            calls.append(list(argv))
-            led = {"runIds": ["r%d" % len(calls)], "entries": {
-                "a__baseline": {"status": "completed"}, "b__baseline": {"status": "stopped(deadline)"},
-                "c__baseline": {"status": "stopped(deadline)"}, "d__candidate-01": {"status": "skipped-budget"}}}
-            (ctx.out / "evaluation" / "ledger.json").write_text(json.dumps(led), encoding="utf-8")
-            return {"exitCode": 0, "stopped": None}
-        try:
-            EP.Context, EP.child = FakeCtx, fake_child
-            for n in ("census", "prepare", "scope", "plan"):
-                EP.STAGE_BODIES[n] = light(n)
-            a = types.SimpleNamespace(entry="e.json", machine=None, out=str(out), through="evaluate")
-            rc1 = EP.cmd_run(a)
-            status = json.loads((out / "status.json").read_text(encoding="utf-8"))
-            accepted = "evaluate" in EP.StageLedger(out).doc["stages"]
-            rc2 = EP.cmd_run(a)
-        finally:
-            EP.Context, EP.child = saved[0], saved[2]
-            EP.STAGE_BODIES.clear()
-            EP.STAGE_BODIES.update(saved[1])
-            os.environ.pop("HOUSECARL_RUNLOG_DIR", None)
-    sentence = str(status.get("sentence") or status)
-    if accepted:
-        problems.append("the stage was accepted with rows stopped or skipped at the budget")
-    if not ("stopped at its budget" in sentence and "3 rows open" in sentence and "run again" in sentence):
-        problems.append(f"the run's status does not say the evaluation stopped at its budget with 3 rows open and that "
-                        f"running again resumes it: {sentence!r}")
-    if rc1 != EP.EXIT_OK:
-        problems.append(f"the refusal is non-blocking (exit {rc1})")
-    if len(calls) != 2 or "resume" not in calls[-1]:
-        problems.append(f"the rerun at the same budget must resume evalrun, got {len(calls)} call(s): "
-                        f"{[c[2:4] for c in calls]}")
-    assert not problems, "; ".join(problems)
-
-
 def case_68_a_stage_after_the_bundle_runs_again_when_its_tools_change():
     """F7: the capture stage binds the code it runs. The driver under test is copied into a scratch harness with stand-in
     tools beside it (tools resolve next to the driver), run through the capture, then a tool is edited. Wrong answers:
@@ -939,7 +560,7 @@ def case_68_a_stage_after_the_bundle_runs_again_when_its_tools_change():
             return body
         try:
             ep.Context = FakeCtx
-            for n in list(ep.STAGE_BODIES):
+            for n in ep.STAGES:
                 ep.STAGE_BODIES[n] = light(n)
             a = types.SimpleNamespace(entry="e.json", machine=None, out=str(out), through="capture")
 
@@ -1055,56 +676,6 @@ def case_2321_a_patch_search_change_reruns_report_plan_and_later_not_the_bundle(
     assert rc1 == EP.EXIT_OK and first == list(EP.STAGES), f"the first run ran {first} (exit {rc1})"
     assert after_search == AFTER_REPORT_PLAN, f"a patch-search change re-ran {after_search}"
     assert after_names == ["bundle", "precedent"] + AFTER_REPORT_PLAN, f"a mod-name change re-ran {after_names}"
-
-
-def _legacy_inputs(entry, name, ledger_doc, tools):
-    """The stage inputs as the driver at 02d9ea09 hashed them: the whole entry from the bundle on, else the entry
-    without its presentation keys; every earlier stage's recorded inputsSha256; the stage's tools."""
-    measured = {k: v for k, v in entry.items() if k not in EP.PRESENTATION_KEYS}
-    h = EP.sha256_json(entry if EP.STAGES.index(name) >= EP.STAGES.index("bundle") else measured)
-    inputs = {"entry": h, "upstream": {s: (ledger_doc["stages"].get(s) or {}).get("inputsSha256")
-                                       for s in EP.STAGES[:EP.STAGES.index(name)]}}
-    if tools:
-        inputs["tools"] = tools
-    return inputs
-
-
-def case_2322_a_ledger_from_the_earlier_rule_is_reused_and_then_follows_the_new_one():
-    """C2322 (item 2, existing runs): a stages.json written under the earlier whole-entry rule (Hroggar's) is reused
-    with nothing re-run while the entry is unchanged, and a patch-search change after that reruns only report-plan and
-    later. Wrong answers: the rule change alone reruns the bundle (which then refuses over its folder); the upgrade
-    hides a real change."""
-    e = {"evaluation": {"budgetMinutes": 5}, "modNames": {"S.esp": "S"}, "patchSearch": "X:/a.json"}
-    with tempfile.TemporaryDirectory() as t:
-        out, _ = _run_pipeline(t, {}, [], [e])
-        led = EP.StageLedger(out)
-        for s in EP.STAGES:   # rewrite every receipt as the earlier driver would have hashed it
-            rec = led.doc["stages"][s]
-            legacy = _legacy_inputs(e, s, led.doc, rec["inputs"].get("tools"))
-            rec.update(inputs=legacy, inputsSha256=EP.sha256_json(legacy))
-        led._save()
-        _, got = _run_pipeline(t, {}, [], [e, dict(e, patchSearch="X:/b.json")])
-    (rc1, same), (rc2, changed) = got
-    assert rc1 == EP.EXIT_OK and same == [], f"a ledger from the earlier rule re-ran {same} with the entry unchanged"
-    assert changed == AFTER_REPORT_PLAN, f"after the upgrade a patch-search change re-ran {changed}"
-
-
-def case_2322_b_the_earlier_rule_never_reuses_a_stage_after_one_that_ran():
-    """C2322 (b): the earlier-rule fallback holds only while every earlier stage was reused. A raised budget reruns
-    evaluate; every stage after it must run again. Wrong answer (caught by test_records_keep_work p1 before this case
-    existed): records re-keyed and reused against the upstream hashes from before the run."""
-    def plan_json(name, ctx, sdir):
-        if name == "plan":
-            (ctx.out / "evaluation").mkdir(exist_ok=True)
-            (ctx.out / "evaluation" / "plan.json").write_text('{"budgets": {"minutes": 5}}', encoding="utf-8")
-        return None
-    e = {"evaluation": {"budgetMinutes": 5}, "modNames": {"S.esp": "S"}}
-    with tempfile.TemporaryDirectory() as t:
-        _, got = _run_pipeline(t, {}, [], [e, dict(e, evaluation={"budgetMinutes": 9})], refuse_when=plan_json)
-    (rc1, first), (rc2, raised) = got
-    assert rc1 == EP.EXIT_OK and first == list(EP.STAGES), f"the first run ran {first} (exit {rc1})"
-    want = list(EP.STAGES[EP.STAGES.index("evaluate"):])
-    assert raised == want, f"a raised budget re-ran {raised}, expected {want}"
 
 
 def case_2323_a_refused_stage_keeps_its_accepted_receipt_so_restoring_the_input_restores_it():
@@ -1271,6 +842,130 @@ def case_2324_a_run_through_report_plan_needs_every_partner_pair_searched_before
         status = json.loads((out / "status.json").read_text(encoding="utf-8"))
     assert got[0] == (EP.EXIT_REFUSED, []), f"the run must stop before census, got {got}"
     assert "PB.esp and S.esp" in status.get("sentence", ""), f"the stop does not name the pairs: {status}"
+
+
+def _continuation_folder(t, entry_doc):
+    """A run folder as the built-in controller leaves it through the bundle: the entry, every census-to-bundle receipt
+    accepted under the driver's own inputs rule, scenes refused and not blocking, and its arms and preparation."""
+    import types
+    out = Path(t) / "run"
+    entry_p = Path(t) / "entry.json"
+    entry_p.write_text(json.dumps(entry_doc), encoding="utf-8")
+    ctx = EP.Context(entry_p, None, out)
+    led = EP.StageLedger(out)
+    reads = EP.stage_entry_keys()
+    measured = {k: v for k, v in ctx.entry.items() if k not in EP.PRESENTATION_KEYS}
+    for name in EP.MEASURING:
+        earlier = EP.STAGES[:EP.STAGES.index(name)]
+        inputs = {"entry": EP.stage_entry_hash(ctx.entry, measured, reads.get(name, [])),
+                  "upstream": {s: (led.doc["stages"].get(s) or {}).get("inputsSha256") for s in earlier}}
+        f = out / name / f"{name}.json"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("{}", encoding="utf-8")
+        if name == "scenes":
+            led.record(name, inputs, [], exit_code=2)
+            led.doc["history"][-1]["reason"] = "refused: overlap scene acquisition is not built in this version."
+            led._save()
+        else:
+            led.record(name, inputs, [f], exit_code=0)
+    (out / "prepare" / "preparation.json").write_text(json.dumps({
+        "baseline": ["Base.esm"], "headers": {"S.esp": {"path": str(Path(t) / "S.esp"), "masters": ["Base.esm"]}},
+        "providers": {"S.esp": "SMod"}, "arms": []}), encoding="utf-8")
+    (out / "arms.json").write_text(json.dumps([
+        {"id": "dependencies", "evaluated": [], "keys": [], "plugins": ["Base.esm"], "mods": []},
+        {"id": "subject", "evaluated": ["S.esp", "Sc.esp"], "keys": [], "plugins": ["Base.esm", "S.esp", "Sc.esp"], "mods": ["SMod"]},
+        {"id": "unit:0", "evaluated": ["PA.esp"], "keys": [], "plugins": ["Base.esm", "PA.esp"], "mods": []},
+        {"id": "unit:1", "evaluated": ["PB.esp", "PBm.esp"], "keys": [], "plugins": ["Base.esm", "PBm.esp", "PB.esp"], "mods": []},
+        {"id": "combined+key:K.esp", "evaluated": ["S.esp", "PA.esp", "K.esp"], "keys": ["K.esp"], "plugins": [], "mods": []},
+        {"id": "combined+key:J.esp", "evaluated": ["S.esp", "PA.esp", "J.esp"], "keys": ["J.esp"], "plugins": [], "mods": []},
+        {"id": "combined+keys", "evaluated": [], "keys": ["K.esp", "J.esp"], "plugins": [], "mods": []}]), encoding="utf-8")
+    return out, entry_p, types
+
+
+def case_2330_the_run_folders_own_record_is_what_the_later_stages_resolve():
+    """C2330 (step 3): the driver no longer derives arms; it reads what the built-in controller resolved. Wrong answers:
+    the subject taken from the entry rather than the subject arm (companions lost), a key listed twice, partner units
+    merged, or a folder with no record read as an empty evaluation."""
+    with tempfile.TemporaryDirectory() as t:
+        out, entry_p, _ = _continuation_folder(t, {"schema": 1, "id": "m", "inPlace": {"instance": str(t), "profile": "P", "game": str(t)}})
+        res = EP.Context(entry_p, None, out).resolve()
+        assert res["subject"] == ["S.esp", "Sc.esp"], res["subject"]
+        assert res["partners"] == [["PA.esp"], ["PB.esp", "PBm.esp"]], res["partners"]
+        assert res["keys"] == ["K.esp", "J.esp"], res["keys"]
+        assert res["baseline"] == ["Base.esm"] and "S.esp" in res["headers"] and res["providers"] == {"S.esp": "SMod"}
+        assert [a["id"] for a in res["arms"]][:2] == ["dependencies", "subject"]
+        # in place there is no subject arm: the profile with the selection is the combined arm
+        (out / "arms.json").write_text(json.dumps([
+            {"id": "combined", "evaluated": ["Sel.esp"], "keys": [], "plugins": ["Base.esm", "Sel.esp"], "mods": ["Sel"]},
+            {"id": "without-selection", "evaluated": [], "keys": [], "plugins": ["Base.esm"], "mods": []}]), encoding="utf-8")
+        res = EP.Context(entry_p, None, out).resolve()
+        assert (res["subject"], res["partners"], res["keys"]) == (["Sel.esp"], [], []), res
+        (out / "arms.json").unlink()
+        refuses(lambda: EP.Context(entry_p, None, out).resolve(), "runcontrol run --entry")
+
+
+def case_2331_a_fresh_run_folder_is_refused_naming_the_built_in_controller_and_nothing_runs():
+    """C2331 (step 3): census to bundle are never run here. A run folder the controller has not carried through the
+    bundle stops before any stage with one sentence naming the runcontrol command for this entry and folder."""
+    import types
+    with tempfile.TemporaryDirectory() as t:
+        entry_p = Path(t) / "entry.json"
+        entry_p.write_text(json.dumps({"schema": 1, "id": "m", "inPlace": {"instance": str(t), "profile": "P", "game": str(t)}}), encoding="utf-8")
+        out = Path(t) / "run"
+        os.environ["HOUSECARL_RUNLOG_DIR"] = str(Path(t) / "runlog")
+        try:
+            rc = EP.cmd_run(types.SimpleNamespace(entry=str(entry_p), machine=None, out=str(out), through=None))
+        finally:
+            os.environ.pop("HOUSECARL_RUNLOG_DIR", None)
+        status = json.loads((out / "status.json").read_text(encoding="utf-8"))
+        made = sorted(x.name for x in out.iterdir())
+    assert rc == EP.EXIT_REFUSED, rc
+    assert status["stoppedAt"] == "census" and "runcontrol run --entry" in status["sentence"] and "--through bundle" in status["sentence"], status
+    assert made == ["runlog", "status.json"], f"a refused run wrote {made}"   # an in-place run keeps its run log here
+
+
+def case_2332_a_controller_run_folder_is_continued_reusing_census_to_bundle_and_carrying_scenes():
+    """C2332 (step 3): on a folder the controller carried through the bundle, every census-to-bundle receipt is reused,
+    scenes' refusal is carried on as not blocking, and the first stage after the bundle runs. A changed entry is not
+    measured here: the run stops at census naming runcontrol. Wrong answers: a measuring stage run or skipped, scenes
+    blocking the run, or the bundle's receipt not reused because its entry keys were derived from no body."""
+    import io, contextlib, types
+    saved = dict(EP.STAGE_BODIES)
+    ran = []
+
+    def precedent(ctx, res, sdir):
+        ran.append(("precedent", res["subject"]))
+        f = sdir / "cards.json"
+        f.write_text("{}", encoding="utf-8")
+        return {}, [f]
+    with tempfile.TemporaryDirectory() as t:
+        doc = {"schema": 1, "id": "m", "inPlace": {"instance": str(t), "profile": "P", "game": str(t)}, "modNames": {"S.esp": "Ess"}}
+        out, entry_p, _ = _continuation_folder(t, doc)
+        os.environ["HOUSECARL_RUNLOG_DIR"] = str(Path(t) / "runlog")
+        try:
+            EP.STAGE_BODIES["precedent"] = precedent
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = EP.cmd_run(types.SimpleNamespace(entry=str(entry_p), machine=None, out=str(out), through="precedent"))
+            text = buf.getvalue()
+            st1 = json.loads((out / "status.json").read_text(encoding="utf-8"))
+            entry_p.write_text(json.dumps(dict(doc, evaluation={"depth": "deep"})), encoding="utf-8")
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                rc2 = EP.cmd_run(types.SimpleNamespace(entry=str(entry_p), machine=None, out=str(out), through="precedent"))
+            st2 = json.loads((out / "status.json").read_text(encoding="utf-8"))
+        finally:
+            EP.STAGE_BODIES.clear()
+            EP.STAGE_BODIES.update(saved)
+            os.environ.pop("HOUSECARL_RUNLOG_DIR", None)
+    assert rc == EP.EXIT_OK, (rc, text)
+    for name in ("census", "prepare", "scope", "plan", "evaluate", "records", "bundle"):
+        assert f"{name}: reused (inputs and outputs unchanged)" in text, f"{name} was not reused: {text}"
+    assert "scenes: refused, not blocking: overlap scene acquisition is not built in this version." in text, text
+    assert ran == [("precedent", ["S.esp", "Sc.esp"])], ran
+    assert st1.get("status") == "incomplete" and st1["refusals"][0]["stage"] == "scenes", st1
+    assert rc2 == EP.EXIT_REFUSED and st2["stoppedAt"] == "census" and "runcontrol run" in st2["sentence"], (rc2, st2, err.getvalue())
+    assert len(ran) == 1, "a stage ran after the entry changed under the measuring stages"
 
 
 def main():

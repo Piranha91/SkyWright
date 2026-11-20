@@ -20,6 +20,9 @@
     <Compile Include="..\_shared\ConflictReport.cs" Link="ConflictReport.cs" />
     <Compile Include="..\_shared\ReverseFromBaseline.cs" Link="ReverseFromBaseline.cs" />
     <Compile Include="..\_shared\PopulationScope.cs" Link="PopulationScope.cs" />
+    <Compile Include="..\_shared\MeshResponsibility.cs" Link="MeshResponsibility.cs" />
+    <Compile Include="..\_shared\PlacedMeshReach.cs" Link="PlacedMeshReach.cs" />
+    <Compile Include="..\_shared\PopulationRules.cs" Link="PopulationRules.cs" />
     <Compile Include="..\_shared\LargeReferenceLists.cs" Link="LargeReferenceLists.cs" />
     <Compile Include="..\_shared\PopulationFixture.cs" Link="PopulationFixture.cs" />
     <Compile Include="..\_shared\NifBoxFixture.cs" Link="NifBoxFixture.cs" />

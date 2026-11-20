@@ -754,7 +754,8 @@ def cmd_launch(a) -> int:
 # --------------------------------------------------------------------------------------------- export --
 
 def cmd_export(a) -> int:
-    """Assemble one arm's import document for `evalrun import-results` from a block's launch folders."""
+    """Assemble one arm's live import document from a block's launch folders (the built-in controller reads it once
+    evallive.py is ported)."""
     block = Path(a.block)
     doc = json.loads((block / "flipplan.json").read_text(encoding="utf-8"))
     if not doc.get("binding"):
@@ -843,7 +844,7 @@ def main(argv=None) -> int:
             p.add_argument("--plan-sha", required=True)
             p.add_argument("--idle-json", required=True)
             p.set_defaults(fn=cmd_launch)
-    p = sub.add_parser("export", help="assemble one arm's import document for evalrun import-results")
+    p = sub.add_parser("export", help="assemble one arm's live import document (read once evallive.py is ported)")
     p.add_argument("--block", required=True)
     p.add_argument("--arm", required=True)
     p.add_argument("--out", required=True)
