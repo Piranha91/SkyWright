@@ -36,6 +36,19 @@ using HousecarlCore.Progress;
 // PlacementHistory's changed-only rule. An override that forwards a position unchanged takes no
 // responsibility; one that changes only rotation or scale is not a step either, and is COUNTED.
 //
+// A MOD FOLDER'S MESH (mesh-responsibility, 2026-11-19; overlapprobe/MeshRule.cs, _shared/MeshResponsibility.cs). A folder is
+// responsible for a shape when its copy of the base's model wins in the arm's asset view, another folder's copy would win
+// without it, and the bytes differ (an archive entry is read decompressed). A crossing that is separated when the sides the
+// folder reshapes are rebuilt, at the same placements, with the mesh that wins without it is the folder's row: B names the
+// folder, A the plugin that placed the other object, and the row carries Mesh (the swapped models and both copies' hashes).
+// This holds for two objects of one plugin and for two base-game objects too: a base-game reference set aside below comes
+// back in when its shape is a credited folder's, or when its placed render bounds come within the tolerance of such a shape.
+// Sight: Seen when the later placement's plugin masters a plugin the folder ships, or a plugin the folder ships masters both
+// placements' plugins; a folder with no plugin is always Blind. The class is Introduced + Blind; the Bethesda floor does not
+// withhold a folder row. The folders credited: with --population its folders; otherwise --mesh-folder (repeatable, "*" for
+// every folder); with neither, none, and the emit's coverage says so. A crossing that persists without the folder's mesh is
+// judged by the plugin rule below. Scene capture and --responsible-pair keep the plugin rule.
+//
 // Boundary (the standing rules, applied):
 //   - Geometry is complete decoded visible render vertices from the winning VFS NIF. Record OBND and stored NIF
 //     spheres have zero influence; unavailable geometry = not judged, counted (rule 6). Editor markers are set aside.
@@ -50,7 +63,7 @@ using HousecarlCore.Progress;
 //                     [--prepared-cache-mib N] [--threads N] [--pair-cache-read FILE]* [--pair-cache-write FILE]
 //                     [--bos on|off] [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
 //                     [--responsible-pair A.esp B.esp]* [--historical-pairs crosswalk.json] [--geometry-manifest output.json]
-//                     [--motion swept [--motion-delta U]]
+//                     [--motion swept [--motion-delta U]] [--mesh-folder NAME|*]*
 //   --motion swept  a base whose render geometry refuses as unsupported_pose but whose motion the files settle (NifMotion:
 //                   NIF sequences and controllers, behaviour-graph clips) is discovered by a swept proxy instead of being
 //                   unmeasurable: the boxes of its sampled poses, each grown by the sample's certified delta (default 0.5 u,
@@ -107,6 +120,8 @@ never asserts a reference is present, absent or separated in the game state, nor
 it does or does not exist -- those are read from an enumerated record row's own fields.
 Legacy mode: --responsible-pair PLUGIN_A PLUGIN_B with --geometry-manifest OUTPUT. --scene-cell does not apply in this mode:
 the manifest reads every reference of the responsible pairs, whatever its cell (a note on stderr says so when it is given).
+--mesh-folder NAME (repeatable; * = every folder): the folders whose mesh a whole-order run may name as the cause of a crossing;
+with --population, the population's folders are named instead; with neither, no folder is named. A folder row's B is the folder.
 --motion swept [--motion-delta U]: a base refused for its pose alone (unsupported_pose, or partial_geometry when every
 visible shape decoded and only the pose is refused) whose motion the files settle is discovered
 by a swept proxy (its sampled poses' boxes, each grown by its certified delta): an outer bound, labelled in the reason.
@@ -2253,6 +2268,7 @@ if (geometryManifestPath is not null)
         {
             responsiblePairs = responsiblePairs.Select(p => new[] { p.AName, p.BName }).ToArray(),
             population = pop.Identity, state = pop.StateName, bos = bosOn ? "on" : "off",
+            meshResponsibility = "not applied: scene capture and --responsible-pair keep the plugin rule; no mod folder's mesh is named as the cause of a pair here",
             historicalPairs = historicalPairsPath is null ? null : new { path = Path.GetFullPath(historicalPairsPath), sha256 = historicalCrosswalkSha256 },
             contactEvidencePairs = contactEvidencePairsPath is null ? null : new { path = Path.GetFullPath(contactEvidencePairsPath), sha256 = contactEvidencePairsSha256, count = contactEvidenceKeys.Count },
             predicate = new { tolerance = surfaceTolerance, maxTrianglePairs, pairSeconds, policyVersion = MeshIntersection.PolicyVersion },

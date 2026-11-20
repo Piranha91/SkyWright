@@ -180,6 +180,11 @@ See contactprobe/Program.cs usage documentation for those modes. Help performs n
 """);
     return 0;
 }
+// A MOD FOLDER'S MESH (mesh-responsibility, 2026-11-19): a host whose shape a credited folder's mesh changes (Reshaped), and a
+// dependent whose own shape it changes, are judged by the same Judge as a moved host, the folder as the mover: the arm without
+// it keeps every placement and reads the mesh that wins without the folder (_shared/MeshResponsibility.cs). Rows name the folder
+// (B) and carry Mesh; sight and the folders credited are overlapprobe's rule (overlapprobe/Program.cs header). --mesh-folder
+// NAME (repeatable, * = every folder) names them for a whole-order run. --empty-space keeps the plugin rule.
 using var __run = RunLog.BeginProcess("contactprobe", args);
 // Known answers for the emit's class and the physical predicate (ContactSelfTest.cs, over ContactCredit.cs).
 if (args.Length >= 1 && args[0] == "--self-test") return ContactSelfTest.Run();

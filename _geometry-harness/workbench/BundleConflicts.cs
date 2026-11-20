@@ -23,7 +23,16 @@ internal sealed record ConflictRow(
     string Identity, string CheckId, string Kind, string A, string B, string Summary,
     string RefKey, string? OtherKey, PhysicalState? Physical,
     string? Cell, string? RefBaseType, string? RefBaseEditorId, string? OtherBaseType, string? OtherBaseEditorId,
-    string EvidenceStrength, bool? NewOnArm);
+    string EvidenceStrength, bool? NewOnArm, MeshCause? Mesh = null)
+{
+    /// <summary>For a row a mod folder's mesh alone creates (<see cref="Mesh"/> set): what happens, in a modder's words.</summary>
+    internal string? MeshSentence => Mesh is not { } m ? null
+        : Kind == "CONTACT"
+            ? $"The mesh {m.Folder} provides ({string.Join(", ", m.Swapped.Select(s => s.Model).Distinct())}) leaves this object resting on nothing; "
+              + $"without {m.Folder} the next mesh in priority order is used and it rests where {m.PlacedBy[0]} placed it."
+            : $"The mesh {m.Folder} provides for this object ({string.Join(", ", m.Swapped.Select(s => s.Model).Distinct())}) makes it pass through "
+              + $"an object {A} places; without {m.Folder} the next mesh in priority order is used and they do not touch.";
+}
 
 /// <summary>A verified evaluation bundle, read for the Conflicts tab (DESIGN.md section 3). The bundle is verified by
 /// the run engine's own verb (<c>verify-bundle DIR --out FILE</c>, see <see cref="RunEngine"/>) and every file a receipt names is read
@@ -147,6 +156,10 @@ internal sealed class BundleConflicts
         if (!plan.GetProperty("arms").EnumerateArray().Any(a => a.GetProperty("armId").GetString() == arm))
             throw new InvalidOperationException($"the bundle's plan has no arm '{arm}'; name one of {string.Join(", ", plan.GetProperty("arms").EnumerateArray().Select(a => a.GetProperty("armId").GetString()))}.");
         var targets = plan.GetProperty("targets").EnumerateArray().Select(t => t.GetProperty("name").GetString()!).ToList();
+        // a row a selected mod folder's mesh creates names the folder: the population's folders are targets too
+        if (plan.TryGetProperty("population", out var popBlock) && popBlock.ValueKind == JsonValueKind.Object
+            && popBlock.TryGetProperty("mods", out var popMods) && popMods.ValueKind == JsonValueKind.Array)
+            targets.AddRange(popMods.EnumerateArray().Select(m => m.GetString()!).Where(m => !targets.Contains(m, StringComparer.OrdinalIgnoreCase)));
         // a manual run's plan names its review arm (the profile with the selected mods); opened on that arm, the bundle
         // reports only what the selection brings
         bool manual = plan.TryGetProperty("reviewArm", out var revArm) && revArm.ValueKind == JsonValueKind.String && revArm.GetString() == arm;
@@ -232,7 +245,7 @@ internal sealed class BundleConflicts
                         var rn = names?.Ref(r.FormKey); var on = other is null ? null : names?.Ref(other);
                         rows.Add(new ConflictRow(id, check, c.Kind, c.A, c.B, c.Summary, r.FormKey, other, r.Physical,
                             CellRule.Drawable(rn?.Cell, on?.Cell), rn?.BaseType, rn?.BaseEditorId, on?.BaseType, on?.BaseEditorId,
-                            strength.GetValueOrDefault(check, "unknown"), newOnArm is null ? null : newOnArm.Contains(id)));
+                            strength.GetValueOrDefault(check, "unknown"), newOnArm is null ? null : newOnArm.Contains(id), c.Mesh));
                     }
                 }
             }

@@ -76,8 +76,9 @@ internal static class Shell
     internal static IReadOnlyList<RankedRow> Visible => ShowAll ? Ranked : Ranked.Where(r => r.InvolvesTarget).ToList();
 
     internal static string RowText(RankedRow r) =>
-        $"{r.Rank}. {r.Row.Kind}  {r.Row.A} / {r.Row.B}  ref {r.Row.RefKey}{(r.Row.RefBaseEditorId is { } e ? " " + e : "")}"
-        + $"  [physical {r.PhysicalLabel}; check's evidence grade {r.EvidenceLabel}; {r.NewLabel}; severity {r.Severity} ({r.SeverityLabel})]";
+        $"{r.Rank}. {r.Row.Kind}  {r.Row.A} / {r.Row.B}{(r.Row.Mesh is not null ? " (its mesh)" : "")}  ref {r.Row.RefKey}{(r.Row.RefBaseEditorId is { } e ? " " + e : "")}"
+        + $"  [physical {r.PhysicalLabel}; check's evidence grade {r.EvidenceLabel}; {r.NewLabel}; severity {r.Severity} ({r.SeverityLabel})]"
+        + (r.Row.MeshSentence is { } ms ? "\n      " + ms : "");
 
     internal const double MinWidth = 560 + 360, MinHeight = 480;   // the tabs' width plus a 360-wide view; device-independent units
 
