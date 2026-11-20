@@ -1284,6 +1284,10 @@ public sealed class ContactIndex
     /// reshaped dependent, whose authoring base reads the mesh that wins without the folder. Null keeps <see cref="ArmBase"/>.</summary>
     public Func<FormKey, FormKey?>? DependentAuthoringBase { get; set; }
 
+    /// <summary>The folder rule's pass only: the dependents a judged host considers (null: every one). Set and cleared by that
+    /// single-threaded pass.</summary>
+    public Func<FormKey, bool>? DependentFilter { get; set; }
+
     // ---- the two hashes ----------------------------------------------------------------------------
 
     /// <summary>Every dependent-typed reference at every undeleted snap, hashed by that snap's world box — the authoring
@@ -1652,6 +1656,7 @@ public sealed class ContactIndex
             bool tw = Tw(depKey);
             bool lastSnap = si == snaps.Count - 1;
             if (depKey == host.Key) { if (tw && lastSnap) Te(depKey, DR, TraceOutcome.Never, "SelfPair", host.Key); continue; }
+            if (DependentFilter is { } keep && !keep(depKey)) continue;   // the folder rule's pass: only dependents a Blind row can involve
             int ai = AuthoringSnapIndex(snaps, host.Mover, closure);
             if (ai < 0) { if (lastSnap) { skips.DepIntroducedByMover++; if (tw) Te(depKey, DR, TraceOutcome.SetAside, "DepIntroducedByMover", host.Key); } continue; }
             if (ai != si)                                                        // this snap is not the authoring arm's

@@ -1270,6 +1270,7 @@ Console.WriteLine($"   MoveableStatic bases with geometry: {mstt.Count:N0}; thei
 var meshRows = new List<(ContactRow Row, MeshOwner Owner, bool DependentSide)>();
 var meshSkips = new ContactSkips();
 long meshHosts = 0, meshDeps = 0;
+long meshSeenNotTested = 0;
 var meshFolderPlugins = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
 for (int i = 0; i < cfg.Plugins.Count; i++)
 {
@@ -1306,18 +1307,23 @@ if (meshActive)
         if (cidx.ReshapedHost(key, fb, pseudo, extClosure, meshSkips) is { } host)
         {
             meshHosts++;
-            foreach (var r in cidx.Judge(host, depHash, winHash, extClosure, meshSkips)) Keep(r, o, false);
+            // sight before cost: only dependents whose row with this host could be Blind for the folder
+            var hostSnaps = snaps;
+            cidx.DependentFilter = d => MeshBlindPossible(o.Folder!, idx.History.Of(d), hostSnaps);
+            try { foreach (var r in cidx.Judge(host, depHash, winHash, extClosure, meshSkips)) Keep(r, o, false); }
+            finally { cidx.DependentFilter = null; }
         }
         if (!cidx.IsDependentType(b) || snaps[^1].Deleted) continue;
         var depBox = cidx.WorldBox(b, snaps[^1]);
         if (depBox.IsEmpty) continue;
         meshDeps++;
         cidx.DependentAuthoringBase = k => k == key ? fb : null;
+        cidx.DependentFilter = k => k == key;   // a neighbour host is judged for this one dependent only
         try
         {
             foreach (var (hk, _, _) in winHash.Near(snaps[^1].Space, depBox, cidx.Reach).ToList())
             {
-                if (hk == key) continue;
+                if (hk == key || !MeshBlindPossible(o.Folder!, snaps, idx.History.Of(hk))) continue;
                 var hb = cidx.WinnerBase(hk);
                 var hostAuthoring = Owner(hb) is { } ho ? FallbackOf(hb, ho) : hb;
                 if (cidx.ReshapedHost(hk, hostAuthoring, pseudo, extClosure, meshSkips) is not { } h2) continue;
@@ -1325,8 +1331,26 @@ if (meshActive)
                     if (r.Dependent == key) Keep(r, o, true);
             }
         }
-        finally { cidx.DependentAuthoringBase = null; }
+        finally { cidx.DependentAuthoringBase = null; cidx.DependentFilter = null; }
     }
+}
+// Sight before cost: false only when every placement plugin either side has makes the row Seen (MeshSight below), so the pass
+// never judges a pair whose folder row would be set aside; such candidates are counted, not tested.
+
+bool MeshBlindPossible(string folder, IReadOnlyList<Snap>? dep, IReadOnlyList<Snap>? host)
+{
+    if (dep is not { Count: > 0 } || host is not { Count: > 0 }) return true;
+    bool In(int owner, int x) => owner == x || (owner >= 0 && owner < closure.Length && closure[owner].Contains(x));
+    var plugins = meshFolderPlugins.TryGetValue(folder, out var l) ? l : new List<int>();
+    if (plugins.Count == 0) return true;
+    foreach (var pd in dep.Select(x => x.Plugin).Distinct())
+        foreach (var ph in host.Select(x => x.Plugin).Distinct())
+        {
+            int later = Math.Max(pd, ph), earlier = Math.Min(pd, ph);
+            if (!(In(later, earlier) && plugins.Any(p => In(later, p))) && !plugins.Any(p => In(p, pd) && In(p, ph))) return true;
+        }
+    meshSeenNotTested++;
+    return false;
 }
 // Sight (DetectorModel.MeshProvenance): (a) the later placement's plugin was made with the folder's plugin as a master; (b) a
 // plugin the folder ships masters both placements' plugins.
@@ -1645,6 +1669,7 @@ if (emitPath is not null)
     coverage.Add(new("mesh responsibility", meshHosts + meshDeps, new Dictionary<string, long>(),
         new Dictionary<string, long> { ["MeshEqualsReplaced"] = meshOwners.Answered.Count(x => x.Shape == MeshShape.EqualBytes),
                                        ["NewMeshNoFallback"] = meshOwners.Answered.Count(x => x.Shape == MeshShape.NoFallback),
+                                       ["SeenNotTested"] = meshSeenNotTested,
                                        ["SeenFolderRows"] = meshRows.Count(m => m.Row.Verdict is ContactVerdict.Stranded or ContactVerdict.Orphaned && MeshSight(m.Row, m.Owner.Folder!).Sight == OverlapSight.Seen) },
         $"credited: {meshScope}; reshaped hosts {meshHosts:N0} and dependents {meshDeps:N0} judged; relationships {meshRows.Count:N0}, class {meshClass.Count:N0}"));
     string populationIdentity = sweepPopulation;
