@@ -11,8 +11,8 @@ namespace Workbench;
 /// mouse messages cannot hold frames back. Nothing sleeps on the UI thread, and nothing is posted while no frame is
 /// wanted. One frame is in flight at a time.
 /// <para>The beat is each desktop composition (<c>DwmFlush</c>) while the compositor keeps the display's rate. A desktop
-/// can compose much more slowly than the display refreshes (measured: every 46.6 ms, three 15.6 ms timer ticks, on a
-/// 60 Hz display), and a view that waits for it then runs at that rate. So a second thread watches the compositions
+/// can compose much more slowly than the display refreshes (every few system timer ticks rather than every
+/// refresh), and a view that waits for it then runs at that rate. So a second thread watches the compositions
 /// while frames are wanted, and when two in a row come more than a period and a half apart the pacer keeps time with
 /// its own high-resolution clock at the display's period, until the compositor keeps the rate again (<see cref="PaceChoice"/>).</para></summary>
 internal sealed class FramePacer : IDisposable
