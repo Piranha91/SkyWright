@@ -23,6 +23,7 @@ HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
 REPO = HARNESS.parent
 EVALRUN = HARNESS / "evalrun.py"
+from test_evalrun import CONTROLLER  # noqa: E402  (the built-in controller, runcontrol, as test_evalrun starts it)
 REGISTRY = REPO / ".claude" / "skills" / "world-edit-compatibility" / "references" / "check-registry.json"
 EXE = HARNESS / "overlapprobe" / "bin" / "Release" / "net9.0" / ("overlapprobe.exe" if os.name == "nt" else "overlapprobe")
 
@@ -73,7 +74,7 @@ def plan(root: Path, cands: Path, *, instance=None, game=None, profile="P", harn
     out = root / "run"
     if out.exists():
         shutil.rmtree(out)
-    args = [sys.executable, str(EVALRUN), "plan", "--registry", str(REGISTRY), "--candidates", str(cands),
+    args = [*CONTROLLER, "plan", "--registry", str(REGISTRY), "--candidates", str(cands),
             "--out", str(out), "--harness", str(harness), "--depth", "standard"]
     if instance is not None:
         args += ["--instance", str(instance), "--game", str(game), "--profile", profile]

@@ -342,15 +342,6 @@ def case_55_a_line_the_winner_branch_cannot_read_is_counted_not_dropped():
     # a real failed read: nothing readable at all is still judged 0 with its lines counted, so it stays refused
     cov = cell_capture({f: [odd] for f in CELL_LINES})
     assert cov["Judged"] == 0 and cov["Unjudgeable"] == {why: 2}, (cov["Judged"], cov["Unjudgeable"])
-    try:
-        sys.path.insert(0, str(HERE.parent))
-        import evalrun
-    except Exception:  # noqa: BLE001
-        return
-    refused, why_not = evalrun.empty_population({"targets": [{"name": "COTN - Morthal.esp"}]},
-                                                {"plugins": ["COTN - Morthal.esp"]}, [cov["Members"]],
-                                                sum(cov["Unjudgeable"].values()))
-    assert refused is None and "failed extraction" in why_not, (refused, why_not)
 
 
 def case_64_a_winning_records_flags_in_both_views_are_judged_once():

@@ -1,10 +1,11 @@
 """toolidentity — the one identity rule for the programs an evaluation runs.
 
-evalrun freezes these identities into a plan, checks them before `run` / `resume` write anything, again when a child
-launches and before its result is accepted, and binds them into every accepted receipt; ordersweep keys its cache by
-the same digests. A library with no entry point: pure functions over files.
+The built-in controller (runcontrol, ToolIdentity.cs) holds the same rule for the plans it freezes; this is its Python
+spelling, for the Python tools that bind a build: the capture stage binds viewprobe's package, evalrecords the record
+reader's, ordersweep keys its cache by these digests, and verify-bundle prints them short. A library with no entry
+point: pure functions over files.
 
-Three kinds, compared by digest, never by path (a path only locates the program):
+Two kinds, compared by digest, never by path (a path only locates the program):
 
 - **package** — a Release folder: every top-level file except `*.pdb`, plus every file under `runtimes/`, each by its
   lower-cased relative path and sha256. Other subfolders are run-time output (viewprobe writes `shots/` there) and are
@@ -15,7 +16,6 @@ Three kinds, compared by digest, never by path (a path only locates the program)
   bare first token (`python`) is resolved through PATH and recorded as a locator only: interpreters, their standard
   libraries and the shared .NET runtime are outside identity. Files a named program imports are not followed. A command
   that names no file is `unverifiable`.
-- **scripts** — the controller: its scripts by repository-relative name and sha256.
 
 A file that exists but cannot be read raises `Unreadable`; it never becomes a value.
 """
@@ -24,13 +24,6 @@ from __future__ import annotations
 import hashlib
 import shutil
 from pathlib import Path
-
-#: The controller: every script whose code decides a run's, a resume's or an import's result.
-CONTROLLER_FILES = ("_geometry-harness/evalrun.py", "_geometry-harness/evalregistry.py",
-                    "_geometry-harness/evalsettings.py", "_geometry-harness/stategen.py",
-                    "_geometry-harness/switchflip_scope.py", "_geometry-harness/switchflip_outcome.py",
-                    "_geometry-harness/evallive.py", "_geometry-harness/ordersweep.py",
-                    "_geometry-harness/toolidentity.py", "scripts/runlog.py")
 
 
 class Unreadable(Exception):
@@ -95,37 +88,6 @@ def probe_cmd(text: str) -> dict:
         return {**rec, "state": "unverifiable", "digest": None}
     lines = [f"{text}\n"] + [f"{r['token']}\0{r['sha256'] or 'absent'}\n" for r in inputs]
     return {**rec, "state": "present", "digest": _digest("probe-cmd:", lines)}
-
-
-def scripts(root: Path, names=CONTROLLER_FILES) -> dict:
-    """The controller's identity: each named script under `root` (a repository root) by name and sha256."""
-    root = Path(root)
-    files = [{"name": n, "sha256": file_sha256(root / n) if (root / n).is_file() else None} for n in names]
-    return {"kind": "scripts", "locator": str(root), "state": "present",
-            "digest": _digest("scripts:", (f"{f['name']}\0{f['sha256'] or 'absent'}\n" for f in files)),
-            "files": files}
-
-
-def differences(old: dict, new: dict) -> list[str]:
-    """What differs between two identities of one program, file by file, in plain words."""
-    def rows(rec):
-        if rec.get("kind") == "scripts":
-            return {f["name"]: f["sha256"] for f in rec.get("files") or []}
-        if rec.get("kind") == "probe-cmd":
-            return {r["path"]: r["sha256"] for r in rec.get("inputs") or []}
-        return {f["path"]: f["sha256"] for f in rec.get("files") or []}
-    a, b = rows(old), rows(new)
-    out = []
-    for k in sorted(set(a) | set(b)):
-        if k not in b or (b[k] is None and a.get(k) is not None):
-            out.append(f"{k} removed")
-        elif k not in a or (a[k] is None and b[k] is not None):
-            out.append(f"{k} added")
-        elif a[k] != b[k]:
-            out.append(f"{k} changed {str(a[k])[:12]} -> {str(b[k])[:12]}")
-    if old.get("kind") == "probe-cmd" and old.get("command") != new.get("command"):
-        out.append(f"command text {old.get('command')!r} -> {new.get('command')!r}")
-    return out
 
 
 def short(digest) -> str:

@@ -521,8 +521,10 @@ public static class SelfTestPlanModules
 
     static void LiveCases(Action<string, string> skip)
     {
+        // (the live comparison with Python's evalregistry went with that module in step 3: the registry's rules are this
+        // program's own, and its recorded answers above are the known answers)
         string[] names = ["checkout: the registry in this checkout validates, and its patterns compile",
-                          "live: Python's applicability of this checkout's registry", "live: Python's record of the settings on this machine"];
+                          "live: Python's record of the settings on this machine"];
         string? root = AppContext.BaseDirectory;
         while (root != null && !File.Exists(Path.Combine(root, "housecarl.sln"))) root = Path.GetDirectoryName(root);
         string harness = root == null ? "" : Path.Combine(root, "_geometry-harness");
@@ -542,19 +544,6 @@ public static class SelfTestPlanModules
         }
         const string head = "import sys, json; sys.path.insert(0, sys.argv[1]); ";
         Case(names[1], () =>
-        {
-            var r = Python(harness, "-c", head + "import evalregistry as R; d = R.load(sys.argv[2]); "
-                + "print(json.dumps([R.registry_sha256(sys.argv[2]), R.validate(d), R.applicability(d, None), R.applicability(d, {'complete': True})], sort_keys=True, separators=(',', ':'), ensure_ascii=False))",
-                harness, registryPath);
-            if (r is not { exit: 0 }) return $"python failed: {r?.stderr}";
-            var mine = new List<object?>
-            {
-                Registry.Sha256(registryPath), Registry.Validate(registry).Cast<object?>().ToList(), Registry.Applicability(registry, null),
-                Registry.Applicability(registry, new PyDict { ["complete"] = true }),
-            };
-            return Same("answers", PyJson.Canonical(mine), PyText.SplitLines(r.Value.stdout).LastOrDefault());
-        });
-        Case(names[2], () =>
         {
             var r = Python(harness, "-c", head + "import evalsettings as S; r = S.load(None, {'evaluation.budgetMinutes': 7.5}); "
                 + "print(json.dumps([r.record(), r.sentences()], separators=(',', ':'), ensure_ascii=False))", harness);

@@ -2013,27 +2013,6 @@ def case_capture_plan():
                                                     state="000701:Skyrim.esm")
         except Exception as exc:  # noqa: BLE001
             got_id = {"error": f"{type(exc).__name__}: {exc}"}
-        # a state picture is admitted to its arm's bundle: the arm's own configuration in a state the run measured
-        import evalrun
-        smf = getattr(evalrun, "state_media_fingerprints", None)
-        own = [{"plugins": [{"name": "Target.esp", "sha256": "a" * 64}], "providers": [], "overlays": [],
-                "population": "load-time+population:0123456789ab", "state": "baseline", "schemaVersion": 1}]
-        img = root / "state.png"
-        img.write_bytes(b"png")
-        item = {"path": str(img), "mediaKind": "offline-render", "state": "000701:Skyrim.esm",
-                "subject": {"checkId": "state.conditional-geometry", "armId": "with-target", "description": "d"},
-                "configurationFingerprint": want_fp, "fingerprintSource": "emitted",
-                "provenance": {"tool": "viewprobe", "capturedUtc": "2026-10-26T00:00:00Z"}}
-        try:
-            ok_in = evalrun.media_item_refusal(item, img, {"with-target": {"x" * 64}}, {},
-                                               lambda arm, st: smf(own, {"000701:Skyrim.esm"}, st))[0]
-            ok_out = evalrun.media_item_refusal({**item, "state": "000799:Skyrim.esm"}, img, {"with-target": {"x" * 64}}, {},
-                                                lambda arm, st: smf(own, {"000701:Skyrim.esm"}, st))[0]
-        except Exception as exc:  # noqa: BLE001
-            ok_in, ok_out = f"raised {type(exc).__name__}: {exc}", None
-        check("N5-state-media", smf is not None and ok_in is None and ok_out == "fingerprint-mismatch",
-              f"a picture in a measured world state is admitted with its arm's configuration in that state, and one in "
-              f"an unmeasured state is not (measured: {ok_in!r}, unmeasured: {ok_out!r})")
         check("N5-identity", (got_id or {}).get("sceneFingerprint") == want_fp,
               f"a state request's scene identity is the emit's configuration with the renderer's population and the clash's "
               f"state ({got_id})")

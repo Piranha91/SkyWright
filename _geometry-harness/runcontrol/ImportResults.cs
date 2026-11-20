@@ -157,8 +157,8 @@ public static class ImportResults
         if (check == null) return Refuse($"wrong-check: plan {Ev.Str(plan["planId"])} has no check {PyText.Repr(cid)}");
         var adapter = Ev.OrEmpty(check.Get("adapter"));
         if (adapter.Get("kind") is "live-import")
-            return Refuse($"wrong-check: {Ev.Str(cid)} is a live game driver's check, and runcontrol does not read a live driver's export "
-                          + "(evallive.py's validator is not part of it); import it with the Python controller: evalrun.py import-results.");
+            return Refuse($"wrong-check: {Ev.Str(cid)} is a live game driver's check, and importing a live driver's export is not available on the built-in "
+                          + "engine until evallive.py's validator is ported to it.");
         if (adapter.Get("kind") is not "mcp-only")
             return Refuse($"wrong-check: {Ev.Str(cid)} is {PyText.Repr(adapter.Get("kind"))}, not mcp-only; "
                           + "import-results cannot replace a runnable or unsupported detector");

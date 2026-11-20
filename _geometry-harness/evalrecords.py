@@ -6,7 +6,7 @@
 What this is for. Five registry checks are `mcp-only`: their capability is the houseCARL record and check tools,
 which evalrun cannot call. This module calls them for each planned arm through the built houseCARL server, in its
 explicit-paths mode (the arm's own plugins.txt, loadorder.txt and modlist.txt, and the base profile's INIs, so the
-base archives are read), and writes one schema-1 import document per (check, arm) for `evalrun import-results`.
+base archives are read), and writes one schema-1 import document per (check, arm) for `runcontrol import-results`.
 Every session's `initialize` names `evalrun:<planId>:<armId>`, so each import is `fresh` for its arm.
 
 The selection, per arm: A, every record the arm's evaluated plugins (its plugins minus the dependency baseline) touch.

@@ -27,6 +27,7 @@ HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
 REPO = HARNESS.parent
 EVALRUN = HARNESS / "evalrun.py"
+from test_evalrun import CONTROLLER  # noqa: E402  (the built-in controller, runcontrol, as test_evalrun starts it)
 REGISTRY = REPO / ".claude" / "skills" / "world-edit-compatibility" / "references" / "check-registry.json"
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HARNESS))
@@ -106,7 +107,7 @@ def plan(root: Path, *, with_instance=True):
     if out.exists():
         shutil.rmtree(out)
     inst, game = root / "instance", root / "game"
-    args = [sys.executable, str(EVALRUN), "plan", "--registry", str(REGISTRY), "--scope", str(root / "scope.json"),
+    args = [*CONTROLLER, "plan", "--registry", str(REGISTRY), "--scope", str(root / "scope.json"),
             "--candidates", str(root / "candidates"), "--out", str(out), "--harness", str(HARNESS),
             "--depth", "standard"]
     if with_instance:
@@ -145,18 +146,6 @@ def plan_cases(root: Path):
 
     # 453: an arm without its own Mods reads the scope's view: unchanged.
     check(row(doc, "candidate-03-profile-assets") == scope_row, "453: an arm without Mods keeps the scope row")
-
-    # 455: the run binds the variant arm to the variant: its emit is accepted, the main file's is rejected.
-    val = evalrun.Validator(root / "run", doc)
-    arm = next(a for a in doc["arms"] if a["armId"] == "candidate-01-variant")
-
-    def mismatch(mod_sha):
-        ident = {"plugins": [{"name": "Skyrim.esm", "sha256": sha(SKYRIM), "path": scope_row and row(doc, "baseline", "Skyrim.esm").get("path")},
-                             {"name": "Mod.esp", "sha256": mod_sha, "path": v.get("path")}]}
-        rej = val._identity_checks(ident, arm, {}, {}, limits=[])
-        return [x for x in rej if "Mod.esp was requested at" in str(x.get("detail"))]
-    check(not mismatch(sha(VARIANT)), "455: an emit that read the variant is bound to the request")
-    check(len(mismatch(sha(MAIN))) == 1, "455: an emit that read the main file is rejected for this arm")
 
     # 454: no instance: the walk cannot be completed, so the differing arm states nothing rather than the scope hash.
     r2, doc2 = plan(root, with_instance=False)

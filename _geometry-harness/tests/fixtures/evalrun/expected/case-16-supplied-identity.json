@@ -102,9 +102,10 @@
    "exit": 0,
    "hashSource": "unstated",
    "sha256IsNull": true,
-   "reasonContains": "modlist.txt",
-   "providedByLayers": ["(not in modlist.txt)", "(not in modlist.txt)"],
-   "providedByCount": 2,
+   "reasonContains": "no layer provides",
+   "providedByLayers": [],
+   "providedByCount": 0,
+   "ownerDifference": "Re-based in step 3 of the controller's port on the owner of the layer walk (HarnessOrderCli.PluginLayerMap, which the probes use): with no modlist.txt or no profile, mod folders outside the view are not layers, so no copy is listed (slice 3b owner differences 1 and 2). The Python controller listed both copies at the layer (not in modlist.txt).",
    "rule": "D1: modlist.txt cannot be read and the name is provided only by folders under mods/ that layers 1-3 do not cover — the probe would not walk those folders either, so nothing is resolved; the reason names modlist.txt and providedBy lists the copies found with layer '(not in modlist.txt)'. That is the ambiguity STATED on the arm, never a guess.",
    "notAsserted": "whether the name also reaches supplied.payloadMissing or supplied.outOfView in this state — see rulingNeeded"
   },
@@ -128,7 +129,8 @@
    "hashSource": "unstated",
    "sha256IsNull": true,
    "reasonContains": "profile",
-   "providedByLayers": ["(not in modlist.txt)", "(not in modlist.txt)"],
+   "providedByLayers": [],
+   "ownerDifference": "Re-based in step 3 of the controller's port on the owner of the layer walk (HarnessOrderCli.PluginLayerMap, which the probes use): with no modlist.txt or no profile, mod folders outside the view are not layers, so no copy is listed (slice 3b owner differences 1 and 2). The Python controller listed both copies at the layer (not in modlist.txt).",
    "rulingApplied": "A-3 / finding F5: with no profile there is no modlist.txt to read, and the reason must name what is actually missing — the profile, not the file it would have led to. The copies are listed at the same '(not in modlist.txt)' layer the unreadable-modlist case uses, because that is exactly what is true of them."
   },
   {

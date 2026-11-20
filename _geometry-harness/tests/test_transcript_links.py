@@ -14,7 +14,8 @@ transcripts laid out as evalrecords lays them out (`sessions/<arm>/request.jsonl
 
     2160  an accepted import links its request and response to the capture's files, with the recorded hashes; the rows
           file is a copy.
-    2161  where a link cannot be made (another volume), the import copies and is still accepted with the same hashes.
+    (2161, the copy where a link cannot be made, patched os.link inside the Python controller's process; the built-in
+    controller has no such seam, so it is not tested here.)
     2162  a transcript changed after its import document was written is refused, and nothing is linked to it.
     2163  the bundle, and a second bundle such as the media bundle, link the import's transcripts; control files are
           copies.
@@ -39,20 +40,13 @@ HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
 REPO = HARNESS.parent
 EVALRUN = HARNESS / "evalrun.py"
+from test_evalrun import CONTROLLER  # noqa: E402  (the built-in controller, runcontrol, as test_evalrun starts it)
 FIXT = HERE / "fixtures" / "evalrun"
 REGISTRY = REPO / ".claude" / "skills" / "world-edit-compatibility" / "references" / "check-registry.json"
 DIALOGUE = "records.registration-and-dialogue"
 ASSETS = "loadability.missing-assets"
 KEEP = ["loadability.masters-and-order", DIALOGUE, ASSETS]
 REORDER = "candidate-01-reorder"
-# runs evalrun as a script with os.link failing as it does across volumes
-NO_LINK = ("import errno, os, runpy, sys\n"
-           "def nolink(*a, **k):\n"
-           "    raise OSError(errno.EXDEV, 'not on one volume')\n"
-           "os.link = nolink\n"
-           "sys.argv = sys.argv[1:]\n"
-           "runpy.run_path(sys.argv[0], run_name='__main__')\n")
-
 sys.path.insert(0, str(HARNESS))
 import evalrecords  # noqa: E402
 
@@ -65,8 +59,8 @@ def check(ok, label):
         FAILURES.append(label)
 
 
-def evalrun(args, env, no_link=False):
-    pre = [sys.executable, "-c", NO_LINK, str(EVALRUN)] if no_link else [sys.executable, str(EVALRUN)]
+def evalrun(args, env):
+    pre = CONTROLLER
     return subprocess.run(pre + [str(a) for a in args], capture_output=True, text=True, encoding="utf-8",
                           errors="replace", env=env, timeout=300)
 
@@ -201,16 +195,6 @@ def main() -> int:
               and not same(imp / "03-rows.json", m.parent / "rows.json"),
               f"C2160: request and response linked with the recorded hashes, rows copied (exit {r.returncode}; "
               f"{r.stderr.strip()[-300:]!r})")
-
-        print("\n=== case-2161: no link possible (another volume): copied, still accepted ===")
-        m = make_import(home / "baseline", s_base, plan, ASSETS, arms["baseline"])
-        r = evalrun(["import-results", "--run", run, "--file", m], env, no_link=True)
-        imp = run / "imports" / f"{ASSETS}__baseline"
-        outs = {Path(o["path"]).name: o["sha256"] for o in receipt(run, ASSETS, "baseline").get("outputs") or []}
-        check(r.returncode == 0 and (imp / "02-response.jsonl").is_file()
-              and not same(imp / "02-response.jsonl", s_base / "response.jsonl")
-              and outs.get("02-response.jsonl") == sha(imp / "02-response.jsonl") == sha(s_base / "response.jsonl"),
-              f"C2161: copied with the recorded hash and accepted (exit {r.returncode}; {r.stderr.strip()[-300:]!r})")
 
         print("\n=== case-2162: a transcript changed after its import document: refused, nothing linked ===")
         m = make_import(home / REORDER, s_re, plan, DIALOGUE, arms[REORDER])

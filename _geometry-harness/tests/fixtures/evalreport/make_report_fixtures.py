@@ -1,6 +1,7 @@
-"""Build the evalreport fixtures: schema-2 bundles for cases R1-R6, made by driving the REAL controller
-(`evalrun.py` plan / run / finalize / bundle) over `test_evalrun.py`'s fixture engine - the tiny plugins, the
-trimmed registry, the fake probes that write the real conflict-file format, the real conflictdiff.exe.
+"""Build the evalreport fixtures: schema-2 bundles for cases R1-R7, made by driving the REAL controller (the built-in
+one, runcontrol: plan / run / import-results / finalize / bundle, started as test_evalrun's CONTROLLER) over
+`test_evalrun.py`'s fixture engine - the tiny plugins, the trimmed registry, the fake probes that write the real
+conflict-file format, the real conflictdiff.exe.
 
     python _geometry-harness/tests/fixtures/evalreport/make_report_fixtures.py --out DIR
 
@@ -15,8 +16,8 @@ Cases (EXPECTED.md section 1):
   R4 repaired-plus-regression     case-07
   R5 media-mismatch-same-basenames case-10's run + a D5 schema-2 media.json (five items)
   R6 changed-or-missing-source    two damaged COPIES of R5's / R1's bundle
-  R7 import-origin                one mcp-only check imported on four arms: fresh, reused, a pre-origin receipt,
-                                  and one blocked by its prerequisite after the fact
+  R7 import-origin                one mcp-only check imported fresh and reused, and one arm blocked by its prerequisite
+                                  (a pre-origin receipt is no longer made: its only writer was the Python controller)
 
 Builds conflictdiff from this checkout's source into the output folder (test_evalrun.use_conflictdiff), unless
 HOUSECARL_EVALRUN_TEST_HARNESS names a tree to use as given.
@@ -237,7 +238,7 @@ def run_case(root: Path, case: str, fixture_case: str, media: Path | None = None
     _, _, _, scen = T.case_paths(fixture_case)
     p = T.do_plan(run, fixture_case)
     if p.returncode != 0:
-        raise SystemExit(f"{case}: evalrun plan exited {p.returncode}\n{p.stdout[-2000:]}\n{p.stderr[-2000:]}")
+        raise SystemExit(f"{case}: the controller's plan exited {p.returncode}\n{p.stdout[-2000:]}\n{p.stderr[-2000:]}")
     r = T.evalrun(["run", "--run", run], scen)
     f = T.evalrun(["finalize", "--run", run], scen)
     if media is None and case.startswith("R5"):
@@ -246,7 +247,7 @@ def run_case(root: Path, case: str, fixture_case: str, media: Path | None = None
     bargs = ["bundle", "--run", run, "--no-names"] + (["--media", media] if media else [])
     b = T.evalrun(bargs, scen)
     if b.returncode != 0:
-        raise SystemExit(f"{case}: evalrun bundle exited {b.returncode}\n{b.stdout[-2000:]}\n{b.stderr[-2000:]}")
+        raise SystemExit(f"{case}: the controller's bundle exited {b.returncode}\n{b.stdout[-2000:]}\n{b.stderr[-2000:]}")
     return {"run": str(run), "bundle": str(run / "bundle"), "fixtureCase": fixture_case,
             "exits": {"plan": p.returncode, "run": r.returncode, "finalize": f.returncode, "bundle": b.returncode},
             "media": str(media) if media else None}
@@ -264,60 +265,17 @@ IMPORT_STEMS = {
 IMPORT_REUSED_FROM = {"planId": "0123456789ab", "armId": "candidate-01-earlier", "resultSha256": "ab" * 32}
 
 
-def _evalrun_module():
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("evalrun_report_fixture", T.EVALRUN)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def _import_inprocess(run: Path, scen: Path, manifest: Path, legacy: bool) -> int:
-    """One `import-results` in process. With `legacy`, the receipt is written in the shape an import had before an
-    origin had to be declared: the envelope carries no origin, the receipt's `imported` block carries only
-    sourceSha256 / capturedUtc / tool and the ledger transition only `imported: true`. Every other check (identity,
-    hashes, prerequisites) runs as it does for a current import, and the receipt is sealed by the real writer."""
-    mod = _evalrun_module()
-    if legacy:
-        real_write, real_transition = mod.write_receipt, mod.Ledger.transition
-
-        def write_receipt(*args, **kw):
-            imp = (kw.get("extra") or {}).get("imported")
-            if isinstance(imp, dict):
-                for k in ("origin", "originCheck", "reusedFrom", "reusedFromVerified", "reusedFromNote"):
-                    imp.pop(k, None)
-            return real_write(*args, **kw)
-
-        def transition(self, *args, **kw):
-            if isinstance(kw.get("extra"), dict):
-                kw["extra"] = {k: v for k, v in kw["extra"].items() if k != "importOrigin"}
-            return real_transition(self, *args, **kw)
-
-        mod.origin_refusals = lambda *args, **kw: ([], {"origin": None})
-        mod.write_receipt = write_receipt
-        mod.Ledger.transition = transition
-    saved = os.environ.get("EVALRUN_FAKE_SCENARIO")
-    os.environ["EVALRUN_FAKE_SCENARIO"] = str(scen)
-    try:
-        a = mod.build_parser().parse_args(["import-results", "--run", str(run), "--file", str(manifest)])
-        return a.fn(a)
-    finally:
-        if saved is None:
-            os.environ.pop("EVALRUN_FAKE_SCENARIO", None)
-        else:
-            os.environ["EVALRUN_FAKE_SCENARIO"] = saved
-
-
 def make_import_origin_case(root: Path) -> dict:
-    """A schema-2 bundle whose mcp-only check (`T.IMPORT_CHECK`, prerequisite masters-and-order) was imported on four
-    arms by the REAL controller, one per way a report must describe imported evidence:
+    """A schema-2 bundle whose mcp-only check (`T.IMPORT_CHECK`, prerequisite masters-and-order) the REAL controller
+    imported, one arm per way a report must describe imported evidence:
 
       candidate-00-baseline        origin fresh (capture token and time checked)
       candidate-01-reorder         origin reused, declaring IMPORT_REUSED_FROM as its source, reporting 2 findings
-      candidate-02-legacy          a receipt in the pre-origin shape: origin not recorded
-      candidate-03-missing-master  accepted while its own masters-and-order was not attempted (baseline fallback),
-                                   then `resume` measured that prerequisite, it was refused, and the import is
-                                   accounted blocked(prerequisite:...) - not credited
+      candidate-02-legacy          no import: the pre-origin receipt this arm once carried had only the Python
+                                   controller as its writer (step 3, D-A2), so its check stays open here
+      candidate-03-missing-master  its masters-and-order is refused, so an import there is refused and the check
+                                   stays open (the accepted-then-blocked import this arm once carried needed the Python
+                                   controller run in process, D-A2)
 
     After the resume the credited imports' ledger entries read `reused` (the controller re-using this run's own
     receipts), which is exactly the status a report must not describe as reused evidence."""
@@ -331,42 +289,35 @@ def make_import_origin_case(root: Path) -> dict:
     p = T.do_plan(run, case, ["--select", T.MAO, "--probe-cmd", f"scopeprobe=python {scope_fake}"],
                   registry="fixture-check-registry-derived.json")
     if p.returncode != 0:
-        raise SystemExit(f"{case}: evalrun plan exited {p.returncode}\n{p.stdout[-2000:]}\n{p.stderr[-2000:]}")
+        raise SystemExit(f"{case}: the controller's plan exited {p.returncode}\n{p.stdout[-2000:]}\n{p.stderr[-2000:]}")
     plan = load(run / "plan.json")
     arms = {stem: next(a for a in plan["arms"] if Path(a.get("candidateFile") or "").stem == stem)
             for stem in IMPORT_STEMS}
     bad = arms["candidate-03-missing-master"]
 
-    def not_attempted(ex, check_row, arm):
-        if check_row["checkId"] == T.MAO and arm["armId"] == bad["armId"]:
-            ex.account(check_row, arm, "blocked(fixture-not-attempted)", "blocked-prerequisite",
-                       "fixture: accounted before any launch, so this arm's answer was never measured")
-            return True
-        return False
-
-    exits = {"plan": p.returncode, "run": T.evalrun_inprocess(run, scen, not_attempted)}
+    r = T.evalrun(["run", "--run", run], scen)
+    exits = {"plan": p.returncode, "run": r.returncode}
     work = root / "imports" / case
     envelopes = {
-        "fresh": (arms["candidate-00-baseline"], {}, False),
-        "reused": (arms["candidate-01-reorder"], {"origin": "reused", "reused_from": IMPORT_REUSED_FROM}, False),
-        "legacy": (arms["candidate-02-legacy"], {"drop": ("origin",)}, True),
-        "blocked": (bad, {}, False),
+        "fresh": (arms["candidate-00-baseline"], {}),
+        "reused": (arms["candidate-01-reorder"], {"origin": "reused", "reused_from": IMPORT_REUSED_FROM}),
     }
-    for tag, (arm, kw, legacy) in envelopes.items():
+    for tag, (arm, kw) in envelopes.items():
         manifest, doc = T.origin_import(work / tag, plan, arm, **kw)
         if tag == "reused":
             # the reused import reports findings, so the reader's finding sentence carries the qualification too
             doc["result"] = {"detector": "finding", "findings": 2,
                              "coverage": [{"Population": "records", "Judged": 3, "Unjudgeable": {}}]}
             T.write_doc(manifest, doc)
-        exits[f"import-{tag}"] = _import_inprocess(run, scen, manifest, legacy)
-        if exits[f"import-{tag}"] != 0:
-            raise SystemExit(f"{case}: the {tag} import exited {exits[f'import-{tag}']}")
+        ri = T.evalrun(["import-results", "--run", run, "--file", manifest], scen)
+        exits[f"import-{tag}"] = ri.returncode
+        if ri.returncode != 0:
+            raise SystemExit(f"{case}: the {tag} import exited {ri.returncode}\n{ri.stdout[-2000:]}\n{ri.stderr[-2000:]}")
     for verb in ("resume", "finalize", "bundle"):
         r = T.evalrun([verb, "--run", run] + (["--no-names"] if verb == "bundle" else []), scen)
         exits[verb] = r.returncode
         if r.returncode != 0:
-            raise SystemExit(f"{case}: evalrun {verb} exited {r.returncode}\n{r.stdout[-2000:]}\n{r.stderr[-2000:]}")
+            raise SystemExit(f"{case}: the controller's {verb} exited {r.returncode}\n{r.stdout[-2000:]}\n{r.stderr[-2000:]}")
     return {"run": str(run), "bundle": str(run / "bundle"), "fixtureCase": case, "exits": exits,
             "arms": {stem: a["armId"] for stem, a in arms.items()}, "importCheck": T.IMPORT_CHECK,
             "prerequisite": T.MAO, "reusedFrom": IMPORT_REUSED_FROM, "planId": plan["planId"]}
@@ -413,11 +364,7 @@ def generate(root: Path, only: str | None = None) -> dict:
     make_r3_case(gen)
     make_r5_case(gen)
     T.GEN = gen
-    # HOUSECARL_EVALRUN names another tree's evalrun.py to build the bundles with (an integration head, or a
-    # worktree carrying the media-boundary change); the default is this checkout's own.
-    if os.environ.get("HOUSECARL_EVALRUN"):
-        T.EVALRUN = Path(os.environ["HOUSECARL_EVALRUN"])
-        print(f"  evalrun under test: {T.EVALRUN}")
+    # EVALRUN_CONTROLLER_CMD (test_evalrun's) names another build of the controller to make the bundles with
     os.environ.setdefault("HOUSECARL_RUNLOG_DIR", str(root / "runlog"))
     os.environ["PYTHONIOENCODING"] = "utf-8"
     # These bundles are load-time fixtures: plan them at Standard depth explicitly, whatever the evaluation's default

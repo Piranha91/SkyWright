@@ -1,7 +1,9 @@
 """evallive — import a live game driver's receipts into an evaluation run (`live-import` checks).
 
-Called by `evalrun.py import-results` when the planned check's adapter kind is `live-import`; it is not an entry
-point of its own. The first such check is `runtime.state-switch-flip`, fed by `switchflip.py`.
+The Python controller's `import-results` called it when the planned check's adapter kind was `live-import`. That
+command is gone (step 3 of the controller's port), and the built-in controller (runcontrol) refuses a live import in
+one sentence until this module is ported to it (step 4); until then nothing calls it, and it is kept as that port's
+source. It is not an entry point of its own. The first such check is `runtime.state-switch-flip`, fed by `switchflip.py`.
 
 What it refuses to trust. A live receipt says what the game did, so every claim in it is re-derived here:
   - each launch receipt names the plan, check and arm it was launched for (written by the driver BEFORE the

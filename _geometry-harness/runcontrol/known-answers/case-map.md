@@ -235,3 +235,18 @@ Cases of the self-test with no Python case behind them: the generated tables (`p
 prints and writes for the same command line), the cases named `owner: ...` (one per place where the controller follows
 a probe reader and Python's copy answers otherwise), the `driver: ...`, `child: ...`, `stages: ...`, `lab: ...`,
 `prep reuse: ...` and `black box: ...` cases, and the live cases against a Python on PATH.
+
+## After step 3 (the Python census-to-bundle path deleted)
+
+The Python side of this map is gone: `evalpipeline.py` keeps only the stages after the bundle, `evalrun.py` only
+`enrich` and `verify-bundle`, and the generators `make_known_answers*.py` that recorded the JSON answers here were
+deleted with the code they ran (they are in git history). The JSON files are the known answers now: a behaviour change
+gets a new known answer from what the game does, not from Python. What became of each suite:
+
+- `tests/test_evalpipeline.py`: the `ported` rows above were deleted from it, and 52 to 56 (the lab resolution) too; it
+  keeps the cases of the code that stays (the ledger, the stages after the bundle, the entry keys, the disk forecast,
+  the patch-search pairs) and gained 2330 to 2332, the continuation of a run folder this program made.
+- `tests/test_workbench_manual_pipeline.py`: deleted; every case was the in-place census-to-plan path.
+- `tests/test_evalrun.py`: starts this program by default (`enrich` still goes to `evalrun.py`). The cases that ran
+  `evalrun.py` inside the test process or hooked Python's Runner were deleted (23, 25 to 41, 45, 47, 49, 55, 57, 71, 83,
+  430), and the in-process halves of 20, 42, 43 and 413 were cut.

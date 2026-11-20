@@ -30,6 +30,7 @@ HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
 REPO = HARNESS.parent
 EVALRUN = HARNESS / "evalrun.py"
+from test_evalrun import CONTROLLER  # noqa: E402  (the built-in controller, runcontrol, as test_evalrun starts it)
 REGISTRY = REPO / ".claude" / "skills" / "world-edit-compatibility" / "references" / "check-registry.json"
 EXE = HARNESS / "overlapprobe" / "bin" / "Release" / "net9.0" / ("overlapprobe.exe" if os.name == "nt" else "overlapprobe")
 CODE = "view-lacks-installed-meshes"
@@ -174,7 +175,7 @@ def plan(root: Path, cands: Path, inst: Path, game: Path):
     out = root / "run"
     if out.exists():
         shutil.rmtree(out)
-    args = [sys.executable, str(EVALRUN), "plan", "--registry", str(REGISTRY), "--candidates", str(cands),
+    args = [*CONTROLLER, "plan", "--registry", str(REGISTRY), "--candidates", str(cands),
             "--out", str(out), "--harness", str(HARNESS), "--depth", "standard",
             "--instance", str(inst), "--game", str(game), "--profile", "P"]
     r = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -430,7 +431,7 @@ def plan_with(root: Path, cands: Path, inst: Path, game: Path, extra):
     out = root / "run"
     if out.exists():
         shutil.rmtree(out)
-    args = [sys.executable, str(EVALRUN), "plan", "--registry", str(REGISTRY), "--candidates", str(cands),
+    args = [*CONTROLLER, "plan", "--registry", str(REGISTRY), "--candidates", str(cands),
             "--out", str(out), "--harness", str(HARNESS), "--depth", "standard",
             "--instance", str(inst), "--game", str(game), "--profile", "P"] + list(extra)
     r = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace",
