@@ -23,8 +23,8 @@ public sealed class R3Bundle : IDisposable
         Assert.NotNull(d);
         return d!.FullName;
     }
-    public static string Evalrun => Environment.GetEnvironmentVariable("WB_TEST_EVALRUN") is { Length: > 0 } e ? e
-        : Path.Combine(Checkout(), "_geometry-harness", "evalrun.py");
+    public static string Runcontrol => Environment.GetEnvironmentVariable("WB_RUNCONTROL") is { Length: > 0 } e ? e
+        : Path.Combine(Checkout(), "_geometry-harness", "runcontrol", "bin", "Release", "net9.0", "runcontrol.exe");
 
     public R3Bundle()
     {
@@ -99,7 +99,7 @@ public class BundleTests : IClassFixture<R3Bundle>
         PlantDecoy(dir);
         var work = Path.Combine(dir + "-work");
         BundleConflicts? got = null;
-        var ex = Record.Exception(() => got = BundleConflicts.Open(dir, "baseline", Path.Combine(work, "verify.json"), RunEngine.OfPython(R3Bundle.Evalrun)));
+        var ex = Record.Exception(() => got = BundleConflicts.Open(dir, "baseline", Path.Combine(work, "verify.json"), RunEngine.OfBuiltIn(R3Bundle.Runcontrol)));
         Assert.True(ex is null, "the bundle with a decoy at the wrong root was refused: " + ex?.Message);
         Assert.DoesNotContain(got!.Rows, r => r.A == "Decoy.esp" || r.B == "Decoy.esp");
         var emit = got.EmitsRead.Single(e => e.Receipt == "geometry.object-overlap__baseline__arm");
@@ -122,7 +122,7 @@ public class BundleTests : IClassFixture<R3Bundle>
         Assert.True(i >= 0);
         bytes[i] = (byte)'Q';
         File.WriteAllBytes(p, bytes);
-        var ex = Assert.ThrowsAny<Exception>(() => BundleConflicts.Open(dir, "baseline", Path.Combine(dir + "-work", "verify.json"), RunEngine.OfPython(R3Bundle.Evalrun)));
+        var ex = Assert.ThrowsAny<Exception>(() => BundleConflicts.Open(dir, "baseline", Path.Combine(dir + "-work", "verify.json"), RunEngine.OfBuiltIn(R3Bundle.Runcontrol)));
         Assert.Contains("does not verify", ex.Message);
         Assert.DoesNotContain('\n', ex.Message.Trim());
     }
@@ -132,7 +132,7 @@ public class BundleTests : IClassFixture<R3Bundle>
     {
         var dir = _b.Copy();
         var v = Path.Combine(dir + "-work", "verify.json");
-        var said = BundleConflicts.Verify(dir, v, RunEngine.OfPython(R3Bundle.Evalrun));
+        var said = BundleConflicts.Verify(dir, v, RunEngine.OfBuiltIn(R3Bundle.Runcontrol));
         var doc = JsonNode.Parse(File.ReadAllText(v))!;
         var outs = doc["receiptOutputs"]!.AsArray();
         var drop = outs.Where(o => (string?)o!["receipt"] == "geometry.object-overlap__baseline__arm").ToList();
@@ -159,7 +159,7 @@ public class BundleTests : IClassFixture<R3Bundle>
         var sev = SeverityTable.Load(sevPath);
 
         var v = Path.Combine(dir + "-work", "verify.json");
-        var said = BundleConflicts.Verify(dir, v, RunEngine.OfPython(R3Bundle.Evalrun));
+        var said = BundleConflicts.Verify(dir, v, RunEngine.OfBuiltIn(R3Bundle.Runcontrol));
         var first = BundleConflicts.Read(dir, Arm, v, said);
         var r0 = ConflictRanking.Rank(first.Rows, first.Targets, sev).Where(r => r.Row.CheckId == "geometry.object-overlap").ToList();
         Assert.All(r0, r => Assert.Equal("not new", r.NewLabel));

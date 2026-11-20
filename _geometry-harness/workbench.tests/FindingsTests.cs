@@ -140,9 +140,11 @@ public sealed class FindingsBundle : IDisposable
             ["toolIdentity"] = new JsonObject { ["guarantee"] = "verified" }, ["receiptOutputs"] = _outputs,
         }.ToJsonString());
         File.WriteAllText(Path.Combine(Root, "severity.json"), """{ "unread": 25, "default": 25, "weights": { "*": { "Static": 50 } } }""");
-        // a stand-in for evalrun's verify-bundle that hands back this fixture's verdict (OpenBundle's own verify step)
-        File.WriteAllText(Path.Combine(Root, "fake_evalrun.py"),
-            "import shutil, sys\nshutil.copy(sys.argv[0].replace('fake_evalrun.py', 'verify.json'), sys.argv[sys.argv.index('--out') + 1])\nprint('verify: fixture verdict')\n");
+        // a stand-in for runcontrol's verify-bundle that hands back this fixture's verdict (OpenBundle's own verify step):
+        // a Python script, started by a .cmd beside it because the built-in engine starts a program
+        File.WriteAllText(Path.Combine(Root, "fake_verify.py"),
+            "import shutil, sys\nshutil.copy(sys.argv[0].replace('fake_verify.py', 'verify.json'), sys.argv[sys.argv.index('--out') + 1])\nprint('verify: fixture verdict')\n");
+        File.WriteAllText(Path.Combine(Root, "fake_runcontrol.cmd"), "@echo off\r\npython \"%~dp0fake_verify.py\" %*\r\n");
     }
 
     public void Dispose() { try { Directory.Delete(Root, true); } catch { } }
@@ -321,8 +323,7 @@ public sealed class FindingsTests
     static (string[]? Args, Exception? Failed) OpenOnSta(FindingsBundle f)
     {
         var open = typeof(PatchWriter).Assembly.GetType("Workbench.Program")!.GetMethod("OpenBundle", BindingFlags.Static | BindingFlags.NonPublic)!;
-        Environment.SetEnvironmentVariable("WB_EVALRUN", Path.Combine(f.Root, "fake_evalrun.py"));
-        Environment.SetEnvironmentVariable("WB_CONTROLLER", "python");   // the stand-in verifier is a Python script
+        Environment.SetEnvironmentVariable("WB_RUNCONTROL", Path.Combine(f.Root, "fake_runcontrol.cmd"));
         Environment.SetEnvironmentVariable("WB_SEVERITY", Path.Combine(f.Root, "severity.json"));
         Environment.SetEnvironmentVariable("WB_OUT", Path.Combine(f.Root, "work"));
         string[]? args = null; Exception? failed = null;
@@ -334,7 +335,7 @@ public sealed class FindingsTests
                 catch (TargetInvocationException ex) { failed = ex.InnerException ?? ex; }
             });
         }
-        finally { foreach (var v in new[] { "WB_EVALRUN", "WB_CONTROLLER", "WB_SEVERITY", "WB_OUT" }) Environment.SetEnvironmentVariable(v, null); }
+        finally { foreach (var v in new[] { "WB_RUNCONTROL", "WB_SEVERITY", "WB_OUT" }) Environment.SetEnvironmentVariable(v, null); }
         return (args, failed);
     }
 
@@ -357,8 +358,7 @@ public sealed class FindingsTests
     {
         using var f = new FindingsBundle(findingsOnly: true);
         var open = typeof(PatchWriter).Assembly.GetType("Workbench.Program")!.GetMethod("OpenBundle", BindingFlags.Static | BindingFlags.NonPublic)!;
-        Environment.SetEnvironmentVariable("WB_EVALRUN", Path.Combine(f.Root, "fake_evalrun.py"));
-        Environment.SetEnvironmentVariable("WB_CONTROLLER", "python");   // the stand-in verifier is a Python script
+        Environment.SetEnvironmentVariable("WB_RUNCONTROL", Path.Combine(f.Root, "fake_runcontrol.cmd"));
         Environment.SetEnvironmentVariable("WB_SEVERITY", Path.Combine(f.Root, "severity.json"));
         Environment.SetEnvironmentVariable("WB_OUT", Path.Combine(f.Root, "work"));
         try
@@ -375,7 +375,7 @@ public sealed class FindingsTests
         }
         finally
         {
-            foreach (var v in new[] { "WB_EVALRUN", "WB_CONTROLLER", "WB_SEVERITY", "WB_OUT" }) Environment.SetEnvironmentVariable(v, null);
+            foreach (var v in new[] { "WB_RUNCONTROL", "WB_SEVERITY", "WB_OUT" }) Environment.SetEnvironmentVariable(v, null);
         }
     }
 

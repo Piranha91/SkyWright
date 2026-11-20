@@ -186,10 +186,10 @@ public sealed class LauncherUiTests : IDisposable
         }
     }
 
-    // ---- the run engine setting and each engine's commands ----
+    // ---- the run engine: the built-in one, and what an older settings file's choice does now ----
 
     [Fact]
-    public void An_old_settings_file_loads_unchanged_and_means_python()
+    public void An_old_settings_file_loads_unchanged_and_runs_the_built_in_engine()
     {
         var path = Path.Combine(_root, LauncherSettings.FileName);
         var old = "{\n  \"instance\": \"X:/Lab\",\n  \"profile\": \"Default\",\n  \"game\": \"C:/Game\",\n  \"output\": \"X:/Out\",\n  \"workFolder\": null\n}";
@@ -197,30 +197,48 @@ public sealed class LauncherUiTests : IDisposable
         var s = LauncherSettings.Load(path).Settings!;
         Assert.Equal(new LauncherSettings("X:/Lab", "Default", "C:/Game", "X:/Out", null), s);
         Assert.Null(s.Controller);
-        // written back with nothing chosen, the file is the old file: no new member appears
+        // written back, the file is the old file: no new member appears
         Assert.Null(LauncherSettings.Save(path, s));
         Assert.Equal(old.ReplaceLineEndings(), File.ReadAllText(path).ReplaceLineEndings());
+        Assert.Equal("runcontrol", new Launcher { SettingsPath = path }.Engine.Controller);
+    }
+
+    [Theory]
+    [InlineData("python", true)]
+    [InlineData("Python", true)]
+    [InlineData("ruby", true)]
+    [InlineData("csharp", false)]
+    public async Task A_settings_file_that_names_a_run_engine_is_read_says_once_that_the_choice_is_gone_and_drops_it(string saved, bool said)
+    {
+        Assert.Null(Environment.GetEnvironmentVariable("WB_CONTROLLER"));
+        var path = Path.Combine(_root, LauncherSettings.FileName);
+        File.WriteAllText(path, "{\n  \"instance\": null,\n  \"controller\": \"" + saved + "\"\n}");
+        Assert.Equal(saved, LauncherSettings.Load(path).Settings!.Controller);       // read, not refused
         var l = new Launcher { SettingsPath = path };
-        Assert.Equal(("csharp", "default"), (l.Controller, l.ControllerFrom));
-        Assert.True(l.Engine.BuiltIn);
+        var restored = await l.RestoreAsync();
+        var note = $"the saved run engine '{saved}' is gone: runs use the built-in engine, and the setting is dropped the next time the settings are saved.";
+        if (said) { Assert.Equal(note, restored); Assert.Equal(note, l.SettingsNote); }
+        else { Assert.Equal("no saved instance to restore.", restored); Assert.Null(l.SettingsNote); }
+        Assert.Equal("runcontrol", l.Engine.Controller);
+        // the next save never writes a run engine
+        Assert.Null(LauncherSettings.Save(path, LauncherSettings.Load(path).Settings! with { Output = "X:/Out" }));
+        Assert.DoesNotContain("controller", File.ReadAllText(path));
     }
 
     [Fact]
-    public void The_chosen_run_engine_is_remembered_beside_the_other_settings_and_a_wrong_name_is_refused()
+    public async Task WB_CONTROLLER_is_not_obeyed_and_the_window_says_so()
     {
         var path = Path.Combine(_root, LauncherSettings.FileName);
-        Assert.Null(LauncherSettings.Save(path, new LauncherSettings("X:/Lab", "Default", "C:/Game", "X:/Out", null)));
-        var l = new Launcher { SettingsPath = path };
-        Assert.Contains("Built-in", l.SetController("csharp"));
-        Assert.Equal(new LauncherSettings("X:/Lab", "Default", "C:/Game", "X:/Out", null, "csharp"), LauncherSettings.Load(path).Settings);
-        var next = new Launcher { SettingsPath = path };                         // the next session
-        Assert.Equal(("csharp", "setting"), (next.Controller, next.ControllerFrom));
-        Assert.True(next.Engine.BuiltIn);
-        Assert.Contains("Python", next.SetController("Python"));
-        Assert.Equal("python", LauncherSettings.Load(path).Settings!.Controller);
-        var ex = Assert.Throws<InvalidOperationException>(() => next.SetController("ruby"));
-        Assert.Equal("'ruby' is not a run engine; use python or csharp.", ex.Message);
-        Assert.Equal("python", next.Controller);
+        File.WriteAllText(path, "{\n  \"instance\": null\n}");
+        Environment.SetEnvironmentVariable("WB_CONTROLLER", "python");
+        try
+        {
+            var l = new Launcher { SettingsPath = path };
+            var restored = await l.RestoreAsync();
+            Assert.Equal("WB_CONTROLLER is set to 'python', but there is no choice of run engine any more: runs use the built-in one.", restored);
+            Assert.Equal("runcontrol", l.Engine.Controller);
+        }
+        finally { Environment.SetEnvironmentVariable("WB_CONTROLLER", null); }
     }
 
     /// <summary>An empty file where runcontrol.exe would be built, for commands that are composed and not started.</summary>
@@ -232,29 +250,21 @@ public sealed class LauncherUiTests : IDisposable
     }
 
     [Fact]
-    public void The_bundle_check_and_the_population_are_one_request_to_either_engine()
+    public void The_bundle_check_and_the_population_are_the_built_in_engines_commands()
     {
         var exe = PlacedExe();
-        var cs = RunEngine.OfBuiltIn(exe); var py = RunEngine.OfPython(@"H:\gh\evalrun.py", "py3");
+        var cs = RunEngine.OfBuiltIn(exe);
         var v = cs.Verify(@"B:\bundle", @"W:\wb\bundle-verify.json");
         Assert.Equal(exe, v.FileName);
         Assert.Equal(new[] { "verify-bundle", @"B:\bundle", "--out", @"W:\wb\bundle-verify.json" }, v.ArgumentList);
         Assert.Equal(@"W:\wb\runlog", v.Environment["HOUSECARL_RUNLOG_DIR"]);
-        var pv = py.Verify(@"B:\bundle", @"W:\wb\bundle-verify.json");
-        Assert.Equal("py3", pv.FileName);
-        Assert.Equal(new[] { @"H:\gh\evalrun.py" }.Concat(v.ArgumentList), pv.ArgumentList);
-        Assert.Equal(("utf-8", "1"), (pv.Environment["PYTHONIOENCODING"], pv.Environment["PYTHONUTF8"]));
 
         var p = cs.Population(@"M:\p\Fix.esp", "Fix", @"I:\inst", @"W:\re\population.json");
         Assert.Equal(exe, p.FileName);
         Assert.Equal(new[] { "population", "--plugin", @"M:\p\Fix.esp", "--mod", "Fix", "--instance", @"I:\inst", "--out", @"W:\re\population.json" }, p.ArgumentList);
         Assert.Equal(@"W:\re\runlog", p.Environment["HOUSECARL_RUNLOG_DIR"]);
-        var pp = py.Population(@"M:\p\Fix.esp", "Fix", @"I:\inst", @"W:\re\population.json");
-        Assert.Equal("py3", pp.FileName);
-        Assert.Equal(new[] { @"H:\gh\evalrun.py" }.Concat(p.ArgumentList), pp.ArgumentList);
 
-        // the harness folder: beside the Python controller, or above the built-in one; never a .py path for the built-in
-        Assert.Equal(@"H:\gh", py.HarnessDir());
+        // the harness folder is above the built-in engine's build; no command names Python or a .py path
         Assert.Equal(Path.Combine(_root, "harness"), cs.HarnessDir());
         foreach (var c in new[] { v, p }) Assert.DoesNotContain(c.ArgumentList.Prepend(c.FileName), a => a.EndsWith(".py", StringComparison.OrdinalIgnoreCase) || a.Contains("python", StringComparison.OrdinalIgnoreCase));
     }
@@ -267,7 +277,7 @@ public sealed class LauncherUiTests : IDisposable
                                            () => RunEngine.OfBuiltIn(gone).PackageDigest(_root, _root), () => RunEngine.OfBuiltIn(gone).ControllerExe() })
         {
             var ex = Assert.Throws<InvalidOperationException>(act);
-            Assert.Equal($"the built-in run engine is not at '{gone}'; build it (dotnet build _geometry-harness/runcontrol -c Release), set WB_RUNCONTROL to runcontrol.exe, or switch the run engine to Python.", ex.Message);
+            Assert.Equal($"the built-in run engine is not at '{gone}'; build it (dotnet build _geometry-harness/runcontrol -c Release), or set WB_RUNCONTROL to runcontrol.exe.", ex.Message);
         }
     }
 

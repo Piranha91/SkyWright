@@ -793,10 +793,8 @@ public sealed class InPlaceRunTests
         }));
         var decoy = Path.Combine(w.Root, "decoy-runlog"); Directory.CreateDirectory(decoy);
         var before = Listing(w.Root);                                 // the whole world root, not only instance and game
-        var psi = new ProcessStartInfo("python") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (var a in new[] { "-I", Path.Combine(R3Bundle.Checkout(), "_geometry-harness", "evalpipeline.py"), "run", "--entry", entry,
-                                  "--machine", machine, "--out", work, "--through", "bundle" }) psi.ArgumentList.Add(a);
-        psi.Environment["PYTHONIOENCODING"] = "utf-8";
+        var psi = new ProcessStartInfo(R3Bundle.Runcontrol) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var a in new[] { "run", "--entry", entry, "--machine", machine, "--out", work, "--through", "bundle" }) psi.ArgumentList.Add(a);
         psi.Environment["HOUSECARL_RUNLOG_DIR"] = decoy;              // the run must set its own, under the work folder (not setdefault)
         using var p = Process.Start(psi)!;
         var o = p.StandardOutput.ReadToEndAsync(); var e = p.StandardError.ReadToEndAsync();
@@ -808,7 +806,7 @@ public sealed class InPlaceRunTests
         var changed = before.Keys.Union(after.Keys).Where(k => !before.TryGetValue(k, out var b) || !after.TryGetValue(k, out var a) || b != a)
                             .Where(k => !Under(k, work) && !string.Equals(Path.GetFullPath(k), Path.GetFullPath(w.Root), StringComparison.OrdinalIgnoreCase)).ToList();
         Assert.True(changed.Count == 0, $"the run wrote outside its work folder: {string.Join("; ", changed.Take(5))}");
-        Assert.True(p.ExitCode == 0, $"evalpipeline run --through bundle exited {p.ExitCode}: {text[^Math.Min(800, text.Length)..]}");
+        Assert.True(p.ExitCode == 0, $"runcontrol run --through bundle exited {p.ExitCode}: {text[^Math.Min(800, text.Length)..]}");
         Assert.Empty(Directory.EnumerateFileSystemEntries(decoy));
         var bundle = Path.Combine(work, "bundle", "evidence");
         Assert.True(File.Exists(Path.Combine(bundle, "manifest.json")), "no bundle under the work folder");
@@ -822,8 +820,8 @@ public sealed class InPlaceRunTests
 
     static int FreePort() { var l = new TcpListener(IPAddress.Loopback, 0); l.Start(); int p = ((IPEndPoint)l.LocalEndpoint).Port; l.Stop(); return p; }
 
-    /// <summary>B5: the workbench itself, started with no Python anywhere on its PATH and the built-in run engine chosen
-    /// through its own tool, runs the selection to done: the engine builds the bundle and the workbench checks and opens
+    /// <summary>B5: the workbench itself, started with no Python anywhere on its PATH and with its one run engine, the built-in one,
+    /// driven through its own tools, runs the selection to done: the engine builds the bundle and the workbench checks and opens
     /// it, still with no Python. A run that stops before the bundle fails the test. The engine is this
     /// checkout's runcontrol.exe (or WB_RUNCONTROL); set WB_TEST_SHOTS to a folder to keep pictures of the window.</summary>
     [Fact]
@@ -870,7 +868,7 @@ public sealed class InPlaceRunTests
         psi.Environment["WB_SETTINGS"] = settings;
         psi.Environment["WB_RUNCONTROL"] = engine;
         psi.Environment["HOUSECARL_RUNLOG_DIR"] = decoy;                 // the run must keep its own run log, not this one
-        foreach (var k in new[] { "WB_CONTROLLER", "WB_PIPELINE_CMD", "WB_PIPELINE", "WB_EVALRUN", "WB_HARNESS", "WB_OUT", "WB_SCRIPT", "WB_MACHINE" }) psi.Environment.Remove(k);
+        foreach (var k in new[] { "WB_CONTROLLER", "WB_PIPELINE_CMD", "WB_HARNESS", "WB_OUT", "WB_SCRIPT", "WB_MACHINE" }) psi.Environment.Remove(k);
         var before = Listing(watched);
         using var wb = Process.Start(psi)!;
         var console = new System.Text.StringBuilder();
@@ -903,12 +901,8 @@ public sealed class InPlaceRunTests
             await Ok("workbench_act", ("verb", "select_mods"), ("mods", new[] { mod }));
             await Ok("workbench_act", ("verb", "select_probes"), ("checks", new[] { "geometry.object-overlap" }));
             var set = await Ok("workbench_act", ("verb", "set_output"), ("path", outDir));
-            Assert.Equal("csharp", set.GetProperty("launcher").GetProperty("controller").GetString());   // nothing chosen yet: the built-in default
-            await Shot("start-tab-run-engine-default");
-            var chosen = await Ok("workbench_act", ("verb", "set_controller"), ("controller", "csharp"));
-            Assert.Equal("csharp", chosen.GetProperty("launcher").GetProperty("controller").GetString());
-            Assert.Equal("csharp", LauncherSettings.Load(settings).Settings!.Controller);
-            await Shot("start-tab-run-engine-built-in");
+            Assert.False(set.GetProperty("launcher").TryGetProperty("controller", out var engineChoice));   // there is no run engine to choose
+            await Shot("start-tab");
 
             var started = await Ok("workbench_act", ("verb", "run"));
             Assert.Equal("running", started.GetProperty("launcher").GetProperty("run").GetProperty("state").GetString());
@@ -1120,7 +1114,7 @@ public sealed class ManualWriteTests
             "patchFolder" => folder,                                 // the patch's folder by its full path
             "patchMod" => Path.GetFileName(folder),                  // the base: the folder's name, which the window found under the instance's mods
             "instance" => w.Instance, "profile" => "Default", "game" => game, "workDir" => work,
-            "engine" => RunEngine.OfPython(Path.Combine(harness, "evalrun.py")), "conflictdiffExe" => Path.Combine(harness, "conflictdiff", "bin", "Release", "net9.0", "conflictdiff.exe"),
+            "engine" => RunEngine.OfBuiltIn(Path.Combine(harness, "runcontrol", "bin", "Release", "net9.0", "runcontrol.exe")), "conflictdiffExe" => Path.Combine(harness, "conflictdiff", "bin", "Release", "net9.0", "conflictdiff.exe"),
             "buildDirs" => Array.Empty<string>(), "localProbesRoot" => harness, "say" => (Action<string>)(_ => { }),
             _ => throw new Xunit.Sdk.XunitException($"Recheck.RunAll has a parameter {p.Name} this test does not know"),
         }).ToArray();

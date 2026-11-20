@@ -133,13 +133,13 @@ internal sealed class BundleConflicts
             string why = b.GetProperty("defects").EnumerateArray().Select(d => d.GetProperty("detail").GetString()).FirstOrDefault()
                          ?? (b.GetProperty("mismatched").GetArrayLength() > 0 ? $"{b.GetProperty("mismatched").GetArrayLength()} file(s) do not hash to what the manifest recorded"
                          : b.GetProperty("missing").GetArrayLength() > 0 ? $"{b.GetProperty("missing").GetArrayLength()} file(s) the manifest lists are missing" : "it is not structurally valid");
-            throw new InvalidOperationException($"the bundle at '{dir}' does not verify ({why}); open a bundle that evalrun verify-bundle passes.");
+            throw new InvalidOperationException($"the bundle at '{dir}' does not verify ({why}); open a bundle that runcontrol verify-bundle passes.");
         }
         var guarantee = v.GetProperty("toolIdentity").GetProperty("guarantee").GetString();
         if (guarantee != "verified")
             throw new InvalidOperationException($"the bundle at '{dir}' has tool identity '{guarantee}', not 'verified', so which build produced its rows cannot be checked; open a bundle made under the identity contract.");
         if (!v.TryGetProperty("receiptOutputs", out var ro))
-            throw new InvalidOperationException("this evalrun's verify-bundle lists no receiptOutputs, so the receipts' files cannot be resolved; use the evalrun of this checkout.");
+            throw new InvalidOperationException("this runcontrol's verify-bundle lists no receiptOutputs, so the receipts' files cannot be resolved; use the runcontrol of this checkout.");
 
         // receipt key -> (recorded path -> resolved entry)
         var resolved = new Dictionary<string, Dictionary<string, JsonElement>>(StringComparer.Ordinal);

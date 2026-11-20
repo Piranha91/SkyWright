@@ -63,35 +63,18 @@ internal sealed class Launcher : IAsyncDisposable
     /// <summary>The current run's own run-log store, where its probes record their progress: the pipeline keeps it under
     /// its output folder (<c>run/runlog</c>).</summary>
     internal string? RunStore => RunFolder is null ? null : Path.Combine(RunFolder, "run", "runlog");
-    string? _controller;
-    /// <summary>The run engine: WB_CONTROLLER when set, else the one chosen here, else the settings file's, else the built-in one.</summary>
-    internal string Controller => RunEngine.FromEnv() is { } env ? env.Trim().ToLowerInvariant() : Chosen();
-    /// <summary>Where <see cref="Controller"/> comes from: WB_CONTROLLER, setting, or default.</summary>
-    internal string ControllerFrom => RunEngine.FromEnv() is not null ? "WB_CONTROLLER" : Chosen() == RunEngine.CSharp && !_controllerSaved ? "default" : "setting";
-    bool _controllerSaved;
-    /// <summary>The engine every command of a run and of a review goes through; an unknown WB_CONTROLLER is refused here.</summary>
-    internal RunEngine Engine => RunEngine.Of(Controller);
+    /// <summary>The engine every command of a run and of a review goes through: the built-in one, the only one.</summary>
+    internal RunEngine Engine => RunEngine.OfBuiltIn();
 
-    string Chosen()
+    /// <summary>One sentence when a remembered setting or WB_CONTROLLER still names the Python run engine, which is gone;
+    /// null when nothing does. A remembered csharp means what it always meant and is dropped without a word.</summary>
+    static string? GoneEngineNote(LauncherSettings? saved)
     {
-        if (_controller is not null) return _controller;
-        // not chosen in this session yet (a bundle opened directly never restores): what the settings file remembers
-        var saved = LauncherSettings.Load(SettingsPath).Settings?.Controller;
-        try { _controller = saved is null ? RunEngine.CSharp : RunEngine.Name(saved); _controllerSaved = saved is not null; }
-        catch (InvalidOperationException) { _controller = RunEngine.CSharp; SettingsNote = $"the saved run engine '{saved}' is not one this workbench knows, so the built-in one is used."; }
-        return _controller;
-    }
-
-    /// <summary>Choose the run engine and remember it; the rest of the settings file is kept as it is.</summary>
-    internal string SetController(string? controller)
-    {
-        var name = RunEngine.Name(controller);
-        if (RunTask is { IsCompleted: false }) throw new InvalidOperationException("a run is going; change the run engine once it has ended.");
-        lock (_gate) { _controller = name; _controllerSaved = true; }
-        var (old, why) = LauncherSettings.Load(SettingsPath);
-        SettingsNote = why ?? LauncherSettings.Save(SettingsPath, (old ?? new LauncherSettings(null, null, null, null, null)) with { Controller = name });
-        return $"the run engine is {RunEngine.Label(name)}"
-               + (RunEngine.FromEnv() is { } env ? $"; WB_CONTROLLER is set to '{env}' and is used instead while it is set" : "");
+        var env = Environment.GetEnvironmentVariable("WB_CONTROLLER");
+        if (env is { Length: > 0 }) return $"WB_CONTROLLER is set to '{env}', but there is no choice of run engine any more: runs use the built-in one.";
+        var name = saved?.Controller?.Trim().ToLowerInvariant();
+        if (name is null or "" or "csharp" or "built-in" or "builtin") return null;
+        return $"the saved run engine '{saved!.Controller}' is gone: runs use the built-in engine, and the setting is dropped the next time the settings are saved.";
     }
 
     readonly Dictionary<string, HousecarlCore.Progress.RunEstimate> _first = new(StringComparer.OrdinalIgnoreCase);
@@ -180,7 +163,7 @@ internal sealed class Launcher : IAsyncDisposable
     void Remember()
     {
         if (Mode != "free" || Instance is null) return;
-        SettingsNote = LauncherSettings.Save(SettingsPath, new LauncherSettings(Instance, Profile, Game, Output, WorkFolderChosen ? WorkFolder : null, _controllerSaved ? _controller : null));
+        SettingsNote = LauncherSettings.Save(SettingsPath, new LauncherSettings(Instance, Profile, Game, Output, WorkFolderChosen ? WorkFolder : null));
     }
 
     /// <summary>Open what the settings file remembers: the instance and profile, then the Output Folder and a chosen Work
@@ -190,13 +173,14 @@ internal sealed class Launcher : IAsyncDisposable
         SettingsNote = LauncherSettings.CannotWrite(SettingsPath);
         var (s, why) = LauncherSettings.Load(SettingsPath);
         if (why is not null) { SettingsNote = why; return why; }
-        _controller = null; Chosen();                                 // the saved run engine, before anything is written back
-        if (s?.Instance is null) return "no saved instance to restore.";
+        var gone = GoneEngineNote(s);                                 // read before anything is written back
+        if (s?.Instance is null) { SettingsNote ??= gone; return gone ?? "no saved instance to restore."; }
         var said = new List<string>();
         try { said.Add(await OpenProfileAsync("free", s.Instance, s.Profile, s.Game)); }
-        catch (InvalidOperationException ex) { return "the saved instance could not be opened: " + ex.Message; }
+        catch (InvalidOperationException ex) { SettingsNote ??= gone; return "the saved instance could not be opened: " + ex.Message + (gone is null ? "" : " " + gone); }
         if (s.Output is not null) { try { said.Add(SetOutput(s.Output)); } catch (InvalidOperationException ex) { said.Add("the saved Output Folder was not set: " + ex.Message.TrimEnd('.')); } }
         if (s.WorkFolder is not null) { try { said.Add(SetWorkFolder(s.WorkFolder)); } catch (InvalidOperationException ex) { said.Add("the saved Work Folder was not set: " + ex.Message.TrimEnd('.')); } }
+        if (gone is not null) { SettingsNote ??= gone; said.Add(gone.TrimEnd('.')); }
         return "restored from the last session: " + string.Join("; ", said);
     }
 
@@ -649,7 +633,6 @@ internal sealed class Launcher : IAsyncDisposable
                 }).ToList(),
                 notProbes = Registry().Where(c => !ProbeKinds.Contains(c.Kind)).Select(c => new { checkId = c.Id, name = ProbeNames.Of(c.Id), why = ProbeNames.NotAProbe(c.Kind) }).ToList(),
                 settings = new { path = SettingsPath, note = SettingsNote },
-                controller = Controller, controllerFrom = ControllerFrom,
                 output = Output, outputVerdict = verdict, workFolder = WorkFolder,
                 depth = Depth,
                 run = new { state = RunState, refusal = RunRefusal, line = RunLine, folder = RunFolder, bundle = RunBundle, preparation = PrepNote, scope = ScopeNote, tally = RunTally },

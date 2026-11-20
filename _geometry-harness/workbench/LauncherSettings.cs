@@ -3,8 +3,8 @@ using System.Text.Json;
 namespace Workbench;
 
 /// <summary>What free mode remembers between sessions: the MO2 instance, the profile, the game folder, the Output Folder
-/// and a chosen Work Folder, and the run engine when one was chosen (python or csharp; absent means python). Kept in
-/// <see cref="FileName"/> beside the workbench's exe.</summary>
+/// and a chosen Work Folder. Kept in <see cref="FileName"/> beside the workbench's exe. <c>Controller</c> is the run engine
+/// an older workbench remembered (python or csharp): it is read only to say that the choice is gone, and never written.</summary>
 internal sealed record LauncherSettings(string? Instance, string? Profile, string? Game, string? Output, string? WorkFolder,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? Controller = null)
 {
@@ -38,7 +38,7 @@ internal sealed record LauncherSettings(string? Instance, string? Profile, strin
         try
         {
             var tmp = path + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(s, Json));
+            File.WriteAllText(tmp, JsonSerializer.Serialize(s with { Controller = null }, Json));   // a run engine is never written
             File.Move(tmp, path, overwrite: true);
             return null;
         }
