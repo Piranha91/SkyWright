@@ -25,12 +25,12 @@ public sealed class ReviewSpeedPart2Tests : IDisposable
     internal static string RepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "housecarl.sln"))) dir = dir.Parent;
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, HarnessShared.CheckoutLayout.Marker))) dir = dir.Parent;
         Assert.NotNull(dir);
         return dir!.FullName;
     }
 
-    internal static string SkillPolicy() => Path.Combine(RepoRoot(), ".claude", "skills", "evaluation-reporting", "references", "scene-policy.json");
+    internal static string SkillPolicy() => Path.Combine(HarnessShared.CheckoutLayout.Housecarl(RepoRoot()), ".claude", "skills", "evaluation-reporting", "references", "scene-policy.json");
 
     static RankedRow Row(int rank, string refKey, string? other, string cell = "000100:HcWbTest.esp", string check = "geometry.object-overlap",
                          string kind = "OVERLAP", string a = "Subject.esp", string b = "Other.esp") =>
@@ -857,7 +857,7 @@ public class TrialPatchWriteTests : IClassFixture<TiltedRefWorld>
     [Fact]
     public async Task P8o_commit_with_out_path_writes_a_new_patch_in_that_folder()
     {
-        var exe = Path.Combine(ReviewSpeedPart2Tests.RepoRoot(), "src", "housecarl-mcp", "bin", "Release", "net9.0", "housecarl-mcp.exe");
+        var exe = HarnessShared.CheckoutLayout.ServerExe(ReviewSpeedPart2Tests.RepoRoot());
         Assert.True(File.Exists(exe), $"build src/housecarl-mcp in Release first: {exe}");
         await using var w = await PatchWriter.StartAsync(exe, new WriteTarget(_w.Instance, "Default", _w.DataDir, Path.Combine(_w.Instance, "mods")),
             Path.Combine(_w.Root, "hcdata-" + Guid.NewGuid().ToString("N")), TestCorpus.Path, _ => { });

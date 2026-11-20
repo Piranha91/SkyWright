@@ -20,9 +20,9 @@ public class ReviewSpeedServerTests
     static string ServerExe()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "housecarl.sln"))) dir = dir.Parent;
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, HarnessShared.CheckoutLayout.Marker))) dir = dir.Parent;
         Assert.NotNull(dir);
-        var exe = Path.Combine(dir!.FullName, "src", "housecarl-mcp", "bin", "Release", "net9.0", "housecarl-mcp.exe");
+        var exe = HarnessShared.CheckoutLayout.ServerExe(dir!.FullName);
         Assert.True(File.Exists(exe), $"build src/housecarl-mcp in Release first: {exe}");
         return exe;
     }

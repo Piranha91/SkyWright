@@ -232,7 +232,7 @@ internal sealed class Launcher : IAsyncDisposable
     internal static IReadOnlyList<RegistryCheck> Registry()
     {
         if (_registry is not null) return _registry;
-        var path = Program.FromCheckoutPublic("WB_REGISTRY", "check registry", ".claude", "skills", "world-edit-compatibility", "references", "check-registry.json");
+        var path = Program.FromCheckoutPublic("WB_REGISTRY", "check registry", "data", "check-registry.json");
         if (!File.Exists(path)) throw new InvalidOperationException($"the check registry is not at '{path}'; set WB_REGISTRY to check-registry.json.");
         using var d = JsonDocument.Parse(File.ReadAllText(path));
         _registry = d.RootElement.GetProperty("checks").EnumerateArray().Select(c =>

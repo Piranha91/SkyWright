@@ -117,7 +117,7 @@ public sealed class OutputWriteTests : IClassFixture<TiltedRefWorld>
 
     static string ServerExe()
     {
-        var exe = Path.Combine(R3Bundle.Checkout(), "src", "housecarl-mcp", "bin", "Release", "net9.0", "housecarl-mcp.exe");
+        var exe = HarnessShared.CheckoutLayout.ServerExe(R3Bundle.Checkout());
         Assert.True(File.Exists(exe), $"build src/housecarl-mcp in Release first: {exe}");
         return exe;
     }
@@ -789,7 +789,7 @@ public sealed class InPlaceRunTests
         var machine = Path.Combine(w.Root, "machine.json");
         File.WriteAllText(machine, JsonSerializer.Serialize(new
         {
-            readerCmd = "\"" + Path.Combine(R3Bundle.Checkout(), "src", "housecarl-mcp", "bin", "Release", "net9.0", "housecarl-mcp.exe") + "\"",
+            readerCmd = "\"" + HarnessShared.CheckoutLayout.ServerExe(R3Bundle.Checkout()) + "\"",
         }));
         var decoy = Path.Combine(w.Root, "decoy-runlog"); Directory.CreateDirectory(decoy);
         var before = Listing(w.Root);                                 // the whole world root, not only instance and game
@@ -1011,7 +1011,7 @@ public sealed class OutputFolderLayoutTests : IDisposable
 public sealed class ManualWriteTests
 {
     static string Checkout() => R3Bundle.Checkout();
-    static string ServerExe() => Path.Combine(Checkout(), "src", "housecarl-mcp", "bin", "Release", "net9.0", "housecarl-mcp.exe");
+    static string ServerExe() => HarnessShared.CheckoutLayout.ServerExe(Checkout());
 
     static Dictionary<string, (long, DateTime)> Listing(params string[] roots) =>
         roots.Where(Directory.Exists).SelectMany(r => Directory.EnumerateFileSystemEntries(r, "*", SearchOption.AllDirectories))

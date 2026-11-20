@@ -7,20 +7,15 @@ namespace Workbench;
 /// <c>viewprobe --interactive</c> takes), then hands it to the workbench window instead of the fly-through.</summary>
 internal static class Program
 {
-    /// <summary>The houseCARL checkout this exe was built from (the folder holding housecarl.sln), or null.</summary>
-    internal static string? CheckoutRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "housecarl.sln"))) dir = dir.Parent;
-        return dir?.FullName;
-    }
+    /// <summary>The SkyWright checkout this exe was built from (the folder holding SkyWright.sln), or null.</summary>
+    internal static string? CheckoutRoot() => HarnessShared.CheckoutLayout.FindRoot();
 
-    /// <summary>The houseCARL server built in this checkout, beside this exe's checkout: src/housecarl-mcp/bin/Release.</summary>
+    /// <summary>The houseCARL server built in this checkout's pinned houseCARL: external/houseCARL/src/housecarl-mcp/bin/Release.</summary>
     internal static string DefaultServerExe()
     {
         var root = CheckoutRoot()
-            ?? throw new InvalidOperationException("this workbench was not built inside a houseCARL checkout; set WB_SERVER to the housecarl-mcp.exe it should use.");
-        return Path.Combine(root, "src", "housecarl-mcp", "bin", "Release", "net9.0", "housecarl-mcp.exe");
+            ?? throw new InvalidOperationException("this workbench was not built inside a SkyWright checkout; set WB_SERVER to the housecarl-mcp.exe it should use.");
+        return HarnessShared.CheckoutLayout.ServerExe(root);
     }
 
     internal static string FromCheckoutPublic(string env, string what, params string[] rel) => FromCheckout(env, what, rel);
@@ -28,7 +23,7 @@ internal static class Program
     static string FromCheckout(string env, string what, params string[] rel)
     {
         if (Environment.GetEnvironmentVariable(env) is { Length: > 0 } v) return v;
-        var root = CheckoutRoot() ?? throw new InvalidOperationException($"this workbench was not built inside a houseCARL checkout; set {env} to the {what}.");
+        var root = CheckoutRoot() ?? throw new InvalidOperationException($"this workbench was not built inside a SkyWright checkout; set {env} to the {what}.");
         return Path.Combine(new[] { root }.Concat(rel).ToArray());
     }
 
@@ -49,7 +44,7 @@ internal static class Program
         arm ??= BundleConflicts.DefaultArm(dir);               // the plan's review arm in manual mode, else baseline
         var work = Environment.GetEnvironmentVariable("WB_OUT") is { Length: > 0 } o ? o : outDir ?? Path.Combine(Path.GetTempPath(), "workbench");
         Directory.CreateDirectory(work);
-        var sevPath = FromCheckout("WB_SEVERITY", "severity table", ".claude", "skills", "world-edit-compatibility", "references", "workbench-severity.json");
+        var sevPath = FromCheckout("WB_SEVERITY", "severity table", "data", "workbench-severity.json");
         Shell.Severity = SeverityTable.Load(sevPath);
         var sw = System.Diagnostics.Stopwatch.StartNew();
         Shell.Bundle = BundleConflicts.Open(dir, arm, Path.Combine(work, "bundle-verify.json"), Shell.Launcher.Engine);

@@ -504,10 +504,9 @@ public static partial class SelfTest
     {
         string[] names = ["live: toolidentity.package of real build folders", "live: toolidentity.probe_cmd with an interpreter on PATH",
                           "live: Python reuses a stage this program recorded", "live: this program reuses a stage Python recorded"];
-        string? root = AppContext.BaseDirectory;
-        while (root != null && !File.Exists(Path.Combine(root, "housecarl.sln"))) root = Path.GetDirectoryName(root);
+        string? root = HarnessShared.CheckoutLayout.FindRoot();
         string harness = root == null ? "" : Path.Combine(root, "_geometry-harness");
-        string? reason = !File.Exists(Path.Combine(harness, "evalpipeline.py")) ? "this build is not inside a houseCARL checkout with the Python controller"
+        string? reason = !File.Exists(Path.Combine(harness, "evalpipeline.py")) ? "this build is not inside a SkyWright checkout with the Python controller"
             : Python(harness, "--version") is not { exit: 0 } ? "python is not on PATH" : null;
         if (reason != null) { foreach (string n in names) Skip(n, reason); return; }
         const string head = "import sys, json; sys.path.insert(0, sys.argv[1]); ";

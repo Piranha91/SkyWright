@@ -19,7 +19,7 @@ public sealed class R3Bundle : IDisposable
     public static string Checkout()
     {
         var d = new DirectoryInfo(AppContext.BaseDirectory);
-        while (d is not null && !File.Exists(Path.Combine(d.FullName, "housecarl.sln"))) d = d.Parent;
+        while (d is not null && !File.Exists(Path.Combine(d.FullName, HarnessShared.CheckoutLayout.Marker))) d = d.Parent;
         Assert.NotNull(d);
         return d!.FullName;
     }

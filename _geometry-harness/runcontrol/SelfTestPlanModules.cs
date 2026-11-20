@@ -525,10 +525,9 @@ public static class SelfTestPlanModules
         // program's own, and its recorded answers above are the known answers)
         string[] names = ["checkout: the registry in this checkout validates, and its patterns compile",
                           "live: Python's record of the settings on this machine"];
-        string? root = AppContext.BaseDirectory;
-        while (root != null && !File.Exists(Path.Combine(root, "housecarl.sln"))) root = Path.GetDirectoryName(root);
+        string? root = HarnessShared.CheckoutLayout.FindRoot();
         string harness = root == null ? "" : Path.Combine(root, "_geometry-harness");
-        string registryPath = root == null ? "" : Path.Combine(root, ".claude", "skills", "world-edit-compatibility", "references", "check-registry.json");
+        string registryPath = root == null ? "" : HarnessShared.CheckoutLayout.Registry(root);
         if (!File.Exists(registryPath))
         {
             foreach (string n in names) skip(n, "this build is not inside a houseCARL checkout");

@@ -90,7 +90,7 @@ public class ServerContextSourceTests : IClassFixture<DoorWorld>
     public ServerContextSourceTests(DoorWorld w) => _w = w;
 
     Task<PatchWriter> Start() => PatchWriter.StartAsync(
-        Path.Combine(ReviewSpeedPart2Tests.RepoRoot(), "src", "housecarl-mcp", "bin", "Release", "net9.0", "housecarl-mcp.exe"),
+        HarnessShared.CheckoutLayout.ServerExe(ReviewSpeedPart2Tests.RepoRoot()),
         new WriteTarget(_w.Instance, "Default", _w.DataDir, Path.Combine(_w.Instance, "mods")),
         Path.Combine(_w.Root, "hcdata-" + Guid.NewGuid().ToString("N")), TestCorpus.Path, _ => { });
 

@@ -3,7 +3,7 @@ using HarnessShared;
 
 namespace Workbench;
 
-/// <summary>The severity weights (ranking key 5): skill data, <c>world-edit-compatibility/references/workbench-severity.json</c>,
+/// <summary>The severity weights (ranking key 5): app data, <c>data/workbench-severity.json</c>,
 /// keyed by (Kind, base type) with '*' for any kind.</summary>
 internal sealed class SeverityTable
 {
@@ -15,7 +15,7 @@ internal sealed class SeverityTable
 
     internal static SeverityTable Load(string path)
     {
-        if (!File.Exists(path)) throw new InvalidOperationException($"the severity table is not at '{path}'; it ships in the world-edit-compatibility skill's references.");
+        if (!File.Exists(path)) throw new InvalidOperationException($"the severity table is not at '{path}'; it ships in SkyWright's data folder.");
         using var d = JsonDocument.Parse(File.ReadAllText(path));
         var r = d.RootElement;
         var t = new SeverityTable { Unread = r.GetProperty("unread").GetInt32(), Default = r.GetProperty("default").GetInt32(),

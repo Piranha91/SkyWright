@@ -28,11 +28,11 @@ public sealed class NavRepairWorld : IDisposable
     internal static string RepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "housecarl.sln"))) dir = dir.Parent;
-        return dir?.FullName ?? throw new InvalidOperationException("no housecarl.sln above the test's folder");
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, HarnessShared.CheckoutLayout.Marker))) dir = dir.Parent;
+        return dir?.FullName ?? throw new InvalidOperationException("no SkyWright.sln above the test's folder");
     }
     internal static string Probe => NavRepairLane.ProbeExe(Path.Combine(RepoRoot(), "_geometry-harness"));
-    internal static string Server => Path.Combine(RepoRoot(), "src", "housecarl-mcp", "bin", "Release", "net9.0", "housecarl-mcp.exe");
+    internal static string Server => HarnessShared.CheckoutLayout.ServerExe(RepoRoot());
 
     public NavRepairWorld()
     {

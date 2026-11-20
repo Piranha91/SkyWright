@@ -50,9 +50,9 @@ public class ShellTests
     public void The_shipped_severity_table_loads_puts_a_door_above_a_static_above_flora_and_says_how_it_was_accepted()
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);
-        while (root is not null && !File.Exists(Path.Combine(root.FullName, "housecarl.sln"))) root = root.Parent;
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, HarnessShared.CheckoutLayout.Marker))) root = root.Parent;
         Assert.NotNull(root);
-        var t = SeverityTable.Load(Path.Combine(root!.FullName, ".claude", "skills", "world-edit-compatibility", "references", "workbench-severity.json"));
+        var t = SeverityTable.Load(HarnessShared.CheckoutLayout.Severity(root!.FullName));
         Assert.True(t.Of("OVERLAP", "Door").Weight > t.Of("OVERLAP", "Static").Weight);
         Assert.True(t.Of("OVERLAP", "Static").Weight > t.Of("OVERLAP", "Flora").Weight);
         Assert.Contains("accepted under the standing rule", t.Status);

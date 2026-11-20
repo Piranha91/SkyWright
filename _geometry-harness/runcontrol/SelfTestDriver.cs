@@ -696,10 +696,9 @@ public static partial class SelfTest
     static void PipelineLiveCases()
     {
         const string name = "live: the Python pipeline reuses the census, prepare and scope this program accepted";
-        string? root = AppContext.BaseDirectory;
-        while (root != null && !File.Exists(Path.Combine(root, "housecarl.sln"))) root = Path.GetDirectoryName(root);
+        string? root = HarnessShared.CheckoutLayout.FindRoot();
         string harness = root == null ? "" : Path.Combine(root, "_geometry-harness");
-        string? reason = !File.Exists(Path.Combine(harness, "evalpipeline.py")) ? "this build is not inside a houseCARL checkout with the Python controller"
+        string? reason = !File.Exists(Path.Combine(harness, "evalpipeline.py")) ? "this build is not inside a SkyWright checkout with the Python controller"
             : Python(harness, "--version") is not { exit: 0 } ? "python is not on PATH" : null;
         if (reason != null)
         {

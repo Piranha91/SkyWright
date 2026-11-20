@@ -94,7 +94,7 @@ public class RecheckRuleTests
         if (string.IsNullOrEmpty(exe))
         {
             var root = new DirectoryInfo(AppContext.BaseDirectory);
-            while (root is not null && !File.Exists(Path.Combine(root.FullName, "housecarl.sln"))) root = root.Parent;
+            while (root is not null && !File.Exists(Path.Combine(root.FullName, HarnessShared.CheckoutLayout.Marker))) root = root.Parent;
             exe = Path.Combine(root!.FullName, "_geometry-harness", "conflictdiff", "bin", "Release", "net9.0", "conflictdiff.exe");
         }
         Assert.True(File.Exists(exe), $"conflictdiff is not built at {exe}; build it first (dotnet build _geometry-harness/conflictdiff -c Release).");

@@ -243,8 +243,11 @@ internal static class Shell
     {
         var path = Environment.GetEnvironmentVariable("WB_SCENE_POLICY");
         if (string.IsNullOrWhiteSpace(path))
-            for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-                if (File.Exists(Path.Combine(dir.FullName, SceneKeyPolicy.RelativePath))) { path = Path.Combine(dir.FullName, SceneKeyPolicy.RelativePath); break; }
+            // beside the app, or in a checkout's pinned houseCARL (external/houseCARL), whose reporting skill owns the policy
+            for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null && path is null; dir = dir.Parent)
+                foreach (var cand in new[] { Path.Combine(dir.FullName, SceneKeyPolicy.RelativePath),
+                                             Path.Combine(HarnessShared.CheckoutLayout.Housecarl(dir.FullName), SceneKeyPolicy.RelativePath) })
+                    if (File.Exists(cand)) { path = cand; break; }
         if (string.IsNullOrWhiteSpace(path)) return (null, "the reporting skill's scene policy was not found beside the workbench, so rows are listed without scenes.");
         try { return (SceneKeyPolicy.Load(path), null); }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or System.Text.Json.JsonException) { return (null, ex.Message); }
