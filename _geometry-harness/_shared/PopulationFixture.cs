@@ -65,14 +65,18 @@ namespace HarnessShared;
 //                                                         PpDelta.esp masters PpBase, so both placements were in its editor (M2's mirror)
 //  M8    u1 (Delta, MeshT) 2700 x u2 (A, Box) 2800  PpStrongMod +-60 / PpBase +-20          scoped: plugin row A x Delta (PpStrongMod
 //                                                                                         is not a population folder); every folder: PpStrongMod
+//  M10   w1 (Skyrim, SkU) 3200 x w2 (Update, SkBox) 3300, SkRoom   PpSkyMod +-60 / PpBase +-20   folder row PpSkyMod: its plugin
+//        PpSkyMod.esp masters Skyrim.esm but not Update.esm, so the pair is Blind; both are base-game references that come back in
+//        (Gate B review condition A: a plugin-carrying folder does not make every base-game partner Seen)
 //  K4    cup c4 on slab hs4 (both PpBase, SlabM), E35   PpMeshMod +-60 / PpBase +-100      Stranded, reshaped host, PpMeshMod
 //  K5    cup c5 (PpBase, CupM) on slab hs5 (PpBase), E35  PpMeshMod +-5 / PpBase +-20      Stranded, reshaped dependent, PpMeshMod
 public static class PopulationFixture
 {
     public const SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
     public static readonly ModKey BaseKey = new("PpBase", ModType.Master), AKey = new("PpA", ModType.Plugin), BKey = new("PpB", ModType.Plugin),
-        MoverKey = new("PpMover", ModType.Plugin), DeltaKey = new("PpDelta", ModType.Plugin), SkKey = new("Skyrim", ModType.Master);
-    public const string MeshModName = "PpMeshMod", StrongModName = "PpStrongMod";
+        MoverKey = new("PpMover", ModType.Plugin), DeltaKey = new("PpDelta", ModType.Plugin), SkKey = new("Skyrim", ModType.Master),
+        UpKey = new("Update", ModType.Master), SkyModKey = new("PpSkyMod", ModType.Plugin);
+    public const string MeshModName = "PpMeshMod", StrongModName = "PpStrongMod", SkyModName = "PpSkyMod";
     static FormKey K(uint id) => new(BaseKey, id);
     static FormKey KA(uint id) => new(AKey, id);
     static FormKey KB(uint id) => new(BKey, id);
@@ -93,8 +97,9 @@ public static class PopulationFixture
     public static readonly FormKey S1 = KA(0x90B), S2 = KA(0x90C), C1 = KA(0x90D), T1 = KA(0x90E), T2 = KA(0x90F), U2 = KA(0x910), C2b = KB(0x90A);
     public static readonly FormKey DNew = KD(0x801), O1 = KD(0x906), N1 = KD(0x907), N2 = KD(0x908), U1 = KD(0x909);
     public static readonly FormKey SkB = KS(0x801), SkBox = KS(0x802), SkE = KS(0x803), SkZ = KS(0x804), SkRoom = KS(0x810),
-        V1 = KS(0x901), V2 = KS(0x902), E1 = KS(0x903), E2 = KS(0x904), E3 = KS(0x905), E4 = KS(0x906);
-    public static readonly string[] Order = { "Skyrim.esm", "PpBase.esm", "PpA.esp", "PpB.esp", "PpMover.esp", "PpDelta.esp" };
+        V1 = KS(0x901), V2 = KS(0x902), E1 = KS(0x903), E2 = KS(0x904), E3 = KS(0x905), E4 = KS(0x906), SkU = KS(0x805), W1 = KS(0x907);
+    public static readonly FormKey W2 = new(UpKey, 0x901);
+    public static readonly string[] Order = { "Skyrim.esm", "Update.esm", "PpBase.esm", "PpA.esp", "PpB.esp", "PpMover.esp", "PpDelta.esp", "PpSkyMod.esp" };
     const float X30 = 3 * 4096f, X35 = 35 * 4096f;
     const float C = 4096f;
 
@@ -175,9 +180,17 @@ public static class PopulationFixture
         sk.Statics.Add(new Static(SkBox, Rel) { EditorID = "SkBox", Model = new Model { File = "pp\\box.nif" } });
         sk.Statics.Add(new Static(SkE, Rel) { EditorID = "SkMeshE", Model = new Model { File = "pp\\mshe.nif" } });
         sk.Statics.Add(new Static(SkZ, Rel) { EditorID = "SkMeshZ", Model = new Model { File = "pp\\mshz.nif" } });
+        sk.Statics.Add(new Static(SkU, Rel) { EditorID = "SkMeshU", Model = new Model { File = "pp\\mshu.nif" } });
         Room(sk, SkRoom, "SkRoom", Ref(V1, SkB, 200, 100, 0), Ref(V2, SkBox, 300, 100, 0), Ref(E1, SkE, 1200, 100, 0),
-             Ref(E2, SkBox, 1300, 100, 0), Ref(E3, SkZ, 2200, 100, 0), Ref(E4, SkBox, 2300, 100, 0));
-        Save(sk);
+             Ref(E2, SkBox, 1300, 100, 0), Ref(E3, SkZ, 2200, 100, 0), Ref(E4, SkBox, 2300, 100, 0), Ref(W1, SkU, 3200, 100, 0));
+        var skPath = Save(sk);
+        using var skOv = SkyrimMod.CreateFromBinaryOverlay(skPath, Rel);
+
+        // ---- Update.esm: a second core-named master; it places w2 into SkRoom ----
+        var up = new SkyrimMod(UpKey, Rel);
+        up.ModHeader.Flags |= SkyrimModHeader.HeaderFlag.Master;
+        Room(up, SkRoom, "SkRoom", Ref(W2, SkBox, 3300, 100, 0));
+        Save(up, skOv);
 
         // ---- PpBase.esm ----
         var b = new SkyrimMod(BaseKey, Rel);
@@ -285,6 +298,11 @@ public static class PopulationFixture
         }
         Save(dl, bOv);
 
+        // ---- PpSkyMod.esp: masters Skyrim.esm only (it restates SkBox); its folder reshapes pp\\mshu.nif ----
+        var skm = new SkyrimMod(SkyModKey, Rel);
+        skm.Statics.Add(new Static(SkBox, Rel) { EditorID = "SkBox", Model = new Model { File = "pp\\box.nif" } });
+        Save(skm, skOv);
+
         // ---- meshes: one folder per plugin stem (the base's meshes under PpBase), and PpMeshMod ----
         var mods = Path.Combine(d, "mods");
         foreach (var n in Order) Directory.CreateDirectory(Path.Combine(mods, Path.GetFileNameWithoutExtension(n)));
@@ -313,6 +331,9 @@ public static class PopulationFixture
         var sm = Path.Combine(mods, StrongModName, "meshes", "pp"); Directory.CreateDirectory(sm);
         File.WriteAllBytes(Path.Combine(sm, "mshs.nif"), Mesh(30, true));
         File.WriteAllBytes(Path.Combine(sm, "msht.nif"), Mesh(60, true));
+        File.WriteAllBytes(Path.Combine(bm, "mshu.nif"), Mesh(20, true));
+        var um = Path.Combine(mods, SkyModName, "meshes", "pp"); Directory.CreateDirectory(um);
+        File.WriteAllBytes(Path.Combine(um, "mshu.nif"), Mesh(60, true));
         var dm = Path.Combine(mods, "PpDelta", "meshes", "pp"); Directory.CreateDirectory(dm);
         File.WriteAllBytes(Path.Combine(dm, "msho.nif"), Mesh(60, true));
         File.WriteAllBytes(Path.Combine(dm, "dnew.nif"), Mesh(60, true));
@@ -368,7 +389,8 @@ public static class PopulationFixture
         string Esc(string x) => x.Replace("\\", "\\\\");
         File.WriteAllText(path, "{\n \"schema\": 1,\n \"plugins\": [{\"name\": \"PpDelta.esp\", \"path\": \"" + Esc(delta) + "\", \"sha256\": \"" + sha + "\"}],\n"
                               + " \"mods\": [{\"name\": \"" + MeshModName + "\", \"path\": \"" + Esc(Path.Combine(w.ModsDir, MeshModName)) + "\"},"
-                              + " {\"name\": \"PpDelta\", \"path\": \"" + Esc(Path.Combine(w.ModsDir, "PpDelta")) + "\"}],\n"
+                              + " {\"name\": \"PpDelta\", \"path\": \"" + Esc(Path.Combine(w.ModsDir, "PpDelta")) + "\"},"
+                              + " {\"name\": \"" + SkyModName + "\", \"path\": \"" + Esc(Path.Combine(w.ModsDir, SkyModName)) + "\"}],\n"
                               + " \"targets\": [\"PpDelta.esp\"]\n}\n");
         return path;
     }

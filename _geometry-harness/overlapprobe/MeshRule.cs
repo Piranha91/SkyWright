@@ -36,7 +36,7 @@ sealed class MeshRule
     public string IdentitySuffix { get; }
     public HashSet<FormKey> Readmitted { get; } = new();
     public HashSet<FormKey> Targets { get; } = new();
-    public long Judged, CrossesWithout, Unknown, Joint, SeenRows, Partners;
+    public long Judged, CrossesWithout, Unknown, Joint, SeenRows, Partners, SeenNotTested;
     public double ReadmitSeconds, JudgeSeconds;
 
     public MeshRule(OverlapIndex idx, AssetResolver assets, PopulationScope? population, IReadOnlyList<string> meshFolders,
@@ -103,26 +103,60 @@ sealed class MeshRule
         }
         var core = _idx.SurfaceCandidates(Proxy, obstructing, p => !_isCore(p), out _, enabledOf, (k, s) => spaces.Contains(s.Space));
         var tCore = core.Where(c => CreditedOwner(c.Base) is not null && InPop(c.Key, c.Win)).ToList();
-        foreach (var c in tCore) want.Add(c.Key);
-        var hash = new Dictionary<(FormKey, int, int), List<int>>();
-        for (int i = 0; i < core.Count; i++)
-            foreach (var (x, y) in Cells(core[i].WorldBounds))
-            {
-                if (!hash.TryGetValue((core[i].Win.Space, x, y), out var l)) hash[(core[i].Win.Space, x, y)] = l = new();
-                l.Add(i);
-            }
-        int targetsCore = want.Count;
+        // Sight before cost (Gate C): a reference comes back in only when some pair it could form might be a Blind folder row.
+        // The partners are the box-near references (a superset of the pairs the sweep can find), and a pair is kept when any
+        // credited folder on it would be Blind for its two placements, so a reference left out cannot make a Blind row.
+        Dictionary<(FormKey, int, int), List<SurfaceOverlapCandidate>> Hash(IEnumerable<SurfaceOverlapCandidate> list)
+        {
+            var h = new Dictionary<(FormKey, int, int), List<SurfaceOverlapCandidate>>();
+            foreach (var c in list)
+                foreach (var (x, y) in Cells(c.WorldBounds))
+                {
+                    if (!h.TryGetValue((c.Win.Space, x, y), out var l)) h[(c.Win.Space, x, y)] = l = new();
+                    l.Add(c);
+                }
+            return h;
+        }
+        bool PairCanBeBlind(SurfaceOverlapCandidate a, SurfaceOverlapCandidate b)
+            => (CreditedOwner(a.Base) is { } oa && InPop(a.Key, a.Win) && BlindPossible(oa.Folder!, a.Win.Plugin, b.Win.Plugin))
+            || (CreditedOwner(b.Base) is { } ob && InPop(b.Key, b.Win) && BlindPossible(ob.Folder!, a.Win.Plugin, b.Win.Plugin));
+        var coreHash = Hash(core);
+        var candHash = Hash(candidates.Where(c => spaces.Contains(c.Win.Space)));
+        IEnumerable<SurfaceOverlapCandidate> NearIn(Dictionary<(FormKey, int, int), List<SurfaceOverlapCandidate>> h, SurfaceOverlapCandidate t)
+        {
+            var seen = new HashSet<FormKey>();
+            foreach (var (x, y) in Cells(t.WorldBounds))
+                if (h.TryGetValue((t.Win.Space, x, y), out var l))
+                    foreach (var c in l)
+                        if (c.Key != t.Key && seen.Add(c.Key) && Near(t.WorldBounds, c.WorldBounds, _tol)) yield return c;
+        }
+        var tCoreKeys = tCore.Select(c => c.Key).ToHashSet();
         foreach (var t in tNon.Concat(tCore))
         {
-            var seen = new HashSet<int>();
-            foreach (var (x, y) in Cells(t.WorldBounds))
-                if (hash.TryGetValue((t.Win.Space, x, y), out var l))
-                    foreach (var i in l)
-                        if (seen.Add(i) && core[i].Key != t.Key && Near(t.WorldBounds, core[i].WorldBounds, _tol)) want.Add(core[i].Key);
+            foreach (var c in NearIn(coreHash, t))
+            {
+                if (PairCanBeBlind(t, c)) { want.Add(c.Key); if (tCoreKeys.Contains(t.Key)) want.Add(t.Key); }
+                else if (!want.Contains(c.Key)) SeenNotReadmitted.Add(c.Key);
+            }
+            if (tCoreKeys.Contains(t.Key))
+                foreach (var z in NearIn(candHash, t))
+                    if (PairCanBeBlind(t, z)) want.Add(t.Key);
         }
-        Partners = want.Count - targetsCore;
+        SeenNotReadmitted.ExceptWith(want);
+        foreach (var c in tCore) if (!want.Contains(c.Key)) SeenNotReadmitted.Add(c.Key);
+        Partners = want.Count(k => !tCoreKeys.Contains(k));
         ReadmitSeconds = clock.Elapsed.TotalSeconds;
         return want;
+    }
+
+    /// <summary>Base-game references near a target that stayed set aside because every pair they could form is Seen.</summary>
+    public HashSet<FormKey> SeenNotReadmitted { get; } = new();
+
+    /// <summary>Whether a row the folder's mesh made for two placements could be Blind: neither sight (a) nor (b) holds.</summary>
+    public bool BlindPossible(string folder, int pa, int pb)
+    {
+        var f = Facts(folder, pa, pb, false);
+        return !(f.FolderPluginInLaterClosure || f.FolderPluginMastersBoth);
     }
 
     IEnumerable<(int, int)> Cells(Aabb b)
@@ -202,7 +236,7 @@ sealed class MeshRule
         return src.FirstOrDefault(x => MeshResponsibility.IsGame(MeshResponsibility.FolderOf(x))) ?? src.LastOrDefault();
     }
 
-    public enum Outcome { NotJudged, Folder, Persists, Unknown }
+    public enum Outcome { NotJudged, Folder, Persists, Unknown, SeenSkipped }
 
     /// <summary>One intersecting pair under the folder rule.</summary>
     public sealed record Verdict(SurfaceOverlapHit Hit, Outcome Kind, string? Folder, IReadOnlyList<string> AlsoFolders, bool JointSwap,
@@ -218,11 +252,19 @@ sealed class MeshRule
         if (!Active || (oa is null && ob is null))
             return new(h, Outcome.NotJudged, null, Array.Empty<string>(), false, h.A, h.B, Array.Empty<(SurfaceOverlapCandidate, MeshOwner)>(), null, null, null, OverlapSight.Blind, "", default);
         var clock = System.Diagnostics.Stopwatch.StartNew();
-        Judged++;
         var sides = new List<(SurfaceOverlapCandidate Ref, MeshOwner Owner)>();
         if (oa is not null) sides.Add((h.A, oa));
         if (ob is not null) sides.Add((h.B, ob));
         var folders = sides.Select(s => s.Owner.Folder!).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(Priority).ThenBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+        // Sight before cost (Gate C): a pair of one plugin, or of two base-game placements, ends as no row whether or not the
+        // folder made it when every folder on it would be Seen; it is counted, not tested.
+        bool floorPair = h.A.Win.Plugin == h.B.Win.Plugin || (_isCore(h.A.Win.Plugin) && _isCore(h.B.Win.Plugin));
+        if (floorPair && folders.All(f => !BlindPossible(f, h.A.Win.Plugin, h.B.Win.Plugin)))
+        {
+            SeenNotTested++;
+            return new(h, Outcome.SeenSkipped, null, folders, false, h.A, h.B, sides, null, null, null, OverlapSight.Seen, "", default);
+        }
+        Judged++;
         SurfaceQueryOutcome? cf = null; string? credited = null; bool joint = false; string? unknown = null;
         foreach (var f in folders)
         {
@@ -302,7 +344,8 @@ sealed class MeshRule
             {
                 ["CrossesWithoutTheFolderMesh"] = CrossesWithout, ["MeshEqualsReplaced"] = Count(MeshShape.EqualBytes),
                 ["NewMeshNoFallback"] = Count(MeshShape.NoFallback), ["BaseGameReadmitted"] = Readmitted.Count,
-                ["JointSwap"] = Joint, ["SeenFolderRows"] = SeenRows,
+                ["JointSwap"] = Joint, ["SeenFolderRows"] = SeenRows, ["SeenNotTested"] = SeenNotTested,
+                ["SeenNotReadmitted"] = SeenNotReadmitted.Count,
             },
             $"credited: {Scope}; {Count(MeshShape.Credited):N0} model path(s) a credited folder reshapes; {Targets.Count:N0} target reference(s), "
           + $"{Partners:N0} base-game partner(s) readmitted; readmission {ReadmitSeconds:0.0}s, counterfactuals {JudgeSeconds:0.0}s");

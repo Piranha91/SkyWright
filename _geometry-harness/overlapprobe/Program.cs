@@ -1738,7 +1738,7 @@ foreach (var h in sweep.CrossHits)
 {
     var mv = meshMode ? meshRule.Judge(h) : null;
     if (mv is { Kind: MeshRule.Outcome.Folder }) meshVerdicts.Add(mv);
-    else if (mv is not { Kind: MeshRule.Outcome.Unknown })
+    else if (mv is not { Kind: MeshRule.Outcome.Unknown or MeshRule.Outcome.SeenSkipped })
         rows.Add(idx.JudgeSurface(h, closure, SurfaceGeometryOf, surfaceTolerance,
             maxTrianglePairs, TimeSpan.FromSeconds(pairSeconds), popMode == PopulationMode.Flags ? null : arms, default, provenanceTimer, pairResults));
     __run.Advance();

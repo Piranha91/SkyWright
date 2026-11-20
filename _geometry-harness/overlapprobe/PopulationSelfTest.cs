@@ -17,7 +17,7 @@ static class PopulationSelfTest
         var pop = F.WritePopulation(w, Path.Combine(t.Root, "pp", "population.json"));
         var idx = new OverlapIndex();
         int p = 0;
-        foreach (var path in w.Order.Where(x => Path.GetFileName(x) != "PpDelta.esp"))
+        foreach (var path in w.Order.Where(x => Path.GetFileName(x) is not ("PpDelta.esp" or "PpSkyMod.esp")))
         {
             using var mod = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE);
             idx.Ingest(p++, mod);
@@ -43,10 +43,10 @@ static class PopulationSelfTest
                 scope.Seeds.Contains(F.M8) && scope.ModFiles.Contains("meshes\\pp\\mshb.nif"), string.Join(", ", scope.ModFiles));
         // S2 by listing (mesh responsibility cases): PpMeshMod ships mshb (v1, s1, c1), mshs (t1, though PpStrongMod's wins), mshe (e1),
         // mshz (e3), slabm (hs4), cupm (c5); the PpDelta folder ships msho (o2, o3) and dnew (only delta references use it)
-        var s2 = new[] { F.M8, F.V1, F.S1, F.C1, F.T1, F.E1, F.E3, F.Hs4, F.C5, F.O2, F.O3 };
+        var s2 = new[] { F.M8, F.V1, F.S1, F.C1, F.T1, F.E1, F.E3, F.Hs4, F.C5, F.O2, F.O3, F.W1 };
         t.Check("C406 S2 for the mesh cases: every reference whose model a population folder lists is a seed", s2.All(scope.Seeds.Contains), $"missing: {Has(s2)}");
         var expected = fileRefs.Concat(new[] { F.Kc, F.X7 }).Concat(s2).ToHashSet();
-        t.Check("C406 nothing else is a seed: exactly the 12 file references, Kc, x7 and the eleven S2 references",
+        t.Check("C406 nothing else is a seed: exactly the 12 file references, Kc, x7 and the twelve S2 references",
                 scope.Seeds.SetEquals(expected), string.Join(", ", scope.Seeds.Except(expected)));
         // mesh responsibility, finding 2: an archive entry is read decompressed, so the same file compares equal loose and archived
         var bsaPath = Path.Combine(w.ModsDir, "PpBase", "PpBase.bsa");
@@ -70,7 +70,7 @@ static class PopulationSelfTest
         // Refusals: one plain sentence each, never a silently narrower or wider run.
         string? Refused(Action a) { try { a(); return null; } catch (PopulationRefused ex) { return ex.Message; } }
         var bad = Path.Combine(t.Root, "pp", "population-badsha.json");
-        File.WriteAllText(bad, File.ReadAllText(pop).Replace(FileSha(w.Order.Last()), new string('0', 64)));
+        File.WriteAllText(bad, File.ReadAllText(pop).Replace(FileSha(w.Order.First(x => Path.GetFileName(x) == "PpDelta.esp")), new string('0', 64)));
         var r1 = Refused(() => PopulationScope.Load(bad));
         t.Check("C400 refused: a delta plugin whose bytes are not the ones the population names", r1?.Contains("hashes to") == true, r1 ?? "(not refused)");
         var swapDir = Path.Combine(t.Root, "pp", "swapmod"); Directory.CreateDirectory(swapDir);

@@ -52,8 +52,9 @@ def run(argv, **kw):
                           timeout=600, **kw)
 
 
-ORDER = ["Skyrim.esm", "PpBase.esm", "PpA.esp", "PpB.esp", "PpMover.esp", "PpDelta.esp"]
-MESH_FOLDERS = ["PpMeshMod", "PpDelta"]   # the population's folders
+ORDER = ["Skyrim.esm", "Update.esm", "PpBase.esm", "PpA.esp", "PpB.esp", "PpMover.esp", "PpDelta.esp", "PpSkyMod.esp"]
+MESH_FOLDERS = ["PpMeshMod", "PpDelta", "PpSkyMod"]   # the population's folders
+DELTA = ("PpDelta.esp", "PpSkyMod.esp")                 # the plugins the arm without the delta drops
 
 
 def fk(hexid, plugin):
@@ -80,17 +81,18 @@ R = {
     "hs5": fk("00090C", "PpBase.esm"), "c5": fk("00090D", "PpBase.esm"),
     "v1": fk("000901", "Skyrim.esm"), "v2": fk("000902", "Skyrim.esm"), "e1": fk("000903", "Skyrim.esm"),
     "e2": fk("000904", "Skyrim.esm"), "e3": fk("000905", "Skyrim.esm"), "e4": fk("000906", "Skyrim.esm"),
+    "w1": fk("000907", "Skyrim.esm"), "w2": fk("000901", "Update.esm"),
 }
 OVERLAP = {"O1": ("a1", "b1"), "O2": ("a2", "b2"), "O3": ("d3", "a3"), "O3b": ("b4", "a4"), "O4": ("dE", "hA"),
            "O4b": ("hA", "bE"), "O5": ("pA", "bP"), "O5b": ("pA2", "bP2"), "O6": ("Kc", "b6"), "O7": ("x7", "b7"),
            "O8": ("m8", "b8"), "O9": ("a9", "b9"),
            "M1": ("s1", "s2"), "M2": ("v1", "v2"), "M3": ("c1", "c2b"), "M4": ("t1", "t2"), "M5": ("e1", "e2"), "M5b": ("e3", "e4"),
-           "M6": ("o2", "o1"), "M7": ("n1", "n2"), "M8": ("u1", "u2"), "M9": ("o3", "o4")}
+           "M6": ("o2", "o1"), "M7": ("n1", "n2"), "M8": ("u1", "u2"), "M9": ("o3", "o4"), "M10": ("w1", "w2")}
 CONTACT = {"K1": ("dc1", "hs1"), "K2": ("c2", "hs2"), "K3": ("c3", "hs3"), "K4": ("c4", "hs4"), "K5": ("c5", "hs5")}
 # What each arm holds, whole-order and in the population (the fixture's table).
 WANT = {
-    ("overlapprobe", "with", "whole"): {"O1", "O2", "O3", "O3b", "O4", "O4b", "O5", "O5b", "O7", "O8", "O9", "M1", "M2", "M3", "M8"},
-    ("overlapprobe", "with", "scoped"): {"O1", "O3", "O3b", "O4", "O5", "O7", "O8", "M1", "M2", "M3", "M8"},
+    ("overlapprobe", "with", "whole"): {"O1", "O2", "O3", "O3b", "O4", "O4b", "O5", "O5b", "O7", "O8", "O9", "M1", "M2", "M3", "M8", "M10"},
+    ("overlapprobe", "with", "scoped"): {"O1", "O3", "O3b", "O4", "O5", "O7", "O8", "M1", "M2", "M3", "M8", "M10"},
     ("overlapprobe", "without", "whole"): {"O1", "O2", "O4b", "O5b", "O6", "O9", "M3"},
     ("overlapprobe", "without", "scoped"): {"O1", "O6", "M3"},
     ("contactprobe", "with", "whole"): {"K1", "K3", "K4", "K5"},
@@ -149,14 +151,15 @@ class Lab:
             shutil.copyfile(pp / n, self.inst / "mods" / stem / n)
         shutil.copytree(pp / "mods" / "PpMeshMod", self.inst / "mods" / "PpMeshMod")
         shutil.copytree(pp / "mods" / "PpStrongMod", self.inst / "mods" / "PpStrongMod")
-        mods_with = ["PpStrongMod", "PpMeshMod", "PpDelta", "PpMover", "PpB", "PpA", "PpBase", "Skyrim"]
+        shutil.copytree(pp / "mods" / "PpSkyMod", self.inst / "mods" / "PpSkyMod", dirs_exist_ok=True)
+        mods_with = ["PpStrongMod", "PpMeshMod", "PpSkyMod", "PpDelta", "PpMover", "PpB", "PpA", "PpBase", "Update", "Skyrim"]
         (prof / "plugins.txt").write_text("".join("*" + n + "\n" for n in ORDER), encoding="utf-8")
         (prof / "loadorder.txt").write_text("".join(n + "\n" for n in ORDER), encoding="utf-8")
         (prof / "modlist.txt").write_text("".join("+" + m + "\n" for m in mods_with), encoding="utf-8")
         self.cand = {}
         for arm, plugins, mods in (("with", ORDER, mods_with),
-                                   ("without", [n for n in ORDER if n != "PpDelta.esp"],
-                                    [m for m in mods_with if m not in ("PpDelta", "PpMeshMod")])):
+                                   ("without", [n for n in ORDER if n not in DELTA],
+                                    [m for m in mods_with if m not in ("PpDelta", "PpMeshMod", "PpSkyMod")])):
             p = tmp / f"candidate-{arm}.json"
             p.write_text(json.dumps({"SchemaVersion": 1, "Name": arm, "BaseProfile": "P", "Plugins": plugins, "Mods": mods,
                                      "Changes": []}), encoding="utf-8")
@@ -300,7 +303,7 @@ def emit_of(probe, arm, which):
 
 # (case, A, B, the reference whose mesh the folder provides) for every row a folder's mesh alone creates
 FOLDER_ROWS = {"overlapprobe": [("O8", "PpB.esp", "PpMeshMod", "m8"), ("M1", "PpA.esp", "PpMeshMod", "s1"),
-                                ("M2", "Skyrim.esm", "PpMeshMod", "v1")],
+                                ("M2", "Skyrim.esm", "PpMeshMod", "v1"), ("M10", "Update.esm", "PpSkyMod", "w1")],
                "contactprobe": [("K4", "PpBase.esm", "PpMeshMod", "c4"), ("K5", "PpBase.esm", "PpMeshMod", "c5")]}
 
 
@@ -352,11 +355,14 @@ def mesh_counts_are_the_tables(arm, which):
         doc = emit_of("overlapprobe", arm, which)
         m = coverage(doc, "mesh responsibility")
         aside = m.get("SetAside") or {}
-        want = {"with": (6, {"CrossesWithoutTheFolderMesh": 1, "MeshEqualsReplaced": 2, "NewMeshNoFallback": 1, "BaseGameReadmitted": 2}),
-                "without": (0, {"CrossesWithoutTheFolderMesh": 0, "MeshEqualsReplaced": 0, "NewMeshNoFallback": 0, "BaseGameReadmitted": 0})}[arm]
+        # with: O8, M1, M2, M3, M6, M10 given a counterfactual; M9 (Seen by its folder's plugin) counted, not tested
+        want = {"with": (6, {"CrossesWithoutTheFolderMesh": 1, "MeshEqualsReplaced": 2, "NewMeshNoFallback": 1, "BaseGameReadmitted": 4,
+                             "SeenNotTested": 1}),
+                "without": (0, {"CrossesWithoutTheFolderMesh": 0, "MeshEqualsReplaced": 0, "NewMeshNoFallback": 0, "BaseGameReadmitted": 0,
+                                "SeenNotTested": 0})}[arm]
         cand = coverage(doc, "candidate refs").get("SetAside") or {}
-        # six Skyrim.esm references set aside; with the mod, v1 and v2 come back in
-        want = want + ({"with": 4, "without": 6}[arm],)
+        # eight base-game references set aside (seven Skyrim.esm, one Update.esm); with the mods, v1, v2, w1 and w2 come back in
+        want = want + ({"with": 4, "without": 8}[arm],)
         got = (m.get("Judged", -1), {k: aside.get(k, -1) for k in want[1]}, cand.get("BaseGameResponsible"))
         assert got == want, (f"{arm} {which}: (pairs given a mesh counterfactual, counts, base-game references set aside) {got}, "
                              f"the table says {want}")
