@@ -162,6 +162,13 @@ public static partial class SelfTestFinalize
                     return 0;
                 });
                 var want = D(c["want"]);
+                if (want.ContainsKey("launchTarget"))
+                {
+                    // the controller's own answer: the row is launched, on exactly this target
+                    if (launch == null) return "accounted, where the controller proves the order on " + S(want["launchTarget"]);
+                    var argv = L(launch["argv"]).Select(S).ToList();
+                    return Same("targets", string.Join(" ", Enumerable.Range(0, argv.Count - 1).Where(i => argv[i] == "--target").Select(i => argv[i + 1])), S(want["launchTarget"]));
+                }
                 string? why;
                 if (launch != null)
                 {

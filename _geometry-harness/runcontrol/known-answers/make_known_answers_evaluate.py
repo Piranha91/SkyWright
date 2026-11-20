@@ -461,7 +461,7 @@ GENERIC_CHECKS = [
 def generic_cases(tmp: Path) -> list:
     cases = []
 
-    def case(name, cid, aid="baseline", *, change=None, setup=None):
+    def case(name, cid, aid="baseline", *, change=None, setup=None, intended=None):
         root = tmp / f"g{len(cases):03d}"
         root.mkdir()
         plan = eval_plan(root, copy.deepcopy(GENERIC_CHECKS))
@@ -492,6 +492,9 @@ def generic_cases(tmp: Path) -> list:
             if e["status"] == "blocked(census-unreadable)":
                 note = note.split("(")[0]   # the rest is the Python runtime's own words
             want = {"account": {"status": e["status"], "cause": e["cause"], "note": note}}
+        if intended is not None:
+            # the controller's own answer, where it was decided to behave otherwise than evalrun.py; Python's stays beside it
+            want = {**intended, "python": want}
         written = {}
         for p in sorted((root / "outputs").rglob("*.states.*")) if (root / "outputs").is_dir() else []:
             text = p.read_bytes().decode("utf-8")
@@ -528,7 +531,17 @@ def generic_cases(tmp: Path) -> list:
 
     case("scopeprobe: the order and each plan target", "l.masters", "candidate-01")
     case("scopeprobe: a target flag in the registry's own args", "l.masters-target")
-    case("scopeprobe: a plan with no target", "l.masters", change=lambda p, r: p.__setitem__("targets", ["odd", {"provider": "x"}]))
+    # Piranha 2026-11-19: a selection with no plugin is evaluated. The controller proves the arm's order on its last
+    # plugin instead of blocking the row, so the checks that need the order can run; evalrun.py blocks it.
+    case("scopeprobe: a plan with no target", "l.masters", change=lambda p, r: p.__setitem__("targets", ["odd", {"provider": "x"}]),
+         intended={"launchTarget": "Target.esp"})
+
+    def no_plugins(p, r):
+        p["targets"] = []
+        for a in p["arms"]:
+            a["plugins"] = []
+            a["requested"]["plugins"] = []
+    case("scopeprobe: a plan with no target, on an arm that loads no plugin", "l.masters", change=no_plugins)
     case("scopeprobe: probe arguments from the plan's options", "l.masters", change=lambda p, r: p["options"].__setitem__("probeArgs", " --lean\t--threads 4 "))
     case("scopeprobe: no instance, profile or game", "l.masters",
          change=lambda p, r: p["options"].update(instance=None, profile=None, game=""))

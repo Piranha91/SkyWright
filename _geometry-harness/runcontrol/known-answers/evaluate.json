@@ -9363,6 +9363,80 @@
    "check": "l.masters",
    "arm": "baseline",
    "want": {
+    "launchTarget": "Target.esp",
+    "python": {
+     "account": {
+      "status": "blocked(no-target)",
+      "cause": null,
+      "note": "the plan names no target plugin, so the footprint probe has nothing to open"
+     }
+    }
+   },
+   "written": {}
+  },
+  {
+   "name": "scopeprobe: a plan with no target, on an arm that loads no plugin",
+   "tree": [
+    {
+     "path": "candidates/candidate-00-baseline.json",
+     "text": "{\"Plugins\": [\"Skyrim.esm\", \"A.esp\", \"B.esp\", \"Target.esp\"]}",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "candidates/candidate-01-flip.json",
+     "text": "{\"Plugins\": [\"Skyrim.esm\", \"B.esp\", \"A.esp\", \"Target.esp\"]}",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "journal.jsonl",
+     "text": ""
+    },
+    {
+     "path": "ledger.json",
+     "text": "{\r\n \"schemaVersion\": 2,\r\n \"planId\": \"plan00000001\",\r\n \"registrySha256\": \"45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38\",\r\n \"runIds\": [\r\n  {\r\n   \"runId\": \"evalrun-checks-1\",\r\n   \"parentRunId\": null,\r\n   \"command\": \"run\",\r\n   \"startedUtc\": \"2026-01-01T00:00:01Z\"\r\n  }\r\n ],\r\n \"entries\": {}\r\n}"
+    },
+    {
+     "path": "plan.json",
+     "text": {
+      "z": "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"
+     }
+    },
+    {
+     "path": "plan.sha256",
+     "planSha": true
+    },
+    {
+     "path": "plugins/A.esp",
+     "text": "plugin A.esp",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "plugins/B.esp",
+     "text": "plugin B.esp",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "plugins/Skyrim.esm",
+     "text": "plugin Skyrim.esm",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "plugins/Target.esp",
+     "text": "plugin Target.esp",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "premises/registry.json",
+     "text": "{\"registryVersion\": 7}"
+    },
+    {
+     "path": "premises/scope.json",
+     "text": "{\"complete\": true}"
+    }
+   ],
+   "check": "l.masters",
+   "arm": "baseline",
+   "want": {
     "account": {
      "status": "blocked(no-target)",
      "cause": null,

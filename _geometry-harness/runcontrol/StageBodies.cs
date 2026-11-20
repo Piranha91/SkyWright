@@ -171,7 +171,8 @@ public static class StageBodies
             // the line speaks of the selection's own plugins: an asset-only selection has none, and the plugin its
             // arms scope only to prove the order loads is not the selection's
             scope["targets"] = Py.ListOrEmpty(scope.Get("targets")).Where(t => subject.Contains(PyText.Str(Py.D(t).Get("name")))).ToList();
-            PyJson.WritePipelineFile(lineFile, new PyDict { ["line"] = ScopeRules.Line(scope, res, ScopeRules.DisabledModOf(ctx, res)) });
+            string line = subject.Count == 0 ? ScopeRules.AssetOnlyLine(ctx, res) : ScopeRules.Line(scope, res, ScopeRules.DisabledModOf(ctx, res));
+            PyJson.WritePipelineFile(lineFile, new PyDict { ["line"] = line });
             outs.Add(lineFile);
         }
         outs.Add(scopes);

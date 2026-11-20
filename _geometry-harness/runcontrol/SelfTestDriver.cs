@@ -493,10 +493,17 @@ public static partial class SelfTest
             }
             finally { ChildLaunch.RunJob = saved; }
         });
-        Case("stages: an asset-only selection skips the census and its scope line says it places nothing", () =>
+        // a selection with no plugin: the census is skipped, and the scope line says what its folders hold and what is measured
+        string? AssetOnlyLine(string[] files, string expected)
         {
             using var t = new Temp();
             var (inst, game) = World(t, [new ModFolder("Tex"), Mod("A", "A.esp")], ["Tex", "A"], ["A.esp"]);
+            foreach (string f in files)
+            {
+                string at = PyPath.Join(inst, "mods", "Tex", f);
+                Directory.CreateDirectory(Path.GetDirectoryName(at)!);
+                File.WriteAllBytes(at, [0]);
+            }
             var entry = InPlaceEntry(inst, game, ["Tex"], ["geometry.object-overlap"]);
             var res = new RunContext(entry, new PyDict(), t.At("run")).Resolve();
             var launched = new List<string>();
@@ -508,11 +515,24 @@ public static partial class SelfTest
                 if (exit != Exit.Ok) return $"exit {exit}: {stderr}";
                 return (stdout.Contains("census: the selection provides no plugin; skipped, and the plan runs without a scope") ? null : stdout)
                        ?? Same("children", string.Join(" ", launched), "scope-candidate-00-baseline scope-candidate-01")
-                       ?? Same("scope line", S(D(PyJson.ReadPipelineFile(t.At("run/scope/scope-line.json")))["line"]),
-                               "Tex places nothing in any cell, so no other plugin shares its cells.");
+                       ?? Same("scope line", S(D(PyJson.ReadPipelineFile(t.At("run/scope/scope-line.json")))["line"]), expected);
             }
             finally { ChildLaunch.RunJob = saved; }
-        });
+        }
+        Case("stages: a selection with only textures says no check can measure it", () => AssetOnlyLine(["textures/a/b.dds"],
+            "Tex has no plugin and no mesh (1 texture file), so no check here can measure it: textures, sounds and scripts change nothing these checks read."));
+        Case("stages: an empty selected folder says no check can measure it", () => AssetOnlyLine([],
+            "Tex has no plugin and no mesh (0 texture files), so no check here can measure it: textures, sounds and scripts change nothing these checks read."));
+        Case("stages: a selection with meshes says the mesh checks compare the objects that use them", () => AssetOnlyLine(
+            ["meshes/x/a.nif", "meshes/x/y/b.NIF", "meshes/x/notes.txt", "textures/t.dds", "textures/u/v.dds"],
+            "Tex has no plugin, so it places nothing; it holds 2 mesh files. The checks that read meshes compare every placed object that uses one of its meshes, "
+            + "with and without it. Its textures (2 files) and other files are not measured."));
+        Case("stages: a selection with a mesh and an archive names both", () => AssetOnlyLine(["meshes/a.nif", "Tex.bsa"],
+            "Tex has no plugin, so it places nothing; it holds 1 mesh file and 1 archive. The checks that read meshes compare every placed object that uses one of its meshes, "
+            + "with and without it. Its textures (0 files) and other files are not measured."));
+        Case("stages: a selection with only an archive names it", () => AssetOnlyLine(["Tex.BSA", "textures/t.dds"],
+            "Tex has no plugin, so it places nothing; it holds 1 archive. The checks that read meshes compare every placed object that uses one of its meshes, "
+            + "with and without it. Its textures (1 file) and other files are not measured."));
         Case("stages: a scope that stops on the order reader's refusal names it for the profile without the selection", () =>
         {
             using var t = new Temp();

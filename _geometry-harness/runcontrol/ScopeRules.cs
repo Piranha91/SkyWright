@@ -68,6 +68,42 @@ public static class ScopeRules
         return new PyDict { ["targets"] = accepted };
     }
 
+    /// <summary>The plugin an arm is scoped to when it loads none of the selection's: its last one, only to prove the order loads.</summary>
+    public static string? OrderProof(IReadOnlyList<string> plugins) => plugins.Count > 0 ? plugins[^1] : null;
+
+    /// <summary>The tab's plain sentence for a selection with no plugin: what kind of files its folders hold, what the
+    /// checks compare for them and what they do not measure. Which placed objects a mesh reaches is the probes' own
+    /// population rule; this only names the files.</summary>
+    public static string AssetOnlyLine(RunContext ctx, PyDict res)
+    {
+        var ticked = Py.Strs(res.Get("selection"));
+        string who = ticked.Count > 0 ? NamesOf(ticked, 3) : "the selection";
+        long meshes = 0, archives = 0, textures = 0;
+        foreach (string mod in ticked)
+        {
+            string folder = PyPath.Join(ctx.Instance, "mods", mod);
+            if (!Directory.Exists(folder)) continue;
+            meshes += FilesUnder(PyPath.Join(folder, "meshes"), ".nif");
+            textures += FilesUnder(PyPath.Join(folder, "textures"), null);
+            archives += Directory.EnumerateFiles(folder).Count(f => f.EndsWith(".bsa", StringComparison.OrdinalIgnoreCase));
+        }
+        string Count(long n, string one) => $"{n} {one}{(n != 1 ? "s" : "")}";
+        if (meshes == 0 && archives == 0)
+            return $"{who} has no plugin and no mesh ({Count(textures, "texture file")}), so no check here can measure it: "
+                   + "textures, sounds and scripts change nothing these checks read.";
+        string holds = meshes > 0 && archives > 0 ? $"{Count(meshes, "mesh file")} and {Count(archives, "archive")}"
+            : meshes > 0 ? Count(meshes, "mesh file") : Count(archives, "archive");
+        return $"{who} has no plugin, so it places nothing; it holds {holds}. The checks that read meshes compare every placed object "
+               + $"that uses one of its meshes, with and without it. Its textures ({Count(textures, "file")}) and other files are not measured.";
+    }
+
+    static long FilesUnder(string folder, string? extension)
+    {
+        if (!Directory.Exists(folder)) return 0;
+        return Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
+            .Count(f => extension == null || f.EndsWith(extension, StringComparison.OrdinalIgnoreCase));
+    }
+
     /// <summary>The plugins one arm's scope targets.</summary>
     public static List<string> Targets(RunContext ctx, PyDict res, PyDict arm)
     {
@@ -77,7 +113,7 @@ public static class ScopeRules
         {
             // the selection's plugins this arm loads; an arm that loads none scopes its last plugin only, to prove the order loads
             var mine = subject.Where(plugins.Contains).ToList();
-            return mine.Count > 0 ? mine : plugins.Count > 0 ? [plugins[^1]] : [];
+            return mine.Count > 0 ? mine : OrderProof(plugins) is { } last ? [last] : [];
         }
         List<string> targets;
         if (plugins.Contains(subject[0])) targets = [subject[0]];

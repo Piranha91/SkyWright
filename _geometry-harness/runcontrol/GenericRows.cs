@@ -79,6 +79,12 @@ public static class GenericRows
         return Ev.Items(arm.Get("plugins")).Select(p => PyText.Lower(Ev.Str(p))).ToHashSet(StringComparer.Ordinal);
     }
 
+    /// <summary>The plugin names an arm's frozen request loads, in its order.</summary>
+    static List<string> ArmPluginOrder(PyDict arm) =>
+        Ev.OrEmpty(arm.Get("requested")).Get("plugins") is List<object?> rows
+            ? rows.OfType<PyDict>().Where(p => PyValue.Truthy(p.Get("name"))).Select(p => Ev.Str(p["name"])).ToList()
+            : Ev.Items(arm.Get("plugins")).Select(Ev.Str).ToList();
+
     /// <summary>The command line and outputs of one row, or the row accounted (blocked, not applicable, skipped)
     /// when it cannot be built. `launch` receives what RunChild takes.</summary>
     public static void Run(Executor ex, PyDict check, PyDict arm) =>
@@ -221,6 +227,9 @@ public static class GenericRows
         {
             // scopeprobe reads what a target contains; the target list is the plan's, named, never guessed from the order
             var names = TargetNames(plan);
+            // a selection with no plugin has no footprint to open: the row then proves this arm's order loads, on the
+            // plugin the scope stage proves it on
+            if (names.Count == 0 && ScopeRules.OrderProof(ArmPluginOrder(arm)) is { } last) names = [last];
             if (names.Count == 0)
             {
                 ex.Account(check, arm, "blocked(no-target)", null, "the plan names no target plugin, so the footprint probe has nothing to open");
