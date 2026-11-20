@@ -79,6 +79,7 @@ R = {
     "o1": fk("000906", "PpDelta.esp"), "n1": fk("000907", "PpDelta.esp"), "n2": fk("000908", "PpDelta.esp"), "u1": fk("000909", "PpDelta.esp"),
     "o2": fk("000909", "PpBase.esm"), "o3": fk("00090E", "PpBase.esm"), "o4": fk("00090F", "PpBase.esm"), "hs4": fk("00090A", "PpBase.esm"), "c4": fk("00090B", "PpBase.esm"),
     "hs5": fk("00090C", "PpBase.esm"), "c5": fk("00090D", "PpBase.esm"),
+    "hs6": fk("000916", "PpBase.esm"), "c6": fk("000917", "PpBase.esm"), "n6": fk("000918", "PpBase.esm"),
     "v1": fk("000901", "Skyrim.esm"), "v2": fk("000902", "Skyrim.esm"), "e1": fk("000903", "Skyrim.esm"),
     "e2": fk("000904", "Skyrim.esm"), "e3": fk("000905", "Skyrim.esm"), "e4": fk("000906", "Skyrim.esm"),
     "w1": fk("000907", "Skyrim.esm"), "w2": fk("000901", "Update.esm"), "q1": fk("000911", "PpA.esp"), "q2": fk("000912", "PpA.esp"),
@@ -89,7 +90,8 @@ OVERLAP = {"O1": ("a1", "b1"), "O2": ("a2", "b2"), "O3": ("d3", "a3"), "O3b": ("
            "O8": ("m8", "b8"), "O9": ("a9", "b9"),
            "M1": ("s1", "s2"), "M2": ("v1", "v2"), "M3": ("c1", "c2b"), "M4": ("t1", "t2"), "M5": ("e1", "e2"), "M5b": ("e3", "e4"),
            "M6": ("o2", "o1"), "M7": ("n1", "n2"), "M8": ("u1", "u2"), "M9": ("o3", "o4"), "M10": ("w1", "w2"), "M11": ("q1", "q2"), "M12": ("r1", "r2")}
-CONTACT = {"K1": ("dc1", "hs1"), "K2": ("c2", "hs2"), "K3": ("c3", "hs3"), "K4": ("c4", "hs4"), "K5": ("c5", "hs5")}
+CONTACT = {"K1": ("dc1", "hs1"), "K2": ("c2", "hs2"), "K3": ("c3", "hs3"), "K4": ("c4", "hs4"), "K5": ("c5", "hs5"),
+           "K6": ("c6", "hs6"), "K6n": ("c6", "n6")}
 # What each arm holds, whole-order and in the population (the fixture's table).
 WANT = {
     ("overlapprobe", "with", "whole"): {"O1", "O2", "O3", "O3b", "O4", "O4b", "O5", "O5b", "O7", "O8", "O9", "M1", "M2", "M3", "M8", "M10", "M11"},
@@ -323,6 +325,16 @@ def folder_rows_name_the_folder(probe, which):
     return t
 
 
+def held_host_gives_no_row(which):
+    """Rejects: a row for K6, whose reshaped slab still holds the cup, because the cup also grazes the box it sits in (3 u deep,
+    nothing facing) and that graze was taken as the cup's contact under the winner (it touches nothing by the rule)."""
+    def t():
+        doc = emit_of("contactprobe", "with", which)
+        rows = [c for c in doc.get("Conflicts", []) if row_name("contactprobe", c) in ("K6", "K6n")]
+        assert not rows, f"K6: {len(rows)} row(s) where the cup still rests on the slab: {[c['Summary'][:200] for c in rows]}"
+    return t
+
+
 def plugin_rows_stay_plugin_rows(which):
     """Rejects: a folder credited for a crossing that exists without its mesh (M3), or for a folder outside the population (M8)."""
     def t():
@@ -357,8 +369,9 @@ def mesh_counts_are_the_tables(arm, which):
         doc = emit_of("overlapprobe", arm, which)
         m = coverage(doc, "mesh responsibility")
         aside = m.get("SetAside") or {}
-        # with: O8, M1, M2, M3, M6, M10, M11 given a counterfactual; M9 (Seen by its folder's plugin) counted, not tested
-        want = {"with": (7, {"CrossesWithoutTheFolderMesh": 1, "MeshEqualsReplaced": 2, "NewMeshNoFallback": 1, "BaseGameReadmitted": 4,
+        # with: O8, M1, M2, M3, M6, M10, M11, and K6's slab with its cup and with the box n6 (both meet the slab's top with either copy) given a
+        # counterfactual; M9 (Seen by its folder's plugin) counted, not tested
+        want = {"with": (9, {"CrossesWithoutTheFolderMesh": 3, "MeshEqualsReplaced": 2, "NewMeshNoFallback": 1, "BaseGameReadmitted": 4,
                              "SeenNotTested": 1, "TouchingNotCredited": 1}),
                 "without": (0, {"CrossesWithoutTheFolderMesh": 0, "MeshEqualsReplaced": 0, "NewMeshNoFallback": 0, "BaseGameReadmitted": 0,
                                 "SeenNotTested": 0, "TouchingNotCredited": 0})}[arm]
@@ -396,6 +409,9 @@ TESTS = [
     ("C413 contact, arm with, whole: a host (K4) and a dependent (K5) a provided mesh reshapes name the folder",
      folder_rows_name_the_folder("contactprobe", "whole")),
     ("C413 contact, arm with, scoped: the same rows name the folder", folder_rows_name_the_folder("contactprobe", "scoped")),
+    ("C417 contact, arm with, whole: a reshaped host that still holds its dependent (K6) gives no row, though the dependent grazes a neighbour",
+     held_host_gives_no_row("whole")),
+    ("C417 contact, arm with, scoped: the same", held_host_gives_no_row("scoped")),
     ("C414 overlap, arm with, whole: a crossing without the mesh (M3) and one a non-population folder makes (M8) keep the plugins",
      plugin_rows_stay_plugin_rows("whole")),
     ("C414 overlap, arm with, scoped: the same", plugin_rows_stay_plugin_rows("scoped")),

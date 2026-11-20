@@ -1362,6 +1362,11 @@ var meshClass = meshRows.Where(m => m.Row.Motion == DependentMotion.Fixed && m.R
 Console.WriteLine($"\n==== MESH RESPONSIBILITY — a contact only a credited folder's mesh changes ====");
 Console.WriteLine($"   credited {meshScope}; reshaped hosts judged {meshHosts:N0}, reshaped dependents judged {meshDeps:N0}; relationships {meshRows.Count:N0}; "
                 + $"class (Fixed, Stranded or Orphaned, Blind) {meshClass.Count:N0}; by verdict: " + string.Join(", ", meshRows.GroupBy(m => m.Row.Verdict).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}")));
+foreach (var (r, o, depSide) in meshClass.Take(20))
+{
+    Console.WriteLine($"      {r.Verdict,-12} {r.Relation,-9} dependent {BaseLabel(r.DepBase)} {r.Dependent} on {BaseLabel(r.Host.WinBase)} {r.Host.Key}, {(depSide ? "its own" : "the host's")} mesh from {o.Folder}");
+    Console.WriteLine($"         authoring {Contact(r.Authoring)} [{Src(r.Authoring)}]; winner {Contact(r.Winner)}{(r.Winner is { } w ? (w.Against == r.Host.Key ? " (the host)" : $" (against {BaseLabel(cidx!.WinnerBase(w.Against))} {w.Against})") : "")} [{Src(r.Winner)}]");
+}
 
 var rel = rows.Where(r => r.Relation != ContactRelation.None).ToList();
 var near = rows.Where(r => r.Relation == ContactRelation.None && r.Verdict == ContactVerdict.NoRelation).ToList();

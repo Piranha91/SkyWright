@@ -63,6 +63,13 @@ static class ContactDifferentialProof
                   c1 is { PreexistingOnly: true } && c1.Against == pk, $"chose {(c1 == pre ? "the pre-existing overlap" : c1 == graze ? "the grazing contact" : "?")}");
             Check("sd-select: CONTROLS — a plain contact at facing 0 still wins over a pre-existing overlap; a new sink 8 u deep wins too",
                   c2 == touch && c3 == sink, $"touch {(c2 == touch)}, sink {(c3 == sink)}");
+            // The same line among plain contacts (mesh-responsibility Gate C, 2026-11-20): a dependent 1-3 u inside a neighbour with
+            // nothing facing it (real rows: an incense burner 2.5 u into a chandelier, a window 3.2 u into its frame) was ranked over
+            // the wall it hangs on at facing 1.2 u, and read Orphaned.
+            bool grazeOverTouch = ContactIndex.Better(3f, 128f, 0f, 1.2f, 4f), touchOverGraze = ContactIndex.Better(0f, 1.2f, 3f, 128f, 4f);
+            bool sinkOverTouch = ContactIndex.Better(8f, 128f, 0f, 1.2f, 4f), deeperGraze = ContactIndex.Better(3f, 2f, 1f, 0.5f, 4f);
+            Check("sd-rank: a graze (3 u deep, nothing facing) never outranks a contact that touches (facing 1.2 u); a sink 8 u deep still outranks it; between two touching contacts the deeper wins",
+                  !grazeOverTouch && touchOverGraze && sinkOverTouch && deeperGraze, $"graze>touch {grazeOverTouch}, touch>graze {touchOverGraze}, sink>touch {sinkOverTouch}, deeper {deeperGraze}");
         }
 
         // ---- the synthetic order ----

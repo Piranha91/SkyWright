@@ -39,7 +39,7 @@ S1, S2 = "00090B:PpA.esp", "00090C:PpA.esp"   # M1, same plugin
 V1, V2 = "000901:Skyrim.esm", "000902:Skyrim.esm"   # M2, base game
 C1, C2B = "00090D:PpA.esp", "00090A:PpB.esp"   # M3, crosses with either mesh
 Q1, Q2 = "000911:PpA.esp", "000912:PpA.esp"     # M11, contained only inside PpMeshMod's closed shell
-MESH_LINE = ("PpMeshMod has no plugin, so it places nothing; it holds 8 mesh files. The checks that read meshes compare every "
+MESH_LINE = ("PpMeshMod has no plugin, so it places nothing; it holds 9 mesh files. The checks that read meshes compare every "
              "placed object that uses one of its meshes, with and without it. Its textures (0 files) and other files are not measured.")
 TEX_LINE = ("PpTexMod has no plugin and no mesh (1 texture file), so no check here can measure it: textures, sounds and "
             "scripts change nothing these checks read.")

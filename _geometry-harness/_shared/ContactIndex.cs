@@ -1411,7 +1411,8 @@ public sealed class ContactIndex
     // ---- the best contact of one dependent against a population ------------------------------------
 
     /// <summary>The dependent's best contact against everything in <paramref name="hash"/> (itself excluded) whose box
-    /// is within the box band: the deepest penetration if any penetrates, else the least distance. Null when nothing is
+    /// is within the box band: a contact that touches by the rule before one that does not (<see cref="Better"/>), then the
+    /// deepest penetration if any penetrates, else the least distance. Null when nothing is
     /// within the band, or the dependent has no soup. <paramref name="placementOf"/> gives each neighbour's snap in this
     /// arm; <paramref name="baseOf"/> its base then. The against-ref of the best contact is the one the reported depth
     /// was measured against, and the arm carries how wide that ref is along the contact normal (R4).
@@ -1533,7 +1534,7 @@ public sealed class ContactIndex
                 }
             }
             if (isPre ? bestPre is not null && pen <= bestPre.Contact.EffectivePenetration
-                      : best is not null && !Better(rank, c.FacingDistance, bestRank, best.Contact.FacingDistance)) continue;
+                      : best is not null && !Better(rank, c.FacingDistance, bestRank, best.Contact.FacingDistance, Epsilon)) continue;
             if (isPre) bestPre = arm; else { best = arm; bestRank = rank; }
             if (e is not null) e.Lap(ref e.OtherTicks);
         }
@@ -1570,13 +1571,21 @@ public sealed class ContactIndex
     {
         // "Touches" exactly as the rule reads it: a new depth over ε (Sunk) or a facing gap within ε (ReSupported). A contact that only
         // grazes (0 < depth <= ε) with a facing gap over ε reads Stranded/Orphaned, so it must not displace a pre-existing overlap.
-        bool bestTouches = best is not null && (bestRank > epsilon || best.Contact.FacingDistance <= epsilon);
+        bool bestTouches = best is not null && Touches(bestRank, best.Contact.FacingDistance, epsilon);
         return bestPre is not null && !bestTouches ? bestPre : best;
     }
 
-    /// <summary>Depth first (new depth under the differential rule, raw penetration otherwise), then the facing gap.</summary>
-    static bool Better(float depthA, float facingA, float depthB, float facingB)
+    /// <summary>Whether a contact touches by the rule (<see cref="DetectorModel.PlacementContact"/>): a new depth over ε (Sunk) or a
+    /// facing gap within ε (ReSupported). A graze, 0 &lt; depth &lt;= ε with a facing gap over ε, does not.</summary>
+    public static bool Touches(float depth, float facing, float epsilon) => depth > epsilon || facing <= epsilon;
+
+    /// <summary>The ranking of two plain contacts (A replaces B when true). A contact that touches by the rule beats one that does
+    /// not, so a graze into a neighbour can never stand in for a contact that holds the dependent; among contacts on the same side
+    /// of that line, depth first (new depth under the differential rule, raw penetration otherwise), then the facing gap.</summary>
+    public static bool Better(float depthA, float facingA, float depthB, float facingB, float epsilon)
     {
+        bool ta = Touches(depthA, facingA, epsilon), tb = Touches(depthB, facingB, epsilon);
+        if (ta != tb) return ta;
         if (depthA > 0f || depthB > 0f) return depthA > depthB;
         return facingA < facingB;
     }

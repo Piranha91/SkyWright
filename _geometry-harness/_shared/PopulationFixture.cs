@@ -76,6 +76,9 @@ namespace HarnessShared;
 //        along an edge (x 1550, y 1050); PpBase's +-20 leaves them apart. Touching: no row (a folder is never credited for it)
 //  K4    cup c4 on slab hs4 (both PpBase, SlabM), E35   PpMeshMod +-60 / PpBase +-100      Stranded, reshaped host, PpMeshMod
 //  K5    cup c5 (PpBase, CupM) on slab hs5 (PpBase), E35  PpMeshMod +-5 / PpBase +-20      Stranded, reshaped dependent, PpMeshMod
+//  K6    cup c6 on slab hs6 (both PpBase, SlabK), E35 (x0+4500), inside a closed +-23 box n6 (PpBase, Encl): PpMeshMod's slabk
+//        drops a render face (other bytes) and keeps the same collision, so the cup still rests on the slab; it also sits 3 u
+//        inside n6 with no face facing it (a graze, within the 4 u epsilon). No row: a graze never stands in for the slab
 public static class PopulationFixture
 {
     public const SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
@@ -101,6 +104,7 @@ public static class PopulationFixture
     public static readonly FormKey Shell = K(0x80E), Q1 = KA(0x911), Q2 = KA(0x912), Touch = K(0x80F), R1 = KA(0x913), R2 = KA(0x914);
     public static readonly FormKey MeshS = K(0x808), MeshO = K(0x80A), SlabM = K(0x80B), CupM = K(0x80C), MeshT = K(0x80D), E30 = K(0x846), E35 = K(0x847);
     public static readonly FormKey O2 = K(0x909), Hs4 = K(0x90A), C4 = K(0x90B), Hs5 = K(0x90C), C5 = K(0x90D), O3 = K(0x90E), O4 = K(0x90F);
+    public static readonly FormKey SlabK = K(0x820), Encl = K(0x821), Hs6 = K(0x916), C6 = K(0x917), N6 = K(0x918);
     public static readonly FormKey S1 = KA(0x90B), S2 = KA(0x90C), C1 = KA(0x90D), T1 = KA(0x90E), T2 = KA(0x90F), U2 = KA(0x910), C2b = KB(0x90A);
     public static readonly FormKey DNew = KD(0x801), O1 = KD(0x906), N1 = KD(0x907), N2 = KD(0x908), U1 = KD(0x909);
     public static readonly FormKey SkB = KS(0x801), SkBox = KS(0x802), SkE = KS(0x803), SkZ = KS(0x804), SkRoom = KS(0x810),
@@ -218,6 +222,8 @@ public static class PopulationFixture
         b.Statics.Add(new Static(CupM, Rel) { EditorID = "PpCupM", Model = new Model { File = "pp\\cupm.nif" } });
         b.Statics.Add(new Static(MeshT, Rel) { EditorID = "PpMeshT", Model = new Model { File = "pp\\msht.nif" } });
         b.Statics.Add(new Static(Shell, Rel) { EditorID = "PpShell", Model = new Model { File = "pp\\shell.nif" } });
+        b.Statics.Add(new Static(SlabK, Rel) { EditorID = "PpSlabK", Model = new Model { File = "pp\\slabk.nif" } });
+        b.Statics.Add(new Static(Encl, Rel) { EditorID = "PpEncl", Model = new Model { File = "pp\\encl.nif" } });
         b.Statics.Add(new Static(Touch, Rel) { EditorID = "PpTouch", Model = new Model { File = "pp\\touch.nif" } });
         b.Statics.Add(new Static(Huge, Rel)
         {
@@ -238,6 +244,8 @@ public static class PopulationFixture
             var e35 = Ext(E35, 35, 0);
             e35.Temporary.Add(Ref(Hs4, SlabM, X35 + 500, 500, 0)); e35.Temporary.Add(Ref(C4, Cup, X35 + 500, 500, 120));
             e35.Temporary.Add(Ref(Hs5, Slab, X35 + 2500, 500, 0)); e35.Temporary.Add(Ref(C5, CupM, X35 + 2500, 500, 120));
+            e35.Temporary.Add(Ref(Hs6, SlabK, X35 + 4500, 500, 0)); e35.Temporary.Add(Ref(C6, Cup, X35 + 4500, 500, 120));
+            e35.Temporary.Add(Ref(N6, Encl, X35 + 4500, 500, 120));
             b.Worldspaces.Add(Wrld(top, Ext(E00, 0, 0), Ext(E10, 1, 0), e50, Ext(E90, 9, 0), Ext(E200, 20, 0), e600, e30, e35));
         }
         var bPath = Save(b);
@@ -350,6 +358,9 @@ public static class PopulationFixture
         File.WriteAllBytes(Path.Combine(bm, "shell.nif"), Mesh(60, false, true));
         File.WriteAllBytes(Path.Combine(mods, MeshModName, "meshes", "pp", "shell.nif"), Mesh(60, false, false));
         File.WriteAllBytes(Path.Combine(bm, "touch.nif"), Mesh(20, true));
+        File.WriteAllBytes(Path.Combine(bm, "slabk.nif"), Mesh(100, true));
+        File.WriteAllBytes(Path.Combine(mods, MeshModName, "meshes", "pp", "slabk.nif"), Mesh(100, true, true));   // same collision box
+        File.WriteAllBytes(Path.Combine(bm, "encl.nif"), Mesh(23, true));
         File.WriteAllBytes(Path.Combine(mods, MeshModName, "meshes", "pp", "touch.nif"), Mesh(50, true));
         var um = Path.Combine(mods, SkyModName, "meshes", "pp"); Directory.CreateDirectory(um);
         File.WriteAllBytes(Path.Combine(um, "mshu.nif"), Mesh(60, true));
