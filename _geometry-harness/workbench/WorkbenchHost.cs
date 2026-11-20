@@ -469,8 +469,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     internal static double Now => ProcessClock.Elapsed.TotalMilliseconds;
     static readonly Stopwatch ProcessClock = Stopwatch.StartNew();
     static bool _showFps = FrameStats.ShowByDefault;
-    readonly TextBlock _fpsText = new() { Margin = new Thickness(8, 6, 8, 2), Width = 480, TextTrimming = TextTrimming.CharacterEllipsis, FontFamily = new System.Windows.Media.FontFamily("Consolas"),
-                                          ToolTip = "frame rate of the 3D view over the last two seconds: frames a second, the median frame time, the mean of the slowest 1%, the worst" };
+    readonly TextBlock _fpsText = new() { Margin = new Thickness(8, 6, 8, 2), Width = 480, TextWrapping = TextWrapping.Wrap, FontFamily = new System.Windows.Media.FontFamily("Consolas"),
+                                          ToolTip = "frame rate of the 3D view over the last two seconds: frames a second, the median frame time, the mean of the slowest 1%, the worst, and what paces the frames: the desktop compositor, or the view's own clock while the desktop composes slower than the display" };
     DispatcherTimer? _fpsTimer;
 
     Button? _fpsButton;
