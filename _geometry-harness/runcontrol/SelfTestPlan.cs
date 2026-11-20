@@ -126,6 +126,30 @@ public static partial class SelfTest
                    ?? Same("scoped without one", PyJson.Dumps(plain.Get("scopedChecks")),
                            "[\"geometry.fixture-empty-space\", \"geometry.object-overlap\", \"state.conditional-geometry\"]");
         });
+        Case("case 431 a delta the population cannot hold still names its mod folders for the mesh rule (mesh-responsibility)", () =>
+        {
+            var checks = new List<PyDict>
+            {
+                new()
+                {
+                    ["checkId"] = "geometry.object-overlap", ["adapter"] = new PyDict { ["kind"] = "ordersweep-probe", ["exe"] = "overlapprobe", ["populationFlag"] = "--population" },
+                    ["arms"] = new List<object?> { new PyDict { ["armId"] = "baseline", ["status"] = "planned" } },
+                },
+            };
+            PyDict Provider(string name) => new() { ["kind"] = "mod", ["name"] = name };
+            var arms = new List<PyDict>
+            {
+                new() { ["plugins"] = Py.Objs(["A.esp"]), ["requested"] = new PyDict { ["plugins"] = new List<object?>(), ["providers"] = new List<object?> { Provider("A") } } },
+                // the delta plugin's copy is not stated by path and hash, so no population can be planned
+                new() { ["plugins"] = Py.Objs(["A.esp", "B.esp"]), ["requested"] = new PyDict
+                    { ["plugins"] = new List<object?> { new PyDict { ["name"] = "B.esp" } }, ["providers"] = new List<object?> { Provider("A"), Provider("B Meshes") } } },
+            };
+            var (block, text) = PlanPopulation.Plan(checks, arms, new List<object?>(), "load-time", null);
+            return (block["scoped"] is false && text == null ? null : "the population must be refused here")
+                   ?? Same("the folders a mesh row may name", PyJson.Dumps(block.Get("meshFolders")), "[\"B Meshes\"]")
+                   ?? Same("their identity", HarnessShared.PopulationRules.MeshIdentity("load-time", ["B Meshes"]),
+                           "load-time+mesh:" + Hashing.Sha256Text("b meshes")[..12]);
+        });
         Case("owner: the configuration fingerprint is ConfigurationIdentity's (Python hashes a null population or state as the text None)", () =>
             Rows(L(units["fingerprints"]).Select(D), row =>
             {
@@ -195,6 +219,28 @@ public static partial class SelfTest
         return PyJson.Dumps(t.Mask(plan), indent: 1, ensureAscii: false);
     }
 
+    // An intended difference from evalrun.py (mesh-responsibility): a plan with no population names the delta's mod folders
+    // (population.meshFolders), and overlap's and contact's adapters expect a population carrying them. Checked here against
+    // the owner (PopulationRules.MeshIdentity), then taken out, so the rest of the plan is compared with Python's as recorded.
+    static string? MeshAddition(PyDict plan)
+    {
+        var pop = D(plan["population"]);
+        if (pop.Get("meshFolders") is not { } mf) return null;
+        var folders = L(mf).Select(S).ToList();
+        string baseline = S(Py.DictOrEmpty(plan.Get("configuration")).Get("population") ?? "load-time");
+        if (Py.Truthy(pop.Get("scoped"))) return "a scoped plan must not name mesh folders: its population names them";
+        foreach (var c in L(plan["checks"]).Select(D))
+        {
+            var ad = D(c["adapter"]);
+            bool mesh = Py.S(ad.Get("kind")) == "ordersweep-probe" && ad.Get("exe") is string exe && HarnessShared.PopulationRules.MeshProbes.Contains(exe);
+            if (!mesh) continue;
+            if (Same($"{S(c["checkId"])}'s expected population", S(ad.Get("population")), HarnessShared.PopulationRules.MeshIdentity(baseline, folders)) is { } bad) return bad;
+            ad.Pop("population");
+        }
+        pop.Pop("meshFolders");
+        return null;
+    }
+
     static string Listing(string run) => !Directory.Exists(run) ? "" : string.Join(" ",
         PyOrder.SortedPaths(PyPath.RGlob(run).Where(File.Exists)).Select(f => PyPath.RelativeTo(f, run)!).Where(r => !r.Split('/').Contains("runlog")));
 
@@ -218,6 +264,7 @@ public static partial class SelfTest
               ?? Same("plan.sha256", File.ReadAllText(PyPath.Join(got.Run, "plan.sha256")), Hashing.Sha256Bytes(raw) + "\r\n")
               ?? Same("the scope's hash is the file's", D(plan["scope"])["sha256"] as string, D(plan["scope"])["path"] is string scoped ? Hashing.Sha256File(scoped) : null)
               ?? Same("the journal is empty", new FileInfo(PyPath.Join(got.Run, "journal.jsonl")).Length.ToString(), "0")
+              ?? MeshAddition(plan)
               ?? SameText("plan", NormPlan(t, plan), Gunzip(row["planGz"]));
         if (why != null) return why;
         byte[] ledgerRaw = File.ReadAllBytes(PyPath.Join(got.Run, "ledger.json"));

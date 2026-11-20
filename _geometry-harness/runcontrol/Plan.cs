@@ -497,6 +497,14 @@ public static class Plan
                     || (PyValue.Eq(ad.Get("kind"), "probe-emit") && PyValue.In(c["checkId"], Py.ListOrEmpty(populationBlock.Get("scopedChecks")))))
                     ad["population"] = populationBlock["identity"];   // what the scoped emit must carry, for the receipt validator
             }
+        else if (Py.ListOrEmpty(populationBlock.Get("meshFolders")) is { Count: > 0 } meshFolders)
+            foreach (var c in checks)
+            {
+                var ad = Py.D(c["adapter"]);
+                // a whole-order emit that credits the delta's folders carries them in its population (HarnessShared.PopulationRules.MeshIdentity)
+                if (PyValue.Eq(ad.Get("kind"), "ordersweep-probe") && ad.Get("exe") is string exe && HarnessShared.PopulationRules.MeshProbes.Contains(exe))
+                    ad["population"] = HarnessShared.PopulationRules.MeshIdentity(population, meshFolders.Select(PyText.Str));
+            }
         var censusChecks = PyOrder.SortedByCodePoint(checks.Where(c => PyValue.Eq(Py.DictOrEmpty(c["inputs"]).Get("states"), "selected")).Select(c => Py.S(c["checkId"])));
         var statesNotExplored = new List<object?>();
         foreach (var c in checks.Where(c => PyValue.Eq(Py.DictOrEmpty(c["inputs"]).Get("states"), "all")))

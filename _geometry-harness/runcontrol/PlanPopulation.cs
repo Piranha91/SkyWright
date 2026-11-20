@@ -112,11 +112,15 @@ public static class PlanPopulation
         var emitScoped = checks.Where(c => Adapter(c).Get("kind") as string == "probe-emit" && Py.Truthy(Adapter(c).Get("populationFlag")) && Planned(c)).ToList();
         var targetNames = Py.ListOrEmpty(targets).OfType<PyDict>().Where(t => Py.Truthy(t.Get("name"))).Select(t => PyText.Str(t["name"])).ToList();
 
+        // the delta's mod folders: a plan with no population still credits them with a mesh (mesh-responsibility), by name
+        var deltaMods = new List<string>();
         (PyDict, string?) Unscoped(string reason)
         {
             var wholeOrder = new PyDict(whole);
             foreach (var c in planned.Concat(emitScoped).Where(c => Py.Truthy(Adapter(c).Get("populationFlag")))) wholeOrder[Py.S(c["checkId"])] = reason;
-            return (new PyDict { ["scoped"] = false, ["reason"] = reason, ["wholeOrderChecks"] = wholeOrder }, null);
+            var block = new PyDict { ["scoped"] = false, ["reason"] = reason, ["wholeOrderChecks"] = wholeOrder };
+            if (deltaMods.Count > 0) block["meshFolders"] = Py.Objs(PyOrder.SortedByLowerKey(deltaMods));
+            return (block, null);
         }
 
         if (scopedProbes.Count == 0 && emitScoped.Count == 0) return Unscoped("no planned check takes a population");
@@ -126,6 +130,7 @@ public static class PlanPopulation
         var modNames = ArmDelta(arms.Select(a => Py.ListOrEmpty(Py.DictOrEmpty(a.Get("requested")).Get("providers")).Select(Py.D)
             .Where(v => PyText.Lower(Py.Truthy(v.Get("kind")) ? PyText.Str(v["kind"]) : "") == "mod" && Py.Truthy(v.Get("name")))
             .Select(v => PyText.Str(v["name"])).ToList()).ToList());
+        deltaMods.AddRange(modNames);
         if (pluginNames.Count == 0 && modNames.Count == 0)
             return Unscoped("the arms do not differ and the plan names no target, so there is no population to scope to");
         var statedPlugins = new List<PyDict>();

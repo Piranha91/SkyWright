@@ -14,7 +14,7 @@ public sealed class SweepExit(int code, string sentence = "") : Exception(senten
 /// argument unless that looks like an option, `--name=value` is accepted, and a unique prefix names an option.</summary>
 public sealed class SweepArgs
 {
-    public string Candidates = "", Out = "", Probes = "navownprobe,overlapprobe,contactprobe", ProbeArgs = "", Harness = "", PopulationProbes = "";
+    public string Candidates = "", Out = "", Probes = "navownprobe,overlapprobe,contactprobe", ProbeArgs = "", Harness = "", PopulationProbes = "", MeshFolders = "", MeshFolderProbes = "";
     public string? Instance, Profile, Game, Baseline, DiffTolerance, Population;
     public BigInteger? MaxCandidates;
     public double? DeadlineSeconds;
@@ -28,13 +28,13 @@ public sealed class SweepArgs
         ("--profile", true), ("--game", true), ("--probe-args", true), ("--harness", true), ("--baseline", true),
         ("--max-candidates", true), ("--diff-tolerance", true), ("--no-reverse", false), ("--no-pair-results", false),
         ("--full-reverse", false), ("--deadline-seconds", true), ("--probe-cmd", true), ("--population", true),
-        ("--population-probes", true), ("--reuse-cache", true),
+        ("--population-probes", true), ("--reuse-cache", true), ("--mesh-folders", true), ("--mesh-folder-probes", true),
     ];
 
     public const string Usage = "usage: runcontrol ordersweep --candidates DIR --out DIR [--probes a,b,c] [--instance DIR --profile NAME --game DIR] "
         + "[--probe-args \"...\"] [--harness DIR] [--baseline FILE] [--max-candidates N] [--diff-tolerance T] [--no-reverse] "
         + "[--no-pair-results] [--full-reverse] [--deadline-seconds S] [--probe-cmd NAME=<argv prefix>]... "
-        + "[--population FILE --population-probes a,b] [--reuse-cache FILE]...";
+        + "[--population FILE --population-probes a,b] [--reuse-cache FILE]... [--mesh-folders JSON-LIST --mesh-folder-probes a,b]";
 
     static readonly Regex NegativeNumber = new(@"^-\d+$|^-\d*\.\d+$", RegexOptions.CultureInvariant);
 
@@ -119,6 +119,8 @@ public sealed class SweepArgs
                 case "--diff-tolerance": a.DiffTolerance = value; break;
                 case "--population": a.Population = value; break;
                 case "--population-probes": a.PopulationProbes = value; break;
+                case "--mesh-folders": a.MeshFolders = value; break;
+                case "--mesh-folder-probes": a.MeshFolderProbes = value; break;
                 case "--probe-cmd": a.ProbeCmd.Add(value); break;
                 case "--reuse-cache": a.ReuseCache.Add(value); break;
                 case "--max-candidates":

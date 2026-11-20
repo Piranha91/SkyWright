@@ -53,7 +53,7 @@ sealed class MeshRule
               : every ? "every folder of the view (--mesh-folder *)"
               : meshFolders.Count > 0 ? $"the folders --mesh-folder names ({Names(meshFolders)})"
               : "no folder: neither --population nor --mesh-folder names one, so no crossing is credited to a mesh";
-        IdentitySuffix = population is not null || !Active ? "" : every ? "+mesh:every" : "+mesh:" + Sha12(meshFolders);
+        IdentitySuffix = population is not null || !Active ? "" : PopulationRules.MeshIdentity("", meshFolders);
         _priority["overwrite"] = -1;
         for (int i = 0; i < cfg.EnabledMods.Count; i++) _priority.TryAdd(cfg.EnabledMods[i], i);
         for (int i = 0; i < cfg.Plugins.Count; i++)
@@ -64,10 +64,6 @@ sealed class MeshRule
     }
 
     static string Names(IEnumerable<string> n) => string.Join(", ", n.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
-    static string Sha12(IEnumerable<string> n) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\n", n.Select(x => x.ToLowerInvariant()).Distinct().Order(StringComparer.Ordinal)))))
-            .ToLowerInvariant()[..12];
-
     string? ModelOf(FormKey b) => _idx.BaseMesh.TryGetValue(b, out var m) && !string.IsNullOrWhiteSpace(m) ? MeshResponsibility.FullModelPath(m) : null;
     bool InPop(FormKey k, Snap s) => _population is null || _population.KeyInScope(k, s.Cell);
     public MeshOwner? CreditedOwner(FormKey b) => ModelOf(b) is { } m && Owners.Of(m) is { Shape: MeshShape.Credited } o ? o : null;

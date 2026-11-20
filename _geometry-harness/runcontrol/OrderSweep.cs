@@ -66,10 +66,11 @@ public static class OrderSweep
     /// <summary>The request key: sha256 over the "|"-joined probe, program digest, order hash, base emit hash (or "-"),
     /// the shared arguments, then "population:" and "reverse-of:" terms when they apply.</summary>
     public static string RequestKey(string probe, string program, string orderSha, string? baseSha, IEnumerable<string> arguments,
-                                    string? populationSha = null, string? reverseOfSha = null)
+                                    string? populationSha = null, string? reverseOfSha = null, string? meshFolders = null)
     {
         var parts = new List<string> { probe, program, orderSha, baseSha ?? "-", string.Join(" ", arguments) };
         if (populationSha != null) parts.Add("population:" + populationSha);
+        if (meshFolders != null) parts.Add("mesh:" + meshFolders);
         if (reverseOfSha != null) parts.Add("reverse-of:" + reverseOfSha);
         return Hashing.Sha256Text(string.Join("|", parts));
     }
@@ -365,6 +366,9 @@ public static class OrderSweep
         string? popFile = string.IsNullOrEmpty(a.Population) ? null : PyPath.Resolve(a.Population);
         if (popFile != null && !File.Exists(popFile)) throw new SweepExit(1, $"--population {popFile}: no such file");
         string? popSha = popFile != null ? Hashing.Sha256File(popFile) : null;
+        var meshProbes = a.MeshFolderProbes.Split(',').Select(PyValue.Strip).Where(p => p.Length > 0).ToHashSet();
+        var meshFolders = string.IsNullOrEmpty(a.MeshFolders) ? new List<string>() : PyValue.Iter(PyJson.Loads(a.MeshFolders)).Select(PyText.Str).ToList();
+        if (meshProbes.Count > 0 && meshFolders.Count == 0) throw new SweepExit(1, "--mesh-folder-probes needs --mesh-folders naming at least one folder");
         var exes = new Dictionary<string, List<string>>();
         foreach (string p in probes) exes[p] = ProbeProgram(harness, p, overrides);
         var exeSha = new Dictionary<string, string>();
@@ -375,7 +379,8 @@ public static class OrderSweep
 
         string KeyFor(string probe, string orderFile, string? baseEmit, string? reverseOf) =>
             RequestKey(probe, exeSha[probe], Hashing.Sha256File(orderFile), baseEmit != null ? Hashing.Sha256File(baseEmit) : null, shared,
-                       popProbes.Contains(probe) ? popSha : null, reverseOf != null ? Hashing.Sha256File(reverseOf) : null);
+                       popProbes.Contains(probe) ? popSha : null, reverseOf != null ? Hashing.Sha256File(reverseOf) : null,
+                       meshProbes.Contains(probe) ? string.Join("\n", meshFolders) : null);
 
         // Under a caller's deadline a probe is finished only when its whole process tree is empty, and is cached only then.
         double? deadline = a.DeadlineSeconds is { } secs ? ChildRunner.Now() + (secs > 0 ? secs : 0.0) : null;
@@ -417,6 +422,7 @@ public static class OrderSweep
                 argv.AddRange(["--pair-cache-write", mine]);
             }
             if (popProbes.Contains(probe)) argv.AddRange(["--population", popFile!]);
+            if (meshProbes.Contains(probe)) foreach (string f in meshFolders) argv.AddRange(["--mesh-folder", f]);
             // Only an emit this launch wrote is recorded or measured: an earlier run's file may already be at this path.
             var before = SweepFiles.Signature(emit);
             var res = runner.Run(new ChildJob(jobId, argv), echo: true);

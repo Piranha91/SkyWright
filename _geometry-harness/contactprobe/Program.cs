@@ -1137,9 +1137,7 @@ bool meshActive = population is not null ? population.Mods.Count > 0 : meshEvery
 string meshScope = population is not null ? $"the population's folders ({string.Join(", ", population.Mods)})"
     : meshEvery ? "every folder of the view (--mesh-folder *)" : meshFolderNames.Count > 0 ? $"the folders --mesh-folder names ({string.Join(", ", meshFolderNames)})"
     : "no folder: neither --population nor --mesh-folder names one, so no contact is credited to a mesh";
-string meshIdentity = population is not null || !meshActive ? "" : meshEvery ? "+mesh:every"
-    : "+mesh:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
-        string.Join("\n", meshFolderNames.Select(x => x.ToLowerInvariant()).Distinct().Order(StringComparer.Ordinal))))).ToLowerInvariant()[..12];
+string meshIdentity = population is not null || !meshActive ? "" : PopulationRules.MeshIdentity("", meshFolderNames);
 string sweepPopulation = (population?.Identity("load-time") ?? "load-time") + meshIdentity;
 string sweepState = cidx.State?.Name ?? EnablePopulation.BaselineStateName;
 string sweepPolicy = ContactCredit.SweepPolicy(eps, reach, radiusOn, bosOn, allRows, forceEnable);

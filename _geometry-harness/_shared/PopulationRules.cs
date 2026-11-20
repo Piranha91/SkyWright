@@ -15,6 +15,20 @@ public static class PopulationRules
     /// <summary>A scoped emit's population: the enable population, then the first 12 hex of the population file's sha256.</summary>
     public static string Identity(string basePopulation, string sha256) => $"{basePopulation}+population:{sha256[..12].ToLowerInvariant()}";
 
+    /// <summary>The probes whose emit pass credits a mod folder's mesh (mesh-responsibility): overlapprobe and contactprobe.</summary>
+    public static readonly IReadOnlySet<string> MeshProbes = new HashSet<string>(StringComparer.Ordinal) { "overlapprobe", "contactprobe" };
+
+    /// <summary>A whole-order emit's population when it credits named folders (--mesh-folder): the enable population, then
+    /// "+mesh:" and the first 12 hex of the sha256 of the folder names, lower case, distinct, ordinal order, one per line;
+    /// "+mesh:every" for every folder ("*").</summary>
+    public static string MeshIdentity(string basePopulation, IEnumerable<string> folders)
+    {
+        var list = folders.ToList();
+        if (list.Contains("*")) return basePopulation + "+mesh:every";
+        string joined = string.Join("\n", list.Select(x => x.ToLowerInvariant()).Distinct().Order(StringComparer.Ordinal));
+        return basePopulation + "+mesh:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(joined))).ToLowerInvariant()[..12];
+    }
+
     /// <summary>A Base Object Swapper ini, by its name or relative path: a mod folder shipping one cannot be scoped.</summary>
     public static bool IsSwapIni(string path) => path.EndsWith("_swap.ini", StringComparison.OrdinalIgnoreCase);
 

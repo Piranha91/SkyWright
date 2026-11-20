@@ -339,6 +339,13 @@ public static class SweepRows
             }
             if (scopedHere.Count > 0) populationArgs = ["--population", pfile, "--population-probes", string.Join(",", scopedHere)];
         }
+        else if (Ev.Items(population.Get("meshFolders")).Select(Ev.Str).ToList() is { Count: > 0 } meshFolders)
+        {
+            // no population: the delta's folders are still the ones a mesh row may name (PlanPopulation, Plan.cs)
+            var meshHere = PyOrder.SortedByCodePoint(HarnessShared.PopulationRules.MeshProbes.Where(exes.Contains));
+            if (meshHere.Count > 0)
+                populationArgs = ["--mesh-folders", PyJson.Dumps(meshFolders.Cast<object?>().ToList()), "--mesh-folder-probes", string.Join(",", meshHere)];
+        }
         string baselineFile = Ev.Str(arms.First(a => Ev.Eq(a["kind"], "baseline"))["candidateFile"]);
         var args = new List<string>
         {
