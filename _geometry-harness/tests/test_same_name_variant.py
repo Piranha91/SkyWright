@@ -28,7 +28,7 @@ HARNESS = HERE.parent
 REPO = HARNESS.parent
 EVALRUN = HARNESS / "evalrun.py"
 from test_evalrun import CONTROLLER  # noqa: E402  (the built-in controller, runcontrol, as test_evalrun starts it)
-REGISTRY = REPO / ".claude" / "skills" / "world-edit-compatibility" / "references" / "check-registry.json"
+REGISTRY = REPO / "data" / "check-registry.json"
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HARNESS))
 sys.path.insert(0, str(REPO / "scripts"))
@@ -473,7 +473,7 @@ def prediction_cases():
 
     # 474: the reader's document lists the variant by its folder, not the same file name twice.
     import readerdoc as RD
-    words = json.loads((REPO / ".claude/skills/evaluation-reporting/references/report-priorities.json")
+    words = json.loads((REPO / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/references/report-priorities.json")
                        .read_text(encoding="utf-8"))["readerDoc"]
     plan2, _, _ = P.compile_and_render(p_arms(), res, [SEW, CW], patches=[BY_HASH], count_only=co, enrichment=enr)
     try:

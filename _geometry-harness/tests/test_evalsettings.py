@@ -261,7 +261,7 @@ def t8(root):
     check(sha(run / "plan.json") == plan_sha, "8: the plan is unchanged")
 
 
-AGENTS = HARNESS.parent / "plugin" / "agents"
+AGENTS = HARNESS.parent / "external" / "houseCARL" / "plugin" / "agents"
 SHORT_NAMES = ("haiku", "sonnet", "opus", "fable")
 MODEL_KEYS = ("models.recordChecks", "models.imageReview", "models.flipPlan", "models.rewriteExplanations",
               "models.checkExplanations")

@@ -41,7 +41,7 @@ _os_settings.environ["HOUSECARL_EVAL_SETTINGS"] = str(Path(_tf_settings.gettempd
 sys.path.insert(0, str(HERE.parent))
 import evalreport as R                                               # noqa: E402
 
-PRIORITIES = HERE.parent.parent / ".claude/skills/evaluation-reporting/references/report-priorities.json"
+PRIORITIES = HERE.parent.parent / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/references/report-priorities.json"
 CONTACT = "geometry.placement-contact"
 SEAMS = "environment.land-seams"
 WATER = "environment.water-boundaries"

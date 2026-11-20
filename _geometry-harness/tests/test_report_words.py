@@ -49,7 +49,7 @@ HERE = Path(__file__).resolve().parent
 HARNESS = Path(_a0.harness).resolve() if _a0.harness else (
     HERE.parent if (HERE.parent / "reel_plan.py").is_file() else Path("S:/Dev/houseCARL/_geometry-harness"))
 TESTS = HARNESS / "tests"
-SKILL = HARNESS.parent / ".claude" / "skills" / "evaluation-reporting" / "references"
+SKILL = HARNESS.parent / "external" / "houseCARL" / ".claude" / "skills" / "evaluation-reporting" / "references"
 sys.path.insert(0, str(HARNESS))
 sys.path.insert(0, str(TESTS))
 os.environ["PYTHONUTF8"] = "1"

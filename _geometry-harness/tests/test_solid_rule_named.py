@@ -48,7 +48,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
-CORE = HARNESS.parent / "src" / "housecarl-core"
+CORE = HARNESS.parent / "external" / "houseCARL" / "src" / "housecarl-core"
 PROBES = Path(os.environ.get("HC_SR_HARNESS") or HARNESS)
 FIXTURES = Path(os.environ.get("HC_SR_FIXTURES") or HARNESS)
 FAILURES, PASSED = [], []

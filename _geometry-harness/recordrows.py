@@ -12,7 +12,7 @@ bytes, the setup's plugin order and the field scope.
 The fields compared come from the generated schema reference (.claude/skills/mutagen-reference/references/): a field
 whose type is, or transitively contains, another major record is a child record and is not a field of this one; the
 identity field is not compared; file bookkeeping, group bookkeeping and runtime-merged fields are named in skill data
-(.claude/skills/world-edit-compatibility/references/record-field-scope.json) by their schema names. A field the
+(data/record-field-scope.json) by their schema names. A field the
 capture did not read, a field the schema does not know, a field the read printed without its values (an item shown
 only as its type name, a list only as its summary) and a record whose read failed are unjudged with the reason, never
 treated as equal (a difference in the part that was read is still a row), and listed (`Unjudged`: the record, field, reason and the plugins whose versions were compared).
@@ -34,8 +34,8 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REF_DIR = HERE.parent / ".claude" / "skills" / "mutagen-reference" / "references"
-SCOPE_FILE = HERE.parent / ".claude" / "skills" / "world-edit-compatibility" / "references" / "record-field-scope.json"
+REF_DIR = HERE.parent / "external" / "houseCARL" / ".claude" / "skills" / "mutagen-reference" / "references"
+SCOPE_FILE = HERE.parent / "data" / "record-field-scope.json"
 HEAD = re.compile(r"^type=(\S+)\s+formid=(\S+)\s+editorid=(.*)$")
 INDEX = re.compile(r"\[\d+\]")
 LIST_SUMMARY = re.compile(r"^\[list: \d+ item\(s\)\]$")

@@ -36,7 +36,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent))
+sys.path.insert(0, str(HERE.parent.parent / "scripts"))   # the run log, <repo>/scripts/runlog.py
 import runlog  # noqa: E402
 sys.path.insert(0, str(HERE))
 

@@ -655,7 +655,7 @@ def cf23_caption_words(tmp: Path):
     top-down's say it is a sliced view from above. Wrong answer: a caption calling a cutaway or a top-down 'the view'."""
     ER = load("cf_evalreport", HARNESS / "evalreport.py")
     RP = load("cf_reel_plan2", HARNESS / "reel_plan.py")
-    words = json.loads((HARNESS.parent / ".claude" / "skills" / "evaluation-reporting" / "references"
+    words = json.loads((HARNESS.parent / "external" / "houseCARL" / ".claude" / "skills" / "evaluation-reporting" / "references"
                         / "report-priorities.json").read_text(encoding="utf-8"))["reader"]["figureCaptions"]
     cut = {"viewKind": "cutaway", "hidden": [{"formKey": "1:x.esp"}, {"formKey": "2:x.esp"}]}
     top = {"viewKind": "top-down", "cullAbove": 512.0}
@@ -778,7 +778,7 @@ def cf28_buried_said(tmp: Path):
     fr = getattr(ER, "buried_lines", None)
     if not check("CF28", fr is not None, "evalreport has no buried-line rule a test can call"):
         return
-    words = json.loads((HARNESS.parent / ".claude" / "skills" / "evaluation-reporting" / "references"
+    words = json.loads((HARNESS.parent / "external" / "houseCARL" / ".claude" / "skills" / "evaluation-reporting" / "references"
                         / "report-priorities.json").read_text(encoding="utf-8"))["reader"]["figureCaptions"]
     plan = {"reader": {"prediction": {"record": [{"findingId": "F-1", "formKey": A, "other": [B]},
                                                  {"findingId": "F-2", "formKey": "000103:Target.esp", "other": [B]}],
@@ -800,7 +800,7 @@ def rv_reason_only(tmp: Path, RP, A: str, B: str):
     import copy as _copy
     import inspect
     pres, names, masters, search, mods, captures = RV.capture_binding_fixture()
-    shipped = json.loads((HARNESS.parent / ".claude" / "skills" / "evaluation-reporting" / "references"
+    shipped = json.loads((HARNESS.parent / "external" / "houseCARL" / ".claude" / "skills" / "evaluation-reporting" / "references"
                           / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"]
     pol = dict(RV.POLICY, captureAttemptsPerType=1, stillReasons=shipped["stillReasons"])
     keep = [c for c in captures if c["request"] != "req-own"]

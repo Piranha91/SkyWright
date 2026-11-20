@@ -31,7 +31,7 @@ sys.path.insert(0, str(HERE.parent / "scripts"))
 from runlog import Run  # noqa: E402
 
 RULES = HERE / "orderleads-rules.json"
-SCOPE_FILE = HERE.parent / ".claude" / "skills" / "world-edit-compatibility" / "references" / "record-field-scope.json"
+SCOPE_FILE = HERE.parent / "data" / "record-field-scope.json"
 FIELD = re.compile(r"^\S+ \S+: (\S+) - ")
 REGISTRATION = {"Quest", "DialogTopic", "DialogResponses", "Scene", "FormList", "Location", "StoryManagerQuestNode", "StoryManagerBranchNode",
                 "StoryManagerEventNode", "Package", "DialogBranch", "DialogView"}

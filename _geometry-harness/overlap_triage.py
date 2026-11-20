@@ -13,7 +13,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 from runlog import Run  # noqa: E402
-DEFAULT_POLICY = HERE.parent / ".claude/skills/world-edit-compatibility/references/overlap-triage-policy.json"
+DEFAULT_POLICY = HERE.parent / "data/overlap-triage-policy.json"
 SCHEMA = "overlap-triage-v1"
 
 

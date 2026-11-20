@@ -22,7 +22,7 @@ The checks:
                                     A lost edit is a field an evaluated plugin authored (its value differs from the
                                     provider beneath it) whose winning value differs from its own (recordrows' rule),
                                     at the top-level field, file, group and runtime-merged bookkeeping excluded by the
-                                    world-edit-compatibility skill's record-field-scope.json. Record flags are one
+                                    app data's data/record-field-scope.json. Record flags are one
                                     field (recordFlags there): a difference only in the Compressed storage bit is none.
   loadability.missing-assets        every Data-relative asset path the evaluated plugins' winning records name,
                                     resolved through the arm's file view; an absent one is a finding.
@@ -56,7 +56,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(HERE))
 from runlog import Run  # noqa: E402
 
-SCOPE_FILE = ROOT / ".claude/skills/world-edit-compatibility/references/record-field-scope.json"
+SCOPE_FILE = ROOT / "data/record-field-scope.json"
 REGISTRATION_TYPES = {"Quest", "DialogTopic", "DialogResponses", "Scene", "FormList", "Location",
                       "StoryManagerQuestNode", "StoryManagerBranchNode", "StoryManagerEventNode", "Package",
                       "DialogBranch", "DialogView"}

@@ -56,7 +56,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 sys.path.insert(0, str(REPO / "scripts"))
 sys.path.insert(0, str(HERE))
-DBHARNESS_DIR = REPO / ".claude" / "skills" / "devbench-in-game-testing" / "scripts"
+DBHARNESS_DIR = REPO / "external" / "houseCARL" / ".claude" / "skills" / "devbench-in-game-testing" / "scripts"
 
 import switchflip_outcome as O  # noqa: E402
 import machineidle  # noqa: E402

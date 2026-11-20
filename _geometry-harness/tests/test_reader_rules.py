@@ -33,7 +33,7 @@ import evalreport as R  # noqa: E402
 import reel_plan  # noqa: E402
 import reel_stills  # noqa: E402
 
-SKILL = HERE.parent.parent / ".claude/skills/evaluation-reporting/references"
+SKILL = HERE.parent.parent / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/references"
 PR = json.loads((SKILL / "report-priorities.json").read_text(encoding="utf-8"))
 POLICY = dict(json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"])
 POLICY["effectModelPattern"] = ((PR.get("reader") or {}).get("prediction") or {}).get("effectModelPattern")

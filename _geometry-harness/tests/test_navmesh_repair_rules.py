@@ -84,7 +84,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
 PROBES = Path(os.environ.get("HC_NR_HARNESS") or HARNESS)
-SRC = Path(os.environ.get("HC_NR_SRC") or HARNESS.parent / "src")
+SRC = Path(os.environ.get("HC_NR_SRC") or HARNESS.parent / "external" / "houseCARL" / "src")
 sys.path.insert(0, str(HARNESS))
 ONLY = {s.strip() for s in (os.environ.get("HC_NR_CASES") or "").split(",") if s.strip()}
 FAILURES, PASSED = [], []

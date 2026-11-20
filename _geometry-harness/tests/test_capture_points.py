@@ -330,7 +330,7 @@ def c709_c710(fx):
 
 
 def c711(fx):
-    pol = load(HARNESS.parent / ".claude/skills/evaluation-reporting/references/scene-policy.json")
+    pol = load(HARNESS.parent / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/references/scene-policy.json")
     by = {r["requestType"]: (r.get("camera") or {}).get("support") or {} for r in pol["rules"]}
     nav = by.get("navmesh-version-comparison", {})
     check("C711 the scene policy marks navmesh comparisons as supported, with the command that acquires them "
@@ -344,7 +344,7 @@ def c711(fx):
 def c712(fx):
     pk = load(fx.packet)
     row = pk["capturePlan"]["requests"][0]
-    pol = load(HARNESS.parent / ".claude/skills/evaluation-reporting/references/scene-policy.json")
+    pol = load(HARNESS.parent / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/references/scene-policy.json")
     nav = ([r for r in pol["rules"] if r["requestType"] == "navmesh-version-comparison"][0]["camera"].get("support")
            or {"supported": False, "reason": "(the scene policy carries no support mark)"})
     row["requestType"] = "navmesh-version-comparison"

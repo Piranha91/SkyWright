@@ -39,7 +39,7 @@ FAKE = sys.executable.replace("\\", "/") + " " + str(TOOLS / "fake_viewprobe.py"
 FP = "c" * 64
 S, T, T2 = "000100:World.esm", "000200:World.esm", "000300:World.esm"
 C1, C2, C3 = "000010:World.esm", "000020:World.esm", "000030:World.esm"
-POLICY = HARNESS.parent / ".claude/skills/evaluation-reporting/references/scene-policy.json"
+POLICY = HARNESS.parent / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/references/scene-policy.json"
 
 
 def check(name, cond, detail=""):

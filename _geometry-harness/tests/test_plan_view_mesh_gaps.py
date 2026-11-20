@@ -31,7 +31,7 @@ HARNESS = HERE.parent
 REPO = HARNESS.parent
 EVALRUN = HARNESS / "evalrun.py"
 from test_evalrun import CONTROLLER  # noqa: E402  (the built-in controller, runcontrol, as test_evalrun starts it)
-REGISTRY = REPO / ".claude" / "skills" / "world-edit-compatibility" / "references" / "check-registry.json"
+REGISTRY = REPO / "data" / "check-registry.json"
 EXE = HARNESS / "overlapprobe" / "bin" / "Release" / "net9.0" / ("overlapprobe.exe" if os.name == "nt" else "overlapprobe")
 CODE = "view-lacks-installed-meshes"
 

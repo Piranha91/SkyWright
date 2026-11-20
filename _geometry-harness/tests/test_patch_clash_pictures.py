@@ -44,7 +44,7 @@ ap0.add_argument("--harness", default=None)
 _a0, _ = ap0.parse_known_args()
 HERE = Path(__file__).resolve().parent
 HARNESS = Path(_a0.harness).resolve() if _a0.harness else HERE.parent
-SKILL = HARNESS.parent / ".claude" / "skills" / "evaluation-reporting" / "references"
+SKILL = HARNESS.parent / "external" / "houseCARL" / ".claude" / "skills" / "evaluation-reporting" / "references"
 sys.path.insert(0, str(HARNESS))
 sys.path.insert(1, str(HERE))
 os.environ["PYTHONUTF8"] = "1"

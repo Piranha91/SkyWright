@@ -212,8 +212,8 @@ def normalise_entry(e: dict, name: PluginNames) -> dict:
 # ---------------------------------------------------------------- stage receipts
 
 #: the skill data and templates the report and reel words come from (evalreport's own compiler_hashes)
-REPORT_DATA = ("_geometry-harness/evalreport_templates", ".claude/skills/evaluation-reporting/references/report-priorities.json",
-               ".claude/skills/evaluation-reporting/references/scene-policy.json")
+REPORT_DATA = ("_geometry-harness/evalreport_templates", "external/houseCARL/.claude/skills/evaluation-reporting/references/report-priorities.json",
+               "external/houseCARL/.claude/skills/evaluation-reporting/references/scene-policy.json")
 #: the code each stage after the bundle runs, repository-relative: the scripts it launches and those they load by path
 #: (a harness module a listed script imports is followed by stage_tools itself). The measuring stages (census to
 #: bundle) are not here: the controller's plan (runcontrol) freezes every program it launches and refuses a resume under a changed one, and
@@ -1396,7 +1396,7 @@ def disk_forecast(ctx, records: int | None, stages: list[str]) -> tuple[str, str
 
 # ---------------------------------------------------------------- patch-search pairs before a run
 
-SCENE_POLICY = ROOT / ".claude/skills/evaluation-reporting/references/scene-policy.json"
+SCENE_POLICY = ROOT / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/references/scene-policy.json"
 
 
 def patch_search_pairs(res: dict) -> list[tuple[str, str]]:

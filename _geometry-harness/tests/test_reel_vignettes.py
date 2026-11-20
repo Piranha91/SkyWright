@@ -34,7 +34,7 @@ os.environ["PYTHONUTF8"] = "1"
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
 ROOT = HARNESS.parent
-SKILL = ROOT / ".claude/skills/evaluation-reporting"
+SKILL = ROOT / "external" / "houseCARL" / ".claude/skills/evaluation-reporting"
 sys.path.insert(0, str(HARNESS))
 os.environ["HOUSECARL_EVAL_SETTINGS"] = str(Path(tempfile.gettempdir()) / "hc-tests-no-eval-settings" / "houseCARL.evaluation.json")
 
@@ -2225,7 +2225,7 @@ def case_render():
 # ------------------------------------------------------------------------------------------ code sabotage arms
 # Each arm breaks one rule in a copy of the shipped code or skill data (one exact replacement each, counted), runs the
 # case that protects it against the copy, and passes only when the named check fails on its own assertion.
-REF = ".claude/skills/evaluation-reporting/references"
+REF = "external/houseCARL/.claude/skills/evaluation-reporting/references"
 CODE_SABOTAGE = {
     "code-f1": ("planner", "F1-own-pair", [("_geometry-harness/reel_plan.py",
         "return [p for p in supplied if {other.lower(), target.lower()} <= patch_pair(p, masters)]",
@@ -2396,7 +2396,7 @@ def code_sabotage(name: str) -> int:
                 shutil.copy2(f, tmp / d / f.name)
         (tmp / "_geometry-harness/tests").mkdir()
         shutil.copy2(Path(__file__), tmp / "_geometry-harness/tests" / Path(__file__).name)
-        shutil.copytree(SKILL, tmp / ".claude/skills/evaluation-reporting")
+        shutil.copytree(SKILL, tmp / "external" / "houseCARL" / ".claude/skills/evaluation-reporting")
         for rel, old, new in edits:
             f = tmp / rel
             text = f.read_text(encoding="utf-8")

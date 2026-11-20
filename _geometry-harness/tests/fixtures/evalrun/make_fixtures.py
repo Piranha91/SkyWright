@@ -232,7 +232,7 @@ def main() -> int:
     if a.registry_from:
         real = json.loads(Path(a.registry_from).read_text(encoding="utf-8"))
     else:
-        src = REPO / ".claude/skills/world-edit-compatibility/references/check-registry.json"
+        src = REPO / "data/check-registry.json"
         if src.exists():
             real = json.loads(src.read_text(encoding="utf-8"))
         else:

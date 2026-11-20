@@ -228,7 +228,7 @@ def default_reader_cmd(explicit: str | None) -> tuple[str | None, str]:
     env = (os.environ.get(READER_ENV) or "").strip()
     if env:
         return env, READER_ENV
-    exe = HERE.parent / "src" / "housecarl-mcp" / "bin" / "Release" / "net9.0" / exe_name("housecarl-mcp")
+    exe = HERE.parent / "external" / "houseCARL" / "src" / "housecarl-mcp" / "bin" / "Release" / "net9.0" / exe_name("housecarl-mcp")
     if exe.is_file():
         return f'"{exe}"', "checkout"
     return None, (f"no record reader was given (--reader-cmd or {READER_ENV}) and this checkout's houseCARL server is "

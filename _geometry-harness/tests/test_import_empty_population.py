@@ -48,7 +48,7 @@ REPO = HARNESS.parent
 EVALRUN = HARNESS / "evalrun.py"
 from test_evalrun import CONTROLLER  # noqa: E402  (the built-in controller, runcontrol, as test_evalrun starts it)
 FIXT = HERE / "fixtures" / "evalrun"
-REGISTRY = REPO / ".claude" / "skills" / "world-edit-compatibility" / "references" / "check-registry.json"
+REGISTRY = REPO / "data" / "check-registry.json"
 DIALOGUE = "records.registration-and-dialogue"
 ASSETS = "loadability.missing-assets"
 KEEP = ["loadability.masters-and-order", DIALOGUE, ASSETS]

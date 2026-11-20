@@ -3883,11 +3883,16 @@ def _suite_copy(root: Path) -> Path:
         shutil.copy2(f, dst / f.name)
     for item in ET.parse(proj / "conflictdiff.csproj").getroot().iter("Compile"):
         rel = item.get("Include").replace("\\", "/")
-        out = (dst / rel).resolve()
+        if rel.startswith("$(HousecarlSrc)"):     # the pinned houseCARL's src/, as Directory.Build.props names it
+            tail = rel[len("$(HousecarlSrc)"):]
+            src, out = HARNESS.parent / "external" / "houseCARL" / "src" / tail, root / "external" / "houseCARL" / "src" / tail
+        else:
+            src, out = (proj / rel).resolve(), (dst / rel).resolve()
         out.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2((proj / rel).resolve(), out)
-    if (HARNESS.parent / "nuget.config").exists():
-        shutil.copy2(HARNESS.parent / "nuget.config", root / "nuget.config")
+        shutil.copy2(src, out)
+    for name in ("nuget.config", "Directory.Build.props"):
+        if (HARNESS.parent / name).exists():
+            shutil.copy2(HARNESS.parent / name, root / name)
     return h
 
 
@@ -5090,7 +5095,8 @@ def case_566(tmp):
         fake_root = tmp / f"{case}-checkout"
         mod.HERE = fake_root / "_geometry-harness"
         cmd, why = mod.default_reader_cmd(None)
-        exe = fake_root / "src" / "housecarl-mcp" / "bin" / "Release" / "net9.0" / mod.exe_name("housecarl-mcp")
+        exe = (fake_root / "external" / "houseCARL" / "src" / "housecarl-mcp" / "bin" / "Release" / "net9.0"
+               / mod.exe_name("housecarl-mcp"))
         check(cmd is None and str(exe) in why and why.endswith("."),
               f"{case}: with no server built, one sentence naming where it was looked for ({cmd!r}, {why!r})")
         exe.parent.mkdir(parents=True, exist_ok=True)

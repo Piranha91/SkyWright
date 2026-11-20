@@ -61,7 +61,7 @@ HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
 EVALREPORT = Path(os.environ.get("HOUSECARL_EVALREPORT") or (HARNESS / "evalreport.py"))
 TREE = EVALREPORT.parent.parent
-REFS = TREE / ".claude" / "skills" / "evaluation-reporting" / "references"
+REFS = TREE / "external" / "houseCARL" / ".claude" / "skills" / "evaluation-reporting" / "references"
 DATA = REFS / "narration.json"
 os.environ["PYTHONUTF8"] = "1"
 os.environ.setdefault("HOUSECARL_EVAL_SETTINGS",
@@ -288,8 +288,8 @@ def c2028(tmp):
 
 
 def c2029(tmp):
-    std = (TREE / "standards" / "HOUSECARL_EVALUATION_PRESENTATION.md").read_text(encoding="utf-8")
-    skill = (TREE / ".claude" / "skills" / "evaluation-reporting" / "SKILL.md").read_text(encoding="utf-8")
+    std = (TREE / "external" / "houseCARL" / "standards" / "HOUSECARL_EVALUATION_PRESENTATION.md").read_text(encoding="utf-8")
+    skill = (TREE / "external" / "houseCARL" / ".claude" / "skills" / "evaluation-reporting" / "SKILL.md").read_text(encoding="utf-8")
     rules = ("judged-unfaithful", "judgement-stale", "unjudged", "judgements-foreign")
     check("C2029", all(x in std for x in rules) and "models.checkExplanations" in skill and "--judgements" in skill,
           "the contract or the skill does not say a rewrite needs a faithful judgement",
@@ -347,7 +347,7 @@ def c2052(tmp):
 
 
 def c2053(tmp):
-    std = (TREE / "standards" / "HOUSECARL_EVALUATION_PRESENTATION.md").read_text(encoding="utf-8")
+    std = (TREE / "external" / "houseCARL" / "standards" / "HOUSECARL_EVALUATION_PRESENTATION.md").read_text(encoding="utf-8")
     para = next((x for x in std.split("\n\n") if "narrate-packet --presentation P --answers" in x), "")
     check("C2053", "bound rows" in para and "`rows`" in para,
           "the contract does not say the judge's packet carries the finding's bound rows",

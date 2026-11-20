@@ -172,7 +172,7 @@ def run_compiler(arms, repaired_on=None, created_on=None, patches=None, declared
     with tempfile.TemporaryDirectory() as td:
         bdir = make_bundle(Path(td) / "bundle", arms, repaired_on, created_on, patches,
                            import_note, import_arm, targets)
-        pr = json.loads((HERE.parent.parent / ".claude/skills/evaluation-reporting/"
+        pr = json.loads((HERE.parent.parent / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/"
                          "references/report-priorities.json").read_text(encoding="utf-8"))
         conc, page = pr.get("concise") or {}, pr.get("page") or {}
         settings = {"mode": "concise", "layout": conc.get("layout", "normal"),
@@ -211,7 +211,7 @@ def render_artifacts(plan):
     one of two templates read it, and a test on the data could not tell. These cells assert on
     the rendered text of every artifact instead.
     """
-    pr = json.loads((HERE.parent.parent / ".claude/skills/evaluation-reporting/"
+    pr = json.loads((HERE.parent.parent / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/"
                      "references/report-priorities.json").read_text(encoding="utf-8"))
     view = R.effective_view(plan, 3, 1, pr, "normal")
     css = ""

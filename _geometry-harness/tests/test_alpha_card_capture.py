@@ -57,7 +57,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
-SKILL = HARNESS.parent / ".claude" / "skills" / "evaluation-reporting" / "references"
+SKILL = HARNESS.parent / "external" / "houseCARL" / ".claude" / "skills" / "evaluation-reporting" / "references"
 sys.path.insert(0, str(HARNESS))
 sys.path.insert(0, str(HERE))
 os.environ["PYTHONUTF8"] = "1"

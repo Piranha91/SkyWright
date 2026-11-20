@@ -55,7 +55,7 @@ FILE_NAME = "houseCARL.evaluation.json"
 TEMPLATE = HERE / "evalsettings_window.html"
 DEFAULT_TIMEOUT_S = 3600.0
 EXIT_OK, EXIT_REFUSED = 0, 2
-PLUGIN_DIR = HERE.parent / "plugin"
+PLUGIN_DIR = HERE.parent / "external" / "houseCARL" / "plugin"
 
 
 def _model_agents(folder: Path) -> dict[str, str]:
@@ -487,7 +487,7 @@ def stamp(doc: dict, by: str) -> dict:
 
 def houseCARL_version() -> str:
     try:
-        manifest = json.loads((HERE.parent / "plugin" / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        manifest = json.loads((HERE.parent / "external" / "houseCARL" / "plugin" / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
         return str(manifest.get("version") or "unknown")
     except (OSError, ValueError):
         return "unknown"

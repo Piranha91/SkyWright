@@ -58,7 +58,7 @@ except ImportError:  # pragma: no cover - stated, never worked around
     jinja2 = None
 
 TEMPLATES = HERE / "evalreport_templates"
-PRIORITIES = HERE.parent / ".claude" / "skills" / "evaluation-reporting" / "references" / "report-priorities.json"
+PRIORITIES = HERE.parent / "external" / "houseCARL" / ".claude" / "skills" / "evaluation-reporting" / "references" / "report-priorities.json"
 NARRATION = PRIORITIES.parent / "narration.json"
 
 PRESENTATION_SCHEMA = 1
@@ -70,7 +70,7 @@ EXIT_REFUSED_RESULT = 3
 
 ARTIFACTS = ("report.md", "report.html", "report.pdf", "evidence-index.md", "evidence-index.html")
 TRIAGE_SCHEMA = "overlap-triage-v1"
-TRIAGE_POLICY = HERE.parent / ".claude" / "skills" / "world-edit-compatibility" / "references" / "overlap-triage-policy.json"
+TRIAGE_POLICY = HERE.parent / "data" / "overlap-triage-policy.json"
 
 
 # ------------------------------------------------------------------------------------------ helpers --
@@ -1663,8 +1663,7 @@ def field_name(row: dict) -> str:
 # lost-edit rows whose values show no change the game sees, or whose subject another check judges (window 2, cw)
 NOISE_ADMISSIONS = ("navmeshCheck", "doorLinkNavmesh", "noWater", "winnerListDrop", "orderOnly", "carriedList", "listKept",
                     "unusedBits", "sameAsRead", "winnerOwnChange", "storageFlag", "sameFlagsView")
-FIELD_SCOPE_FILE = (Path(__file__).resolve().parent.parent / ".claude" / "skills" / "world-edit-compatibility"
-                    / "references" / "record-field-scope.json")
+FIELD_SCOPE_FILE = (Path(__file__).resolve().parent.parent / "data" / "record-field-scope.json")
 _field_masks = []
 
 
@@ -11428,7 +11427,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     return plan
 
 
-SCENE_POLICY = HERE.parent / ".claude" / "skills" / "evaluation-reporting" / "references" / "scene-policy.json"
+SCENE_POLICY = HERE.parent / "external" / "houseCARL" / ".claude" / "skills" / "evaluation-reporting" / "references" / "scene-policy.json"
 
 
 def bundle_media_rows(b: "Bundle", arms: set) -> list[dict]:
@@ -11576,7 +11575,7 @@ def resolve_mod_names(bundle: Path, siblings, a, out: Path) -> tuple[dict, dict]
     nexus_mode = getattr(a, "nexus_names", None) or "offline"
     reader_ = getattr(a, "nexus_reader_cmd", None) or os.environ.get("HOUSECARL_RECORD_READER_CMD") or None
     if nexus_mode == "fetch" and not reader_:
-        exe_ = HERE.parent / "src" / "housecarl-mcp" / "bin" / "Release" / "net9.0" / ("housecarl-mcp.exe" if os.name == "nt" else "housecarl-mcp")
+        exe_ = HERE.parent / "external" / "houseCARL" / "src" / "housecarl-mcp" / "bin" / "Release" / "net9.0" / ("housecarl-mcp.exe" if os.name == "nt" else "housecarl-mcp")
         reader_ = f'"{exe_}"' if exe_.is_file() else None
     mod_names, names_doc = modnames.resolve([b.plan] + [x.plan for x in sbs],
                                             ((b.scope or {}).get("targets") or [])

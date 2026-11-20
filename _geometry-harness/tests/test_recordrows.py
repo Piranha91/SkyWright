@@ -31,7 +31,7 @@ try:
 except (FileNotFoundError, ImportError, OSError) as _ex:   # the module does not exist yet on the base
     RR, LOAD_ERROR = None, f"{type(_ex).__name__}: {_ex}"
 
-SCOPE_FILE = ROOT / ".claude/skills/world-edit-compatibility/references/record-field-scope.json"
+SCOPE_FILE = ROOT / "data/record-field-scope.json"
 BASE, A, B = "Skyrim.esm", "ModA.esp", "ModB.esp"
 PATHS = {BASE: "C:/Game/Data/Skyrim.esm", A: "X:/Lab/mods/Mod A/ModA.esp", B: "X:/Lab/mods/Mod B/ModB.esp"}
 ORDER = [{"name": n, "path": PATHS[n], "sha256": "0" * 64} for n in (BASE, A, B)]

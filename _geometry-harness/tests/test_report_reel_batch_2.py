@@ -29,8 +29,8 @@ import evalreport as R  # noqa: E402
 import reel_plan  # noqa: E402
 
 ROOT = HERE.parent.parent
-SCOPE_FILE = ROOT / ".claude/skills/world-edit-compatibility/references/record-field-scope.json"
-REGISTRY = ROOT / ".claude/skills/world-edit-compatibility/references/check-registry.json"
+SCOPE_FILE = ROOT / "data/record-field-scope.json"
+REGISTRY = ROOT / "data/check-registry.json"
 BASE, A, B, OTHER, PATCH = P.BASE, P.MOD_A, P.MOD_B, P.OTHER, P.PATCH
 CONTACT, RECORDS = P.CONTACT, P.RECORDS
 ADVICE = "patch.author-advice"

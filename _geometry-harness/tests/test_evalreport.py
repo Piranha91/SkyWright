@@ -1076,7 +1076,7 @@ def check_alternative_identity(bundle: Path):
           and not names(masters[0], "candidate-01-patcha") and not names(masters[0], "candidate-03-combined"),
           f"{label}: a check clean on exactly one arm names that arm alone (got {masters!r})")
     # the concise page prints a no-problem line in its short form (skill data concise.nullLong -> nullShort, W-B1)
-    conc_ = (json.loads((HARNESS.parent / ".claude/skills/evaluation-reporting/references/report-priorities.json")
+    conc_ = (json.loads((HARNESS.parent / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/references/report-priorities.json")
                         .read_text(encoding="utf-8")).get("concise") or {})
     links = [x.replace(conc_.get("nullLong") or "\0", conc_.get("nullShort") or "") for x in links]
     masters = [x.replace(conc_.get("nullLong") or "\0", conc_.get("nullShort") or "") for x in masters]
