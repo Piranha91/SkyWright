@@ -525,15 +525,8 @@ RefGeometry? DecodeMesh(string full, byte[] bytes, bool first)
         // The HOST surface: the solid bodies on the layers an actor (and a dropped item) meets — a canopy
         // leaves, a trunk stays. The DEPENDENT solid: every solid body but NONCOLLIDABLE (an item's WEAPON
         // or CLUTTER body is its shape). Either falls back to the render soup, labelled 'r'.
-        var hc = m.CollisionSoupFor(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
-        var dc = m.CollisionSoupFor(b => b.Solid && b.Layer != "SKYL_NONCOLLIDABLE");
-        TriangleSoup host, dep; char hs, ds;
-        if (m.CollisionComplete && hc is { TriangleCount: > 0 }) { host = hc; hs = 'c'; if (first) hostColl++; }
-        else if (m.Soup is { TriangleCount: > 0 }) { host = m.Soup; hs = 'r'; if (first) hostRender++; }
-        else { host = TriangleSoup.Empty; hs = '-'; }
-        if (m.CollisionComplete && dc is { TriangleCount: > 0 }) { dep = dc; ds = 'c'; if (first) depColl++; }
-        else if (m.Soup is { TriangleCount: > 0 }) { dep = m.Soup; ds = 'r'; if (first) depRender++; }
-        else { dep = TriangleSoup.Empty; ds = '-'; }
+        var (host, hs, dep, ds) = CollisionLayers.RoleSoups(m);
+        if (first) { if (hs == 'c') hostColl++; else if (hs == 'r') hostRender++; if (ds == 'c') depColl++; else if (ds == 'r') depRender++; }
         var box = SpatialOverlap.SoupBounds(host).Union(SpatialOverlap.SoupBounds(dep));
         var bodies = m.CollisionBodies?.Where(b => b.Solid).Select(b => (b.Layer, b.MotionSystem)).ToList() ?? new List<(string, string)>();
         bool phantom = m.HasCollision && !m.HasSolidCollision;
