@@ -254,6 +254,10 @@ sealed class MeshRule
     // shortcut, nor does a model whose triangles could not be read, nor a run with --motion swept (its soup is a proxy).
     // Triangle identity: the three vertices' float bit patterns in model space, sorted (winding-insensitive); a multiset.
     public bool NoShortcut { get; init; }
+    /// <summary>The changed region's box is grown by this much (world units) before it is tested: the box is placed in float
+    /// world coordinates while the surface query works in a pair frame, so a seam the query calls touching can read a hair apart
+    /// here. Any doubt counts as changed.</summary>
+    public const double RegionMargin = 1.0;
     public long RegionShortcuts;
     readonly Dictionary<string, Aabb?> _region = new(StringComparer.OrdinalIgnoreCase);
 
@@ -316,7 +320,7 @@ sealed class MeshRule
             if (region.IsEmpty) continue;
             var other = r.Key == h.A.Key ? h.B : h.A;
             var world = SpatialOverlap.SoupBounds(SpatialOverlap.TransformSoup(ContactIndex.BoxSoup(region), r.Win.Pos, r.Win.Rot, r.Win.Scale));
-            if (Near(world, other.WorldBounds, _tol)) return false;
+            if (Near(world, other.WorldBounds, Math.Max(_tol, RegionMargin))) return false;
         }
         return true;
     }
@@ -331,12 +335,12 @@ sealed class MeshRule
         if (ChangedRegion(o, o.Fallback) is not { } region) return true;
         if (region.IsEmpty) return false;
         var world = SpatialOverlap.SoupBounds(SpatialOverlap.TransformSoup(ContactIndex.BoxSoup(region), t.Win.Pos, t.Win.Rot, t.Win.Scale));
-        if (Near(world, c.WorldBounds, _tol)) return true;
+        if (Near(world, c.WorldBounds, Math.Max(_tol, RegionMargin))) return true;
         // the joint swap reads the game's copy: the partner reaches when it reaches that region too
         var game = GameSource(o.Path);
         if (game is null || ReferenceEquals(game, o.Fallback)) return false;
         if (ChangedRegion(o, game) is not { } g) return true;
-        return !g.IsEmpty && Near(SpatialOverlap.SoupBounds(SpatialOverlap.TransformSoup(ContactIndex.BoxSoup(g), t.Win.Pos, t.Win.Rot, t.Win.Scale)), c.WorldBounds, _tol);
+        return !g.IsEmpty && Near(SpatialOverlap.SoupBounds(SpatialOverlap.TransformSoup(ContactIndex.BoxSoup(g), t.Win.Pos, t.Win.Rot, t.Win.Scale)), c.WorldBounds, Math.Max(_tol, RegionMargin));
     }
 
     /// <summary>One intersecting pair under the folder rule.</summary>
