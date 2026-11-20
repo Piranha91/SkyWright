@@ -74,7 +74,7 @@ internal sealed class FramePacer : IDisposable
             else
             {
                 if (idle) _composed.Reset();                                 // a composition before the pause is not this frame's
-                _composed.WaitOne((int)Math.Ceiling(_choice.PeriodMs * 3)); // late rather than never
+                WaitForComposition();
             }
             idle = false;
             if (_stop || !_want) continue;
@@ -106,6 +106,24 @@ internal sealed class FramePacer : IDisposable
             _composed.Set();
         }
     }
+
+    /// <summary>Waits for the next composition for a period and a quarter at most, on the high-resolution timer: a composition
+    /// now and then comes two or three periods late on a healthy desktop (SkyRender's benchmark), and a frame a little off the
+    /// beat is better than one that late.</summary>
+    void WaitForComposition()
+    {
+        long due = -(long)(_choice.PeriodMs * 1.25 * 10_000);   // relative, in 100 ns units
+        if (_timer != IntPtr.Zero && SetWaitableTimer(_timer, ref due, 0, IntPtr.Zero, IntPtr.Zero, false))
+        {
+            _waitHandles[0] = _composed.SafeWaitHandle.DangerousGetHandle();
+            _waitHandles[1] = _timer;
+            WaitForMultipleObjects(2, _waitHandles, false, 200);
+            _composed.Reset();
+        }
+        else _composed.WaitOne((int)Math.Ceiling(_choice.PeriodMs * 3));   // no timer: late rather than never
+    }
+
+    readonly IntPtr[] _waitHandles = new IntPtr[2];
 
     /// <summary>Waits for the clock's next beat on a high-resolution waitable timer; the process's timer resolution is left alone.</summary>
     void ClockWait(Stopwatch clock, ref double next)
@@ -151,6 +169,7 @@ internal sealed class FramePacer : IDisposable
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr CreateWaitableTimerEx(IntPtr attributes, string? name, uint flags, uint access);
     [DllImport("kernel32.dll")] static extern bool SetWaitableTimer(IntPtr timer, ref long dueTime, int period, IntPtr routine, IntPtr arg, bool resume);
     [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+    [DllImport("kernel32.dll")] static extern uint WaitForMultipleObjects(uint count, IntPtr[] handles, bool waitAll, uint milliseconds);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
 }
 

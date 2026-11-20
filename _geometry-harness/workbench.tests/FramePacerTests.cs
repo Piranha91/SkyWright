@@ -115,6 +115,30 @@ public class FramePacerTests
     /// timed the last one.</summary>
     static (double Median, string By) Run(double composeMs, int ms)
     {
+        var (iv, by) = Intervals(t => (Math.Floor(t / composeMs) + 1) * composeMs, ms);
+        return (iv[iv.Length / 2], by);
+    }
+
+    [Fact]
+    public void A_composition_that_comes_three_periods_late_holds_a_frame_back_a_period_and_a_quarter_at_most()
+    {
+        // a healthy stand-in compositor, except that every twentieth composition comes two refreshes late
+        static double Next(double t)
+        {
+            double next = (Math.Floor(t / Period) + 1) * Period;
+            return Math.Round(next / Period) % 20 == 0 ? next + 2 * Period : next;
+        }
+        var (iv, by) = Intervals(Next, 1500);
+        Assert.Equal("compositor", by);
+        Assert.InRange(iv[iv.Length / 2], Period - 2.5, Period + 3);
+        Assert.True(iv[^1] < 2.4 * Period, $"worst interval {iv[^1]:F1} ms; waiting for the late composition gives about {3 * Period:F0}");
+    }
+
+    /// <summary>Runs a pacer that always wants a frame for <paramref name="ms"/>, against a stand-in compositor whose next
+    /// composition after time t (ms) is <paramref name="nextComposition"/>(t); returns the sorted intervals between drawn
+    /// frames after the first 300 ms, and what timed the last one.</summary>
+    static (double[] Sorted, string By) Intervals(Func<double, double> nextComposition, int ms)
+    {
         Dispatcher? d = null; using var ready = new ManualResetEventSlim();
         var t = new Thread(() => { d = Dispatcher.CurrentDispatcher; ready.Set(); Dispatcher.Run(); }) { IsBackground = true, Name = "fake UI thread" };
         t.SetApartmentState(ApartmentState.STA); t.Start(); ready.Wait();
@@ -123,7 +147,7 @@ public class FramePacerTests
         FramePacer? pacer = null;
         bool Compose()
         {
-            double next = (Math.Floor(clock.Elapsed.TotalMilliseconds / composeMs) + 1) * composeMs;
+            double next = nextComposition(clock.Elapsed.TotalMilliseconds);
             while (clock.Elapsed.TotalMilliseconds < next) Thread.Sleep(0);
             return true;
         }
@@ -136,6 +160,6 @@ public class FramePacerTests
         double[] times; lock (drawn) times = drawn.Where(x => x > 300).ToArray();
         var iv = times.Zip(times.Skip(1), (a, b) => b - a).OrderBy(x => x).ToArray();
         Assert.True(iv.Length > 10, $"only {iv.Length} frame intervals were drawn");
-        return (iv[iv.Length / 2], by);
+        return (iv, by);
     }
 }
