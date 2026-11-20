@@ -149,6 +149,18 @@ sealed class MeshRule
         return want;
     }
 
+    /// <summary>Seen folder pairs by (folder, the two placements' plugin indices, what happened), for the console: who sight
+    /// rests on, printed so it can be checked against the plugins' own headers.</summary>
+    public Dictionary<(string Folder, int Low, int High, string What), long> SeenTally { get; } = new();
+    static void Tally(Dictionary<(string, int, int, string), long> t, string folder, int a, int b, string what)
+    {
+        var k = (folder, Math.Min(a, b), Math.Max(a, b), what);
+        t[k] = t.GetValueOrDefault(k) + 1;
+    }
+
+    /// <summary>The plugin indices a folder ships (cfg.Plugins' provider), for the console.</summary>
+    public IReadOnlyList<int> PluginsOf(string folder) => _folderPlugins.TryGetValue(folder, out var l) ? l : Array.Empty<int>();
+
     /// <summary>Base-game references near a target that stayed set aside because every pair they could form is Seen.</summary>
     public HashSet<FormKey> SeenNotReadmitted { get; } = new();
 
@@ -262,6 +274,7 @@ sealed class MeshRule
         if (floorPair && folders.All(f => !BlindPossible(f, h.A.Win.Plugin, h.B.Win.Plugin)))
         {
             SeenNotTested++;
+            foreach (var f in folders) Tally(SeenTally, f, h.A.Win.Plugin, h.B.Win.Plugin, "not tested");
             return new(h, Outcome.SeenSkipped, null, folders, false, h.A, h.B, sides, null, null, null, OverlapSight.Seen, "", default);
         }
         Judged++;
@@ -299,7 +312,7 @@ sealed class MeshRule
         var other = nec.Key == h.A.Key ? h.B : h.A;
         var facts = Facts(credited, h.A.Win.Plugin, h.B.Win.Plugin, joint);
         var (origin, sight, reason) = DetectorModel.MeshProvenance(facts);
-        if (sight == OverlapSight.Seen) SeenRows++;
+        if (sight == OverlapSight.Seen) { SeenRows++; Tally(SeenTally, credited, h.A.Win.Plugin, h.B.Win.Plugin, "made by the folder"); }
         return new(h, Outcome.Folder, credited, folders.Where(f => !string.Equals(f, credited, StringComparison.OrdinalIgnoreCase)).ToList(), joint,
                    nec, other, mine, cf, null, origin, sight, reason, facts);
     }

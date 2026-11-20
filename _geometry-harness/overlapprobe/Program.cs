@@ -1760,7 +1760,11 @@ MeshCause CauseOf(MeshRule.Verdict v) => new(v.Folder!,
 Console.WriteLine($"\n==== MESH RESPONSIBILITY — a crossing only a credited folder's mesh makes ({meshRule.Judged:N0} intersections given a mesh counterfactual) ====");
 Console.WriteLine($"   credited {meshRule.Scope}");
 Console.WriteLine($"   folder-made {meshVerdicts.Count:N0} (Blind {meshClass.Count:N0}, Seen {meshVerdicts.Count(v => v.Sight == OverlapSight.Seen):N0}); "
-    + $"cross without the folder's mesh {meshRule.CrossesWithout:N0}; unknown {meshRule.Unknown:N0}; joint swaps {meshRule.Joint:N0}");
+    + $"cross without the folder's mesh {meshRule.CrossesWithout:N0}; unknown {meshRule.Unknown:N0}; joint swaps {meshRule.Joint:N0}; "
+    + $"Seen and not tested {meshRule.SeenNotTested:N0}; base-game references left out as Seen {meshRule.SeenNotReadmitted.Count:N0}");
+foreach (var ((folder, lo, hi, what), n) in meshRule.SeenTally.OrderByDescending(kv => kv.Value).Take(listN))
+    Console.WriteLine($"   Seen, {what}: {n:N0} pair(s), folder {folder} (ships {string.Join(", ", meshRule.PluginsOf(folder).Select(PluginName))}"
+        + $"{(meshRule.PluginsOf(folder).Count == 0 ? "no plugin" : "")}), placements by {PluginName(lo)} and {PluginName(hi)}");
 foreach (var v in meshClass.Take(listN)) Console.WriteLine("   " + DescribeMesh(v));
 ReportTimer("provenance", provenanceTimer, null);
 var split = OverlapClass.Of(rows, PopOf);   // overlapprobe/OverlapClass.cs
