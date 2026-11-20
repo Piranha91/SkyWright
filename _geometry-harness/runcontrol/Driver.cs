@@ -169,6 +169,7 @@ public sealed class Driver
             }
             sizeBefore ??= Hashing.UniqueBytes(outDir, topFiles: false);
             double t0 = ChildRunner.Now();
+            ChildLaunch.TakeWaited();
             PyDict? bound;
             List<string> outputs;
             try { (bound, outputs) = body(ctx, res, sdir); }
@@ -200,15 +201,17 @@ public sealed class Driver
                 continue;
             }
             double secs = PyText.Round(ChildRunner.Now() - t0, 1);
+            double waited = PyText.Round(ChildLaunch.TakeWaited(), 1);
             long sizeAfter = Hashing.UniqueBytes(outDir, topFiles: false);
             ledger.Record(name, inputs, outputs, 0, new PyDict
             {
-                ["bound"] = bound, ["seconds"] = secs, ["driverSha256"] = ToolIdentity.DriverSha256(),
+                ["bound"] = bound, ["seconds"] = secs, ["waitedSeconds"] = waited, ["driverSha256"] = ToolIdentity.DriverSha256(),
                 // what this stage added to the run folder, each file once, for later forecasts
                 ["disk"] = new PyDict { ["addedBytes"] = sizeAfter - sizeBefore.Value, ["evaluatedRecords"] = records },
             });
             sizeBefore = sizeAfter;
-            Report.Line($"{name}: accepted in {PyText.FloatRepr(secs)} s");
+            Report.Line($"{name}: accepted in {PyText.FloatRepr(secs)} s"
+                        + (waited >= 1 ? $" ({PyText.FloatRepr(waited)} s of it waiting for the machine: a free slot or free memory)" : ""));
             run.Advance();
         }
         var status = refusals.Count > 0

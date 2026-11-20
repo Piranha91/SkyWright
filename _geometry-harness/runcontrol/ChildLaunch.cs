@@ -60,8 +60,33 @@ public static class ChildLaunch
         bool lockBefore = lockFile != null && File.Exists(lockFile);
         double? deadline = deadlineMinutes is { } minutes ? ChildRunner.Now() + 60 * minutes : null;
         var res = RunJob("evalpipeline-" + op, PyPath.Str(ledgerDir), deadline, job);
+        if (lockFile != null) AddWaited(PyPath.Join(ledgerDir, op + ".txt"));
         if (lockFile != null && !lockBefore && !string.IsNullOrEmpty(res.Stopped) && File.Exists(lockFile)) ReleaseStoppedLock(lockFile, res);
         return res;
+    }
+
+    static readonly object WaitGate = new();
+    static double _waited;
+
+    /// <summary>Seconds the heavy children launched since the last call spent waiting for the machine (the slot
+    /// command's slot and idle waits, from its "taken" line), and resets the count.</summary>
+    public static double TakeWaited() { lock (WaitGate) { double w = _waited; _waited = 0; return w; } }
+
+    // Adds the waitedSeconds of every "taken" line in a heavy child's log; a log without one adds nothing.
+    internal static void AddWaited(string log)
+    {
+        double sum = 0;
+        try
+        {
+            foreach (var line in File.ReadLines(log))
+            {
+                var t = line.Trim();
+                if (!t.StartsWith('{') || !t.Contains("\"step\": \"taken\"", StringComparison.Ordinal)) continue;
+                if ((PyJson.Loads(t) as PyDict)?.Get("waitedSeconds") is { } w && Py.Truthy(w)) sum += Py.Float(w);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or ArgumentException or PyError) { }
+        lock (WaitGate) _waited += sum;
     }
 
     /// <summary>The lock a slot command took before a stop from outside killed it, so its own release never ran.

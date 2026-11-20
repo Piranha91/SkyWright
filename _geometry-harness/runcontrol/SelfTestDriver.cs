@@ -519,6 +519,24 @@ public static partial class SelfTest
             }
             finally { ChildLaunch.RunJob = saved; }
         }
+        Case("stages: the machine wait is read from each slot command's taken line and reset per stage", () =>
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "rc-wait-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                string a = Path.Combine(dir, "a.txt"), b = Path.Combine(dir, "b.txt"), c = Path.Combine(dir, "c.txt");
+                File.WriteAllLines(a, ["$ python idle_lock.py hold", "(exit 0, 5.0s)", "{\"step\": \"slot_taken\", \"t\": \"x\"}",
+                                       "{\"step\": \"taken\", \"pid\": 1, \"waitedSeconds\": 120.5, \"t\": \"x\"}", "   held-job  exit 0  2.0s"]);
+                File.WriteAllLines(b, ["{\"step\": \"taken\", \"pid\": 2, \"waitedSeconds\": 9.5}"]);
+                File.WriteAllLines(c, ["{\"step\": \"taken\", \"pid\": 3}", "not json {\"step\": \"taken\""]);
+                ChildLaunch.TakeWaited();
+                ChildLaunch.AddWaited(a); ChildLaunch.AddWaited(b); ChildLaunch.AddWaited(c); ChildLaunch.AddWaited(Path.Combine(dir, "missing.txt"));
+                double first = ChildLaunch.TakeWaited(), second = ChildLaunch.TakeWaited();
+                return first == 130.0 && second == 0 ? null : $"read {first} then {second}; expected 130 then 0";
+            }
+            finally { Directory.Delete(dir, true); }
+        });
         Case("stages: a selection with only textures says no check can measure it", () => AssetOnlyLine(["textures/a/b.dds"],
             "Tex has no plugin and no mesh (1 texture file), so no check here can measure it: textures, sounds and scripts change nothing these checks read."));
         Case("stages: an empty selected folder says no check can measure it", () => AssetOnlyLine([],
