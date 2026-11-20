@@ -8,6 +8,6 @@
     <AssemblyName>placeprobe</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
+    <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
   </ItemGroup>
 </Project>

@@ -13,7 +13,7 @@
     <Compile Include="..\_shared\LastSighting.cs" Link="LastSighting.cs" />
     <Compile Include="..\_shared\MovedRefFixture.cs" Link="MovedRefFixture.cs" />
     <Compile Include="..\_shared\MovedRefSelfTest.cs" Link="MovedRefSelfTest.cs" />
-    <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
+    <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
     <Compile Include="..\_shared\EnablePopulation.cs" Link="EnablePopulation.cs" />
     <Compile Include="..\_shared\WinStateDump.cs" Link="WinStateDump.cs" />
   </ItemGroup>

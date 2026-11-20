@@ -1,0 +1,35 @@
+# SkyWright — .gitignore
+
+## Build output
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+
+## Editors
+.vs/
+.idea/
+*.user
+*.suo
+*.DotSettings.user
+
+## NuGet and test results
+*.nupkg
+*.snupkg
+.nuget/
+[Tt]est[Rr]esult*/
+*.trx
+
+## Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+## Generated and local
+/generated/
+/_claude/
+CLAUDE.local.md
+.claude/settings.local.json
+.claude/worktrees/

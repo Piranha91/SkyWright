@@ -7,7 +7,7 @@
     <NuGetAudit>false</NuGetAudit>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../src/housecarl-core/AtomicFile.cs" Link="AtomicFile.cs" />
-    <Compile Include="../../src/housecarl-core/Progress/*.cs" Link="Progress/%(Filename)%(Extension)" />
+    <Compile Include="$(HousecarlSrc)housecarl-core/AtomicFile.cs" Link="AtomicFile.cs" />
+    <Compile Include="$(HousecarlSrc)housecarl-core/Progress/*.cs" Link="Progress/%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

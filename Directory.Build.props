@@ -1,0 +1,7 @@
+<Project>
+  <!-- houseCARL, pinned as the submodule external/houseCARL: its core, nexus, generator and server are built from there. -->
+  <PropertyGroup>
+    <HousecarlRoot>$(MSBuildThisFileDirectory)external\houseCARL\</HousecarlRoot>
+    <HousecarlSrc>$(HousecarlRoot)src\</HousecarlSrc>
+  </PropertyGroup>
+</Project>
