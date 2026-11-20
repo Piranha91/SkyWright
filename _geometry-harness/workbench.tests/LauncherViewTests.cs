@@ -43,6 +43,7 @@ public sealed class LauncherViewTests
                     Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
                     using var fs = File.Create(outPath); enc.Save(fs);
                 }
+                host.Child = null;   // the tab's controls are built once per process; give them back for the next test that draws it
             }
             catch (Exception ex) { failed = ex; }
         });

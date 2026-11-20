@@ -53,8 +53,12 @@ internal static class LauncherView
 
     static void Try(Func<string> act) { try { Status.Text = act(); } catch (InvalidOperationException ex) { Status.Text = ex.Message; } Fill(); }
 
+    // The tab is built once: its controls are static, and a second build would give them a second parent.
+    static ScrollViewer? _built;
+
     internal static UIElement Build()
     {
+        if (_built is not null) return _built;
         Button Browse(TextBox box, Action? after = null)
         {
             var b = new Button { Content = "Browse…", Margin = new Thickness(4, 0, 0, 0) };
@@ -130,7 +134,7 @@ internal static class LauncherView
         var outer = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Background = Theme.Brush(Theme.Panel) };
         // the mod list scrolls on its own, at most about 40% of the tab, so the probes stay in view below it
         outer.SizeChanged += (_, _) => ModScroll.MaxHeight = Math.Max(160, outer.ActualHeight * 0.4);
-        return outer;
+        return _built = outer;
     }
 
     /// <summary>One tile per probe, in a group box per family; checks that are not probes are said below in plain words.</summary>

@@ -516,24 +516,54 @@ internal sealed class Launcher : IAsyncDisposable
         return $"running {(checks.Count == 1 ? ProbeNames.Of(checks[0]) : $"{checks.Count} probes")} on {sel.Count} mod(s){(depth == "deep" ? ", thorough" : "")} in profile '{Profile}'; its files go under '{dir}'";
     }
 
-    /// <summary>One sentence on the ticked checks from a disposition: how many found something, found nothing, did not
-    /// complete. A check counts as complete only when no arm or part of it is listed missing.</summary>
+    /// <summary>One sentence on the ticked checks from a disposition (FOLD-REVIEW finding 2). A check with any finding found
+    /// something, else one with a completed null result found nothing, else it did not complete; either of the first two is
+    /// marked not complete when a part or arm of it is listed missing. What it could not judge is the disposition's own
+    /// unjudgeablePopulations on the review arm (the rows repeat per part, so the largest per population); a check whose only
+    /// missing rows are an unknown applicability says so, since that is a measurement the controller could not make, not a fault.</summary>
     internal static string Tally(string disposition, IReadOnlyCollection<string> checks)
     {
         try
         {
             using var doc = JsonDocument.Parse(File.ReadAllBytes(disposition));
-            var ev = doc.RootElement.GetProperty("evaluation");
-            HashSet<string> Ids(string key) => ev.TryGetProperty(key, out var a) && a.ValueKind == JsonValueKind.Array
-                ? a.EnumerateArray().Select(x => x.TryGetProperty("checkId", out var c) ? c.GetString() ?? "" : "").ToHashSet(StringComparer.OrdinalIgnoreCase)
-                : new(StringComparer.OrdinalIgnoreCase);
-            var missing = Ids("missing"); var found = Ids("findings"); var nothing = Ids("completedNullChecks");
-            int f = 0, n = 0, m = 0;
+            var root = doc.RootElement;
+            var ev = root.GetProperty("evaluation");
+            static string Str(JsonElement x, string k) => x.ValueKind == JsonValueKind.Object && x.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+            IEnumerable<JsonElement> Rows(JsonElement at, string key) => at.TryGetProperty(key, out var a) && a.ValueKind == JsonValueKind.Array ? a.EnumerateArray() : [];
+            HashSet<string> Ids(string key) => Rows(ev, key).Select(x => Str(x, "checkId")).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var found = Ids("findings"); var nothing = Ids("completedNullChecks");
+            var missing = Rows(ev, "missing").GroupBy(x => Str(x, "checkId"), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.Select(x => Str(x, "status")).ToList(), StringComparer.OrdinalIgnoreCase);
+            string review = Str(root, "reviewArm");
+            var unj = root.TryGetProperty("unassessed", out var ua) ? Rows(ua, "unjudgeablePopulations").ToList() : new List<JsonElement>();
+            if (unj.Any(x => Str(x, "armId") == review)) unj = unj.Where(x => Str(x, "armId") == review).ToList();
+            static long Total(JsonElement x) => x.TryGetProperty("unjudgeable", out var u) && u.ValueKind == JsonValueKind.Object
+                ? u.EnumerateObject().Sum(p => p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetInt64(out var v) ? v : 0) : 0;
+            int f = 0, n = 0, m = 0, fInc = 0, nInc = 0, judgedShort = 0, onlyUnknown = 0;
+            var unjudged = new SortedDictionary<string, long>(StringComparer.Ordinal);
             foreach (var c in checks)
-                if (missing.Contains(c)) m++; else if (found.Contains(c)) f++; else if (nothing.Contains(c)) n++; else m++;
+            {
+                var miss = missing.GetValueOrDefault(c);
+                bool incomplete = miss is { Count: > 0 };
+                if (found.Contains(c)) { f++; if (incomplete) fInc++; }
+                else if (nothing.Contains(c)) { n++; if (incomplete) nInc++; }
+                else { m++; continue; }
+                if (incomplete && miss!.All(s => s == "unknown-applicability")) onlyUnknown++;
+                var mine = unj.Where(x => string.Equals(Str(x, "checkId"), c, StringComparison.OrdinalIgnoreCase))
+                              .GroupBy(x => Str(x, "population")).Select(g => (pop: g.Key, n: g.Max(Total))).Where(p => p.n > 0).ToList();
+                if (mine.Count > 0) judgedShort++;
+                foreach (var (pop, k) in mine) unjudged[pop] = unjudged.GetValueOrDefault(pop) + k;
+            }
             string Of(int k) => k == 1 ? "1 check" : $"{k} checks";
-            var line = $"{Of(f)} found something, {Of(n)} found nothing, {Of(m)} did not complete";
-            return m == 0 ? line : f + n == 0 ? line + ", so nothing was measured" : line + ", so this is not a full result";
+            string Inc(int k) => k > 0 ? $" ({k} not complete)" : "";
+            var line = $"{Of(f)} found something{Inc(fInc)}, {Of(n)} found nothing{Inc(nInc)}, {Of(m)} did not complete";
+            if (m > 0 || fInc + nInc > 0) line += f + n == 0 ? ", so nothing was measured" : ", so this is not a full result";
+            if (judgedShort > 0)
+                line += $"; {judgedShort} could not judge every object ({string.Join(", ", unjudged.Select(kv => $"{kv.Key} {kv.Value}"))})";
+            if (onlyUnknown > 0)
+                line += $"; {onlyUnknown} {(onlyUnknown == 1 ? "is" : "are")} not complete only because whether {(onlyUnknown == 1 ? "it applies" : "they apply")} "
+                        + "to this mod could not be measured, which is not a fault in the mod";
+            return line;
         }
         catch (Exception ex) when (ex is IOException or JsonException or KeyNotFoundException or InvalidOperationException)
         {
