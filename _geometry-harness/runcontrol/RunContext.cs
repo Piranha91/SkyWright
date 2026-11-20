@@ -25,11 +25,15 @@ public sealed class RunContext
     public Func<PyDict>? ResolveWith { get; init; }
 
     public RunContext(string entryPath, string? machinePath, string outDir)
-        : this(Py.D(PyJson.ReadPipelineFile(entryPath)), machinePath != null ? Py.D(PyJson.ReadPipelineFile(machinePath)) : new PyDict(), outDir)
+        : this(Py.D(ReadNamed(entryPath, "--entry")), machinePath != null ? Py.D(ReadNamed(machinePath, "--machine")) : new PyDict(), outDir)
     {
         EntryPath = PyPath.Str(entryPath);
         MachinePath = machinePath == null ? null : PyPath.Str(machinePath);
     }
+
+    /// <summary>Reads a file named on the command line; a missing one is refused in one sentence.</summary>
+    static object? ReadNamed(string path, string flag) => File.Exists(path) ? PyJson.ReadPipelineFile(path)
+        : throw new Refusal($"{flag} {path}: no such file; give the path of an existing JSON file.");
 
     /// <summary>A context over documents already read; `id` stands in when the entry is not a whole one (tests).</summary>
     public RunContext(PyDict entry, PyDict machine, string outDir, string? id = null)
