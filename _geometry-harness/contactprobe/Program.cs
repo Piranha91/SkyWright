@@ -1643,10 +1643,11 @@ if (emitPath is not null)
         var cause = new MeshCause(o.Folder!, new[] { new MeshSwap(reshaped.ToString(), o.Path, o.WinnerSha256!, MeshResponsibility.FolderOf(o.Fallback!),
                                                                   o.Fallback!.Kind == AssetKind.Bsa ? o.Fallback.ProviderName : null, o.FallbackSha256!) },
                                   new[] { PluginName(r.DepAuthoring.Plugin), PluginName(r.Host.Winner.Plugin) }, sight.ToString(), sightWhy);
-        string what = depSide ? $"whose own mesh {o.Folder} provides ({o.Path})" : "";
-        string on = depSide ? BaseLabel(r.Host.WinBase) : $"{BaseLabel(r.Host.WinBase)}, whose mesh {o.Folder} provides ({o.Path})";
+        string whose = depSide ? BaseLabel(cidx!.WinnerBase(r.Dependent)) : BaseLabel(r.Host.WinBase);
+        string nearNow = r.Facts.WinnerDistance >= cidx!.Reach ? $"nothing within {cidx.Reach:0.#}u" : $"nearest thing {r.Facts.WinnerDistance:0.#}u";
         conflicts.Add(new Conflict("CONTACT", PluginName(r.DepAuthor), o.Folder!,
-            $"{r.Verdict}: {BaseLabel(cidx!.WinnerBase(r.Dependent))} {what} {r.Relation} on {on} with the mesh that wins without {o.Folder}; nearest thing now {r.Facts.WinnerDistance:0.#}u  {r.Dependent} / {r.Host.Key} in {CellOf(r.DepAuthoring.Cell)}".Replace("  ", " "),
+            $"{r.Verdict}: {BaseLabel(cidx!.WinnerBase(r.Dependent))} is {r.Relation} on {BaseLabel(r.Host.WinBase)} with the mesh that wins without {o.Folder}; "
+            + $"with {o.Folder}'s mesh for {whose} ({o.Path}), {nearNow}  {r.Dependent} / {r.Host.Key} in {CellOf(r.DepAuthoring.Cell)}",
             new List<ConflictRecord> { new(r.Dependent.ToString(), "placed-ref", CellOf(r.DepAuthoring.Cell), st, why, Wind: WindNoteOf(cidx.WinnerBase(r.Dependent))) },
             new List<ConflictRecord> { new(r.Host.Key.ToString(), "placed-ref", null) }, cause));
     }
