@@ -1491,7 +1491,7 @@ bool StateGates(SurfaceOverlapCandidate c, CandidateSkips s)
 candidates = candidates.Where(c => StateGates(c, skips)).ToList();
 // THE FOLDER RULE (overlapprobe/MeshRule.cs): which base-game references come back in, in the emit pass only. Scene capture
 // and --responsible-pair keep the plugin rule and say so in their manifests.
-var meshRule = new MeshRule(idx, assets, population, meshFolderNames, cfg, closure, IsBaseGame, surfaceTolerance, maxTrianglePairs, pairSeconds, pairResults);
+var meshRule = new MeshRule(idx, assets, population, meshFolderNames, cfg, closure, IsBaseGame, surfaceTolerance, maxTrianglePairs, pairSeconds, pairResults) { NoShortcut = motionSwept };
 bool meshMode = !sceneCapture && responsiblePairs.Count == 0;
 if (meshMode && meshRule.Active)
 {

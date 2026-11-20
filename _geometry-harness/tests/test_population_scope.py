@@ -81,18 +81,18 @@ R = {
     "hs5": fk("00090C", "PpBase.esm"), "c5": fk("00090D", "PpBase.esm"),
     "v1": fk("000901", "Skyrim.esm"), "v2": fk("000902", "Skyrim.esm"), "e1": fk("000903", "Skyrim.esm"),
     "e2": fk("000904", "Skyrim.esm"), "e3": fk("000905", "Skyrim.esm"), "e4": fk("000906", "Skyrim.esm"),
-    "w1": fk("000907", "Skyrim.esm"), "w2": fk("000901", "Update.esm"),
+    "w1": fk("000907", "Skyrim.esm"), "w2": fk("000901", "Update.esm"), "q1": fk("000911", "PpA.esp"), "q2": fk("000912", "PpA.esp"),
 }
 OVERLAP = {"O1": ("a1", "b1"), "O2": ("a2", "b2"), "O3": ("d3", "a3"), "O3b": ("b4", "a4"), "O4": ("dE", "hA"),
            "O4b": ("hA", "bE"), "O5": ("pA", "bP"), "O5b": ("pA2", "bP2"), "O6": ("Kc", "b6"), "O7": ("x7", "b7"),
            "O8": ("m8", "b8"), "O9": ("a9", "b9"),
            "M1": ("s1", "s2"), "M2": ("v1", "v2"), "M3": ("c1", "c2b"), "M4": ("t1", "t2"), "M5": ("e1", "e2"), "M5b": ("e3", "e4"),
-           "M6": ("o2", "o1"), "M7": ("n1", "n2"), "M8": ("u1", "u2"), "M9": ("o3", "o4"), "M10": ("w1", "w2")}
+           "M6": ("o2", "o1"), "M7": ("n1", "n2"), "M8": ("u1", "u2"), "M9": ("o3", "o4"), "M10": ("w1", "w2"), "M11": ("q1", "q2")}
 CONTACT = {"K1": ("dc1", "hs1"), "K2": ("c2", "hs2"), "K3": ("c3", "hs3"), "K4": ("c4", "hs4"), "K5": ("c5", "hs5")}
 # What each arm holds, whole-order and in the population (the fixture's table).
 WANT = {
-    ("overlapprobe", "with", "whole"): {"O1", "O2", "O3", "O3b", "O4", "O4b", "O5", "O5b", "O7", "O8", "O9", "M1", "M2", "M3", "M8", "M10"},
-    ("overlapprobe", "with", "scoped"): {"O1", "O3", "O3b", "O4", "O5", "O7", "O8", "M1", "M2", "M3", "M8", "M10"},
+    ("overlapprobe", "with", "whole"): {"O1", "O2", "O3", "O3b", "O4", "O4b", "O5", "O5b", "O7", "O8", "O9", "M1", "M2", "M3", "M8", "M10", "M11"},
+    ("overlapprobe", "with", "scoped"): {"O1", "O3", "O3b", "O4", "O5", "O7", "O8", "M1", "M2", "M3", "M8", "M10", "M11"},
     ("overlapprobe", "without", "whole"): {"O1", "O2", "O4b", "O5b", "O6", "O9", "M3"},
     ("overlapprobe", "without", "scoped"): {"O1", "O6", "M3"},
     ("contactprobe", "with", "whole"): {"K1", "K3", "K4", "K5"},
@@ -303,7 +303,8 @@ def emit_of(probe, arm, which):
 
 # (case, A, B, the reference whose mesh the folder provides) for every row a folder's mesh alone creates
 FOLDER_ROWS = {"overlapprobe": [("O8", "PpB.esp", "PpMeshMod", "m8"), ("M1", "PpA.esp", "PpMeshMod", "s1"),
-                                ("M2", "Skyrim.esm", "PpMeshMod", "v1"), ("M10", "Update.esm", "PpSkyMod", "w1")],
+                                ("M2", "Skyrim.esm", "PpMeshMod", "v1"), ("M10", "Update.esm", "PpSkyMod", "w1"),
+                                ("M11", "PpA.esp", "PpMeshMod", "q1")],
                "contactprobe": [("K4", "PpBase.esm", "PpMeshMod", "c4"), ("K5", "PpBase.esm", "PpMeshMod", "c5")]}
 
 
@@ -355,8 +356,8 @@ def mesh_counts_are_the_tables(arm, which):
         doc = emit_of("overlapprobe", arm, which)
         m = coverage(doc, "mesh responsibility")
         aside = m.get("SetAside") or {}
-        # with: O8, M1, M2, M3, M6, M10 given a counterfactual; M9 (Seen by its folder's plugin) counted, not tested
-        want = {"with": (6, {"CrossesWithoutTheFolderMesh": 1, "MeshEqualsReplaced": 2, "NewMeshNoFallback": 1, "BaseGameReadmitted": 4,
+        # with: O8, M1, M2, M3, M6, M10, M11 given a counterfactual; M9 (Seen by its folder's plugin) counted, not tested
+        want = {"with": (7, {"CrossesWithoutTheFolderMesh": 1, "MeshEqualsReplaced": 2, "NewMeshNoFallback": 1, "BaseGameReadmitted": 4,
                              "SeenNotTested": 1}),
                 "without": (0, {"CrossesWithoutTheFolderMesh": 0, "MeshEqualsReplaced": 0, "NewMeshNoFallback": 0, "BaseGameReadmitted": 0,
                                 "SeenNotTested": 0})}[arm]

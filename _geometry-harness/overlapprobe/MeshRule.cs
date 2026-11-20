@@ -118,8 +118,8 @@ sealed class MeshRule
             return h;
         }
         bool PairCanBeBlind(SurfaceOverlapCandidate a, SurfaceOverlapCandidate b)
-            => (CreditedOwner(a.Base) is { } oa && InPop(a.Key, a.Win) && BlindPossible(oa.Folder!, a.Win.Plugin, b.Win.Plugin))
-            || (CreditedOwner(b.Base) is { } ob && InPop(b.Key, b.Win) && BlindPossible(ob.Folder!, a.Win.Plugin, b.Win.Plugin));
+            => (CreditedOwner(a.Base) is { } oa && InPop(a.Key, a.Win) && BlindPossible(oa.Folder!, a.Win.Plugin, b.Win.Plugin) && PartnerReaches(a, oa, b))
+            || (CreditedOwner(b.Base) is { } ob && InPop(b.Key, b.Win) && BlindPossible(ob.Folder!, a.Win.Plugin, b.Win.Plugin) && PartnerReaches(b, ob, a));
         var coreHash = Hash(core);
         var candHash = Hash(candidates.Where(c => spaces.Contains(c.Win.Space)));
         IEnumerable<SurfaceOverlapCandidate> NearIn(Dictionary<(FormKey, int, int), List<SurfaceOverlapCandidate>> h, SurfaceOverlapCandidate t)
@@ -250,6 +250,99 @@ sealed class MeshRule
 
     public enum Outcome { NotJudged, Folder, Persists, Unknown, SeenSkipped }
 
+    // ---- the changed-region bound (Gate C) ------------------------------------------------------------------------------
+    // A pair whose relation is a SURFACE relation (crossing, coplanar overlap, touching: MeshIntersection.QuerySurfaces, decided
+    // by triangle pairs) keeps that relation when each swapped side's changed triangles (those its copy has and the other copy
+    // lacks, both ways) stay clear of the other side's box: every triangle pair that made the relation is in both copies. A
+    // relation decided with separated surfaces (containment: an inside test over the whole closed shell) never takes the
+    // shortcut, nor does a model whose triangles could not be read, nor a run with --motion swept (its soup is a proxy).
+    // Triangle identity: the three vertices' float bit patterns in model space, sorted (winding-insensitive); a multiset.
+    public bool NoShortcut { get; init; }
+    public long RegionShortcuts;
+    readonly Dictionary<string, Aabb?> _region = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The model-space box of the triangles one copy has and the other lacks; Aabb.Empty when none; null when either
+    /// copy cannot be read (any doubt counts as changed).</summary>
+    Aabb? ChangedRegion(MeshOwner o, PlacementSource? against)
+    {
+        string key = o.Path + "|" + (against is null ? "-" : against.Kind + ":" + (against.LooseFilePath ?? against.ArchivePath + "#" + against.EntryPath));
+        if (_region.TryGetValue(key, out var hit)) return hit;
+        TriangleSoup? Soup(PlacementSource? src)
+        {
+            if (src is null) return null;
+            var (bytes, _) = AssetResolver.ReadPlacementSource(src);
+            if (bytes is null) return null;
+            var m = _cache.Measure(bytes, includeTriangles: true);
+            return m.UsableForSurfaceIntersection ? m.Soup : null;
+        }
+        var w = Soup(o.Winner); var f = Soup(against);
+        if (w is null || f is null) return _region[key] = null;
+        static Dictionary<((int, int, int), (int, int, int), (int, int, int)), int> Tris(TriangleSoup t)
+        {
+            var d = new Dictionary<((int, int, int), (int, int, int), (int, int, int)), int>();
+            for (int i = 0; i + 2 < t.Indices.Length; i += 3)
+            {
+                var v = new[] { t.Indices[i], t.Indices[i + 1], t.Indices[i + 2] }
+                    .Select(k => (BitConverter.SingleToInt32Bits(t.Vertices[k].X), BitConverter.SingleToInt32Bits(t.Vertices[k].Y), BitConverter.SingleToInt32Bits(t.Vertices[k].Z)))
+                    .Order().ToArray();
+                var tk = (v[0], v[1], v[2]);
+                d[tk] = d.GetValueOrDefault(tk) + 1;
+            }
+            return d;
+        }
+        var tw = Tris(w); var tf = Tris(f);
+        float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
+        bool any = false;
+        void Grow(((int, int, int), (int, int, int), (int, int, int)) t)
+        {
+            any = true;
+            foreach (var (x, y, z) in new[] { t.Item1, t.Item2, t.Item3 })
+            {
+                float fx = BitConverter.Int32BitsToSingle(x), fy = BitConverter.Int32BitsToSingle(y), fz = BitConverter.Int32BitsToSingle(z);
+                minX = Math.Min(minX, fx); minY = Math.Min(minY, fy); minZ = Math.Min(minZ, fz);
+                maxX = Math.Max(maxX, fx); maxY = Math.Max(maxY, fy); maxZ = Math.Max(maxZ, fz);
+            }
+        }
+        foreach (var (t, n) in tw) if (tf.GetValueOrDefault(t) != n) Grow(t);
+        foreach (var (t, n) in tf) if (tw.GetValueOrDefault(t) != n) Grow(t);
+        if (!any) return _region[key] = Aabb.Empty;
+        if (!float.IsFinite(minX + minY + minZ + maxX + maxY + maxZ)) return _region[key] = null;
+        return _region[key] = new Aabb(new Vec3(minX, minY, minZ), new Vec3(maxX, maxY, maxZ), false);
+    }
+
+    /// <summary>The pair keeps its surface relation with the swapped sides' other copies (see the section comment).</summary>
+    bool Unchanged(SurfaceOverlapHit h, List<(SurfaceOverlapCandidate Ref, MeshOwner Owner, PlacementSource? Against)> swap)
+    {
+        if (NoShortcut || h.Query.SurfaceRelation is not ("crossing" or "coplanar_overlap" or "touching")) return false;
+        foreach (var (r, o, against) in swap)
+        {
+            if (ChangedRegion(o, against) is not { } region) return false;
+            if (region.IsEmpty) continue;
+            var other = r.Key == h.A.Key ? h.B : h.A;
+            var world = SpatialOverlap.SoupBounds(SpatialOverlap.TransformSoup(ContactIndex.BoxSoup(region), r.Win.Pos, r.Win.Rot, r.Win.Scale));
+            if (Near(world, other.WorldBounds, _tol)) return false;
+        }
+        return true;
+    }
+
+    /// <summary>For readmission: a partner can only take part in a folder row when its box comes within the tolerance of the
+    /// target's changed region (a surface relation), or the two boxes nest (containment, decided over the whole shell).</summary>
+    bool PartnerReaches(SurfaceOverlapCandidate t, MeshOwner o, SurfaceOverlapCandidate c)
+    {
+        if (NoShortcut) return true;
+        static bool Inside(Aabb a, Aabb b) => a.Min.X >= b.Min.X && a.Min.Y >= b.Min.Y && a.Min.Z >= b.Min.Z && a.Max.X <= b.Max.X && a.Max.Y <= b.Max.Y && a.Max.Z <= b.Max.Z;
+        if (Inside(t.WorldBounds, c.WorldBounds) || Inside(c.WorldBounds, t.WorldBounds)) return true;
+        if (ChangedRegion(o, o.Fallback) is not { } region) return true;
+        if (region.IsEmpty) return false;
+        var world = SpatialOverlap.SoupBounds(SpatialOverlap.TransformSoup(ContactIndex.BoxSoup(region), t.Win.Pos, t.Win.Rot, t.Win.Scale));
+        if (Near(world, c.WorldBounds, _tol)) return true;
+        // the joint swap reads the game's copy: the partner reaches when it reaches that region too
+        var game = GameSource(o.Path);
+        if (game is null || ReferenceEquals(game, o.Fallback)) return false;
+        if (ChangedRegion(o, game) is not { } g) return true;
+        return !g.IsEmpty && Near(SpatialOverlap.SoupBounds(SpatialOverlap.TransformSoup(ContactIndex.BoxSoup(g), t.Win.Pos, t.Win.Rot, t.Win.Scale)), c.WorldBounds, _tol);
+    }
+
     /// <summary>One intersecting pair under the folder rule.</summary>
     public sealed record Verdict(SurfaceOverlapHit Hit, Outcome Kind, string? Folder, IReadOnlyList<string> AlsoFolders, bool JointSwap,
                                  SurfaceOverlapCandidate Necessary, SurfaceOverlapCandidate Other, IReadOnlyList<(SurfaceOverlapCandidate Ref, MeshOwner Owner)> Swapped,
@@ -282,6 +375,7 @@ sealed class MeshRule
         foreach (var f in folders)
         {
             var swap = sides.Where(s => string.Equals(s.Owner.Folder, f, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (Unchanged(h, swap.Select(s => (s.Ref, s.Owner, s.Owner.Fallback)).ToList())) { RegionShortcuts++; continue; }
             var (q, why) = Query(h, swap.Select(s => (s.Ref.Key, SoupOf(s.Owner.Fallback, _fallbackSoup, s.Owner.Path))).ToList());
             if (q is null || q.Unknown) { unknown = why ?? q?.Reason ?? "the counterfactual actual-shape result is unknown"; cf = q; break; }
             if (q.Intersects == false) { credited = f; cf = q; break; }
@@ -290,11 +384,15 @@ sealed class MeshRule
         bool stacked = sides.Any(s => s.Owner.Fallback is { } fb && !MeshResponsibility.IsGame(MeshResponsibility.FolderOf(fb)));
         if (unknown is null && credited is null && (folders.Count > 1 || stacked))
         {
-            Joint++;
-            var (q, why) = Query(h, sides.Select(s => (s.Ref.Key, SoupOf(GameSource(s.Owner.Path), _gameSoup, s.Owner.Path))).ToList());
-            if (q is null || q.Unknown) unknown = why ?? q?.Reason ?? "the joint counterfactual actual-shape result is unknown";
-            else if (q.Intersects == false) { credited = folders[0]; joint = true; }
-            cf = q ?? cf;
+            if (Unchanged(h, sides.Select(s => (s.Ref, s.Owner, GameSource(s.Owner.Path))).ToList())) RegionShortcuts++;
+            else
+            {
+                Joint++;
+                var (q, why) = Query(h, sides.Select(s => (s.Ref.Key, SoupOf(GameSource(s.Owner.Path), _gameSoup, s.Owner.Path))).ToList());
+                if (q is null || q.Unknown) unknown = why ?? q?.Reason ?? "the joint counterfactual actual-shape result is unknown";
+                else if (q.Intersects == false) { credited = folders[0]; joint = true; }
+                cf = q ?? cf;
+            }
         }
         JudgeSeconds += clock.Elapsed.TotalSeconds;
         if (unknown is not null)
@@ -358,7 +456,7 @@ sealed class MeshRule
                 ["CrossesWithoutTheFolderMesh"] = CrossesWithout, ["MeshEqualsReplaced"] = Count(MeshShape.EqualBytes),
                 ["NewMeshNoFallback"] = Count(MeshShape.NoFallback), ["BaseGameReadmitted"] = Readmitted.Count,
                 ["JointSwap"] = Joint, ["SeenFolderRows"] = SeenRows, ["SeenNotTested"] = SeenNotTested,
-                ["SeenNotReadmitted"] = SeenNotReadmitted.Count,
+                ["SeenNotReadmitted"] = SeenNotReadmitted.Count, ["ChangedRegionClear"] = RegionShortcuts,
             },
             $"credited: {Scope}; {Count(MeshShape.Credited):N0} model path(s) a credited folder reshapes; {Targets.Count:N0} target reference(s), "
           + $"{Partners:N0} base-game partner(s) readmitted; readmission {ReadmitSeconds:0.0}s, counterfactuals {JudgeSeconds:0.0}s");

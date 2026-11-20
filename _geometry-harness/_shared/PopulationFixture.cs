@@ -68,6 +68,10 @@ namespace HarnessShared;
 //  M10   w1 (Skyrim, SkU) 3200 x w2 (Update, SkBox) 3300, SkRoom   PpSkyMod +-60 / PpBase +-20   folder row PpSkyMod: its plugin
 //        PpSkyMod.esp masters Skyrim.esm but not Update.esm, so the pair is Blind; both are base-game references that come back in
 //        (Gate B review condition A: a plugin-carrying folder does not make every base-game partner Seen)
+//  M11   q1 (A, PpShell) x q2 (A, Cup), E30 (x0+500, 1000): q2 (+-20) sits inside q1. PpBase's shell is a +-60 box with its +x face
+//        missing (open: no containment); PpMeshMod's is the closed box. The surfaces never meet (40 u apart) and the folder changes
+//        only the far face, yet the pair is contained only with PpMeshMod's mesh: folder row PpMeshMod (containment is decided
+//        over the whole shell, so it never takes the changed-region shortcut)
 //  K4    cup c4 on slab hs4 (both PpBase, SlabM), E35   PpMeshMod +-60 / PpBase +-100      Stranded, reshaped host, PpMeshMod
 //  K5    cup c5 (PpBase, CupM) on slab hs5 (PpBase), E35  PpMeshMod +-5 / PpBase +-20      Stranded, reshaped dependent, PpMeshMod
 public static class PopulationFixture
@@ -92,6 +96,7 @@ public static class PopulationFixture
         B9 = KB(0x908), B6 = KB(0x909);
     public static readonly FormKey D0 = KD(0x901), D3 = KD(0x902), DE = KD(0x903), Dc1 = KD(0x904), Ds2 = KD(0x905);
     // mesh responsibility
+    public static readonly FormKey Shell = K(0x80E), Q1 = KA(0x911), Q2 = KA(0x912);
     public static readonly FormKey MeshS = K(0x808), MeshO = K(0x80A), SlabM = K(0x80B), CupM = K(0x80C), MeshT = K(0x80D), E30 = K(0x846), E35 = K(0x847);
     public static readonly FormKey O2 = K(0x909), Hs4 = K(0x90A), C4 = K(0x90B), Hs5 = K(0x90C), C5 = K(0x90D), O3 = K(0x90E), O4 = K(0x90F);
     public static readonly FormKey S1 = KA(0x90B), S2 = KA(0x90C), C1 = KA(0x90D), T1 = KA(0x90E), T2 = KA(0x90F), U2 = KA(0x910), C2b = KB(0x90A);
@@ -131,7 +136,10 @@ public static class PopulationFixture
     }
 
     /// <summary>A closed render box (+-half) and, when asked, a collision box of the same size.</summary>
-    public static byte[] Mesh(float half, bool collision)
+    public static byte[] Mesh(float half, bool collision) => Mesh(half, collision, false);
+
+    /// <summary>The same box; <paramref name="openPlusX"/> leaves out its +x face (an open shell).</summary>
+    public static byte[] Mesh(float half, bool collision, bool openPlusX)
     {
         var f = new NifFile();
         var version = new NiVersion { FileVersion = NiVersion.ToFile("20.2.0.7"), UserVersion = 12, StreamVersion = 100 };
@@ -146,6 +154,7 @@ public static class PopulationFixture
             new(0, 2, 1), new(1, 2, 3), new(4, 5, 6), new(5, 7, 6), new(0, 1, 4), new(1, 5, 4),
             new(2, 6, 3), new(3, 6, 7), new(0, 4, 2), new(2, 4, 6), new(1, 3, 5), new(3, 7, 5),
         };
+        if (openPlusX) t.RemoveRange(t.Count - 2, 2);
         var shape = new BSTriShape { Name = new("render"), Flags_ui = 0xEu, Scale = 1f };
         shape.Create(version, v, t, new(), new());
         shape.IsSkinned = false;
@@ -206,6 +215,7 @@ public static class PopulationFixture
         b.Statics.Add(new Static(SlabM, Rel) { EditorID = "PpSlabM", Model = new Model { File = "pp\\slabm.nif" } });
         b.Statics.Add(new Static(CupM, Rel) { EditorID = "PpCupM", Model = new Model { File = "pp\\cupm.nif" } });
         b.Statics.Add(new Static(MeshT, Rel) { EditorID = "PpMeshT", Model = new Model { File = "pp\\msht.nif" } });
+        b.Statics.Add(new Static(Shell, Rel) { EditorID = "PpShell", Model = new Model { File = "pp\\shell.nif" } });
         b.Statics.Add(new Static(Huge, Rel)
         {
             EditorID = "PpHuge", Model = new Model { File = "pp\\huge.nif" },
@@ -244,7 +254,8 @@ public static class PopulationFixture
             var e200 = Ext(E200, 20, 0); e200.Temporary.Add(Ref(Kc, Box, 20 * C + 100, 100, 0, Mk));
             var e30 = Ext(E30, 3, 0);
             foreach (var r in new[] { Ref(S1, MeshB, X30 + 200, 100, 0), Ref(S2, Box, X30 + 300, 100, 0), Ref(C1, MeshB, X30 + 1200, 100, 0),
-                                      Ref(T1, MeshS, X30 + 1700, 100, 0), Ref(T2, Box, X30 + 1800, 100, 0), Ref(U2, Box, X30 + 2800, 100, 0) })
+                                      Ref(T1, MeshS, X30 + 1700, 100, 0), Ref(T2, Box, X30 + 1800, 100, 0), Ref(U2, Box, X30 + 2800, 100, 0),
+                                      Ref(Q1, Shell, X30 + 500, 1000, 0), Ref(Q2, Cup, X30 + 500, 1000, 0) })
                 e30.Temporary.Add(r);
             a.Worldspaces.Add(Wrld(top, e10, e90, e200, e30));
         }
@@ -332,6 +343,8 @@ public static class PopulationFixture
         File.WriteAllBytes(Path.Combine(sm, "mshs.nif"), Mesh(30, true));
         File.WriteAllBytes(Path.Combine(sm, "msht.nif"), Mesh(60, true));
         File.WriteAllBytes(Path.Combine(bm, "mshu.nif"), Mesh(20, true));
+        File.WriteAllBytes(Path.Combine(bm, "shell.nif"), Mesh(60, false, true));
+        File.WriteAllBytes(Path.Combine(mods, MeshModName, "meshes", "pp", "shell.nif"), Mesh(60, false, false));
         var um = Path.Combine(mods, SkyModName, "meshes", "pp"); Directory.CreateDirectory(um);
         File.WriteAllBytes(Path.Combine(um, "mshu.nif"), Mesh(60, true));
         var dm = Path.Combine(mods, "PpDelta", "meshes", "pp"); Directory.CreateDirectory(dm);

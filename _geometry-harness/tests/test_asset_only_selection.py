@@ -38,7 +38,8 @@ M8, B8 = "000908:PpA.esp", "000907:PpB.esp"   # PopulationFixture.M8 and B8
 S1, S2 = "00090B:PpA.esp", "00090C:PpA.esp"   # M1, same plugin
 V1, V2 = "000901:Skyrim.esm", "000902:Skyrim.esm"   # M2, base game
 C1, C2B = "00090D:PpA.esp", "00090A:PpB.esp"   # M3, crosses with either mesh
-MESH_LINE = ("PpMeshMod has no plugin, so it places nothing; it holds 6 mesh files. The checks that read meshes compare every "
+Q1, Q2 = "000911:PpA.esp", "000912:PpA.esp"     # M11, contained only inside PpMeshMod's closed shell
+MESH_LINE = ("PpMeshMod has no plugin, so it places nothing; it holds 7 mesh files. The checks that read meshes compare every "
              "placed object that uses one of its meshes, with and without it. Its textures (0 files) and other files are not measured.")
 TEX_LINE = ("PpTexMod has no plugin and no mesh (1 texture file), so no check here can measure it: textures, sounds and "
             "scripts change nothing these checks read.")
@@ -159,14 +160,14 @@ def a_mesh_only_mod_gets_its_one_new_crossing():   # its new crossings: O8, M1, 
     # without the mod only M3, which crosses with the game's mesh too; with it the table's O8, M1, M2 and M3 and no other row:
     # every other pair of the fixture is the same on both arms or outside the population
     assert W.rows("PpMeshMod", "baseline") == [sorted([C1, C2B])], W.rows("PpMeshMod", "baseline")
-    want = sorted(sorted(p) for p in ([M8, B8], [S1, S2], [V1, V2], [C1, C2B]))
+    want = sorted(sorted(p) for p in ([M8, B8], [S1, S2], [V1, V2], [C1, C2B], [Q1, Q2]))
     assert W.rows("PpMeshMod", "candidate-01") == want, (W.rows("PpMeshMod", "candidate-01"), want)
 
 
 def the_rows_its_mesh_creates_name_the_folder():
     # rejects: O8 named by the plugins that placed the two objects (PpA.esp x PpB.esp), and the same-plugin and base-game
     # crossings not reported at all; and M3, which crosses without the mod's mesh, credited to the folder
-    for pair, a, ref in (([M8, B8], "PpB.esp", M8), ([S1, S2], "PpA.esp", S1), ([V1, V2], "Skyrim.esm", V1)):
+    for pair, a, ref in (([M8, B8], "PpB.esp", M8), ([S1, S2], "PpA.esp", S1), ([V1, V2], "Skyrim.esm", V1), ([Q1, Q2], "PpA.esp", Q1)):
         c = W.row("PpMeshMod", "candidate-01", pair)
         got = (c["A"], c["B"], (c.get("Mesh") or {}).get("Folder"), c["Necessary"][0]["FormKey"])
         assert got == (a, "PpMeshMod", "PpMeshMod", ref), (pair, got)
