@@ -40,6 +40,8 @@ internal sealed class Launcher : IAsyncDisposable
     internal string? PrepNote { get; private set; }
     /// <summary>The pipeline's scope line: the cells the ticked mods edit, who else touches them, disabled mods to tick.</summary>
     internal string? ScopeNote { get; private set; }
+    /// <summary>What the ticked checks did, from the bundle's disposition: found something, found nothing, did not complete.</summary>
+    internal string? RunTally { get; private set; }
     internal string? RunFolder { get; private set; }
     internal Task? RunTask { get; private set; }
     /// <summary>Raised on the run's thread with the verified bundle's folder when a run is done (the window opens it).</summary>
@@ -462,7 +464,7 @@ internal sealed class Launcher : IAsyncDisposable
         var psi = engine.Pipeline(entry, machine, run, WorkFolder, Path.Combine(dir, "runlog"));
         lock (_gate)
         {
-            RunState = "running"; RunRefusal = null; RunBundle = null; RunLine = null; PrepNote = null; ScopeNote = null; RunFolder = dir;
+            RunState = "running"; RunRefusal = null; RunBundle = null; RunLine = null; PrepNote = null; ScopeNote = null; RunTally = null; RunFolder = dir;
             RunChecks.Clear(); RunChecks.AddRange(checks); AbortedChecks.Clear(); _groupAborted = false;
             // the first guess per probe: the run-log estimator over earlier runs' histories (this Work Folder's runs and the default store)
             _first.Clear();
@@ -503,7 +505,8 @@ internal sealed class Launcher : IAsyncDisposable
                 if (_groupAborted) { }                                                     // AbortRun said so already
                 else if (p.ExitCode == 0 && File.Exists(Path.Combine(bundle, "manifest.json")))
                 {
-                    lock (_gate) { RunState = "done"; RunBundle = bundle; }
+                    var tally = Tally(Path.Combine(bundle, "disposition.json"), checks);
+                    lock (_gate) { RunState = "done"; RunBundle = bundle; RunTally = tally; }
                     BundleReady?.Invoke(bundle);
                 }
                 else lock (_gate) { RunState = "refused"; RunRefusal = $"the run stopped (exit code {p.ExitCode}) without making results: {RunLine?.Trim()} (its log: {log})"; }
@@ -511,6 +514,31 @@ internal sealed class Launcher : IAsyncDisposable
             catch (Exception ex) { lock (_gate) { RunState = "refused"; RunRefusal = $"the run could not be started: {ex.Message}"; } }
         });
         return $"running {(checks.Count == 1 ? ProbeNames.Of(checks[0]) : $"{checks.Count} probes")} on {sel.Count} mod(s){(depth == "deep" ? ", thorough" : "")} in profile '{Profile}'; its files go under '{dir}'";
+    }
+
+    /// <summary>One sentence on the ticked checks from a disposition: how many found something, found nothing, did not
+    /// complete. A check counts as complete only when no arm or part of it is listed missing.</summary>
+    internal static string Tally(string disposition, IReadOnlyCollection<string> checks)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllBytes(disposition));
+            var ev = doc.RootElement.GetProperty("evaluation");
+            HashSet<string> Ids(string key) => ev.TryGetProperty(key, out var a) && a.ValueKind == JsonValueKind.Array
+                ? a.EnumerateArray().Select(x => x.TryGetProperty("checkId", out var c) ? c.GetString() ?? "" : "").ToHashSet(StringComparer.OrdinalIgnoreCase)
+                : new(StringComparer.OrdinalIgnoreCase);
+            var missing = Ids("missing"); var found = Ids("findings"); var nothing = Ids("completedNullChecks");
+            int f = 0, n = 0, m = 0;
+            foreach (var c in checks)
+                if (missing.Contains(c)) m++; else if (found.Contains(c)) f++; else if (nothing.Contains(c)) n++; else m++;
+            string Of(int k) => k == 1 ? "1 check" : $"{k} checks";
+            var line = $"{Of(f)} found something, {Of(n)} found nothing, {Of(m)} did not complete";
+            return m == 0 ? line : f + n == 0 ? line + ", so nothing was measured" : line + ", so this is not a full result";
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            return $"what the checks did could not be read from {disposition} ({ex.Message})";
+        }
     }
 
     static string StateServerExe() { try { return Program.DefaultServerExe(); } catch (InvalidOperationException) { return "housecarl-mcp.exe"; } }
@@ -594,7 +622,7 @@ internal sealed class Launcher : IAsyncDisposable
                 controller = Controller, controllerFrom = ControllerFrom,
                 output = Output, outputVerdict = verdict, workFolder = WorkFolder,
                 depth = Depth,
-                run = new { state = RunState, refusal = RunRefusal, line = RunLine, folder = RunFolder, bundle = RunBundle, preparation = PrepNote, scope = ScopeNote },
+                run = new { state = RunState, refusal = RunRefusal, line = RunLine, folder = RunFolder, bundle = RunBundle, preparation = PrepNote, scope = ScopeNote, tally = RunTally },
             };
         }
     }
