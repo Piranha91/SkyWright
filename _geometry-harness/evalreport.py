@@ -60,7 +60,6 @@ except ImportError:  # pragma: no cover - stated, never worked around
 TEMPLATES = HERE / "evalreport_templates"
 PRIORITIES = HERE.parent / ".claude" / "skills" / "evaluation-reporting" / "references" / "report-priorities.json"
 NARRATION = PRIORITIES.parent / "narration.json"
-EVALRUN = HERE / "evalrun.py"
 
 PRESENTATION_SCHEMA = 1
 BUNDLE_SCHEMA = 2
@@ -1037,14 +1036,19 @@ def relative_pdf_links(pdf: Path, folder: Path) -> str | None:
 # ------------------------------------------------------------------------------ bundle verification --
 
 def run_verify_bundle(bundle: Path, out: Path) -> tuple[dict | None, int, str]:
-    """D1: `evalrun.py verify-bundle DIR` is the authority. It reads the bundle in place and writes its result to
-    OUT/verify.json (`--out`), so the bundle is never written and nothing is copied. An earlier OUT/verify.json is
-    removed first, so a verify that dies before writing cannot be read as this run's verdict."""
+    """D1: the built-in controller's `runcontrol verify-bundle DIR` is the authority (HOUSECARL_RUNCONTROL, else this
+    checkout's build). It reads the bundle in place and writes its result to OUT/verify.json (`--out`), so the bundle is
+    never written and nothing is copied. An earlier OUT/verify.json is removed first, so a verify that dies before
+    writing cannot be read as this run's verdict."""
+    import evalpipeline
     result = out / "verify.json"
     result.unlink(missing_ok=True)
     try:
-        r = subprocess.run([sys.executable, str(EVALRUN), "verify-bundle", str(bundle), "--out", str(result)],
-                           capture_output=True, text=True, timeout=900)
+        argv = evalpipeline.verify_bundle_argv(None, bundle) + ["--out", str(result)]
+    except evalpipeline.Refusal as ex:
+        return None, EXIT_REFUSED_INPUT, f"verify-bundle could not run: {ex}"
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=900)
     except (OSError, subprocess.SubprocessError) as ex:
         return None, EXIT_REFUSED_INPUT, f"verify-bundle could not run: {ex}"
     verify = load_json(result)

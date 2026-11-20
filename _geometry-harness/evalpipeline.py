@@ -228,8 +228,9 @@ STAGE_TOOLS = {
 }
 #: stages whose renderer build is part of their tools (capture_acquire's own default build when the machine names none)
 RENDERER_STAGES = frozenset({"capture"})
-#: stages that start the built-in controller (the report's media bundle): its build is part of their tools
-CONTROLLER_STAGES = frozenset({"report"})
+#: stages that start the built-in controller (the report's media bundle, and evalreport plan's bundle check in every stage
+#: that runs it): its build is part of their tools
+CONTROLLER_STAGES = frozenset({"report-plan", "capture", "report"})
 #: this driver: modules a tool imports may import it, and its code is recorded on every receipt, not bound
 DRIVER = "_geometry-harness/evalpipeline.py"
 DEFAULT_VIEWPROBE_DIR = Path("_geometry-harness/viewprobe/bin/Release/net9.0-windows10.0.19041.0")
@@ -435,9 +436,15 @@ def measuring_refusal(ctx, stage: str) -> str:
             f"this command again.")
 
 
+#: The environment variable naming runcontrol.exe for a tool started without a machine file (evalreport, evalrun enrich);
+#: the pipeline sets it on every child from the machine file's `runcontrol`.
+RUNCONTROL_ENV = "HOUSECARL_RUNCONTROL"
+
+
 def runcontrol_exe(machine: dict | None) -> Path:
-    """The built-in controller: the machine file's `runcontrol`, else this checkout's build; refused when it is absent."""
-    named = (machine or {}).get("runcontrol")
+    """The built-in controller: the machine file's `runcontrol`, else HOUSECARL_RUNCONTROL, else this checkout's build;
+    refused when it is absent."""
+    named = (machine or {}).get("runcontrol") or (os.environ.get(RUNCONTROL_ENV) or "").strip()
     exe = Path(named) if named else ROOT / DEFAULT_RUNCONTROL
     if not exe.is_file():
         raise Refusal(f"the built-in controller is not at {fwd(exe)}; build it (dotnet build _geometry-harness/runcontrol -c "
@@ -483,6 +490,9 @@ def child(ctx, ledger_dir, op, argv, *, heavy=False, purpose=None, deadline_min=
                             + _prefix_minutes(prefix, "--max-min", deadline_min) + HOLD_MARGIN_MIN)
         argv = prefix + ["--"] + argv
     job = {"id": op, "argv": [str(a) for a in argv], "cwd": str(ROOT)}
+    if ctx.machine.get("runcontrol"):
+        # the Python tools a stage starts (evalreport) verify bundles with the controller the machine file names
+        env = {RUNCONTROL_ENV: fwd(Path(ctx.machine["runcontrol"])), **(env or {})}
     if env:
         job["env"] = {**os.environ, **env}
     lock_before = lock is not None and lock.exists()
@@ -527,8 +537,9 @@ def budget_differs(ctx_entry: dict, out: Path):
     return want if planned is not None and want is not None and float(want) != float(planned) else None
 
 
-def evalrun(*args) -> list[str]:
-    return [sys.executable, fwd(HERE / "evalrun.py"), *[str(a) for a in args]]
+def verify_bundle_argv(machine: dict | None, bundle: Path) -> list[str]:
+    """The bundle check: the built-in controller's `verify-bundle`, its one owner."""
+    return [fwd(runcontrol_exe(machine)), "verify-bundle", fwd(bundle)]
 
 
 def reader_cmd(ctx) -> str:
@@ -1054,7 +1065,7 @@ def stage_report(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
                                                     *[x for k, v in names_env(ctx).items() for x in ("--reader-env", f"{k}={v}")],
                                                     *[x for p, n in (ctx.entry.get("modNames") or {}).items()
                                                       for x in ("--mod-name", f"{p}={n}")]]),
-                           ("media-verify", evalrun("verify-bundle", fwd(bundle)))):
+                           ("media-verify", verify_bundle_argv(ctx.machine, bundle))):
             r = child(ctx, sdir / "commands", name, argv)
             if r.get("exitCode") != 0:
                 raise Refusal(f"{name} refused (exit {r.get('exitCode')}); read {fwd(sdir / 'commands' / (name + '.txt'))}.")
