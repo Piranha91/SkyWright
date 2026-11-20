@@ -64,10 +64,10 @@ internal sealed class Launcher : IAsyncDisposable
     /// its output folder (<c>run/runlog</c>).</summary>
     internal string? RunStore => RunFolder is null ? null : Path.Combine(RunFolder, "run", "runlog");
     string? _controller;
-    /// <summary>The run engine: WB_CONTROLLER when set, else the one chosen here, else the settings file's, else python.</summary>
+    /// <summary>The run engine: WB_CONTROLLER when set, else the one chosen here, else the settings file's, else the built-in one.</summary>
     internal string Controller => RunEngine.FromEnv() is { } env ? env.Trim().ToLowerInvariant() : Chosen();
     /// <summary>Where <see cref="Controller"/> comes from: WB_CONTROLLER, setting, or default.</summary>
-    internal string ControllerFrom => RunEngine.FromEnv() is not null ? "WB_CONTROLLER" : Chosen() == RunEngine.Python && !_controllerSaved ? "default" : "setting";
+    internal string ControllerFrom => RunEngine.FromEnv() is not null ? "WB_CONTROLLER" : Chosen() == RunEngine.CSharp && !_controllerSaved ? "default" : "setting";
     bool _controllerSaved;
     /// <summary>The engine every command of a run and of a review goes through; an unknown WB_CONTROLLER is refused here.</summary>
     internal RunEngine Engine => RunEngine.Of(Controller);
@@ -77,8 +77,8 @@ internal sealed class Launcher : IAsyncDisposable
         if (_controller is not null) return _controller;
         // not chosen in this session yet (a bundle opened directly never restores): what the settings file remembers
         var saved = LauncherSettings.Load(SettingsPath).Settings?.Controller;
-        try { _controller = saved is null ? RunEngine.Python : RunEngine.Name(saved); _controllerSaved = saved is not null; }
-        catch (InvalidOperationException) { _controller = RunEngine.Python; SettingsNote = $"the saved run engine '{saved}' is not one this workbench knows, so Python is used."; }
+        try { _controller = saved is null ? RunEngine.CSharp : RunEngine.Name(saved); _controllerSaved = saved is not null; }
+        catch (InvalidOperationException) { _controller = RunEngine.CSharp; SettingsNote = $"the saved run engine '{saved}' is not one this workbench knows, so the built-in one is used."; }
         return _controller;
     }
 

@@ -778,6 +778,7 @@ public sealed class StateToolsTests : IAsyncLifetime
             "json.dump({'args': a, 'entry': json.load(open(a[a.index('--entry') + 1]))}, open(os.path.join(os.path.dirname(sys.argv[0]), 'called.json'), 'w'))",
             "print('stage bundle: done')"));
         Environment.SetEnvironmentVariable("WB_PIPELINE_CMD", fake);
+        Environment.SetEnvironmentVariable("WB_CONTROLLER", "python");   // the stand-in pipeline is a Python script
         try
         {
             await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", inst), ("profile", "P"), ("game", inst)));
@@ -798,7 +799,7 @@ public sealed class StateToolsTests : IAsyncLifetime
             Assert.Contains("geometry.object-overlap", P(entry, "evaluation", "select").EnumerateArray().Select(x => x.GetString()));
             Assert.Equal("test-plan", P(done, "bundle", "planId").GetString());     // the same server still answers
         }
-        finally { Environment.SetEnvironmentVariable("WB_PIPELINE_CMD", null); }
+        finally { Environment.SetEnvironmentVariable("WB_PIPELINE_CMD", null); Environment.SetEnvironmentVariable("WB_CONTROLLER", null); }
     }
 
     // ---- the run engine: one setting chooses Python or the built-in controller ----
@@ -851,7 +852,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         var settings = OwnSettings();
         var inst = LauncherInstanceL5();
         var s0 = await Ok("workbench_state", A(("project", new[] { "launcher" })));
-        Assert.Equal("python", P(s0, "launcher", "controller").GetString());     // the default, with nothing chosen
+        Assert.Equal("csharp", P(s0, "launcher", "controller").GetString());     // the default, with nothing chosen
         Assert.Equal("default", P(s0, "launcher", "controllerFrom").GetString());
         Assert.Contains("not a run engine", await Refused("workbench_act", A(("verb", "set_controller"), ("controller", "perl"))));
         var set = await Ok("workbench_act", A(("verb", "set_controller"), ("controller", "csharp")));

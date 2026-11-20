@@ -322,6 +322,7 @@ public sealed class FindingsTests
     {
         var open = typeof(PatchWriter).Assembly.GetType("Workbench.Program")!.GetMethod("OpenBundle", BindingFlags.Static | BindingFlags.NonPublic)!;
         Environment.SetEnvironmentVariable("WB_EVALRUN", Path.Combine(f.Root, "fake_evalrun.py"));
+        Environment.SetEnvironmentVariable("WB_CONTROLLER", "python");   // the stand-in verifier is a Python script
         Environment.SetEnvironmentVariable("WB_SEVERITY", Path.Combine(f.Root, "severity.json"));
         Environment.SetEnvironmentVariable("WB_OUT", Path.Combine(f.Root, "work"));
         string[]? args = null; Exception? failed = null;
@@ -333,7 +334,7 @@ public sealed class FindingsTests
                 catch (TargetInvocationException ex) { failed = ex.InnerException ?? ex; }
             });
         }
-        finally { foreach (var v in new[] { "WB_EVALRUN", "WB_SEVERITY", "WB_OUT" }) Environment.SetEnvironmentVariable(v, null); }
+        finally { foreach (var v in new[] { "WB_EVALRUN", "WB_CONTROLLER", "WB_SEVERITY", "WB_OUT" }) Environment.SetEnvironmentVariable(v, null); }
         return (args, failed);
     }
 
@@ -357,6 +358,7 @@ public sealed class FindingsTests
         using var f = new FindingsBundle(findingsOnly: true);
         var open = typeof(PatchWriter).Assembly.GetType("Workbench.Program")!.GetMethod("OpenBundle", BindingFlags.Static | BindingFlags.NonPublic)!;
         Environment.SetEnvironmentVariable("WB_EVALRUN", Path.Combine(f.Root, "fake_evalrun.py"));
+        Environment.SetEnvironmentVariable("WB_CONTROLLER", "python");   // the stand-in verifier is a Python script
         Environment.SetEnvironmentVariable("WB_SEVERITY", Path.Combine(f.Root, "severity.json"));
         Environment.SetEnvironmentVariable("WB_OUT", Path.Combine(f.Root, "work"));
         try
@@ -373,7 +375,7 @@ public sealed class FindingsTests
         }
         finally
         {
-            foreach (var v in new[] { "WB_EVALRUN", "WB_SEVERITY", "WB_OUT" }) Environment.SetEnvironmentVariable(v, null);
+            foreach (var v in new[] { "WB_EVALRUN", "WB_CONTROLLER", "WB_SEVERITY", "WB_OUT" }) Environment.SetEnvironmentVariable(v, null);
         }
     }
 

@@ -903,8 +903,8 @@ public sealed class InPlaceRunTests
             await Ok("workbench_act", ("verb", "select_mods"), ("mods", new[] { mod }));
             await Ok("workbench_act", ("verb", "select_probes"), ("checks", new[] { "geometry.object-overlap" }));
             var set = await Ok("workbench_act", ("verb", "set_output"), ("path", outDir));
-            Assert.Equal("python", set.GetProperty("launcher").GetProperty("controller").GetString());   // nothing chosen yet
-            await Shot("start-tab-run-engine-python");
+            Assert.Equal("csharp", set.GetProperty("launcher").GetProperty("controller").GetString());   // nothing chosen yet: the built-in default
+            await Shot("start-tab-run-engine-default");
             var chosen = await Ok("workbench_act", ("verb", "set_controller"), ("controller", "csharp"));
             Assert.Equal("csharp", chosen.GetProperty("launcher").GetProperty("controller").GetString());
             Assert.Equal("csharp", LauncherSettings.Load(settings).Settings!.Controller);

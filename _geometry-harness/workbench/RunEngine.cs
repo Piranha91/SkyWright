@@ -50,7 +50,7 @@ internal sealed class RunEngine
     internal static string? FromEnv() => Environment.GetEnvironmentVariable("WB_CONTROLLER") is { Length: > 0 } v ? v : null;
 
     /// <summary>The engine's name as the Start tab shows it.</summary>
-    internal static string Label(string kind) => kind == CSharp ? "Built-in (no Python needed)" : "Python (current)";
+    internal static string Label(string kind) => kind == CSharp ? "Built-in (no Python needed)" : "Python (old pipeline)";
 
     /// <summary>The verbs' names in a refusal: which program said no.</summary>
     internal string Controller => BuiltIn ? "runcontrol" : "evalrun";

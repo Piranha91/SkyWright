@@ -114,7 +114,7 @@ internal sealed class StateTools
                  "choose (`n`: stage that candidate like any edit). " +
                  "Manual mode (the launcher): open_profile (`mode` free with `instance`, `profile`, optional `game`), select_mods (`mods`, `how` " +
                  "set/add/remove), select_probes (`checks`: check ids, probe names or [\"all\"]), set_output (`path`, the Output Folder every " +
-                 "write goes under), set_work_folder (`path`, where a run keeps its files), set_controller (`controller`: python, the default, or csharp, the built-in run engine that needs no Python; remembered between sessions), run (the ticked probes, only `checks`, or [\"all\"]: every probe that can run here), " +
+                 "write goes under), set_work_folder (`path`, where a run keeps its files), set_controller (`controller`: csharp, the default, the built-in run engine that needs no Python, or python, the old pipeline; remembered between sessions), run (the ticked probes, only `checks`, or [\"all\"]: every probe that can run here), " +
                  "abort (one probe of the running run by `checks`, leaving the rest running; with no checks, the whole run), capture_window (`path`, a .png of the window), show_tab (`tab`, by its header), search_mods (`search`, filters the Start tab's mod list by name). " +
                  "The app never enables a patch: the load order is unchanged until the user enables it in Mod Organizer 2.")]
     public static Task<CallToolResult> Act(

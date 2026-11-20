@@ -201,8 +201,8 @@ public sealed class LauncherUiTests : IDisposable
         Assert.Null(LauncherSettings.Save(path, s));
         Assert.Equal(old.ReplaceLineEndings(), File.ReadAllText(path).ReplaceLineEndings());
         var l = new Launcher { SettingsPath = path };
-        Assert.Equal(("python", "default"), (l.Controller, l.ControllerFrom));
-        Assert.False(l.Engine.BuiltIn);
+        Assert.Equal(("csharp", "default"), (l.Controller, l.ControllerFrom));
+        Assert.True(l.Engine.BuiltIn);
     }
 
     [Fact]
