@@ -33,6 +33,10 @@ internal static class RecordWords
         _ => recordType,
     };
 
+    /// <summary>A base object's type in words: "moveable static" for MoveableStatic.</summary>
+    internal static string BaseType(string baseType) =>
+        System.Text.RegularExpressions.Regex.Replace(baseType, "(?<=[a-z])(?=[A-Z])", " ").ToLowerInvariant();
+
     /// <summary>"000891 in Skyrim.esm" for "000891:Skyrim.esm".</summary>
     internal static string Form(string formKey)
     {
@@ -99,7 +103,7 @@ internal sealed record ResultTableRow(ResultRow Row, string Line, ResultPair? Pa
     internal static Border Square(ResultGroup g) => new() { Width = 11, Height = 11, CornerRadius = new CornerRadius(2), Background = BrushOf(g), VerticalAlignment = VerticalAlignment.Center };
 
     public string FormKey => Row.FormKey;
-    public string Type => RecordWords.Type(Row.RecordType) + (Row.BaseType is { Length: > 0 } b && Row.RecordType is "REFR" or "ACHR" ? $" ({System.Text.RegularExpressions.Regex.Replace(b, "(?<=[a-z])(?=[A-Z])", " ").ToLowerInvariant()})" : "");
+    public string Type => RecordWords.Type(Row.RecordType) + (Row.BaseType is { Length: > 0 } b && Row.RecordType is "REFR" or "ACHR" ? $" ({RecordWords.BaseType(b)})" : "");
     public Brush ResultBrush => BrushOf(Row.Group);
     public string Result => Row.Group == ResultGroup.PatchChange
         ? "patch change nothing predicted: " + (Row.Category switch { 3 => "a new value", 4 => "forwards a value", 5 => "not measured", _ => "category " + Row.Category })

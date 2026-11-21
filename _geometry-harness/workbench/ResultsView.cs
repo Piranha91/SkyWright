@@ -81,7 +81,8 @@ internal static class ResultsView
     static readonly TextBlock Legend = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(6, 0, 6, 2), Foreground = Theme.Brush(Theme.Dim), FontSize = 11 };
     // the rows as a table: a column per thing a modder sorts or reads by (ResultTableRow)
     static readonly ListView Rows = new() { View = ResultTableRow.Grid() };
-    static readonly TextBox Detail = new() { IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Height = 210, Margin = new Thickness(6, 2, 6, 4), FontSize = 12 };
+    // the open row laid out for reading (ResultDetail); its plain-text account is DetailText
+    static readonly ScrollViewer Detail = new() { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(6, 2, 6, 4) };
 
     static EvaluationResults? _results;
     static readonly Dictionary<string, IReadOnlyList<ResultRow>> Loaded = new(StringComparer.OrdinalIgnoreCase);
@@ -167,7 +168,6 @@ internal static class ResultsView
         foreach (var top in new UIElement[] { Header, PairBox, filters, Means, controls, aboutBox, CountLine }) { DockPanel.SetDock(top, Dock.Top); panel.Children.Add(top); }
         // the open row's values fill the tab; the rows themselves are the table the window shows across its full width
         // under the view (Table), while this tab is in front
-        Detail.Height = double.NaN;
         panel.Children.Add(Detail);
         return panel;
     }
@@ -198,7 +198,7 @@ internal static class ResultsView
         int gen = ++_generation;
         _results = results; Loaded.Clear(); _listed = new(); Open = null; OpenSetup = null; OpenSaid = null; OpenCell = null; Marked = 0;
         Pair = null; Shell.PartnerFor = null; Shell.SceneCaption = null;
-        Rows.ItemsSource = null; Detail.Text = "";
+        Rows.ItemsSource = null; Detail.Content = null;
         FillHeader(); FillPairs();
         if (Shell.Tabs is not null) Shell.ShowTab("Results");
         var ui = Dispatcher.CurrentDispatcher;
@@ -380,7 +380,7 @@ internal static class ResultsView
     internal static string OpenRow(ResultRow r)
     {
         if (_results is not { } res) throw new InvalidOperationException("no evaluation is open.");
-        Open = r; Detail.Text = DetailText(r); OpenCell = null; OpenSaid = null;
+        Open = r; Detail.Content = ResultDetail.Build(r, () => Clipboard.SetText(DetailText(r))); OpenCell = null; OpenSaid = null;
         var item = (Rows.ItemsSource as List<ResultTableRow>)?.FirstOrDefault(i => ReferenceEquals(i.Row, r));
         if (item is not null && !ReferenceEquals(Rows.SelectedItem, item)) { bool was = _filling; _filling = true; try { Rows.SelectedItem = item; Rows.ScrollIntoView(item); } finally { _filling = was; } }
         var pair = res.Pairs.First(p => p.Id == r.Pair);
