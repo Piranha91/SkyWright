@@ -281,7 +281,6 @@ internal static class WorldView
         Notes.Text = string.Join(" ", notes.Select(n => n.TrimEnd('.') + "."));
         SetStatus($"reading the load order of {order.Label}…");
         Loading.Set("world", $"Reading the load order of {order.Label}");
-        if (Shell.Tabs is not null) Shell.ShowTab("World");
         var ui = Dispatcher.CurrentDispatcher;
         var sw = Stopwatch.StartNew();
         var say = new Progress<string>(s => { if (gen == _generation) { SetStatus($"reading the load order of {order.Label}: {s}"); Loading.Set("world", $"Reading the load order of {order.Label}: {s}"); } });
@@ -670,6 +669,8 @@ internal sealed class DataFolderReader : IInputReader
     {
         var staged = DataFolderOrder.Stage(match.Path, Program.RequestWork());
         foreach (var n in staged.Notes) WorkbenchHost.Say("data folder: " + n);
-        return WorldView.Open(staged.Order with { Navmesh = false }, staged.Notes);
+        var said = WorldView.Open(staged.Order with { Navmesh = false }, staged.Notes);
+        if (Shell.Tabs is not null) Shell.ShowTab("World");     // a Data folder has no mod list on Start: its world is what there is to see
+        return said;
     }
 }

@@ -18,23 +18,28 @@ internal static class LauncherView
     static readonly TextBox Instance = new() { Width = 300 }, Output = new() { Width = 300 }, Work = new() { Width = 300 };
     static readonly ComboBox Profile = new() { MinWidth = 160, IsEditable = true };
     static readonly StackPanel ModList = new(), ProbeGroups = new();
-    static readonly TextBox ModSearch = new() { MinWidth = 220, Margin = new Thickness(0, 0, 8, 0), ToolTip = "filter the mods by name" };
+    static readonly TextBox ModSearch = new() { MinWidth = 220, Margin = new Thickness(0, 0, 12, 0), ToolTip = "find a mod by name" };
     static readonly TextBlock ModCount = new() { VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Dim) };
-    static readonly ScrollViewer ModScroll = new() { Content = ModList, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 320, Margin = new Thickness(4, 2, 4, 2) };
+    static readonly ScrollViewer ModScroll = new() { Content = ModList, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 320, Margin = new Thickness(2) };
     static readonly Dictionary<string, CheckBox> ModBoxes = new(StringComparer.OrdinalIgnoreCase);
     static string? _modsShown;
-    static readonly TextBlock Status = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
+    static readonly TextBlock Status = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
     static readonly TextBlock Settings = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4), Foreground = Brushes.Salmon };
-    static readonly TextBlock RunLine = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 0, 4, 4), Foreground = Theme.Brush(Theme.Dim) };
+    static readonly TextBlock RunLine = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0), Foreground = Theme.Brush(Theme.Dim) };
     static readonly TextBlock NotProbes = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 8, 4, 4), Foreground = Theme.Brush(Theme.Dim) };
     static readonly Button RunAll = new() { Content = "Run selected", Margin = new Thickness(4), FontWeight = FontWeights.SemiBold };
     static readonly Button AbortAll = new() { Content = "Abort run", Margin = new Thickness(4) };
+    // the one check a modder runs: always shown once a profile is loaded, greyed out with the reason in its tooltip
     static readonly Button FullCheck = new()
     {
-        Content = "Check Compatibility with Full Load Order", FontWeight = FontWeights.SemiBold, FontSize = 14, Padding = new Thickness(12, 6, 12, 6),
-        Margin = new Thickness(4, 8, 4, 2), Background = Theme.Brush(Theme.Accent), Foreground = Brushes.White, Visibility = Visibility.Collapsed,
+        Content = "Check compatibility with my load order", FontWeight = FontWeights.SemiBold, FontSize = 14, Padding = new Thickness(16, 8, 16, 8),
+        Margin = new Thickness(0, 10, 0, 4), Background = Theme.Brush(Theme.Accent), Foreground = Brushes.White, HorizontalAlignment = HorizontalAlignment.Left,
     };
-    static readonly TextBlock FullCheckWhat = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(4, 0, 4, 6), Visibility = Visibility.Collapsed };
+    static readonly StackPanel ModsSection = new() { Margin = new Thickness(0, 20, 0, 0), Visibility = Visibility.Collapsed };
+    static readonly TextBlock ModsHeading = new() { FontWeight = FontWeights.SemiBold, FontSize = 16, Margin = new Thickness(0, 0, 0, 8),
+        ToolTip = "Tick the mod to check. As in MO2, the mod at the bottom wins. A disabled mod you tick is checked as if enabled; its plugins load last, where MO2 puts a newly enabled plugin." };
+    static readonly CheckBox EnabledOnly = new() { Content = "enabled only", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0), ToolTip = "hide the mods MO2 has switched off" };
+    static readonly StackPanel RecentList = new();
     static readonly Button RunEvery = new() { Content = "Run all", Margin = new Thickness(4), ToolTip = "run every probe that can run here, switched on or not" };
     static readonly Dictionary<string, Tile> Tiles = new(StringComparer.OrdinalIgnoreCase);
     static bool _filling;
@@ -87,38 +92,53 @@ internal static class LauncherView
             foreach (var e in els) r.Children.Add(e);
             return r;
         }
-        var panel = new StackPanel { Background = Theme.Brush(Theme.Panel) };
+        TextBlock Heading(string text, string? tip = null) =>
+            new() { Text = text, FontWeight = FontWeights.SemiBold, FontSize = 16, Margin = new Thickness(0, 4, 0, 8), ToolTip = tip };
+        // The tab is one task in order: load something, then (for an MO2 profile) tick a mod and check it. Explanations
+        // sit in tooltips; the folders, the mode and the individual checks are under Advanced.
+        var panel = new StackPanel { Background = Theme.Brush(Theme.Panel), Margin = new Thickness(16, 12, 16, 12) };
         panel.SetValue(TextElement.ForegroundProperty, Theme.Brush(Theme.Text));
         panel.Children.Add(Settings);
-        panel.Children.Add(Row("Mode", Mode));
-        panel.Children.Add(Row("Instance", Instance, Browse(Instance, FillProfiles)));
-        panel.Children.Add(Row("Profile", Profile, open));
-        panel.Children.Add(Row("Output", Output, Browse(Output), setOut));
-        panel.Children.Add(Row("Work folder", Work, Browse(Work), setWork));
-        panel.Children.Add(new TextBlock { Text = "Mods (priority order)", FontWeight = FontWeights.SemiBold, Margin = new Thickness(4, 8, 4, 0) });
-        panel.Children.Add(new TextBlock { Text = "As in MO2: the mod at the bottom wins. Disabled mods you select are tested as if enabled; their plugins load last, as MO2 places a newly enabled plugin.",
-                                           Foreground = Theme.Brush(Theme.Dim), FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 0, 4, 4) });
-        var find = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 0, 4, 2) };
-        find.Children.Add(new TextBlock { Text = "Search", Width = 90, VerticalAlignment = VerticalAlignment.Center });
-        find.Children.Add(ModSearch); find.Children.Add(ModCount);
+        panel.Children.Add(Heading("Load"));
+        foreach (var c in LoadMenu.Choices) panel.Children.Add(LoadMenu.Button(c, 280));
+        RecentList.Margin = new Thickness(0, 4, 0, 0);
+        panel.Children.Add(RecentList);
+        // the mods of the loaded profile and the one check a modder runs
+        ModsSection.Children.Add(ModsHeading);
+        var find = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
+        var findLabel = new TextBlock { Text = "Find", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+        DockPanel.SetDock(findLabel, Dock.Left); DockPanel.SetDock(ModSearch, Dock.Left); DockPanel.SetDock(EnabledOnly, Dock.Left);
+        find.Children.Add(findLabel); find.Children.Add(ModSearch); find.Children.Add(EnabledOnly); find.Children.Add(ModCount);
         ModSearch.TextChanged += (_, _) => FilterMods();
-        panel.Children.Add(find);
-        panel.Children.Add(new Border { BorderBrush = Theme.Brush(Theme.Line), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Margin = new Thickness(4, 0, 4, 0), Child = ModScroll });
-        var head = new DockPanel { Margin = new Thickness(4, 10, 4, 0) };
+        EnabledOnly.Click += (_, _) => FilterMods();
+        ModsSection.Children.Add(find);
+        ModsSection.Children.Add(new Border { BorderBrush = Theme.Brush(Theme.Line), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Child = ModScroll });
+        ModsSection.Children.Add(FullCheck);
+        panel.Children.Add(ModsSection);
+        panel.Children.Add(RunLine);
+        panel.Children.Add(Status);
+        // everything else the launcher does, for whoever needs it
+        var head = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
         buttons.Children.Add(RunEvery); buttons.Children.Add(RunAll); buttons.Children.Add(AbortAll);
         DockPanel.SetDock(buttons, Dock.Right);
         head.Children.Add(buttons);
-        head.Children.Add(new TextBlock { Text = "Probes", FontWeight = FontWeights.SemiBold, FontSize = 14, VerticalAlignment = VerticalAlignment.Center });
-        // one ticked mod: the run that answers "is this mod compatible with my load order", every probe that can run here
-        panel.Children.Add(FullCheck);
-        FullCheckWhat.Foreground = Theme.Brush(Theme.Dim);
-        panel.Children.Add(FullCheckWhat);
-        panel.Children.Add(head);
-        panel.Children.Add(RunLine);
-        panel.Children.Add(ProbeGroups);
-        panel.Children.Add(NotProbes);
-        panel.Children.Add(Status);
+        head.Children.Add(new TextBlock { Text = "Checks", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center,
+                                          ToolTip = "each check on its own: switch the ones Run selected runs, or run one with its own Run" });
+        var advanced = new StackPanel { Margin = new Thickness(0, 6, 0, 0) };
+        advanced.Children.Add(Row("Mode", Mode));
+        advanced.Children.Add(Row("Instance", Instance, Browse(Instance, FillProfiles)));
+        advanced.Children.Add(Row("Profile", Profile, open));
+        advanced.Children.Add(Row("Output", Output, Browse(Output, () => Try(() => L.SetOutput(Output.Text))), setOut));
+        advanced.Children.Add(Row("Work folder", Work, Browse(Work, () => Try(() => L.SetWorkFolder(Work.Text))), setWork));
+        advanced.Children.Add(head);
+        advanced.Children.Add(ProbeGroups);
+        advanced.Children.Add(NotProbes);
+        panel.Children.Add(new Expander { Header = "Advanced", Content = advanced, IsExpanded = false, Margin = new Thickness(0, 16, 0, 0),
+                                          ToolTip = "the mode, the instance and profile fields, where patches and working files go, and each check on its own" });
+        Mode.ToolTip = "free: open any MO2 instance; housecarl: the instance your houseCARL server manages";
+        Output.ToolTip = "where SkyWright writes patch plugins";
+        Work.ToolTip = "where SkyWright keeps its working files and run records";
         BuildTiles();
         // the run read again every second: each probe's progress from its own run record, and the whole run's line
         var tick = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -183,6 +203,18 @@ internal static class LauncherView
         return new Border { Background = Theme.Brush(Theme.Tile), CornerRadius = new CornerRadius(6), Padding = new Thickness(10, 8, 10, 8), Margin = new Thickness(2, 3, 2, 3), Child = grid };
     }
 
+    /// <summary>The last few things loaded, under the Load buttons.</summary>
+    static void FillRecent()
+    {
+        var recent = OpenBar.ReadRecent(OpenBar.RecentPath).Take(4).ToList();
+        var key = string.Join("|", recent);
+        if (RecentList.Tag as string == key) return;
+        RecentList.Tag = key; RecentList.Children.Clear();
+        if (recent.Count == 0) return;
+        RecentList.Children.Add(new TextBlock { Text = "Recent", Foreground = Theme.Brush(Theme.Dim), Margin = new Thickness(0, 8, 0, 4) });
+        foreach (var r in recent) RecentList.Children.Add(LoadMenu.RecentButton(r, 280));
+    }
+
     /// <summary>The profile picker: the profiles folder of the instance typed or browsed to.</summary>
     static void FillProfiles()
     {
@@ -227,8 +259,11 @@ internal static class LauncherView
                 FilterMods();
             }
             foreach (var m in L.Mods) if (ModBoxes.TryGetValue(m.Name, out var box)) box.IsChecked = m.Selected;
+            ModsSection.Visibility = L.Instance is not null && L.Mods.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            ModsHeading.Text = L.Profile is { } pn ? $"Mods in {pn}" : "Mods";
+            FillRecent();
             int sel = L.Mods.Count(m => m.Selected), off = L.Mods.Count(m => m.Selected && !m.Enabled);
-            ModCount.Text = $"{sel} selected" + (off > 0 ? $", {off} disabled in MO2" : "");
+            ModCount.Text = $"{sel} ticked" + (off > 0 ? $", {off} disabled in MO2" : "");
             Refresh();
         }
         finally { _filling = false; }
@@ -250,6 +285,7 @@ internal static class LauncherView
         foreach (var e in ModList.Children.OfType<FrameworkElement>())
         {
             bool show = q.Length == 0 || (e.Tag is string n && n != "separator" && n.Contains(q, StringComparison.OrdinalIgnoreCase));
+            if (EnabledOnly.IsChecked == true && e is CheckBox { Tag: string mod } && L.Mods.FirstOrDefault(m => m.Name == mod) is { Enabled: false }) show = false;
             e.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         }
     }
@@ -270,8 +306,12 @@ internal static class LauncherView
             RunEvery.Visibility = RunAll.Visibility;
             var ticked = L.Mods.Where(m => m.Selected).ToList();
             bool one = ticked.Count == 1 && !running && L.Instance is not null;
-            FullCheck.Visibility = FullCheckWhat.Visibility = one ? Visibility.Visible : Visibility.Collapsed;
-            if (one) FullCheckWhat.Text = $"Tests {ticked[0].Name}{(ticked[0].Enabled ? "" : " (disabled in MO2, tested as if enabled)")} against everything enabled in this profile, with every probe that can run here.";
+            FullCheck.IsEnabled = one;
+            ToolTipService.SetShowOnDisabled(FullCheck, true);
+            FullCheck.ToolTip = running ? "a check is running; it can be stopped under Advanced"
+                : ticked.Count == 0 ? "tick the mod you want to check"
+                : ticked.Count > 1 ? $"tick one mod to check ({ticked.Count} are ticked); Advanced runs checks on several"
+                : $"checks {ticked[0].Name}{(ticked[0].Enabled ? "" : " (disabled in MO2, checked as if enabled)")} against every mod enabled in this profile, with every check that can run here";
             AbortAll.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
             RunLine.Text = L.RunState switch
             {
@@ -279,8 +319,9 @@ internal static class LauncherView
                 "refused" => L.RunRefusal ?? "",
                 "aborted" => L.RunRefusal ?? "aborted",
                 "done" => "done: " + (L.RunTally is { } tl ? tl + "; " : "") + "the results are open in the Conflicts tab" + (L.RunBundle is { } b ? $" ({b})" : "") + (L.PrepNote is { } pd ? Environment.NewLine + pd : "") + (L.ScopeNote is { } sd ? Environment.NewLine + sd : ""),
-                _ => L.Instance is null ? "open a profile to choose mods and probes" : $"{L.Probes.Count} probe(s) selected",
+                _ => "",
             };
+            RunLine.Visibility = RunLine.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
             foreach (var c in Launcher.Registry().Where(c => Launcher.ProbeKinds.Contains(c.Kind)))
             {
                 if (!Tiles.TryGetValue(c.Id, out var t)) continue;

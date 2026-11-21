@@ -122,6 +122,15 @@ internal static class DataFolderOrder
             var inst = Path.GetDirectoryName(exe)!;
             if (Mo2Instance.TryResolve(inst, out var paths) && paths is not null && GameOf(paths.GamePath) is { } g) return g;
         }
+        return InstalledGame();
+    }
+
+    /// <summary>The game the Load menu's "Current Data Folder" opens: the one Mod Organizer 2 started the workbench in,
+    /// else the installed game Mutagen finds. Null when neither names one.</summary>
+    internal static string? CurrentGame() => StartGame() ?? InstalledGame();
+
+    static string? InstalledGame()
+    {
         foreach (var r in new[] { GameRelease.SkyrimSE, GameRelease.SkyrimSEGog, GameRelease.SkyrimVR })
             if (Mutagen.Bethesda.Installs.GameLocations.TryGetGameFolder(r, out var dir) && GameOf(dir.Path) is { } found) return found;
         return null;

@@ -14,39 +14,22 @@ internal static class OpenBar
     const int MaxRecent = 12;
 
     static readonly TextBox PathBox = new() { MinWidth = 260, Margin = new Thickness(4, 2, 4, 2), VerticalContentAlignment = VerticalAlignment.Center,
-        ToolTip = "an evaluation results folder, an evaluation bundle, an MO2 instance or profile folder, or a game or Data folder" };
-    static readonly ComboBox Recent = new() { Width = 26, Margin = new Thickness(0, 2, 4, 2), ToolTip = "opened before" };
+        ToolTip = "what is open; type or paste a folder here and press Enter to open it" };
 
     /// <summary>Where the recent list is kept: beside the settings file.</summary>
     internal static string RecentPath => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(LauncherSettings.DefaultPath))!, RecentFile);
 
     internal static UIElement Build()
     {
-        var folder = new Button { Content = "Open folder…", Margin = new Thickness(0, 2, 4, 2), Padding = new Thickness(8, 2, 8, 2) };
-        var file = new Button { Content = "Open file…", Margin = new Thickness(0, 2, 4, 2), Padding = new Thickness(8, 2, 8, 2) };
-        var go = new Button { Content = "Open", Margin = new Thickness(0, 2, 4, 2), Padding = new Thickness(8, 2, 8, 2), FontWeight = FontWeights.SemiBold };
-        folder.Click += (_, _) =>
-        {
-            var d = new Microsoft.Win32.OpenFolderDialog { InitialDirectory = Directory.Exists(PathBox.Text) ? PathBox.Text : null, Title = "Open a folder" };
-            if (d.ShowDialog() == true) { PathBox.Text = d.FolderName; Do(d.FolderName); }
-        };
-        file.Click += (_, _) =>
-        {
-            var d = new Microsoft.Win32.OpenFileDialog { Title = "Open a file", CheckFileExists = true };
-            if (d.ShowDialog() == true) { PathBox.Text = d.FileName; Do(d.FileName); }
-        };
-        go.Click += (_, _) => Do(PathBox.Text);
+        // the top bar: Load (the same choices as the Start tab, from any tab), the path that is open (type or paste one
+        // and press Enter to open it), and the session's log
+        PathBox.KeyDown += (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; _ = LoadMenu.OpenAsync(PathBox.Text); } };
         var log = new Button { Content = "Log", Margin = new Thickness(0, 2, 4, 2), Padding = new Thickness(8, 2, 8, 2), ToolTip = "open this session's log file" };
         log.Click += (_, _) => { try { Shell.SetBanner(SessionLog.Open()); } catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); } };
-        PathBox.KeyDown += (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; Do(PathBox.Text); } };
-        Recent.DropDownOpened += (_, _) => Recent.ItemsSource = ReadRecent(RecentPath);
-        Recent.SelectionChanged += (_, _) => { if (Recent.SelectedItem is string p) { Recent.SelectedItem = null; PathBox.Text = p; Do(p); } };
         var bar = new DockPanel { LastChildFill = true, Background = Theme.Brush(Theme.Panel) };
-        var label = new TextBlock { Text = "Open", Margin = new Thickness(8, 2, 4, 2), VerticalAlignment = VerticalAlignment.Center, FontWeight = FontWeights.SemiBold };
-        DockPanel.SetDock(label, Dock.Left);
-        foreach (var b in new UIElement[] { log, go, file, folder, Recent }) DockPanel.SetDock(b, Dock.Right);
-        bar.Children.Add(label);
-        bar.Children.Add(log); bar.Children.Add(go); bar.Children.Add(file); bar.Children.Add(folder); bar.Children.Add(Recent);
+        var load = LoadMenu.TopButton();
+        DockPanel.SetDock(load, Dock.Left); DockPanel.SetDock(log, Dock.Right);
+        bar.Children.Add(load); bar.Children.Add(log);
         bar.Children.Add(PathBox);
         return bar;
     }
