@@ -109,7 +109,7 @@ internal static class ReviewList
                 if (findings.TryGetValue(fr[i], out var f))
                     items.Add(new ListItem("finding", $"   finding {f.Rank}. [{f.Row.CheckId}] {f.Row.Summary}   (not decided here)", f));
             if (show < fr.Count)
-                items.Add(new ListItem("fold", $"   … {fr.Count - show} more Findings rows in this cell (click to show them)", new FoldTag(sv.Scene.Number)));
+                items.Add(new ListItem("fold", $"   {fr.Count - show} more other issues in this place (click to show them)", new FoldTag(sv.Scene.Number)));
         }
         if (v.FindingsOnlyCells > 0)
             items.Add(new ListItem("count", $"{v.FindingsOnlyCells} more {S(v.FindingsOnlyCells, "cell holds", "cells hold")} only Findings rows ({v.FindingsOnlyRows} {S(v.FindingsOnlyRows, "row", "rows")}); tick \"show cells with only Findings rows\" to list them", null));

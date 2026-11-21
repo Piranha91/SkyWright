@@ -175,13 +175,16 @@ internal sealed class Launcher : IAsyncDisposable
 
     /// <summary>Open what the settings file remembers: the instance and profile, then the Output Folder and a chosen Work
     /// Folder. Each refusal is said; nothing is restored silently in part.</summary>
+    /// <summary>What a restore says when no profile was saved: a first start, which the window does not mention.</summary>
+    internal const string NothingToRestore = "no saved instance to restore.";
+
     internal async Task<string> RestoreAsync()
     {
         SettingsNote = LauncherSettings.CannotWrite(SettingsPath);
         var (s, why) = LauncherSettings.Load(SettingsPath);
         if (why is not null) { SettingsNote = why; return why; }
         var gone = GoneEngineNote(s);                                 // read before anything is written back
-        if (s?.Instance is null) { SettingsNote ??= gone; return gone ?? "no saved instance to restore."; }
+        if (s?.Instance is null) { SettingsNote ??= gone; return gone ?? NothingToRestore; }
         var said = new List<string>();
         try { said.Add(await OpenProfileAsync("free", s.Instance, s.Profile, s.Game)); }
         catch (InvalidOperationException ex) { SettingsNote ??= gone; return "the saved instance could not be opened: " + ex.Message + (gone is null ? "" : " " + gone); }

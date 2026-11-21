@@ -133,7 +133,7 @@ internal sealed class WorldIndex : IDisposable
         var clock = Stopwatch.StartNew();
         long before = WorkingSet();
         var signatures = Signatures(CorpusPathOr(corpusPath));
-        say?.Report($"Indexing {paths.Length} plugins…");
+        say?.Report($"Indexing {paths.Length} plugins");
         ct.ThrowIfCancellationRequested();
         var resolver = LoadOrderResolver.Build(paths);   // one pass over every plugin, no token
         var index = new WorldIndex(resolver, signatures);
@@ -227,7 +227,7 @@ internal sealed class WorldIndex : IDisposable
                 reading = source; pluginsRead++;
                 if (say is not null && lastSaid.ElapsedMilliseconds >= 200)
                 {
-                    say.Report($"Reading cells: {source} ({pluginsRead} of {Plugins.Count} plugins)…");
+                    say.Report($"Reading cells: {source} ({pluginsRead} of {Plugins.Count} plugins)");
                     lastSaid.Restart();
                 }
             }

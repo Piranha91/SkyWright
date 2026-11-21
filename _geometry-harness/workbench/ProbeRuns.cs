@@ -223,7 +223,7 @@ internal static class ProbeRuns
         var live = Active(store, op).Where(Ours).FirstOrDefault();
         var done = Finished(store, op).Where(Ours).ToList();
         string passes = done.Count == 0 ? "" : $"; {Runs(done.Count)} finished";
-        if (aborted) return new("aborted", null, (live is null || !Alive(live) ? "aborted" : "aborting…") + passes, null);
+        if (aborted) return new("aborted", null, (live is null || !Alive(live) ? "aborted" : "aborting") + passes, null);
         if (live is not null)
         {
             double elapsed = (now - live.StartedUtc).TotalSeconds;

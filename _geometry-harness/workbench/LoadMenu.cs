@@ -16,10 +16,10 @@ internal static class LoadMenu
     internal static IReadOnlyList<Choice> Choices { get; } = new Choice[]
     {
         new("Current Data Folder", "The game's Data folder as it is now: as Mod Organizer 2 shows it when MO2 started SkyWright, else the installed game's.", CurrentDataFolder),
-        new("MO2 Profile…", "A Mod Organizer 2 profile: its mods can then be checked against its load order, and its world explored.", Mo2Profile),
-        new("Previous Results…", "The folder of an earlier check: a run's results or an evaluation's results.", PreviousResults),
-        new("Clash List…", "A list of clashes written by an AI, a script or by hand (a .clashes.json file; docs/clash-list-format.md describes it).", ClashListFile),
-        new("Other folder or file…", "Any folder or file SkyWright reads; it works out what it is.", OtherFolder),
+        new("MO2 Profile", "A Mod Organizer 2 profile: its mods can then be checked against its load order, and its world explored.", Mo2Profile),
+        new("Previous Results", "The folder of an earlier check: a run's results or an evaluation's results.", PreviousResults),
+        new("Clash List", "A list of clashes written by an AI, a script or by hand (a .clashes.json file; docs/clash-list-format.md describes it).", ClashListFile),
+        new("Other folder or file", "Any folder or file SkyWright reads; it works out what it is.", OtherFolder),
     };
 
     static void Say(string s) { Shell.SetBanner(s); LauncherView.Say(s); }
@@ -40,7 +40,7 @@ internal static class LoadMenu
 
     static void Mo2Profile()
     {
-        var d = new Microsoft.Win32.OpenFolderDialog { Title = "Choose an MO2 profile folder (…\\profiles\\<name>), or an MO2 instance folder for its selected profile",
+        var d = new Microsoft.Win32.OpenFolderDialog { Title = "Choose an MO2 profile folder (profiles\\<name>), or an MO2 instance folder for its selected profile",
                                                        InitialDirectory = Shell.Launcher.Instance is { } i && Directory.Exists(Path.Combine(i, "profiles")) ? Path.Combine(i, "profiles") : null };
         if (d.ShowDialog() == true) _ = OpenAsync(d.FolderName);
     }
@@ -84,7 +84,7 @@ internal static class LoadMenu
         return b;
     }
 
-    static void AutomationPropertiesName(UIElement e, string name) => System.Windows.Automation.AutomationProperties.SetName(e, name.TrimEnd('…'));
+    static void AutomationPropertiesName(UIElement e, string name) => System.Windows.Automation.AutomationProperties.SetName(e, name);
 
     /// <summary>The top bar's Load button: the same choices and the recent list, in a drop-down.</summary>
     internal static UIElement TopButton()

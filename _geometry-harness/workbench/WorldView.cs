@@ -190,7 +190,7 @@ internal static class WorldView
         finally { _mapSetting = false; }
         Map.Show(null, null);
         Map.Tiles.SetWorld(null, null, null);
-        SetMapStatus("reading the terrain…");
+        SetMapStatus("reading the terrain");
         int gen = _generation;
         var ui = Dispatcher.CurrentDispatcher;
         x.TerrainOfAsync(worldKey, CancellationToken.None).ContinueWith(r => (Terrain: r, Picture: r.IsCompletedSuccessfully ? WorldMap.Paint(r.Result) : null), TaskScheduler.Default)
@@ -210,7 +210,7 @@ internal static class WorldView
             if (_pendingMark is { } m) { _pendingMark = null; Map.Choose(m.X, m.Y); }
             // the buildings and captions follow the terrain: they take longer to read
             string terrainSaid = _mapStatus;
-            SetMapStatus("reading buildings and places… " + terrainSaid);
+            SetMapStatus("reading buildings and places; " + terrainSaid);
             x.FeaturesOfAsync(worldKey, CancellationToken.None).ContinueWith(fr => ui.BeginInvoke(() =>
             {
                 if (gen != _generation || !string.Equals(_mapWorld, worldKey, StringComparison.OrdinalIgnoreCase)) return;
@@ -279,7 +279,7 @@ internal static class WorldView
         }, TaskScheduler.FromCurrentSynchronizationContext());
         Tree.Items.Clear(); Hits.Items.Clear(); Hits.Visibility = Visibility.Collapsed; SearchCount.Text = ""; LastHits = Array.Empty<CellRow>();
         Notes.Text = string.Join(" ", notes.Select(n => n.TrimEnd('.') + "."));
-        SetStatus($"reading the load order of {order.Label}…");
+        SetStatus($"reading the load order of {order.Label}");
         Loading.Set("world", $"Reading the load order of {order.Label}");
         var ui = Dispatcher.CurrentDispatcher;
         var sw = Stopwatch.StartNew();
@@ -326,7 +326,7 @@ internal static class WorldView
         var t = new TreeViewItem { Header = header, Tag = tag };
         if (fill is not null)
         {
-            t.Items.Add(new TreeViewItem { Header = "…", IsEnabled = false });
+            t.Items.Add(new TreeViewItem { Header = "reading", IsEnabled = false });
             bool filled = false;
             t.Expanded += (_, e) =>
             {
@@ -384,7 +384,7 @@ internal static class WorldView
     {
         if (_index is not { } x) return;
         int gen = _generation;
-        t.Items.Add(new TreeViewItem { Header = "reading…", IsEnabled = false });
+        t.Items.Add(new TreeViewItem { Header = "reading", IsEnabled = false });
         var ui = Dispatcher.CurrentDispatcher;
         x.ObjectsOfAsync(cellKey, CancellationToken.None).ContinueWith(r => ui.BeginInvoke(() =>
         {
@@ -455,7 +455,7 @@ internal static class WorldView
                 return SceneDirector.Request(new SceneRequest(order, cellKey, landOn, landOn is null ? "the World tab's cell" : $"to show {landOn}"));
             });
         }), TaskScheduler.Default);
-        return $"opening cell {cellKey}…";
+        return $"opening cell {cellKey}";
     }
     static int _pickGeneration;
     static string? _revealObject;                        // an object to select in the tree once its cell's rows arrive
@@ -482,7 +482,7 @@ internal static class WorldView
                 return OpenCell(cell, o.Key);
             });
         }), TaskScheduler.Default);
-        return $"finding the cell {o.Key} stands in…";
+        return $"finding the cell {o.Key} stands in";
     }
 
     static (WorldIndex Index, LoadOrderSpec Order) Need() =>

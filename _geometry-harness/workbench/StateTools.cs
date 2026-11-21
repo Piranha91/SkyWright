@@ -48,7 +48,7 @@ internal sealed class StateTools
                      "view (view-only state: originals shown, the ghost, hidden and see-through references, the Restore visibility label), " +
                      "decisions (each Conflicts row's decision: real problem, intentional or unsure, its reason, and whether it still applies or is flagged to reconsider; and decisions whose row is not in this run). " +
                      "scenes (the Conflicts rows by cell: inside a cell, rows naming a common reference are one cluster, and rows with equal values of the reporting skill's group key are one group; with each cell's clickable Findings rows), " +
-                     "context (the selected reference: doors within 256 units, each 'touches it' or 'near only', with the far side; what names it; its enable parent; what rests on it and what physics does with it at load; the navmesh under its bounds; what stays behind a move; 'reading…' while the read runs), " +
+                     "context (the selected reference: doors within 256 units, each 'touches it' or 'near only', with the far side; what names it; its enable parent; what rests on it and what physics does with it at load; the navmesh under its bounds; what stays behind a move; 'reading' while the read runs), " +
                      "placements (find_clear's candidate positions: each one's move, drop, what it touches there, its word from the open row's re-check, what was and was not checked; wait_seconds waits for them). " +
                      "scene (what the 3D view shows or is loading: the cell, the load order it is built on, read-only or not, and the last build's time and the longest the window waited during it). " +
                      "results (the Results tab: the open evaluation's pairs with their counts, the choices made, and the rows listed, each with its group, values and place; limit and offset page the rows; the open row with its setup, cell and what was said). " +
@@ -466,7 +466,7 @@ internal sealed class StateTools
         if (sc.Session.Selected is not { } k) return new { refused = "nothing is selected; select a reference first." };
         var key = k.ToString();
         if (ContextCache.Read(sc, key) is not { } read) return new { @ref = key, refused = "this scene has no houseCARL server to read the reference's context from." };
-        if (!read.IsCompleted) return new { @ref = key, sections = ContextRead.SectionNames.ToDictionary(n => n, _ => "reading…") };
+        if (!read.IsCompleted) return new { @ref = key, sections = ContextRead.SectionNames.ToDictionary(n => n, _ => "reading") };
         if (read.IsFaulted) return new { @ref = key, refused = read.Exception!.GetBaseException().Message };
         var a = read.Result;
         var moving = ContextCache.MovedWith(sc, key);

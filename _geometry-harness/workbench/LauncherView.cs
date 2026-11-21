@@ -61,7 +61,7 @@ internal static class LauncherView
         if (_built is not null) return _built;
         Button Browse(TextBox box, Action? after = null)
         {
-            var b = new Button { Content = "Browse…", Margin = new Thickness(4, 0, 0, 0) };
+            var b = new Button { Content = "Browse", Margin = new Thickness(4, 0, 0, 0) };
             b.Click += (_, _) =>
             {
                 var d = new Microsoft.Win32.OpenFolderDialog { InitialDirectory = Directory.Exists(box.Text) ? box.Text : null };

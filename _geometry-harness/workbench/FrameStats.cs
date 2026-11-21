@@ -80,7 +80,7 @@ internal sealed class FrameStats
         string tail = $"  |  {loop}  |  vsync {(vsync ? "on" : "off")}" + (pacing is null ? "" : "  |  " + pacing);
         if (_recent.Count == 0 || nowMs - LastPresentMs > 500) return "idle (nothing to draw)" + tail;
         var iv = _recent.Where(r => !AfterIdle(r) && r.IntervalMs > 0 && r.TMs >= nowMs - WindowMs).Select(r => r.IntervalMs).ToList();
-        if (iv.Count < 2) return "drawing..." + tail;
+        if (iv.Count < 2) return "drawing" + tail;
         var sum = IntervalSummary.Of(iv);
         return string.Create(CultureInfo.InvariantCulture, $"{1000 / sum.MedianMs:0} fps  {sum.MedianMs:0.0} ms  1% low {sum.Low1Ms:0.0} ms  worst {sum.WorstMs:0.0} ms") + tail;
     }

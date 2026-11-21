@@ -250,7 +250,7 @@ internal sealed class LayerBar
             bool has = s.Has(l), load = l == Layer.Navmesh && s.NavLoadable;
             b.IsEnabled = has || load;
             b.IsChecked = s.Shown(l);
-            b.Content = l == Layer.Navmesh && loading is not null ? "Navmesh (loading…)" : info.Label;
+            b.Content = l == Layer.Navmesh && loading is not null ? "Navmesh (loading)" : info.Label;
             b.ToolTip = has ? $"{Capital(info.Tip)} ({(ViewLayers.IsOn(l) ? "shown; press to hide" : "hidden; press to show")})."
                       : load ? Capital(s.Why(l)!) : $"{info.Label}: {s.Why(l)}" + (ViewLayers.IsOn(l) && l != Layer.Navmesh ? " It is on, and shows in a scene that has it." : "");
         }

@@ -199,7 +199,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             + (PartnerNote is { } pn ? "; " + pn : "");
         string written = _session.Selected is { } wk && _session.Written.TryGetValue(wk, out var wv) ? "\n" + EditSession.WrittenLabel(wk, wv.Patch)
                        : _session.Selected is { } bk ? "\nthe view shows " + bk + " where the load order places it" : "";
-        string recheck = Rechecking ? "re-checking..." : LastRecheck is { } lr ? $"last re-check: {lr.Row.Word}, {lr.New.Count} new" : RecheckRefusal is { } rr ? "re-check refused: " + rr : "";
+        string recheck = Rechecking ? "re-checking" : LastRecheck is { } lr ? $"last re-check: {lr.Row.Word}, {lr.New.Count} new" : RecheckRefusal is { } rr ? "re-check refused: " + rr : "";
         if (ReadOnly)
         {
             _status.Text = (Shell.SceneCaption is { } cap ? cap + "  |  " : "") + $"{sel}  |  read-only scene on {SceneDirector.Order?.Label ?? "its load order"}" + (marks.Length > 0 ? "\n" + marks : "");
@@ -1103,7 +1103,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         if (ContextCache.Read(scene, key) is not { } read) { Line("This scene has no houseCARL server to read the context from."); return; }
         if (!read.IsCompleted)
         {
-            Line($"{key}: reading its doors, what names it, what rests on it and the navmesh under it…", System.Windows.Media.Brushes.DimGray);
+            Line($"{key}: reading its doors, what names it, what rests on it and the navmesh under it", System.Windows.Media.Brushes.DimGray);
             if (_contextShown != key) { _contextShown = key; read.ContinueWith(_ => _window?.Dispatcher.BeginInvoke(FillContext), TaskScheduler.Default); }
             return;
         }

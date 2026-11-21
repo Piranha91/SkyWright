@@ -236,7 +236,7 @@ public sealed class ReviewSpeedPart2Round2Tests
         var v = ReviewList.BuildScenesView(rows, findings, Policy(), Undecided, false, includeFindingsOnly: false);
         var items = ReviewList.Items(v, byRank, ReviewList.FindingsFoldAt, new HashSet<int>());
         Assert.Equal(ReviewList.FindingsFoldAt, items.Count(i => i.Kind == "finding"));
-        Assert.Contains(items, i => i.Kind == "fold" && i.Text.Contains("30 more Findings rows"));
+        Assert.Contains(items, i => i.Kind == "fold" && i.Text.Contains("30 more other issues"));
         Assert.Contains(items, i => i.Kind == "count" && i.Text.Contains("1 more cell") && i.Text.Contains("1 row"));
         var open = ReviewList.Items(v, byRank, ReviewList.FindingsFoldAt, new HashSet<int> { v.Scenes[0].Scene.Number });
         Assert.Equal(50, open.Count(i => i.Kind == "finding"));

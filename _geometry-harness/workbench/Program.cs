@@ -169,7 +169,7 @@ internal static class Program
             // free mode remembers the instance, profile and Output Folder between sessions (workbench-settings.json beside the exe)
             window.Dispatcher.BeginInvoke(async () =>
             {
-                try { LauncherView.Say(await Shell.Launcher.RestoreAsync()); }
+                try { var said = await Shell.Launcher.RestoreAsync(); if (said != Launcher.NothingToRestore) LauncherView.Say(said); }
                 catch (Exception ex) { LauncherView.Say("the last session's settings could not be restored: " + ex.GetBaseException().Message); }
                 LauncherView.Fill();
                 OpenBar.OpenAtStart();                           // the Data folder MO2 started the workbench in, when it did

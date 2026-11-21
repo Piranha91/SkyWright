@@ -111,7 +111,7 @@ internal static class ResultsView
         VirtualizingPanel.SetIsVirtualizing(Rows, true);
         VirtualizingPanel.SetVirtualizationMode(Rows, VirtualizationMode.Recycling);
         ScrollViewer.SetHorizontalScrollBarVisibility(Rows, ScrollBarVisibility.Auto);
-        Header.Text = "No earlier results are loaded. Use Load › Previous Results… to open an evaluation's results folder.";
+        Header.Text = "No earlier results are loaded. Use Load › Previous Results to open an evaluation's results folder.";
         var filters = new WrapPanel { Margin = new Thickness(6, 2, 6, 2) };
         foreach (var (group, g) in Groups)
         {
@@ -210,7 +210,7 @@ internal static class ResultsView
 
     static string CountsText(ResultCounts c) =>
         $"{c.Addressed:N0} addressed · {c.NotAddressed:N0} not addressed · {c.PatchChange:N0} patch changes nothing predicted ({c.Category3:N0} / {c.Category4:N0} / {c.Category5:N0}) · "
-        + (c.NotScored is { } n ? $"{n:N0} overlap not scored" : "overlap not scored: reading…");
+        + (c.NotScored is { } n ? $"{n:N0} overlap not scored" : "overlap not scored: reading");
 
     static void FillHeader()
     {
@@ -252,7 +252,7 @@ internal static class ResultsView
             foreach (var (g, cb) in GroupBoxes)
                 {
                 int? n = g switch { ResultGroup.Addressed => counts.Addressed, ResultGroup.NotAddressed => counts.NotAddressed, ResultGroup.PatchChange => counts.PatchChange, _ => counts.NotScored };
-                cb.Content = $"{Groups[g].Shape} {Groups[g].Words}  ({n?.ToString("N0") ?? "reading…"})";
+                cb.Content = $"{Groups[g].Shape} {Groups[g].Words}  ({n?.ToString("N0") ?? "reading"})";
             }
             foreach (var (c, cb) in CategoryBoxes)
                 cb.Content = $"{CategoryWords(c)}  ({(c == 3 ? counts.Category3 : c == 4 ? counts.Category4 : counts.Category5):N0})";
@@ -404,7 +404,7 @@ internal static class ResultsView
                 return OpenSaid = said + (extra is null ? "" : $" Note: {extra}.");
             });
         }), TaskScheduler.Default);
-        return waited ? $"reading the load order of {order.Label} to place {r.FormKey} (once per setup, a few seconds)…" : $"opening {r.RecordType} {r.FormKey} on {order.Label}…";
+        return waited ? $"reading the load order of {order.Label} to place {r.FormKey} (once per setup, a few seconds)" : $"opening {r.RecordType} {r.FormKey} on {order.Label}";
     }
 
     /// <summary>Mark, in the scene shown, every listed row of the open row's pair that the scene draws, each in its group's shape.</summary>
