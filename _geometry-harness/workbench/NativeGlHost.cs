@@ -80,14 +80,54 @@ internal sealed class NativeGlHost : HwndHost
         {
             long l = lParam.ToInt64();
             int x = (short)(l & 0xFFFF), y = (short)((l >> 16) & 0xFFFF);
-            if (msg == 0x201) { SetFocus(_hwnd); SetCapture(_hwnd); }
+            if (msg == 0x201) { SetFocus(_hwnd); SetCapture(_hwnd); _hoverFocus = IntPtr.Zero; }
             if (msg == 0x202) ReleaseCapture();
+            if (msg == 0x200) HoverFocus();
             Message?.Invoke(msg, x, y, wParam);
         }
+        if (msg == 0x02A3) HoverLeave();                                       // WM_MOUSELEAVE
         if (msg is 0x000F or 0x0005) Message?.Invoke(msg, 0, 0, IntPtr.Zero);   // WM_PAINT, WM_SIZE: the view needs a frame
         if (msg == 0x0087) { handled = true; return (IntPtr)0x0004; }   // WM_GETDLGCODE: DLGC_WANTALLKEYS
         return base.WndProc(hwnd, msg, wParam, lParam, ref handled);
     }
+
+    // The fly keys answer while the mouse is over the view, as well as after a click: the first move over it takes the
+    // keyboard, unless the app is not the active window or a text field is being typed in, and leaving gives the keyboard
+    // back to the window it came from. A click keeps the keyboard in the view after the mouse leaves, as before.
+    IntPtr _hoverFocus;   // the window the keyboard was taken from by hovering; zero when it was not taken that way
+    bool _tracking;
+
+    void HoverFocus()
+    {
+        if (!_tracking)
+        {
+            var t = new TRACKMOUSEEVENT { cbSize = (uint)Marshal.SizeOf<TRACKMOUSEEVENT>(), dwFlags = 0x0002 /* TME_LEAVE */, hwndTrack = _hwnd };
+            _tracking = TrackMouseEvent(ref t);
+        }
+        if (GetFocus() == _hwnd) return;
+        var top = GetAncestor(_hwnd, 2 /* GA_ROOT */);
+        if (GetForegroundWindow() != top) return;
+        if (System.Windows.Input.Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase or System.Windows.Controls.PasswordBox
+            or System.Windows.Controls.ComboBox { IsEditable: true, IsKeyboardFocusWithin: true }) return;
+        var from = GetFocus();
+        SetFocus(_hwnd);
+        _hoverFocus = from == IntPtr.Zero ? top : from;
+    }
+
+    void HoverLeave()
+    {
+        _tracking = false;
+        if (_hoverFocus == IntPtr.Zero) return;
+        var back = _hoverFocus; _hoverFocus = IntPtr.Zero;
+        if (GetFocus() == _hwnd) SetFocus(back);   // WM_KILLFOCUS follows: a held fly key stops
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct TRACKMOUSEEVENT { public uint cbSize, dwFlags; public IntPtr hwndTrack; public uint dwHoverTime; }
+    [DllImport("user32.dll")] static extern bool TrackMouseEvent(ref TRACKMOUSEEVENT e);
+    [DllImport("user32.dll")] static extern IntPtr GetFocus();
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
 
     [StructLayout(LayoutKind.Sequential)]
     struct PIXELFORMATDESCRIPTOR
