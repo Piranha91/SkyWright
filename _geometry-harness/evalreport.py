@@ -11593,7 +11593,14 @@ def _reel_block_rest(plan, bundle, sibling, pr, a, out, b, names, masters, sb, p
         # vignettes without figures and nothing on the page says so (Render 13: 11 files missing, no warning)
         doc = load_json(Path(f))
         if not isinstance(doc, (list, dict)):
-            what_ = ("does not exist" if not Path(f).is_file() else "is not JSON" if doc is None
+            def parses_(p_):
+                try:
+                    json.loads(p_.read_text(encoding="utf-8"))
+                    return True
+                except (OSError, ValueError):
+                    return False
+            # load_json answers None for unreadable JSON and for the JSON literal null alike: tell them apart
+            what_ = ("does not exist" if not Path(f).is_file() else "is not JSON" if not parses_(Path(f))
                      else "holds neither a list nor an object of capture results")
             raise InputRefused(f"capture-results-unreadable: the --capture-results file {f} {what_}; check the path, run "
                                f"capture_acquire.py again for it, or leave that file out.")

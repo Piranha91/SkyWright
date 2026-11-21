@@ -64,6 +64,8 @@ def main() -> int:
         corrupt.write_text('[{"status": "captured", "formKey": ', encoding="utf-8")
         scalar = tmp / "capture-results-scalar.json"
         scalar.write_text("5", encoding="utf-8")
+        null = tmp / "capture-results-null.json"
+        null.write_text("null", encoding="utf-8")
         empty = tmp / "capture-results-empty.json"
         empty.write_text("[]", encoding="utf-8")
         for i, (label, files, bad) in enumerate((("CR1-missing", [str(empty), str(missing)], missing),
@@ -74,6 +76,9 @@ def main() -> int:
                   and one_sentence(what),
                   f"an unreadable --capture-results file is refused in one sentence naming it ({got}: "
                   f"{what if got == 'refused' else 'the reel planned without it'})")
+        got, what = reel_with(tmp / "nullcase", [str(null)])
+        check("CR6-json-null", got == "refused" and "holds neither a list nor an object" in what,
+              f"a file holding JSON null is refused as holding no capture results, not as unreadable JSON ({what})")
         got, what = reel_with(tmp / "none", [])
         check("CR4-none-given", got == "planned" and (what or {}).get("status") == "planned",
               f"a plan given no capture results still plans its reel ({got})")
