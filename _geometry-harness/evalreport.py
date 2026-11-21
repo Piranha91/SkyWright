@@ -12334,25 +12334,30 @@ def report_short_forms(plan: dict, pr: dict) -> dict:
 REPORT_MD_KEEP = re.compile(r"```[\s\S]*?```|`[^`\n]*`|\]\([^)\s]*\)|!\[[^\]\n]*\]|<[^>\n]*>|\"[^\"\n]*\"|“[^”\n]*”")
 REPORT_HTML_KEEP = re.compile(r"<(style|script|title)\b[\s\S]*?</\1>|<[^>]*>", re.I)
 TEXT_QUOTED = re.compile(r"\"[^\"\n]*\"|“[^”\n]*”")
+MD_HEADING = re.compile(r"(?m)^ {0,3}#{1,6}[ \t][^\n]*")
+HTML_HEADING_TAG = re.compile(r"<(/?)h[1-6]\b", re.I)
 
 
 def say_report_short_forms(text: str, short: dict, gloss: str, as_html: bool = False) -> str:
     """(report words, item 3) A long plugin file name or mod name said in full until its first plain mention, which
     carries the gloss ("X.esp (X below)"), and by its short form after, in the rendered text's reading order. Link
     targets, tags and attributes, image alt text, code and anything in double quotes (an in-game name quoted as a
-    value) are left as rendered. A possessive after the name is said again by the reel's rule for the short form."""
+    value) are left as rendered. A possessive after the name is said again by the reel's rule for the short form.
+    A heading never carries the gloss: a name in a heading before its gloss is said in full, and the gloss goes on its
+    first mention in body text (Hroggar's H1 held "... BUVARP Patch.esp (BUVARP Patch below) ...")."""
     import reel_plan
     if not short or not text:
         return text
     pat = reel_plan.short_form_pattern(short, ext=True)
     glossed = set()
+    in_heading = [False]
 
     def one(m):
         n, own = m.group("name"), m.group("own")
         key = short[n].casefold()
         if key in glossed:
             return reel_plan.said_short(short[n], own)
-        if own or not gloss:
+        if own or not gloss or in_heading[0]:
             return m.group(0)
         glossed.add(key)
         return fill(gloss, name=m.group(0), short=short[n])
@@ -12364,11 +12369,26 @@ def say_report_short_forms(text: str, short: dict, gloss: str, as_html: bool = F
             last = q.end()
         return "".join(out + [pat.sub(one, chunk[last:])])
     if not as_html:
+        heads = [(h.start(), h.end()) for h in MD_HEADING.finditer(text)]
+
+        def plain_at(start, end):
+            """text[start:end] said, each part inside a heading line said as one."""
+            out_, at = [], start
+            for h0, h1 in heads:
+                if h1 <= at or h0 >= end:
+                    continue
+                if h0 > at:
+                    out_.append(plain(text[at:h0]))
+                in_heading[0] = True
+                out_.append(plain(text[max(at, h0):min(end, h1)]))
+                in_heading[0] = False
+                at = min(end, h1)
+            return "".join(out_ + [plain(text[at:end])])
         out, last = [], 0
         for k in REPORT_MD_KEEP.finditer(text):
-            out += [plain(text[last:k.start()]), k.group(0)]
+            out += [plain_at(last, k.start()), k.group(0)]
             last = k.end()
-        return "".join(out + [plain(text[last:])])
+        return "".join(out + [plain_at(last, len(text))])
     body = text.find("<body")
     head, rest = (text[:body], text[body:]) if body >= 0 else ("", text)
     out, last = [head], 0
@@ -12379,6 +12399,9 @@ def say_report_short_forms(text: str, short: dict, gloss: str, as_html: bool = F
     for k in REPORT_HTML_KEEP.finditer(rest):
         out += [node(rest[last:k.start()]), k.group(0)]
         last = k.end()
+        tag_ = HTML_HEADING_TAG.match(k.group(0))
+        if tag_:
+            in_heading[0] = not tag_.group(1)          # "<hN ...>" opens a heading, "</hN>" closes it
     return "".join(out + [node(rest[last:])])
 
 

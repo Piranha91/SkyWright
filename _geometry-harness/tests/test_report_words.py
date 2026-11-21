@@ -22,7 +22,10 @@ looked up with getattr, so the base fails the case's own assertion, never by a c
     C2316  3   the report says a long plugin file name in full once with the gloss, then by its short form, possessive
                included; link targets, attributes, code, image alt text and a quoted in-game name are left as
                rendered; the compiled report shortens and its evidence index keeps every name in full
-    C2317  3   the reel says a patch named after the evaluated mod in full once, then by the rest
+    C2316h 3   (plugin-name-case fold-in 2) a heading never carries the gloss: a long name in a heading before its
+               first body mention is said in full, the gloss goes on that body mention, and a heading after it says
+               the short form (Markdown and HTML)
+    C2317  3  the reel says a patch named after the evaluated mod in full once, then by the rest
     C2318  4   evalreport has no label_form_keys; test_reader_rules' fact holds on the current path
     C2319  5   a buried line names the object with the item's words (its numbers kept)
 
@@ -305,6 +308,30 @@ def c2316_report_short_forms(tmp: Path):
           "the evidence index is shortened", f"index full {idx.count(f)}x")
 
 
+def c2316h_gloss_not_in_headings(tmp: Path):
+    """Hroggar's H1 read "... BUVARP Patch.esp (BUVARP Patch below) ...". Wrong answers: the gloss in a heading; the
+    first body mention said short with no gloss (the heading took it); a heading's full name shortened before the
+    reader met the gloss; a later heading still in full."""
+    import evalreport as ER
+    fn = getattr(ER, "say_report_short_forms", None)
+    if not check("C2316h", fn is not None, "the report has no short-form pass"):
+        return
+    short = {GS: "Grand Solitude"}
+    gloss = ER.load_priorities()["reel"]["words"]["shortForm"]["reportFirst"]
+    f = f"{GS}.esp"
+    md = f"# Clashes of {f}\n\nThe pairs with {f} are below.\n\n## More of {f}\n\nAnd {f} again.\n"
+    want = (f"# Clashes of {f}\n\nThe pairs with {f} (Grand Solitude below) are below.\n\n## More of Grand Solitude\n\n"
+            f"And Grand Solitude again.\n")
+    got = fn(md, short, gloss)
+    check("C2316h", got == want, "a Markdown heading carries the gloss, or the body's first mention lost it", got)
+    html_ = (f"<html><body><h1 class=\"t\">Clashes of {f}</h1><p>The pairs with {f}.</p><h2>More of {f}</h2>"
+             f"<p>And {f}.</p></body></html>")
+    wanth = (f"<html><body><h1 class=\"t\">Clashes of {f}</h1><p>The pairs with {f} (Grand Solitude below).</p>"
+             f"<h2>More of Grand Solitude</h2><p>And Grand Solitude.</p></body></html>")
+    goth = fn(html_, short, gloss, as_html=True)
+    check("C2316h", goth == wanth, "an HTML heading carries the gloss, or the body's first mention lost it", goth)
+
+
 # ------------------------------------------------------------------------------------------------ C2317 --
 
 def c2317_reel_patch_named_after_subject(tmp: Path):
@@ -366,7 +393,7 @@ def c2319_buried_line_one_name(tmp: Path):
 
 CASES = {"C2310": c2310_seven_reel_strings, "C2311": c2311_planned_reel_has_no_s_s, "C2312": c2312_report_fillers,
          "C2313": c2313_record_cells, "C2314": c2314_landscape_said_by_cell, "C2315": c2315_short_form_rules,
-         "C2316": c2316_report_short_forms, "C2317": c2317_reel_patch_named_after_subject,
+         "C2316": c2316_report_short_forms, "C2316h": c2316h_gloss_not_in_headings, "C2317": c2317_reel_patch_named_after_subject,
          "C2318": c2318_label_form_keys_retired, "C2319": c2319_buried_line_one_name}
 
 
