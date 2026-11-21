@@ -155,7 +155,7 @@ internal sealed class StateTools
         [Description("select_mods: set (default), add or remove.")] string? how = null,
         [Description("select_probes: check ids or probe names, or [\"all\"] for every probe check.")] string[]? checks = null,
         [Description("set_output or set_work_folder: the folder, by its full path. open: the folder or file to open. capture_window: the .png to write. frame_log: the .csv to write (absent: stop the log).")] string? path = null,
-        [Description("show_tab: the tab to bring to the front, by its header (Start, Conflicts, Findings, Records, Results or World).")] string? tab = null,
+        [Description("show_tab: the view to bring to the front (Start, Conflicts, Findings, Results, Records or World; or a tab's header, as Explore or In the world).")] string? tab = null,
         [Description("search_mods: the text the Start tab's mod list is filtered by (any case; empty shows every mod). results: list only rows holding this text. world: part of a cell's EditorID or name, a FormKey, or a grid x,y.")] string? search = null,
         [Description("stage: a typed offset, such as \"+120 x\", \"-30 z\" or \"15°\" (a turn about the vertical).")] string? offset = null,
         [Description("stage: lock the move to x, y, z or xy.")] string? axis = null,

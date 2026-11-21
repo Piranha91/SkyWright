@@ -34,15 +34,37 @@ internal static class Shell
                                    Environment.GetEnvironmentVariable("WB_CORPUS") is { Length: > 0 } cp ? cp : Program.DefaultCorpus(), WorkbenchHost.Say));
     static string RepairWork() => Environment.GetEnvironmentVariable("WB_OUT") is { Length: > 0 } o ? o : Path.Combine(Path.GetTempPath(), "workbench");
 
-    /// <summary>Bring the tab with this header to the front.</summary>
+    /// <summary>Each view by name: the group tab it sits in, and its tab inside the group (null for Start, a group of its
+    /// own). The names are the views' own (Start, Conflicts, Findings, Results, Records, World) and their headers.</summary>
+    static readonly Dictionary<string, (TabItem Group, TabItem? Inner, string Says)> Views = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Bring a view to the front: its group, and its tab inside the group.</summary>
     internal static string ShowTab(string? header)
     {
         if (Tabs is null) throw new InvalidOperationException("no window is shown, so there is no tab to show.");
-        var items = Tabs.Items.OfType<TabItem>().ToList();
-        var item = items.FirstOrDefault(t => string.Equals(t.Header as string, header?.Trim(), StringComparison.OrdinalIgnoreCase))
-                   ?? throw new InvalidOperationException($"'{header}' is not a tab; show_tab takes one of {string.Join(", ", items.Select(t => t.Header))}.");
-        Tabs.SelectedItem = item;
-        return $"the {item.Header} tab is in front";
+        var key = header?.Trim() ?? "";
+        if (!Views.TryGetValue(key, out var v))
+            throw new InvalidOperationException($"'{header}' is not a tab; show_tab takes one of {string.Join(", ", Views.Keys.Distinct(StringComparer.OrdinalIgnoreCase))}.");
+        Tabs.SelectedItem = v.Group;
+        if (v.Inner is { Parent: TabControl inner }) inner.SelectedItem = v.Inner;
+        return $"the {v.Says} tab is in front";
+    }
+
+    /// <summary>A group of views: a tab of the window holding its own row of tabs.</summary>
+    static TabItem Group(string header, string tip, params (string Key, string Header, string Tip, object Content)[] views)
+    {
+        var inner = new TabControl { Margin = new Thickness(0, 4, 0, 0) };
+        var group = new TabItem { Header = header, Content = inner, ToolTip = tip };
+        Views[header] = (group, null, header);
+        foreach (var (key, h, t, content) in views)
+        {
+            var item = new TabItem { Header = h, Content = content, ToolTip = t };
+            inner.Items.Add(item);
+            Views[key] = Views[h] = (group, item, $"{header} › {h}");
+        }
+        // the group's own name brings its first view
+        Views[header] = (group, (TabItem)inner.Items[0], $"{header} › {((TabItem)inner.Items[0]).Header}");
+        return group;
     }
     internal static IReadOnlyList<string> WorklistCells = Array.Empty<string>();
     /// <summary>The load order the open bundle's rows are shown on, when the session named it in full; null otherwise.</summary>
@@ -125,11 +147,6 @@ internal static class Shell
         var conflictsTab = new DockPanel();
         DockPanel.SetDock(AllRows, Dock.Top); DockPanel.SetDock(DecidedRows, Dock.Top); DockPanel.SetDock(FindingsOnlyRows, Dock.Top);
         conflictsTab.Children.Add(AllRows); conflictsTab.Children.Add(DecidedRows); conflictsTab.Children.Add(FindingsOnlyRows); conflictsTab.Children.Add(ConflictList);
-        var tabs = Tabs = new TabControl { MinWidth = 380 };
-        var start = new TabItem { Header = "Start", Content = LauncherView.Build() };
-        tabs.Items.Add(start);
-        tabs.Items.Add(new TabItem { Header = "Conflicts", Content = conflictsTab });
-        tabs.SelectedIndex = Bundle is null ? 0 : 1;           // the Start tab until a bundle is open
         // a navmesh Findings row's repair (RepairDesk): previewed, then written to a new patch, read back and re-checked
         var repairPreview = new Button { Content = "Preview repair", Margin = new Thickness(4), ToolTip = "plan the selected navmesh row's repair: relink a border, or follow moved ground; nothing is written" };
         var repairWrite = new Button { Content = "Write repair", Margin = new Thickness(4), ToolTip = "write the previewed repair to a new patch under the Output Folder, read it back and re-check it" };
@@ -151,10 +168,19 @@ internal static class Shell
         var findingsTab = new DockPanel();
         DockPanel.SetDock(repairBar, Dock.Top);
         findingsTab.Children.Add(repairBar); findingsTab.Children.Add(FindingList);
-        tabs.Items.Add(new TabItem { Header = "Findings", Content = findingsTab });
-        tabs.Items.Add(new TabItem { Header = "Records", Content = Records });
-        tabs.Items.Add(new TabItem { Header = "Results", Content = ResultsView.Build() });
-        tabs.Items.Add(new TabItem { Header = "World", Content = WorldView.Build() });
+        // Three tabs: Start (load, check), Conflicts (what was found, three ways), Explore (the load order as it is)
+        var tabs = Tabs = new TabControl { MinWidth = 380 };
+        var start = new TabItem { Header = "Start", Content = LauncherView.Build(), ToolTip = "load a Data folder, a profile or earlier results, and check a mod" };
+        Views["Start"] = (start, null, "Start");
+        tabs.Items.Add(start);
+        tabs.Items.Add(Group("Conflicts", "what the checks found",
+            ("Conflicts", "In the world", "clashes between mods at a place in the world; pick one to see it in the view", conflictsTab),
+            ("Findings", "Other issues", "what the checks found that is not a clash at one place: missing masters, navmesh, patch advice", findingsTab),
+            ("Results", "Earlier results", "an earlier evaluation's results, pair by pair", ResultsView.Build())));
+        tabs.Items.Add(Group("Explore", "the load order as it is, without a check",
+            ("Records", "Records", "the cells and references of the scene shown, by worldspace", Records),
+            ("World", "World", "the map and cells of the loaded Data folder or profile", WorldView.Build())));
+        tabs.SelectedIndex = Bundle is null ? 0 : 1;           // the Start tab until a bundle is open
         var root = new DockPanel();
         // one Open control for anything the window opens; each kind is a reader (InputReaders)
         InputReaders.Register(new ResultsInputReader());
