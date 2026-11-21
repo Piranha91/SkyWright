@@ -542,6 +542,24 @@ def case_47_an_order_only_tree_delta_is_not_a_difference():
     assert (A, "WaterHeight") in lost, f"the control (a real difference in the same answer) gave no row: {lost}"
 
 
+def case_51_an_order_only_delta_from_an_incomplete_plugin_is_still_compared():
+    """Review of case 47's fix: a plugin the tree could not compare in full (complete false) leaves unjudged only the
+    fields it does not list. An order-only delta is listed: the tree compared that list and found the winner's items, so
+    the field is the winner's value, not unjudged; an unlisted field of the same plugin stays unjudged (the control)."""
+    fk = "00EED6:Skyrim.esm"
+    nodes = [{"plugin": BASE, "is_winner": False, "complete": True, "deltas": []},
+             {"plugin": A, "is_winner": False, "complete": False,
+              "deltas": [f"Regions: same 2 item(s), ORDER DIFFERS from {B}"]},
+             {"plugin": B, "is_winner": True}]
+    with tempfile.TemporaryDirectory() as td:
+        req, resp = tree_transcript_raw(Path(td), fk, "Cell", nodes)
+        got = RR.read_chains(req, resp, ORDER, RR.load_scope())[fk]
+    un = got.get("unjudged") or {}
+    assert "Regions" not in un, f"a compared order-only list was left unjudged: {un.get('Regions')}"
+    assert RR.chain_holds(got, "Regions") is True, "a compared order-only list is not read as the winner's value"
+    assert "WaterHeight" in un, f"the control (an unlisted field of the incomplete plugin) is not unjudged: {sorted(un)}"
+
+
 def case_49_a_tree_chain_holds_no_winner_value_for_an_unjudged_field():
     """Task 2026-11-13-recordrows-tree-order-and-unjudged-read (2). A tree chain is `allListed`: a field it does not
     list holds the winner's value in every provider, EXCEPT a field named in the chain's `unjudged` (a plugin the tree

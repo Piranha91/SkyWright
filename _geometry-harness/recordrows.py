@@ -953,6 +953,7 @@ def _tree_chains(request: Path, response: Path, scope: Scope, formkeys=None, unj
         per_node, won_vals = [], {}
         for n in nodes:
             per = collections.defaultdict(list)
+            listed = set()                     # the top-level fields this node's answer lists, a difference or not
             for d in ([] if n.get("is_winner") else n.get("deltas") or []):
                 m = TREE_KEY.match(d)
                 key = m.group(1) if m else d.split("=")[0]
@@ -961,6 +962,7 @@ def _tree_chains(request: Path, response: Path, scope: Scope, formkeys=None, unj
                     unknown.add(INDEX.sub("", key))
                 if cls != "compared":
                     continue
+                listed.add(key.split(".")[0].split("[")[0])
                 val = d[len(key):]
                 if TREE_ORDER_ONLY.match(val):
                     continue                   # the winner's items in another order: the same multiset
@@ -987,10 +989,11 @@ def _tree_chains(request: Path, response: Path, scope: Scope, formkeys=None, unj
                     val = "=" + norm(v)
                 per[key.split(".")[0].split("[")[0]].append(key + val)
             per_node.append({k: tuple(sorted(v)) for k, v in per.items()})
-            # a plugin the tree could not compare in full: a field it lists is a difference, any other is not known
+            # a plugin the tree could not compare in full: a field it lists was compared (a difference, or the winner's
+            # value by the read-same rules above), any other is not known
             if not n.get("is_winner") and n.get("complete") is False:
                 for t in tops_all:
-                    if t not in per and (sel is None or t in sel):
+                    if t not in listed and (sel is None or t in sel):
                         left_out.setdefault(t, REASON_TREE_PART)
         tops = scope.one_flags_view(sorted(set().union(*[set(v) for v in per_node]) - set(left_out)))
         for f in sorted(unknown):
