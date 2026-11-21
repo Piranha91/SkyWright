@@ -923,12 +923,26 @@ public sealed class OverlapIndex
         return list;
     }
 
+    /// <summary>A model the game draws nothing of: it has a visible render shape, and every visible one is editor-marker
+    /// geometry by core's <see cref="ShapeDrawing.IsEditorMarker"/> (AutoLoadMarker01.nif: a load door's marker, 17
+    /// triangle pairs measured as render surfaces before this). Core's overlap measure leaves editor markers to the
+    /// caller, so the caller's marker gate asks this. A model mixing drawn and marker shapes is not a marker model; its
+    /// marker triangles are core's to leave out.</summary>
+    public static bool OnlyEditorMarkers(IEnumerable<NifShapeGeometry>? shapes)
+    {
+        var visible = (shapes ?? Array.Empty<NifShapeGeometry>()).Where(s => !s.Hidden).ToList();
+        return visible.Count > 0 && visible.All(s => ShapeDrawing.IsEditorMarker(s.Name));
+    }
+
     /// <summary>Build actual-surface candidates under the same declared source/state/type/marker rules as the historical
-    /// overlap pass. No box size, depth or volume gate applies. Flat triangle soups remain eligible.</summary>
+    /// overlap pass. No box size, depth or volume gate applies. Flat triangle soups remain eligible. <paramref
+    /// name="markerModel"/>: the base's model draws only editor-marker shapes (<see cref="OnlyEditorMarkers"/>), counted
+    /// with the other editor markers.</summary>
     public List<SurfaceOverlapCandidate> SurfaceCandidates(
         Func<FormKey, (TriangleSoup? Soup, char Src, string? Reason)> geometryOf,
         ISet<string> obstructing, Func<int, bool> excludeResponsible, out CandidateSkips skips,
-        Func<FormKey, bool>? enabledOf = null, Func<FormKey, Snap, bool>? includeReference = null)
+        Func<FormKey, bool>? enabledOf = null, Func<FormKey, Snap, bool>? includeReference = null,
+        Func<FormKey, bool>? markerModel = null)
     {
         skips = new CandidateSkips();
         var list = new List<SurfaceOverlapCandidate>();
@@ -942,7 +956,8 @@ public sealed class OverlapIndex
             if (!RefBase.TryGetValue(key, out var bk) || !BaseInfo.TryGetValue(bk, out var bi) || !obstructing.Contains(bi.Type))
             { skips.NonObstructingType++; continue; }
             if (BaseIsMarker.Contains(bk) || DetectorModel.ClassifyHost(bi.Type, bi.Edid) == HostClass.Marker
-                || (BaseMesh.TryGetValue(bk, out var mesh) && Path.GetFileName(mesh).StartsWith("MarkerX", StringComparison.OrdinalIgnoreCase)))
+                || (BaseMesh.TryGetValue(bk, out var mesh) && Path.GetFileName(mesh).StartsWith("MarkerX", StringComparison.OrdinalIgnoreCase))
+                || (markerModel?.Invoke(bk) ?? false))
             { skips.MarkerMesh++; continue; }
             var (model, src, _) = geometryOf(bk);
             if (src == '-' || model is not { TriangleCount: > 0 }) { skips.NoGeometry++; continue; }

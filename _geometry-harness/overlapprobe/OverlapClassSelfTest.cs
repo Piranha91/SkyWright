@@ -152,5 +152,43 @@ static class OverlapClassSelfTest
         t.Check("PD4-O-X  candidate filter: a scene excludes nothing; a responsible-pair run excludes outside its scope; default excludes the core masters",
                 table.Count == 0 && pl.Candidates.All(c => !BaseGamePlugins.IsCoreMaster(pl.Name(c.Win.Plugin))) && pl.Skips.ExcludedResponsible == 1,
                 table.Count == 0 ? "16 of 16" : "wrong at " + string.Join(", ", table));
+
+        // Task 2026-11-11-overlapprobe-editor-marker-shapes: a model whose every visible shape is editor-marker geometry
+        // (AutoLoadMarker01.nif) draws nothing, so its base is an editor marker, never "actual render surfaces".
+        static NifShapeGeometry Shape(string name, bool hidden = false) => new(name, "BSTriShape", 8, 12, Aabb.Empty, null, true, Hidden: hidden);
+        var truth = new (string Case, NifShapeGeometry[] Shapes, bool Want)[]
+        {
+            ("one EditorMarker shape", new[] { Shape("EditorMarker") }, true),
+            ("every shape EditorMarker, any case", new[] { Shape("EditorMarker"), Shape("editormarker"), Shape("EDITORMARKER") }, true),
+            ("EditorMarker plus a hidden drawn shape", new[] { Shape("EditorMarker"), Shape("Frame", hidden: true) }, true),
+            ("EditorMarker plus a drawn shape", new[] { Shape("EditorMarker"), Shape("Frame") }, false),
+            ("a drawn shape only", new[] { Shape("Frame") }, false),
+            ("a name that only starts with EditorMarker", new[] { Shape("EditorMarker01") }, false),
+            ("only hidden shapes", new[] { Shape("EditorMarker", hidden: true) }, false),
+            ("no shapes", Array.Empty<NifShapeGeometry>(), false),
+        };
+        var wrong = truth.Where(x => OverlapIndex.OnlyEditorMarkers(x.Shapes) != x.Want).Select(x => x.Case).ToList();
+        t.Check("PD4-O-M1 a model draws nothing when every visible shape is EditorMarker; a drawn or hidden-only mix is not a marker model",
+                wrong.Count == 0 && !OverlapIndex.OnlyEditorMarkers(null), wrong.Count == 0 ? $"{truth.Length} of {truth.Length}" : "wrong: " + string.Join("; ", wrong));
+
+        // The candidate gate: the fixture's references on a marker-model base leave the candidates and are counted as
+        // editor markers; with no marker model the candidates are the pipeline's own.
+        var markerBase = pl.Candidates.Select(c => c.Base).GroupBy(b => b).OrderByDescending(g => g.Count()).First().Key;
+        CandidateSkips SkipsWith(Func<FormKey, bool>? marker, out List<SurfaceOverlapCandidate> got)
+        {
+            got = pl.Index.SurfaceCandidates(pl.Geometry, Obstructing,
+                p => OverlapClass.ExcludeResponsible(false, false, false, BaseGamePlugins.IsCoreMaster(pl.Name(p))), out var sk,
+                EnablePopulation.Of(pl.Arms.WinnerRawFacts, EnablePopulation.BaselineStateName).Predicate, null, marker);
+            return sk;
+        }
+        var plain = SkipsWith(null, out var plainC);
+        var gated = SkipsWith(b => b == markerBase, out var gatedC);
+        int onMarker = plainC.Count(c => c.Base == markerBase);
+        bool othersEqual = (plain.Deleted, plain.Disabled, plain.NonObstructingType, plain.NoGeometry, plain.ExcludedResponsible)
+                        == (gated.Deleted, gated.Disabled, gated.NonObstructingType, gated.NoGeometry, gated.ExcludedResponsible);
+        t.Check($"PD4-O-M2 a marker-model base's {onMarker} candidates are set aside as editor markers, every other count kept",
+                onMarker > 0 && gated.MarkerMesh == plain.MarkerMesh + onMarker && gatedC.Count == plainC.Count - onMarker
+                && gatedC.All(c => c.Base != markerBase) && othersEqual,
+                $"marker {markerBase}: candidates {plainC.Count} -> {gatedC.Count}, editor markers {plain.MarkerMesh} -> {gated.MarkerMesh}");
     }
 }

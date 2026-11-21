@@ -939,6 +939,10 @@ bool HasFreeBody(FormKey baseKey)
     return freeBodyMemo[baseKey] = free;
 }
 
+// a base whose model draws only editor-marker shapes (core's ShapeDrawing; OverlapIndex.OnlyEditorMarkers) is an editor
+// marker, set aside like a marker-flagged base: it has no render surface to cross
+bool MarkerModel(FormKey baseKey) => GeometryOf(baseKey).Outcome?.Model is { } m && OverlapIndex.OnlyEditorMarkers(m.Shapes);
+
 (TriangleSoup? Soup, char Source, string? Reason) SurfaceGeometryOf(FormKey baseKey)
 {
     var geometry = GeometryOf(baseKey);
@@ -1479,7 +1483,7 @@ __run.Stage("render-geometry", "preparing strict render geometry and candidates"
     return result;
 }
 var candidates = idx.SurfaceCandidates(CandidateGeometryOf, Obstructing, ExcludeResponsible, out var skips, enabledOf,
-    sceneCapture ? InSceneScope : null);
+    sceneCapture ? InSceneScope : null, MarkerModel);
 candidates = candidates.Where(BoundsInSceneScope).ToList();
 var sceneUnknownScope = new Dictionary<FormKey, string>();
 var sceneUnlocalizedExterior = new Dictionary<FormKey, string>();
@@ -1526,7 +1530,7 @@ if (meshMode && meshRule.Active)
     var readmit = meshRule.Readmit(candidates, Obstructing, enabledOf);
     if (readmit.Count > 0)
     {
-        var back = idx.SurfaceCandidates(CandidateGeometryOf, Obstructing, p => !IsBaseGame(p), out var backSkips, enabledOf, (k, _) => readmit.Contains(k));
+        var back = idx.SurfaceCandidates(CandidateGeometryOf, Obstructing, p => !IsBaseGame(p), out var backSkips, enabledOf, (k, _) => readmit.Contains(k), MarkerModel);
         back = back.Where(c => StateGates(c, backSkips)).ToList();
         candidates.AddRange(back);
         foreach (var c in back) meshRule.Readmitted.Add(c.Key);
@@ -2017,7 +2021,8 @@ if (geometryManifestPath is not null)
         else if (!idx.BaseInfo.TryGetValue(effectiveBase, out var bi) || !Obstructing.Contains(bi.Type))
         { eligibility = "type_excluded"; eligibilityReason = "the winning base is not an obstructing record type"; }
         else if (idx.BaseIsMarker.Contains(effectiveBase)
-              || (idx.BaseMesh.TryGetValue(effectiveBase, out var markerMesh) && Path.GetFileName(markerMesh).StartsWith("MarkerX", StringComparison.OrdinalIgnoreCase)))
+              || (idx.BaseMesh.TryGetValue(effectiveBase, out var markerMesh) && Path.GetFileName(markerMesh).StartsWith("MarkerX", StringComparison.OrdinalIgnoreCase))
+              || MarkerModel(effectiveBase))
         { eligibility = "marker_excluded"; eligibilityReason = "the winning base is an editor marker"; }
         else if (!geometryKnown) { eligibility = "geometry_unmeasurable"; eligibilityReason = geometry?.Reason ?? "no complete strict render triangles"; }
         else if (zeroScale)
