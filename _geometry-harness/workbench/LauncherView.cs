@@ -18,7 +18,7 @@ internal static class LauncherView
     static readonly TextBox Instance = new() { Width = 300 }, Output = new() { Width = 300 }, Work = new() { Width = 300 };
     static readonly ComboBox Profile = new() { MinWidth = 160, IsEditable = true };
     static readonly StackPanel ModList = new(), ProbeGroups = new();
-    static readonly TextBox ModSearch = new() { MinWidth = 220, Margin = new Thickness(0, 0, 12, 0), ToolTip = "find a mod by name" };
+    static readonly TextBox ModSearch = new() { MinWidth = 150, Margin = new Thickness(0, 0, 12, 0), ToolTip = "find a mod by name" };
     static readonly TextBlock ModCount = new() { VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Dim) };
     static readonly ScrollViewer ModScroll = new() { Content = ModList, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 320, Margin = new Thickness(2) };
     static readonly Dictionary<string, CheckBox> ModBoxes = new(StringComparer.OrdinalIgnoreCase);

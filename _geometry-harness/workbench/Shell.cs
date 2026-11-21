@@ -117,7 +117,7 @@ internal static class Shell
     internal static string RowLabel(RankedRow r) =>
         $"{r.Rank}. {r.Row.Kind}  {r.Row.A} / {r.Row.B}  ·  {r.Row.RefBaseEditorId ?? r.Row.RefKey}";
 
-    internal const double MinWidth = 560 + 360, MinHeight = 480;   // the tabs' width plus a 360-wide view; device-independent units
+    internal const double MinWidth = 420 + 360, MinHeight = 480;   // the tabs' width plus a 360-wide view; device-independent units
 
     internal static Window EnsureWindow(string title)
     {
@@ -182,7 +182,7 @@ internal static class Shell
         DockPanel.SetDock(repairBar, Dock.Top);
         findingsTab.Children.Add(repairBar); findingsTab.Children.Add(FindingList);
         // Three tabs: Start (load, check), Conflicts (what was found, three ways), Explore (the load order as it is)
-        var tabs = Tabs = new TabControl { MinWidth = 380 };
+        var tabs = Tabs = new TabControl { MinWidth = 340 };
         var start = new TabItem { Header = "Start", Content = LauncherView.Build(), ToolTip = "load a Data folder, a profile or earlier results, and check a mod" };
         Views["Start"] = (start, null, "Start");
         tabs.Items.Add(start);
@@ -209,7 +209,7 @@ internal static class Shell
         DockPanel.SetDock(Banner, Dock.Top);
         // the tabs and the 3D view side by side, with a splitter to drag: a long list can be given room, the view keeps its minimum
         var top = new Grid();
-        top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(560), MinWidth = 380 });
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(420), MinWidth = 340 });
         top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 360 });
         var splitter = new GridSplitter { Width = 5, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Stretch,
@@ -222,9 +222,9 @@ internal static class Shell
         top.Children.Add(tabs); top.Children.Add(splitter); top.Children.Add(viewColumn);
         // Earlier results' table runs across the whole window under the tabs and the view, while that tab is in front
         var body = new Grid();
-        body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(3, GridUnitType.Star), MinHeight = 300 });
+        body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(4, GridUnitType.Star), MinHeight = 300 });
         body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(2, GridUnitType.Star), MinHeight = 120 });
+        body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 120 });
         var tableSplit = new GridSplitter { Height = 5, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Center,
                                             Background = Theme.Brush(Theme.Line), ToolTip = "drag to give the table or the view more room" };
         var table = ResultsView.Table;
