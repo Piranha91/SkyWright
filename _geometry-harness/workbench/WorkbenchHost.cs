@@ -541,7 +541,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             _captureAsk = null;
             try
             {
-                var viewPng = Capture(Path.GetFileNameWithoutExtension(ask.Path) + "-view");
+                var viewPng = Capture(Path.GetFileNameWithoutExtension(ask.Path) + "-view", caption: false);
                 var (cw, ch) = WindowCapture.SaveComposite(Shell.Window!, Shell.ViewSlot, viewPng, ask.Path);
                 ask.Done.SetResult($"window captured with its scene ({cw}x{ch}) to {ask.Path}");
             }
@@ -1442,7 +1442,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     }
 
     /// <summary>Read the frame back (resolving the control's multisampled framebuffer) and save a captioned PNG.</summary>
-    internal string Capture(string name)
+    internal string Capture(string name, bool caption = true)
     {
         int w = W, h = H, src = 0;            // the view's back buffer, before the swap
         int fbo = GL.GenFramebuffer(), rb = GL.GenRenderbuffer();
@@ -1461,7 +1461,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         GL.DeleteFramebuffer(fbo); GL.DeleteRenderbuffer(rb);
         var path = Path.Combine(_outDir, name + ".png");
         string pose = FormattableString.Invariant($"eye {_eye.X:0.##},{_eye.Y:0.##},{_eye.Z:0.##} yaw {_yaw:0.#} pitch {_pitch:0.#} fov {_fov:0.#}");
-        TexturedScene.SaveFrame(px, w, h, new[] { $"{_opt.CellLabel} — workbench — {name} — {pose}" },
+        // a view capture carries its cell and pose in a band on top; a window capture shows the view as the window does, without it
+        TexturedScene.SaveFrame(px, w, h, caption ? new[] { $"{_opt.CellLabel} — workbench — {name} — {pose}" } : Array.Empty<string>(),
             Array.Empty<(string, Vector3)>(), $"pose: {pose} | cell {_opt.CellLabel}", path);
         Say($"captured {path}");
         return path;
