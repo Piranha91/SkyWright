@@ -55,7 +55,33 @@ internal static class ActorBand
     /// the physical floor (RouteConnectivity.Measure with floorAt).</summary>
     public static float PhysicalControllerTop(float nominalTop) => ControllerTop(nominalTop) + StationOffset;
 
-    public sealed record NpcFacts(FormKey Race, bool Female, float Height, bool Templated);
+    /// <param name="Templated">The NPC has a template at all (any template flag): what the band count reports.</param>
+    /// <param name="Template">Its template (an NPC or a leveled NPC list), FormKey.Null when it has none.</param>
+    /// <param name="TraitsTemplated">Its traits (race, sex, height) come from the template: core's
+    /// <see cref="FaceGenCheck.InheritsAppearance"/>, the Traits template flag.</param>
+    public sealed record NpcFacts(FormKey Race, bool Female, float Height, bool Templated, FormKey Template = default,
+                                  bool TraitsTemplated = false);
+
+    /// <summary>The facts that set an NPC's body (race, sex, height): its own, or, while the Traits template flag is set,
+    /// its template's, to the end of the chain. Null with the reason when the chain reaches a leveled list or a record
+    /// not read (the race varies or is not known) or loops.</summary>
+    public static NpcFacts? TraitsSource(FormKey npc, IReadOnlyDictionary<FormKey, NpcFacts> npcs, out string why)
+    {
+        why = "";
+        if (!npcs.TryGetValue(npc, out var n)) { why = "its base is not an NPC record (a leveled actor or unread)"; return null; }
+        var seen = new HashSet<FormKey> { npc };
+        while (n.TraitsTemplated)
+        {
+            if (!npcs.TryGetValue(n.Template, out var next))
+            {
+                why = $"a templated NPC whose race comes from {n.Template}, a leveled list or a record not read: its race varies or is not known";
+                return null;
+            }
+            if (!seen.Add(n.Template)) { why = $"a templated NPC whose template chain loops at {n.Template}"; return null; }
+            n = next;
+        }
+        return n;
+    }
     public sealed record RaceFacts(float Male, float Female, bool Playable, string? EditorId,
         string? MaleSkeleton = null, string? FemaleSkeleton = null,
         ControllerShapeFact? MaleController = null, ControllerShapeFact? FemaleController = null);
@@ -99,7 +125,8 @@ internal static class ActorBand
             bool female = npc.Configuration.Flags.HasFlag(NpcConfiguration.Flag.Female);
             float h = float.IsFinite(npc.Height) && npc.Height > 0f ? npc.Height : 1f;
             bool templated = npc.Template is { IsNull: false };
-            npcs[npc.FormKey] = new NpcFacts(npc.Race.FormKey, female, h, templated);
+            npcs[npc.FormKey] = new NpcFacts(npc.Race.FormKey, female, h, templated,
+                                             templated ? npc.Template.FormKey : FormKey.Null, FaceGenCheck.InheritsAppearance(npc));
         }
         else if (rec is IRaceGetter race)
         {

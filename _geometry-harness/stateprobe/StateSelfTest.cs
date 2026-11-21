@@ -138,5 +138,51 @@ static class StateSelfTest
         t.Check("PD4-S-E  the emit carries C1 and W1; C2 and W3 (Bethesda floor) are withheld",
                 string.Join(" ", emitted.Select(r => r.Member.ToString()).OrderBy(x => x)) == string.Join(" ", new[] { F.C1, F.W1 }.Select(k => k.ToString()).OrderBy(x => x)),
                 Rows(emitted));
+        TraitsChecks(t);
     });
+
+    /// <summary>Task 2026-11-11-stateprobe-templated-npc-race: an actor's body (race, sex, height) is its own unless the Traits
+    /// template flag is set, then its template chain's (ActorBand.TraitsSource over ActorBand.CollectRecord's facts).</summary>
+    static void TraitsChecks(ProbeSelfTest t)
+    {
+        var rel = SkyrimRelease.SkyrimSE;
+        var mk = ModKey.FromNameAndExtension("StTraits.esp");
+        FormKey K(uint id) => new(mk, id);
+        FormKey raceOwn = K(0x900), raceTpl = K(0x901), leveled = K(0x9FF);
+        Npc N(uint id, FormKey race, float height, FormKey? template, NpcConfiguration.TemplateFlag flags, bool female = false)
+        {
+            var n = new Npc(K(id), rel) { EditorID = $"StT{id:X}", Height = height, Race = new FormLinkNullable<IRaceGetter>(race) };
+            if (template is { } tk) n.Template = new FormLinkNullable<INpcSpawnGetter>(tk);
+            n.Configuration.TemplateFlags = flags;
+            if (female) n.Configuration.Flags |= NpcConfiguration.Flag.Female;
+            return n;
+        }
+        var npcs = new Dictionary<FormKey, ActorBand.NpcFacts>();
+        var races = new Dictionary<FormKey, ActorBand.RaceFacts>();
+        foreach (var n in new[]
+                 {
+                     N(0x801, raceTpl, 1.1f, null, 0, female: true),                                 // the template
+                     N(0x802, raceOwn, 1.0f, K(0x801), NpcConfiguration.TemplateFlag.AIPackages),  // a template, not for traits
+                     N(0x803, raceOwn, 1.0f, K(0x801), NpcConfiguration.TemplateFlag.Traits),      // traits from 801
+                     N(0x804, raceOwn, 0.9f, K(0x803), NpcConfiguration.TemplateFlag.Traits),      // two steps to 801
+                     N(0x805, raceOwn, 1.0f, leveled, NpcConfiguration.TemplateFlag.Traits),       // a leveled list
+                     N(0x806, raceOwn, 1.0f, K(0x807), NpcConfiguration.TemplateFlag.Traits),      // a loop 806 -> 807 -> 806
+                     N(0x807, raceOwn, 1.0f, K(0x806), NpcConfiguration.TemplateFlag.Traits),
+                 })
+            ActorBand.CollectRecord(n, npcs, races);
+        string Say(uint id)
+        {
+            var f = ActorBand.TraitsSource(K(id), npcs, out var why);
+            return f is null ? "none: " + why : $"{(f.Race == raceTpl ? "template race" : f.Race == raceOwn ? "own race" : f.Race.ToString())}, {(f.Female ? "female" : "male")}, x{f.Height:0.##}";
+        }
+        t.Check("PD4-S-T1 a template that is not for traits leaves the NPC its own race, sex and height", Say(0x802) == "own race, male, x1", Say(0x802));
+        t.Check("PD4-S-T2 the Traits flag gives the template's race, sex and height", Say(0x803) == "template race, female, x1.1", Say(0x803));
+        t.Check("PD4-S-T3 a two-step Traits chain ends at the last template", Say(0x804) == "template race, female, x1.1", Say(0x804));
+        t.Check("PD4-S-T4 a Traits template that is a leveled list leaves the actor unmeasured, saying so",
+                Say(0x805).StartsWith("none: ") && Say(0x805).Contains("leveled list"), Say(0x805));
+        t.Check("PD4-S-T5 a looping Traits chain leaves the actor unmeasured, saying so",
+                Say(0x806).StartsWith("none: ") && Say(0x806).Contains("loops"), Say(0x806));
+        t.Check("PD4-S-T6 every templated NPC still counts as templated for the band (any template flag)",
+                new uint[] { 0x802, 0x803, 0x804, 0x805, 0x806, 0x807 }.All(i => npcs[K(i)].Templated) && !npcs[K(0x801)].Templated, "");
+    }
 }

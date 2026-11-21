@@ -477,8 +477,8 @@ if (routeOn)
     bool Humanoid(FormKey npcBase, out float top, out string why)
     {
         top = float.NaN; why = "";
-        if (!npcFacts.TryGetValue(npcBase, out var n)) { why = "its base is not an NPC record (a leveled actor or unread)"; return false; }
-        if (n.Templated) { why = "a templated NPC: its race comes from its template, which this reading does not follow"; return false; }
+        // a templated NPC's race, sex and height are its template chain's when the Traits flag is set, else its own
+        if (ActorBand.TraitsSource(npcBase, npcFacts, out var twhy) is not { } n) { why = twhy; return false; }
         if (!raceFacts.TryGetValue(n.Race, out var rc)) { why = $"race {n.Race} unresolved"; return false; }
         if (!raceKeywords.TryGetValue(n.Race, out var kws) || !kws.Overlaps(npcTypeKeywords)) { why = $"race {rc.EditorId ?? n.Race.ToString()} is not a humanoid (no ActorTypeNPC keyword): the body band is measured on humanoids only"; return false; }
         top = ActorBand.PhysicalControllerTop(ActorBand.ScaleOneHeight * (n.Female ? rc.Female : rc.Male) * n.Height);
