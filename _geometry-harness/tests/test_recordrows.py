@@ -507,6 +507,70 @@ def case_45_both_capture_forms_give_every_providers_field_values():
     assert answers["tree"][2]["Placement.Rotation"] == answers["fields"][2]["Placement.Rotation"], answers
 
 
+def tree_transcript_raw(folder: Path, fk, rtype, nodes):
+    """One 2.0 tree answer of one record whose nodes are given as the reader writes them (deltas verbatim)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    req = [{"batchMarker": "b1"}, {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+        "name": "housecarl_records", "arguments": {"formids": [fk], "format": "json", "project": {"form": "tree"}}}}]
+    body = {"form": "tree", "rows": [{"formid": fk, "type": rtype, "editorid": None,
+                                      "touchers": [n["plugin"] for n in nodes], "nodes": nodes}]}
+    resp = [{"batchMarker": "b1"}, {"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text",
+                                                                                     "text": json.dumps(body)}]}}]
+    (folder / "01-request.jsonl").write_text("\n".join(json.dumps(x) for x in req) + "\n", encoding="utf-8")
+    (folder / "02-response.jsonl").write_text("\n".join(json.dumps(x) for x in resp) + "\n", encoding="utf-8")
+    return folder / "01-request.jsonl", folder / "02-response.jsonl"
+
+
+def case_47_an_order_only_tree_delta_is_not_a_difference():
+    """Task 2026-11-13-recordrows-tree-order-and-unjudged-read (1). houseCARL's tree answer says a list whose items
+    are the winner's in another order as "<field>: same N item(s), ORDER DIFFERS from <winner>" (FieldsDiff). recordrows
+    compares lists as multisets, so that plugin holds the winner's value: no lost edit, and its value reads the
+    winner's. A real difference in the same answer stays one (the control)."""
+    fk = "00EED6:Skyrim.esm"
+    nodes = [{"plugin": BASE, "is_winner": False, "complete": True, "deltas": []},
+             {"plugin": A, "is_winner": False, "complete": True,
+              "deltas": [f"Regions: same 2 item(s), ORDER DIFFERS from {B}", f"WaterHeight=5 ({B} 0)"]},
+             {"plugin": B, "is_winner": True}]
+    with tempfile.TemporaryDirectory() as td:
+        req, resp = tree_transcript_raw(Path(td), fk, "Cell", nodes)
+        got = RR.read_chains(req, resp, ORDER, RR.load_scope())[fk]
+        emit = RR.derive(req, resp, {"plugins": ORDER}, RR.load_scope())
+    regions = got["values"].get("Regions") or [(), (), ()]
+    assert regions[1] == regions[2], f"ModA's reordered Regions read as a difference from the winner: {regions}"
+    lost = [(c["A"], c["Field"]) for c in conflicts(emit)]
+    assert (A, "Regions") not in lost, f"an order-only list change gave a lost edit: {lost}"
+    assert (A, "WaterHeight") in lost, f"the control (a real difference in the same answer) gave no row: {lost}"
+
+
+def case_49_a_tree_chain_holds_no_winner_value_for_an_unjudged_field():
+    """Task 2026-11-13-recordrows-tree-order-and-unjudged-read (2). A tree chain is `allListed`: a field it does not
+    list holds the winner's value in every provider, EXCEPT a field named in the chain's `unjudged` (a plugin the tree
+    could not compare in full, a narrowed tree's unread fields). `chain_holds` is the one read of that rule: a reader
+    asking for an unjudged field gets no value, never the winner's. evalreport reads a chain only through it."""
+    fk = "00EED6:Skyrim.esm"
+    nodes = [{"plugin": BASE, "is_winner": False, "complete": True, "deltas": []},
+             {"plugin": A, "is_winner": False, "complete": False, "deltas": [f"WaterHeight=5 ({B} 0)"]},
+             {"plugin": B, "is_winner": True}]
+    with tempfile.TemporaryDirectory() as td:
+        req, resp = tree_transcript_raw(Path(td), fk, "Cell", nodes)
+        got = RR.read_chains(req, resp, ORDER, RR.load_scope())[fk]
+    fn = getattr(RR, "chain_holds", None)
+    assert fn is not None, "recordrows has no chain_holds read"
+    un = got.get("unjudged") or {}
+    assert "Regions" in un, f"the fixture's incomplete plugin should leave Regions unjudged: {un}"
+    assert fn(got, "WaterHeight") is True, "a listed field is held"
+    assert fn(got, "Regions") is False, "an unjudged field of a tree chain was read as the winner's value"
+    assert fn(got, "Regions[0].Region") is False, "a leaf of an unjudged field was read as the winner's value"
+    assert fn({"providers": [BASE, B], "values": {}, "allListed": True}, "Regions") is True, \
+        "a field an allListed chain does not list, and does not name unjudged, is the winner's in every provider"
+    assert fn({"providers": [BASE, B], "values": {}}, "Regions") is False, "a by-name chain lacking the field holds none"
+    assert fn(None, "Regions") is False and fn(got, "") is False, "no chain or no field holds nothing"
+    # evalreport reads a chain's allListed only through chain_holds (one owner of the rule)
+    src = (HERE.parent / "evalreport.py").read_text(encoding="utf-8")
+    direct = [ln.strip() for ln in src.splitlines() if 'get("allListed")' in ln]
+    assert not direct, f"evalreport reads allListed directly, past the unjudged rule: {direct}"
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

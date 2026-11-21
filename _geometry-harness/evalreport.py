@@ -2712,7 +2712,7 @@ def build_prediction(ctx: dict) -> dict:
         if not field:
             return None
         ch_ = (chains_of(check_id, arm_id) or {}).get(str(fk))
-        if not ch_ or not ch_.get("providers") or not (field in ch_["values"] or ch_.get("allListed")):
+        if not ch_ or not ch_.get("providers") or not recordrows.chain_holds(ch_, field):
             return None
         provs_ = list(ch_["providers"])
         vals_ = list(ch_["values"].get(field) or [()] * len(provs_))
@@ -2855,8 +2855,7 @@ def build_prediction(ctx: dict) -> dict:
         row_ = ((rows_by.get((rk[0], arm_id)) or {}).get(rk) or {}).get("row") or {}
         field = row_.get("field")
         ch = (chains_of(rk[0], arm_id) or {}).get(str(rk[4]))
-        if ch and str(plugin).lower() in [str(x).lower() for x in ch["providers"]] and (
-                field in ch["values"] or ch.get("allListed")):
+        if ch and str(plugin).lower() in [str(x).lower() for x in ch["providers"]] and recordrows.chain_holds(ch, field):
             # a tree answer lists every difference from the winner: a field it does not list, every provider holds
             provs = list(ch["providers"])
             return provs, list(ch["values"].get(field) or [()] * len(provs)), (ch.get("items") or {}).get(field)
@@ -5462,7 +5461,7 @@ def build_prediction(ctx: dict) -> dict:
                 ch_ = (chains_of(rk_[0], patched_arm) or {}).get(str(rk_[4]))
                 f_ = str(((p_rows.get(rk_) or {}).get("row") or {}).get("field") or "")
                 low_ = [str(x).lower() for x in (ch_ or {}).get("providers") or []]
-                if ch_ and str(base_).lower() in low_ and (f_ in (ch_.get("values") or {}) or ch_.get("allListed")):
+                if ch_ and str(base_).lower() in low_ and recordrows.chain_holds(ch_, f_):
                     vs_ = (ch_.get("values") or {}).get(f_) or [()] * len(low_)
                     kept_ += int(vs_[low_.index(str(base_).lower())] == vs_[-1])  # the chain's read-same values
                     # (seventh review, Clockwork S1) a winning value that is neither the base plugin's nor the mod's but

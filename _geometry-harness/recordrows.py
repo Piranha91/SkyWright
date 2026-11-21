@@ -819,6 +819,24 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, contain
 # ------------------------------------------------------------------------------- houseCARL 2.0 captures
 
 TREE_KEY = re.compile(r"^([A-Za-z0-9_\[\]\.]+?)(=| only in |: )")
+# houseCARL's tree answer for a list holding the winner's items in another order (core FieldsDiff's words, after the
+# field name): lists are compared as multisets here, so it is the winner's value, not a difference
+TREE_ORDER_ONLY = re.compile(r"^: same \d+ item\(s\), ORDER DIFFERS from ")
+
+
+def chain_holds(chain, field) -> bool:
+    """Whether a provider chain (read_chains) gives every provider's value of `field`: the field is in its values, or
+    the chain is a tree answer (`allListed`: a field it does not list is the winner's in every provider) and the field,
+    or the top-level field it is a leaf of, is not named in the chain's `unjudged` (left out of the comparison, so not
+    the winner's value). The one read of that rule; a reader of a chain asks it, never `allListed` alone."""
+    if not chain or not field:
+        return False
+    if field in (chain.get("values") or {}):
+        return True
+    if not chain.get("allListed"):
+        return False
+    un = chain.get("unjudged") or {}
+    return field not in un and str(field).split(".")[0].split("[")[0] not in un
 
 
 def _answers(request: Path, response: Path, formkeys=None):
@@ -944,6 +962,8 @@ def _tree_chains(request: Path, response: Path, scope: Scope, formkeys=None, unj
                 if cls != "compared":
                     continue
                 val = d[len(key):]
+                if TREE_ORDER_ONLY.match(val):
+                    continue                   # the winner's items in another order: the same multiset
                 # (eighth review) "<field> only in <winner>: <value>": the winner holds the leaf and this provider does
                 # not; the winner's value is that value
                 if val.startswith(" only in " + winner + ": "):
