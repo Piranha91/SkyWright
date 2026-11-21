@@ -124,9 +124,24 @@ internal static class Program
     }
     static string? Env(string n) => Environment.GetEnvironmentVariable(n) is { Length: > 0 } v ? v : null;
 
+    /// <summary>Show a sentence that would otherwise go only to the log: a message box when no parent is capturing the
+    /// output (a person started the app), nothing more when one is (the tests read standard error).</summary>
+    static void Tell(string sentence)
+    {
+        if (Console.IsErrorRedirected) return;
+        System.Windows.MessageBox.Show(sentence, "SkyWright", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+    }
+
     [STAThread]
     static int Main(string[] args)
     {
+        SessionLog.Start();                                    // no console window: the log file holds what it would have shown
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            var said = $"the workbench stopped on an error it did not expect: {(e.ExceptionObject as Exception)?.GetBaseException().Message}";
+            Console.Error.WriteLine("workbench: " + said + Environment.NewLine + e.ExceptionObject);
+            Tell(said + (SessionLog.FilePath is { } p ? $" The details are in {p}." : ""));
+        };
         args = FrameSwitches(args);
         InteractiveViewer.Host = WorkbenchHost.Run;
         RenderStages.Tick = SceneDirector.Tick;                // the window is answered while a scene builds
@@ -137,7 +152,7 @@ internal static class Program
         if (!manual)
         {
             try { first = OpenBundle(args); }
-            catch (InvalidOperationException ex) { Console.Error.WriteLine("workbench: " + ex.Message); return 2; }
+            catch (InvalidOperationException ex) { Console.Error.WriteLine("workbench: " + ex.Message); Tell(ex.Message); return 2; }
             if (first is null)
             {
                 // a bundle with nothing to open: shown in the window with no scene; the Open control and the tabs still work

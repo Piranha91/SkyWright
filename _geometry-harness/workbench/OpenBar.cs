@@ -36,15 +36,17 @@ internal static class OpenBar
             if (d.ShowDialog() == true) { PathBox.Text = d.FileName; Do(d.FileName); }
         };
         go.Click += (_, _) => Do(PathBox.Text);
+        var log = new Button { Content = "Log", Margin = new Thickness(0, 2, 4, 2), Padding = new Thickness(8, 2, 8, 2), ToolTip = "open this session's log file" };
+        log.Click += (_, _) => { try { Shell.SetBanner(SessionLog.Open()); } catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); } };
         PathBox.KeyDown += (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; Do(PathBox.Text); } };
         Recent.DropDownOpened += (_, _) => Recent.ItemsSource = ReadRecent(RecentPath);
         Recent.SelectionChanged += (_, _) => { if (Recent.SelectedItem is string p) { Recent.SelectedItem = null; PathBox.Text = p; Do(p); } };
         var bar = new DockPanel { LastChildFill = true, Background = Theme.Brush(Theme.Panel) };
         var label = new TextBlock { Text = "Open", Margin = new Thickness(8, 2, 4, 2), VerticalAlignment = VerticalAlignment.Center, FontWeight = FontWeights.SemiBold };
         DockPanel.SetDock(label, Dock.Left);
-        foreach (var b in new UIElement[] { go, file, folder, Recent }) DockPanel.SetDock(b, Dock.Right);
+        foreach (var b in new UIElement[] { log, go, file, folder, Recent }) DockPanel.SetDock(b, Dock.Right);
         bar.Children.Add(label);
-        bar.Children.Add(go); bar.Children.Add(file); bar.Children.Add(folder); bar.Children.Add(Recent);
+        bar.Children.Add(log); bar.Children.Add(go); bar.Children.Add(file); bar.Children.Add(folder); bar.Children.Add(Recent);
         bar.Children.Add(PathBox);
         return bar;
     }

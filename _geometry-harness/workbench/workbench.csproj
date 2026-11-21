@@ -3,7 +3,8 @@
        context), select / move / rotate a placed reference, and the edit written as a placement override by the
        houseCARL server this checkout builds. -->
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <!-- a windowed program: no console window beside it; standard output still reaches a parent that captures it, and SessionLog writes it to a file -->
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
