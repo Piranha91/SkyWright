@@ -263,6 +263,9 @@ internal static class LauncherView
             Settings.Text = L.SettingsNote ?? "";
             Settings.Visibility = L.SettingsNote is null ? Visibility.Collapsed : Visibility.Visible;
             bool running = L.RunTask is { IsCompleted: false };
+            // the loading strip: the run's own line while it runs (each probe's bar is on its tile)
+            if (running) Loading.Set("run", "Running the checks: " + (L.PipelineLine() ?? L.RunLine ?? "starting"));
+            else Loading.Clear("run");
             RunAll.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
             RunEvery.Visibility = RunAll.Visibility;
             var ticked = L.Mods.Where(m => m.Selected).ToList();

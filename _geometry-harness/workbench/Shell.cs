@@ -175,6 +175,9 @@ internal static class Shell
         Grid.SetColumn(tabs, 0); Grid.SetColumn(splitter, 1); Grid.SetColumn(ViewSlot, 2);
         body.Children.Add(tabs); body.Children.Add(splitter); body.Children.Add(ViewSlot);
         root.Children.Add(openBar);
+        var strip = Loading.Strip();                           // one bar for whatever is loading now
+        DockPanel.SetDock(strip, Dock.Top);
+        root.Children.Add(strip);
         root.Children.Add(Banner); root.Children.Add(BarSlot); root.Children.Add(body);
         // The view keeps room of its own: below this the tabs would take the whole width (a 360x240 window drew the scene
         // into a 1x66 view, stage 3 receipts). A smaller size asked for opens at this minimum and says so.
@@ -417,6 +420,7 @@ internal static class Shell
         scene = h?.SceneState(),
         tree = Tree,
         lastLanding = LastLanding,
+        loading = Loading.State(),
         recheck = h is null ? null : new
         {
             running = h.Rechecking,

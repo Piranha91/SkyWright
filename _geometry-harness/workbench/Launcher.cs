@@ -115,6 +115,13 @@ internal sealed class Launcher : IAsyncDisposable
     /// <summary>Free mode: any MO2 instance in place. The game folder is the instance's gamePath unless given.</summary>
     internal async Task<string> OpenProfileAsync(string? mode, string? instance, string? profile, string? game)
     {
+        Loading.Set("profile", "Opening the profile" + (string.IsNullOrWhiteSpace(profile) ? "" : $" '{profile.Trim()}'"));
+        try { return await OpenProfileCoreAsync(mode, instance, profile, game); }
+        finally { Loading.Clear("profile"); }
+    }
+
+    async Task<string> OpenProfileCoreAsync(string? mode, string? instance, string? profile, string? game)
+    {
         var m = (mode ?? "free").Trim().ToLowerInvariant();
         if (m != "free" && m != "housecarl") throw new InvalidOperationException($"'{mode}' is not a mode; use housecarl or free.");
         if (m == "housecarl")

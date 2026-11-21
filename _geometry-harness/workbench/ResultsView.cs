@@ -183,6 +183,8 @@ internal static class ResultsView
         if (Shell.Tabs is not null) Shell.ShowTab("Results");
         var ui = Dispatcher.CurrentDispatcher;
         // each pair's rows are read off the window's thread (the overlap lists are tens of megabytes); the list fills as they arrive
+        int read = 0, pairs = results.Pairs.Count;
+        if (pairs > 0) Loading.Set("results", $"Reading the evaluation's rows (0 of {pairs} pairs)", 0); else Loading.Clear("results");
         Task.Run(() =>
         {
             foreach (var p in results.Pairs)
@@ -194,6 +196,7 @@ internal static class ResultsView
                 {
                     if (gen != _generation) return;
                     Loaded[p.Id] = rows;
+                    if (++read >= pairs) Loading.Clear("results"); else Loading.Set("results", $"Reading the evaluation's rows ({read} of {pairs} pairs)", (double)read / pairs);
                     if (why is not null) Shell.SetBanner($"the rows of {p.Id} could not be read: {why}");
                     FillHeader(); FillPairs(); Refill();
                 });

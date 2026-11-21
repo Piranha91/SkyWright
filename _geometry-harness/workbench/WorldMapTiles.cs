@@ -501,6 +501,14 @@ internal sealed class MapTileLayer
             if (_failed.Count > 0) s += $"; {_failed.Count} block(s) not drawn, the first: {_failed.Values.First()}";
             s += ".";
         }
+        // the loading strip: the share of the cells in view that are shown, while any is still being drawn or read
+        bool busy = Enabled && _stopped is null && _view is not null && (_running is not null || _queue.Count > 0 || _reading.Count > 0);
+        if (busy && _view is { } vv)
+        {
+            int have = _shown.Count(k => k.Key.X >= vv.X0 && k.Key.X <= vv.X1 && k.Key.Y >= vv.Y0 && k.Key.Y <= vv.Y1);
+            Loading.Set("tiles", $"Drawing the map's textured tiles ({have} of {_inView} cells in view)", _inView > 0 ? (double)have / _inView : null);
+        }
+        else Loading.Clear("tiles");
         if (s == Status) return;
         Status = s;
         Changed?.Invoke();

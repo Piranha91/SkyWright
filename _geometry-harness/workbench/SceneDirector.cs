@@ -165,9 +165,21 @@ internal static class SceneDirector
         BuildStarted();
     }
 
-    internal static void Ended() { Running = false; Order = null; Showing = null; BuildingCell = null; _abandon = false; }
+    internal static void Ended() { Running = false; Order = null; Showing = null; BuildingCell = null; _abandon = false; Loading.Clear("scene"); }
 
-    static void BuildStarted() { BuildClock.Restart(); LongestGapMs = 0; Pumps = 0; _lastPump = Stopwatch.GetTimestamp(); }
+    static void BuildStarted() { BuildClock.Restart(); LongestGapMs = 0; Pumps = 0; _lastPump = Stopwatch.GetTimestamp(); ShowProgress(); }
+
+    /// <summary>The loading strip's line for the build: its cell, and the stage the build's run record is in, with that
+    /// stage's share done when the stage knows its total.</summary>
+    static void ShowProgress()
+    {
+        var stage = HousecarlCore.Progress.RunLog.Current?.Record.Stages.LastOrDefault();
+        var cell = BuildingCell ?? Shell.SwitchCell;
+        var what = (cell is null ? "Loading the scene" : $"Loading cell {cell}") + (stage?.Title is { Length: > 0 } t ? ": " + t : "");
+        double? f = stage is { Total: > 0 } st ? (double)st.Processed / st.Total.Value : null;
+        if (stage is { Total: > 0 } s2) what += $" ({s2.Processed:N0} of {s2.Total:N0} {s2.Unit})";
+        Loading.Set("scene", what, f);
+    }
 
     /// <summary>A scene arrived (the host calls this before its frame loop): the request it answers is the one shown.</summary>
     internal static void SceneShown()
@@ -176,6 +188,7 @@ internal static class SceneDirector
         LastBuildSeconds = BuildClock.Elapsed.TotalSeconds; LastBuildLongestGapMs = LongestGapMs;
         BuildClock.Stop();
         BuildingCell = null;
+        Loading.Clear("scene");
         WorkbenchHost.Say(FormattableString.Invariant(
             $"scene build: {LastBuildSeconds:0.0} s; the window was answered {Pumps} time(s) meanwhile, longest wait {LastBuildLongestGapMs:0} ms"));
         Showing?.Shown?.Invoke();
@@ -199,6 +212,7 @@ internal static class SceneDirector
         if (since < PumpEveryMs) return;
         if (since > LongestGapMs) LongestGapMs = since;
         Pumps++;
+        ShowProgress();
         Shell.Flush();
         _lastPump = Stopwatch.GetTimestamp();
         if (_abandon || Shell.Closed)

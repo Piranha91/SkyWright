@@ -265,7 +265,8 @@ internal static class WorldView
         _mapWorld = null; _pendingMark = null; MapSeconds = null; MapWorld.Items.Clear(); Map.Show(null, null); SetMapStatus("");
         Map.Meshes = null;
         // the load order's meshes, for the buildings' real shapes; without them the map draws boxes
-        Task.Run(() => BuildingMeshes.For(order)).ContinueWith(t => { if (gen == _generation && t.IsCompletedSuccessfully) Map.Meshes = t.Result; }, TaskScheduler.FromCurrentSynchronizationContext());
+        Loading.Set("buildings", "Reading the buildings' shapes for the map");
+        Task.Run(() => BuildingMeshes.For(order)).ContinueWith(t => { if (gen == _generation) { Loading.Clear("buildings"); if (t.IsCompletedSuccessfully) Map.Meshes = t.Result; } }, TaskScheduler.FromCurrentSynchronizationContext());
         // the load order's tile folder: its name is a digest of every plugin's size and time, read off the window's thread
         Map.Tiles.SetOrder(null, null, null);
         Task.Run(() => MapTileCache.FolderFor(order)).ContinueWith(t =>
@@ -279,13 +280,15 @@ internal static class WorldView
         Tree.Items.Clear(); Hits.Items.Clear(); Hits.Visibility = Visibility.Collapsed; SearchCount.Text = ""; LastHits = Array.Empty<CellRow>();
         Notes.Text = string.Join(" ", notes.Select(n => n.TrimEnd('.') + "."));
         SetStatus($"reading the load order of {order.Label}…");
+        Loading.Set("world", $"Reading the load order of {order.Label}");
         if (Shell.Tabs is not null) Shell.ShowTab("World");
         var ui = Dispatcher.CurrentDispatcher;
         var sw = Stopwatch.StartNew();
-        var say = new Progress<string>(s => { if (gen == _generation) SetStatus($"reading the load order of {order.Label}: {s}"); });
+        var say = new Progress<string>(s => { if (gen == _generation) { SetStatus($"reading the load order of {order.Label}: {s}"); Loading.Set("world", $"Reading the load order of {order.Label}: {s}"); } });
         LoadOrderIndexes.For(order, say).ContinueWith(t => ui.BeginInvoke(() =>
         {
             if (gen != _generation) return;
+            Loading.Clear("world");
             if (t.IsFaulted)
             {
                 var why = t.Exception!.GetBaseException().Message;
