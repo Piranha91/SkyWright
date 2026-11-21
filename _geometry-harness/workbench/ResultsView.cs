@@ -165,18 +165,15 @@ internal static class ResultsView
         var aboutBox = new Expander { Header = "More filters, notes and the scene's marks", IsExpanded = false, Content = about, Margin = new Thickness(6, 0, 6, 2) };
         var panel = new DockPanel();
         foreach (var top in new UIElement[] { Header, PairBox, filters, Means, controls, aboutBox, CountLine }) { DockPanel.SetDock(top, Dock.Top); panel.Children.Add(top); }
-        // the list above, the open row's values below, with a splitter to drag between them
-        var body = new Grid();
-        body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(3, GridUnitType.Star), MinHeight = 90 });
-        body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(2, GridUnitType.Star), MinHeight = 70 });
-        var split = new GridSplitter { Height = 5, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Center, Background = Theme.Brush(Theme.Line) };
+        // the open row's values fill the tab; the rows themselves are the table the window shows across its full width
+        // under the view (Table), while this tab is in front
         Detail.Height = double.NaN;
-        Grid.SetRow(Rows, 0); Grid.SetRow(split, 1); Grid.SetRow(Detail, 2);
-        body.Children.Add(Rows); body.Children.Add(split); body.Children.Add(Detail);
-        panel.Children.Add(body);
+        panel.Children.Add(Detail);
         return panel;
     }
+
+    /// <summary>The rows as a table, for the window to place under the view.</summary>
+    internal static ListView Table => Rows;
 
     /// <summary>A result filter's label: the table's colored square, then the words.</summary>
     static StackPanel GroupLabel(ResultGroup g, string words)

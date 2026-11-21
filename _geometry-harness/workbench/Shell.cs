@@ -206,21 +206,50 @@ internal static class Shell
         OpenBar.StartInput = DataFolderOrder.StartGame;
         var openBar = OpenBar.Build();
         DockPanel.SetDock(openBar, Dock.Top);
-        DockPanel.SetDock(Banner, Dock.Top); DockPanel.SetDock(BarSlot, Dock.Bottom);
+        DockPanel.SetDock(Banner, Dock.Top);
         // the tabs and the 3D view side by side, with a splitter to drag: a long list can be given room, the view keeps its minimum
-        var body = new Grid();
-        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(560), MinWidth = 380 });
-        body.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 360 });
+        var top = new Grid();
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(560), MinWidth = 380 });
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 360 });
         var splitter = new GridSplitter { Width = 5, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Stretch,
                                           Background = Theme.Brush(Theme.Line), ToolTip = "drag to give the lists or the view more room" };
-        Grid.SetColumn(tabs, 0); Grid.SetColumn(splitter, 1); Grid.SetColumn(ViewSlot, 2);
-        body.Children.Add(tabs); body.Children.Add(splitter); body.Children.Add(ViewSlot);
+        // the view with its own bar right under it, so a table below never sits between them
+        var viewColumn = new DockPanel();
+        DockPanel.SetDock(BarSlot, Dock.Bottom);
+        viewColumn.Children.Add(BarSlot); viewColumn.Children.Add(ViewSlot);
+        Grid.SetColumn(tabs, 0); Grid.SetColumn(splitter, 1); Grid.SetColumn(viewColumn, 2);
+        top.Children.Add(tabs); top.Children.Add(splitter); top.Children.Add(viewColumn);
+        // Earlier results' table runs across the whole window under the tabs and the view, while that tab is in front
+        var body = new Grid();
+        body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(3, GridUnitType.Star), MinHeight = 300 });
+        body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(2, GridUnitType.Star), MinHeight = 120 });
+        var tableSplit = new GridSplitter { Height = 5, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Center,
+                                            Background = Theme.Brush(Theme.Line), ToolTip = "drag to give the table or the view more room" };
+        var table = ResultsView.Table;
+        Grid.SetRow(top, 0); Grid.SetRow(tableSplit, 1); Grid.SetRow(table, 2);
+        body.Children.Add(top); body.Children.Add(tableSplit); body.Children.Add(table);
+        GridLength tableHeight = body.RowDefinitions[2].Height;
+        void PlaceTable()
+        {
+            bool show = Views.TryGetValue("Results", out var r) && Tabs.SelectedItem == r.Group && r.Inner is { Parent: TabControl inner } && inner.SelectedItem == r.Inner;
+            if (show == (table.Visibility == Visibility.Visible)) return;
+            if (!show) tableHeight = body.RowDefinitions[2].Height;           // kept for the next time the tab comes to the front
+            table.Visibility = tableSplit.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            body.RowDefinitions[2].Height = show ? tableHeight : new GridLength(0);
+            body.RowDefinitions[2].MinHeight = show ? 120 : 0;
+        }
+        // the group tabs and the tabs inside them both raise SelectionChanged here
+        tabs.AddHandler(System.Windows.Controls.Primitives.Selector.SelectionChangedEvent, new SelectionChangedEventHandler((_, e) => { if (e.OriginalSource is TabControl) PlaceTable(); }));
+        table.Visibility = tableSplit.Visibility = Visibility.Collapsed;
+        body.RowDefinitions[2].Height = new GridLength(0); body.RowDefinitions[2].MinHeight = 0;
+        PlaceTable();
         root.Children.Add(openBar);
         var strip = Loading.Strip();                           // one bar for whatever is loading now
         DockPanel.SetDock(strip, Dock.Top);
         root.Children.Add(strip);
-        root.Children.Add(Banner); root.Children.Add(BarSlot); root.Children.Add(body);
+        root.Children.Add(Banner); root.Children.Add(body);
         // The view keeps room of its own: below this the tabs would take the whole width (a 360x240 window drew the scene
         // into a 1x66 view, stage 3 receipts). A smaller size asked for opens at this minimum and says so.
         Window = new Window { Title = title, Width = 1440, Height = 960, MinWidth = MinWidth, MinHeight = MinHeight, Content = root,
