@@ -32,6 +32,7 @@ internal static class Program
     /// viewprobe's worklist cell switch is what loads another conflict's cell. Returns viewprobe's arguments.</summary>
     static string[]? OpenBundle(string[] args)
     {
+        ClashList.Current = null;                              // a check's results replace a loaded clash list
         var rest = new List<string>(); string? dir = null; string? arm = null; string? outDir = null;
         for (int i = 0; i < args.Length; i++)
         {

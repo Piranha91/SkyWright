@@ -175,7 +175,16 @@ internal static class SceneDirector
     {
         var stage = HousecarlCore.Progress.RunLog.Current?.Record.Stages.LastOrDefault();
         var cell = BuildingCell ?? Shell.SwitchCell;
-        var what = (cell is null ? "Loading the scene" : $"Loading cell {cell}") + (stage?.Title is { Length: > 0 } t ? ": " + t : "");
+        // the build's stages in a modder's words; a stage this list does not know keeps the build's own title
+        var words = stage?.Id switch
+        {
+            RenderStages.FindCell => "finding the cell",
+            RenderStages.RecordWalk => "reading the plugins",
+            RenderStages.SceneBuild => "building the meshes and textures",
+            RenderStages.Report or RenderStages.Encode => "finishing",
+            _ => stage?.Title,
+        };
+        var what = (cell is null ? "Loading the scene" : $"Loading cell {cell}") + (words is { Length: > 0 } t ? ": " + t : "");
         double? f = stage is { Total: > 0 } st ? (double)st.Processed / st.Total.Value : null;
         if (stage is { Total: > 0 } s2) what += $" ({s2.Processed:N0} of {s2.Total:N0} {s2.Unit})";
         Loading.Set("scene", what, f);

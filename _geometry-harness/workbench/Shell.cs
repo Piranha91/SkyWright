@@ -134,6 +134,9 @@ internal static class Shell
                 case ListBoxItem { Tag: Scene sc } when sc.BestRank is { } best && Visible.FirstOrDefault(x => x.Rank == best) is { } row: OpenRow(row); break;
                 case ListBoxItem { Tag: RankedFinding f }: SetBanner(new LiveSurface().OpenFinding(f)); break;
                 case ListBoxItem { Tag: FoldTag fold }: ExpandedScenes.Add(fold.Scene); FillConflicts(); break;
+                case ListBoxItem { Tag: ClashEntry c }:
+                    try { SetBanner(ClashList.OpenEntry(c)); } catch (InvalidOperationException ex) { SetBanner(ex.Message); }
+                    break;
             }
         };
         Records.SelectedItemChanged += (_, e) => { if (e.NewValue is TreeViewItem { Tag: TreeNode { Kind: "ref" } n }) { CurrentRow = null; OpenRef(n.Key, CellOfRef(n.Key)); } };
@@ -195,6 +198,7 @@ internal static class Shell
         if (Records.Items.Count == 0) Records.Items.Add(new TreeViewItem { Header = "Open a clash or a place to list its cells and references here.", IsEnabled = false, FontStyle = FontStyles.Italic });
         var root = new DockPanel();
         // one Open control for anything the window opens; each kind is a reader (InputReaders)
+        InputReaders.Register(new ClashListReader());
         InputReaders.Register(new ResultsInputReader());
         InputReaders.Register(new BundleReader());
         InputReaders.Register(new ProfileReader());
@@ -314,6 +318,17 @@ internal static class Shell
     internal static void FillConflicts()
     {
         ConflictList.Items.Clear();
+        // the switches sort a check's rows: with no check open they have nothing to sort
+        AllRows.Visibility = DecidedRows.Visibility = FindingsOnlyRows.Visibility = Bundle is null ? Visibility.Collapsed : Visibility.Visible;
+        // a clash list loaded with no check open: its clashes, as written
+        if (Bundle is null && ClashList.Current is { } cl)
+        {
+            ConflictList.Items.Add(new ListBoxItem { Content = $"{cl.Title ?? Path.GetFileName(cl.File)}: {cl.Clashes.Count} clash(es)", FontWeight = FontWeights.Bold,
+                                                     Foreground = Brushes.LightSkyBlue, ToolTip = cl.File, IsEnabled = false });
+            foreach (var c in cl.Clashes) ConflictList.Items.Add(new ListBoxItem { Content = ClashList.Label(c), Tag = c, ToolTip = ClashList.Tip(c) });
+            ConflictsEmpty();
+            return;
+        }
         var live = new LiveSurface();
         // the one list model the conflicts and scenes state parts render: scenes by cell, decision order inside each,
         // intentional rows behind the toggle

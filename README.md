@@ -34,6 +34,7 @@ Set `WB_MCP_PORT` to a port number to serve the app's state tools (`workbench_st
 | `data/` | The check registry, the severity table, the record field scope and the overlap triage policy |
 | `external/houseCARL/` | houseCARL, pinned as a git submodule: its core, server (which writes patches) and generator |
 | `scripts/runlog.py` | Loads houseCARL's run log from the submodule |
+| `docs/clash-list-format.md` | The clash list format: clashes an AI, a script or a person writes for SkyWright to list and show |
 
 ## Checks
 

@@ -18,6 +18,7 @@ internal static class LoadMenu
         new("Current Data Folder", "The game's Data folder as it is now: as Mod Organizer 2 shows it when MO2 started SkyWright, else the installed game's.", CurrentDataFolder),
         new("MO2 Profile…", "A Mod Organizer 2 profile: its mods can then be checked against its load order, and its world explored.", Mo2Profile),
         new("Previous Results…", "The folder of an earlier check: a run's results or an evaluation's results.", PreviousResults),
+        new("Clash List…", "A list of clashes written by an AI, a script or by hand (a .clashes.json file; docs/clash-list-format.md describes it).", ClashListFile),
         new("Other folder or file…", "Any folder or file SkyWright reads; it works out what it is.", OtherFolder),
     };
 
@@ -48,6 +49,12 @@ internal static class LoadMenu
     {
         var d = new Microsoft.Win32.OpenFolderDialog { Title = "Choose the folder of an earlier check's results" };
         if (d.ShowDialog() == true) _ = OpenAsync(d.FolderName);
+    }
+
+    static void ClashListFile()
+    {
+        var d = new Microsoft.Win32.OpenFileDialog { Title = "Choose a clash list", Filter = $"Clash lists (*{ClashList.Suffix})|*{ClashList.Suffix}|All files (*.*)|*.*", CheckFileExists = true };
+        if (d.ShowDialog() == true) _ = OpenAsync(d.FileName);
     }
 
     static void OtherFolder()
