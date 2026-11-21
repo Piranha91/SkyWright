@@ -95,6 +95,9 @@ public sealed class CellInfo
     public int GX { get; init; }
     public int GY { get; init; }
     public bool Interior => Worldspace.IsNull;
+    /// <summary>An exterior cell with a grid position: false for an interior and for a worldspace's persistent cell, whose
+    /// GX and GY hold the int.MinValue sentinel (never arithmetic on them: Math.Abs of it throws).</summary>
+    public bool HasGrid => !Interior && GX != int.MinValue;
     public string? EditorId { get; set; }
     public string? Name { get; set; }
     /// <summary>The plugin that defined the record (its FormKey's mod, when loaded; else the first provider seen).</summary>

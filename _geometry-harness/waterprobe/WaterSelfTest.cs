@@ -59,7 +59,30 @@ static class WaterSelfTest
                 string.Join(", ", preds.Where(x => x.Kind == "WATER-SEAM").Select(x => $"{x.FormKey} {x.Physical}")));
 
         HeightlessWinner(t);
+        GridlessCell(t);
     });
+
+    /// <summary>The held-out UME x SR Exterior Cities baseline: waterprobe died (exit 0xE0434352, OverflowException in Rank)
+    /// when a worldspace's persistent cell, whose grid is the int.MinValue sentinel, reached the ranked lists. A gridless
+    /// cell ranks after every cell with a grid, by either order, and never by its sentinel.</summary>
+    static void GridlessCell(ProbeSelfTest t)
+    {
+        var ws = new FormKey(ModKey.FromNameAndExtension("Skyrim.esm"), 0x3C);
+        CellInfo Cell(uint id, int x, int y) => new() { Key = new FormKey(ModKey.FromNameAndExtension("Skyrim.esm"), id), Worldspace = ws, GX = x, GY = y };
+        var persistent = Cell(0xD74, int.MinValue, int.MinValue);
+        var far = Cell(0x900, -60, 40);
+        string Rank(CellInfo c, (int, int)? near)
+        {
+            try { return WaterFindings.Rank(c, near, false, true).ToString("0"); }
+            catch (Exception ex) { return ex.GetType().Name; }
+        }
+        t.Check("PD2-P1 a persistent cell (no grid) is not a grid position: HasGrid false; a placed cell's true",
+                !persistent.HasGrid && far.HasGrid, "");
+        t.Check("PD2-P2 a persistent cell ranks after every cell with a grid, by distance from the origin and from --near",
+                Rank(persistent, null) == "1000000000" && Rank(persistent, (5, -2)) == "1000000000"
+                && double.Parse(Rank(far, null)) < 1e9 && double.Parse(Rank(far, (5, -2))) < 1e9,
+                $"persistent {Rank(persistent, null)} / near {Rank(persistent, (5, -2))}; (-60,40) {Rank(far, null)} / near {Rank(far, (5, -2))}");
+    }
 
     /// <summary>SS-2 (water side): Skyrim.esm with one watered cell (0,0) at height 100 over flat land at 0, and Hole.esp
     /// overriding that cell's LAND with one that declares no heights (no VHGT, DATA flag clear). The winner's ground is

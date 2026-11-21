@@ -14,7 +14,7 @@ static class WaterFindings
         var seams = new List<SeamRow>();
         foreach (var a in ext)
         {
-            if (a.Dup) continue;
+            if (a.Dup || !a.Cell.HasGrid) continue;     // a worldspace's persistent cell has no grid, so no edge neighbours
             foreach (var (dx, dy) in new[] { (1, 0), (0, 1) })
             {
                 var bc = idx.Single(a.Cell.Worldspace, a.Cell.GX + dx, a.Cell.GY + dy);
@@ -29,6 +29,16 @@ static class WaterFindings
             }
         }
         return seams;
+    }
+
+    /// <summary>The order a run lists cells in: nearest a --near cell first (another worldspace than --world after it),
+    /// else Tamriel first, then by distance from the origin. A cell with no grid (a worldspace's persistent cell) comes
+    /// after every cell with one, never by its sentinel (the held-out run's waterprobe died on Math.Abs of it).</summary>
+    public static double Rank(CellInfo c, (int X, int Y)? near, bool outsideWorldFilter, bool tamriel)
+    {
+        if (!c.HasGrid) return 1e9;
+        if (near is { } n) return Math.Max(Math.Abs((long)c.GX - n.X), Math.Abs((long)c.GY - n.Y)) + (outsideWorldFilter ? 10_000 : 0);
+        return (tamriel ? 0 : 100_000) + Math.Abs((long)c.GX) + Math.Abs((long)c.GY);
     }
 
     /// <summary>The seam rows a run lists and emits: Seam only (Inherited is the floor, Joined a fixer's shape).</summary>

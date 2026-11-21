@@ -128,7 +128,9 @@ PluginKind Kind(int p) => idx.KindOf(p, waterModCells);
 string PluginName(int p) => idx.PluginName(p);
 string WsName(FormKey ws) => ws.IsNull ? "(interior)" : idx.WorldEditorId.TryGetValue(ws, out var e) && e is { Length: > 0 } ? e : ws.ToString();
 string WatrName(string? key) => key is null ? "(none)" : FormKey.TryFactory(key, out var fk) && idx.WatrEditorId.TryGetValue(fk, out var e) ? $"{e} ({key})" : key;
-string CellLabel(CellInfo c) => c.Interior ? $"{c.EditorId ?? c.Key.ToString()} (int)" : $"{WsName(c.Worldspace)} ({c.GX},{c.GY}){(c.EditorId is { } e ? " " + e : "")}";
+string CellLabel(CellInfo c) => c.Interior ? $"{c.EditorId ?? c.Key.ToString()} (int)"
+    : !c.HasGrid ? $"{WsName(c.Worldspace)} persistent cell {c.Key}"
+    : $"{WsName(c.Worldspace)} ({c.GX},{c.GY}){(c.EditorId is { } e ? " " + e : "")}";
 
 // Plugin kinds as the rule settles them, stated up front.
 var kindsSeen = Enumerable.Range(0, paths.Count).Where(p => idx.PluginName(p) != "(none)").Select(p => (P: p, K: Kind(p))).ToList();
@@ -204,7 +206,10 @@ static string Pct(float? f) => f is { } v ? v.ToString("P0") : "n/a";
 // ---------------------------------------------------------------------------------------
 // The census — rule 12's split before any count is read.
 // ---------------------------------------------------------------------------------------
-var ext = rows.Where(r => !r.Cell.Interior).ToList();
+// A worldspace's persistent cell has no grid position, so its water statement has no surface over any LAND to measure:
+// it is set aside and counted, never judged (rule 6), and never ranked by its grid sentinel.
+var ext = rows.Where(r => r.Cell.HasGrid).ToList();
+var gridlessW = rows.Where(r => !r.Cell.Interior && !r.Cell.HasGrid && (r.Truth.HasWater || r.Winner.HasWater)).ToList();
 var seEdits = ext.Where(r => !r.AuthorTruth && DetectorModel.WaterDiff(r.First, r.Truth).Count > 0).ToList();
 Console.WriteLine($"\n==== THE SE WATER EDITS — exterior cells whose Bethesda/USSEP truth differs from the earliest contributor's tuple: {seEdits.Count:N0} ====");
 Console.WriteLine("   (the Update.esm additions the mechanism is about; won by, top winners)");
@@ -223,6 +228,8 @@ foreach (var pop in Enum.GetValues<WaterPopulation>())
 Console.WriteLine($"   unjudgeable by reason: " + string.Join(", ", watered.Where(r => r.Verdict == WaterVerdict.Unjudgeable).GroupBy(r => r.Blocker).Select(g => $"{g.Key} {g.Count():N0}")));
 var interiorW = rows.Where(r => r.Cell.Interior && (r.Truth.HasWater || r.Winner.HasWater)).ToList();
 Console.WriteLine($"   interiors, apart: {interiorW.Count:N0} with water — " + VerdictSplit(interiorW));
+Console.WriteLine($"   worldspace persistent cells, set aside: {gridlessW.Count:N0} with water — no grid position, so no surface to measure; not judged"
+                + (gridlessW.Count > 0 ? " (" + string.Join(", ", gridlessW.Select(r => $"{CellLabel(r.Cell)} {r.Verdict}")) + ")" : ""));
 
 Console.WriteLine($"\n==== NON-FORWARDING WINNERS (exterior; who carries the changed tuples) ====");
 foreach (var g in watered.Where(r => r.Verdict is not (WaterVerdict.Forwarded or WaterVerdict.Unjudgeable)).GroupBy(r => r.Cell.Winner).OrderByDescending(g => g.Count()).Take(listN))
@@ -271,11 +278,9 @@ var seamRows = WaterFindings.SeamRows(seams).OrderBy(s => Rank(s.A.Cell)).ThenBy
 foreach (var s in seamRows.Take(listN))
     Console.WriteLine($"   SEAM {CellLabel(s.A.Cell)} {s.Dir} {CellLabel(s.B.Cell)}: {s.Why}\n"
                     + $"        A {s.A.Verdict} won by {PluginName(s.A.Cell.Winner)}; B {s.B.Verdict} won by {PluginName(s.B.Cell.Winner)}");
-double Rank(CellInfo c)
-{
-    if (near is { } n) return Math.Max(Math.Abs(c.GX - n.X), Math.Abs(c.GY - n.Y)) + (worldFilter is not null && !string.Equals(WsName(c.Worldspace), worldFilter, StringComparison.OrdinalIgnoreCase) ? 10_000 : 0);
-    return (WsName(c.Worldspace) == "Tamriel" ? 0 : 100_000) + Math.Abs(c.GX) + Math.Abs(c.GY);
-}
+double Rank(CellInfo c) => WaterFindings.Rank(c, near,
+    worldFilter is not null && !string.Equals(WsName(c.Worldspace), worldFilter, StringComparison.OrdinalIgnoreCase),
+    WsName(c.Worldspace) == "Tamriel");
 
 // ---------------------------------------------------------------------------------------
 // Missing-water candidates, and the same-defect control.
@@ -328,7 +333,7 @@ if (emitPath is not null)
         new("plugins", paths.Count - unreadable.Count, new Dictionary<string, long> { ["UnreadablePlugin"] = unreadable.Count }),
         new("exterior cells with water", watered.Count(r => r.Verdict != WaterVerdict.Unjudgeable),
             watered.Where(r => r.Verdict == WaterVerdict.Unjudgeable).GroupBy(r => r.Blocker.ToString()).ToDictionary(g => g.Key, g => (long)g.Count()),
-            new Dictionary<string, long> { ["Interior"] = interiorW.Count },
+            new Dictionary<string, long> { ["Interior"] = interiorW.Count, ["PersistentCell"] = gridlessW.Count },
             $"same-defect control {control.Count:N0} (truth surface under the ground); no LAND to measure {ext.Count(r => r.Physical == PhysicalState.Unmeasured && r.Verdict is not (WaterVerdict.Forwarded or WaterVerdict.Unjudgeable)):N0}; winning LAND declares no heights {ext.Count(r => r.Cell.LandWinnerDeclaresNone):N0}"),
         new("edge-adjacent pairs", seams.Count + 0, new Dictionary<string, long>(), null,
             $"seam {seamRows.Count:N0}; inherited {seams.Count(s => s.Verdict == WaterSeamVerdict.Inherited):N0}; joined {seams.Count(s => s.Verdict == WaterSeamVerdict.Joined):N0} (pairs with no disagreement in either arm are not listed)"),
