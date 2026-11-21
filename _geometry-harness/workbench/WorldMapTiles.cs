@@ -21,8 +21,9 @@ internal static class MapTileGrid
     internal const int BlockCells = 5;
     /// <summary>World units a pixel: 256- and 512-pixel tiles. Every block is drawn at both.</summary>
     internal static readonly int[] Scales = { 16, 8 };
-    /// <summary>Screen pixels across one cell from which tiles are shown; further out a view holds too many cells to draw.</summary>
-    internal const double TilesAppear = 128;
+    /// <summary>Screen pixels across one cell from which tiles are shown: the zoom at which buildings get their real
+    /// shapes, so the textured view takes over as soon as the detailed models do.</summary>
+    internal const double TilesAppear = WorldMap.ShapesAppear;
 
     /// <summary>The scale to show at a zoom, or null when the view is too far out for tiles.</summary>
     internal static int? ScaleFor(double screenPixelsPerCell, double devicePixelsPerCell) =>

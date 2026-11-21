@@ -181,7 +181,7 @@ internal sealed class StateTools
         [Description("layer: true shows the layer, false hides it.")] bool? show = null,
         [Description("map: the worldspace to show, by EditorID or FormKey.")] string? worldspace = null,
         [Description("map: the point to centre on, [x, y] in Skyrim units (+X east, +Y north).")] double[]? map_centre = null,
-        [Description("map: the zoom, in screen pixels across one cell (textured tiles show from 128).")] double? pixels_per_cell = null,
+        [Description("map: the zoom, in screen pixels across one cell (textured tiles show from 40, with the buildings' real shapes).")] double? pixels_per_cell = null,
         [Description("map: true draws textured tiles when zoomed in, false the shaded shapes.")] bool? textured = null)
         => hub.OnUi(async () =>
         {

@@ -81,7 +81,8 @@ public class MapTileTests
     }
 
     [Theory]
-    [InlineData(100, 100, null)]
+    [InlineData(39, 39, null)]
+    [InlineData(40, 40, 16)]
     [InlineData(128, 128, 16)]
     [InlineData(200, 256, 16)]
     [InlineData(200, 300, 8)]
