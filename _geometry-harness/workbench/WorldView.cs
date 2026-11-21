@@ -23,7 +23,7 @@ internal static class WorldView
     static readonly TextBlock SearchCount = new() { VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Dim) };
     static readonly ListBox Hits = new() { MaxHeight = 200, Margin = new Thickness(6, 2, 6, 2), Visibility = Visibility.Collapsed };
     static readonly TreeView Tree = new();
-    static readonly Button BrowseProfile = new() { Content = "Browse the Start tab's profile", Margin = new Thickness(6, 2, 6, 2), Padding = new Thickness(8, 2, 8, 2), HorizontalAlignment = HorizontalAlignment.Left };
+    static readonly Button BrowseProfile = new() { Content = "Show the loaded profile's world", Margin = new Thickness(6, 2, 6, 2), Padding = new Thickness(8, 2, 8, 2), HorizontalAlignment = HorizontalAlignment.Left };
 
     static readonly WorldMap Map = new();
     static readonly ComboBox MapWorld = new() { MinWidth = 220, Margin = new Thickness(0, 0, 8, 0), ToolTip = "the worldspace the map shows" };

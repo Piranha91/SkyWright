@@ -70,7 +70,7 @@ internal static class ResultsView
         ResultRules.Select(rows, pair, groups, categories, text);
 
     static readonly TextBlock Header = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(6, 4, 6, 2) };
-    static readonly TextBlock Means = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(6, 0, 6, 2), Text = AddressedMeans, FontWeight = FontWeights.SemiBold };
+    static readonly TextBlock Means = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(6, 0, 6, 2), Text = AddressedMeans, Foreground = Theme.Brush(Theme.Dim) };
     static readonly TextBlock NotesLine = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(6, 0, 6, 2), Foreground = Theme.Brush(Theme.Dim), FontSize = 11 };
     static readonly ComboBox PairBox = new() { Margin = new Thickness(6, 2, 6, 2) };
     static readonly Dictionary<ResultGroup, CheckBox> GroupBoxes = new();
@@ -111,7 +111,7 @@ internal static class ResultsView
         VirtualizingPanel.SetIsVirtualizing(Rows, true);
         VirtualizingPanel.SetVirtualizationMode(Rows, VirtualizationMode.Recycling);
         ScrollViewer.SetHorizontalScrollBarVisibility(Rows, ScrollBarVisibility.Auto);
-        Header.Text = "no evaluation is open: use Open above with a finished evaluation's results folder.";
+        Header.Text = "No earlier results are loaded. Use Load › Previous Results… to open an evaluation's results folder.";
         var filters = new WrapPanel { Margin = new Thickness(6, 2, 6, 2) };
         foreach (var (group, g) in Groups)
         {
@@ -119,8 +119,9 @@ internal static class ResultsView
             cb.Click += (_, _) => { if (_filling) return; if (cb.IsChecked == true) Shown.Add(group); else Shown.Remove(group); Refill(); };
             GroupBoxes[group] = cb; filters.Children.Add(cb);
         }
-        var cats = new WrapPanel { Margin = new Thickness(26, 0, 6, 2) };
-        cats.Children.Add(new TextBlock { Text = "patch changes by the scorecard's category:  ", VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Dim) });
+        var cats = new WrapPanel { Margin = new Thickness(0, 0, 0, 2) };
+        cats.Children.Add(new TextBlock { Text = "Patch changes by kind:  ", VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Dim),
+                                          ToolTip = "the scorecard's categories 3, 4 and 5 of a patch change nothing predicted" });
         foreach (int c in new[] { 3, 4, 5 })
         {
             var cb = new CheckBox { IsChecked = true, Margin = new Thickness(0, 0, 12, 2), Content = CategoryWords(c) };
@@ -145,12 +146,12 @@ internal static class ResultsView
         Rows.SelectionChanged += (_, _) => { if (_filling || Rows.SelectedItem is not RowItem item) return; Say(() => OpenRow(item.Row)); };
         Legend.Text = "In the scene: " + ResultMarks.Legend(Groups.Select(g => (g.Value.Mark, g.Value.Words)))
                     + "; cyan: the row's object, magenta: its other object. " + NotScoredMeans;
-        // the notes and the marks' legend fold away, so the rows keep the height
-        var about = new StackPanel();
-        about.Children.Add(NotesLine); about.Children.Add(Legend);
-        var aboutBox = new Expander { Header = "Notes and the scene marks' legend", IsExpanded = false, Content = about, Margin = new Thickness(6, 0, 6, 2) };
+        // the finer filters, the notes and the marks' legend fold away, so the rows keep the height
+        var about = new StackPanel { Margin = new Thickness(6, 2, 6, 2) };
+        about.Children.Add(cats); about.Children.Add(NotesLine); about.Children.Add(Legend);
+        var aboutBox = new Expander { Header = "More filters, notes and the scene's marks", IsExpanded = false, Content = about, Margin = new Thickness(6, 0, 6, 2) };
         var panel = new DockPanel();
-        foreach (var top in new UIElement[] { Header, Means, PairBox, filters, cats, controls, aboutBox, CountLine }) { DockPanel.SetDock(top, Dock.Top); panel.Children.Add(top); }
+        foreach (var top in new UIElement[] { Header, PairBox, filters, Means, controls, aboutBox, CountLine }) { DockPanel.SetDock(top, Dock.Top); panel.Children.Add(top); }
         // the list above, the open row's values below, with a splitter to drag between them
         var body = new Grid();
         body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(3, GridUnitType.Star), MinHeight = 90 });
@@ -214,7 +215,10 @@ internal static class ResultsView
     static void FillHeader()
     {
         if (_results is not { } r) return;
-        Header.Text = $"Evaluation results: {r.Folder}  —  {r.Pairs.Count} pairs; {r.Checked.Count} file(s) match the receipt.  All pairs: {CountsText(r.Totals)}";
+        // the folder's name and pair count shown; where it is and what was checked, in the tooltip
+        Header.Text = $"{Path.GetFileName(r.Folder.TrimEnd('\\', '/'))}: {r.Pairs.Count} pairs";
+        Header.FontWeight = FontWeights.SemiBold;
+        Header.ToolTip = $"{r.Folder}{Environment.NewLine}{r.Checked.Count} file(s) match the evaluation's receipt.{Environment.NewLine}All pairs: {CountsText(r.Totals)}";
         var notes = r.Notes.Concat(Pair is null ? Enumerable.Empty<string>() : r.Pairs.Where(p => p.Id == Pair).SelectMany(p => p.Notes)).Distinct().ToList();
         NotesLine.Text = string.Join(" ", notes.Select(n => n.TrimEnd('.') + "."));
         NotesLine.Visibility = notes.Count > 0 ? Visibility.Visible : Visibility.Collapsed;

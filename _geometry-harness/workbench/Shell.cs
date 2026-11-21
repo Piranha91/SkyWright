@@ -78,9 +78,11 @@ internal static class Shell
     internal static bool ShowAll;
     /// <summary>The "show decided" toggle: rows decided intentional that still apply are hidden unless it is on.</summary>
     internal static bool ShowDecided;
-    static readonly CheckBox DecidedRows = new() { Content = "show rows decided intentional", Margin = new Thickness(6, 2, 6, 2) };
+    static readonly CheckBox DecidedRows = new() { Content = "show clashes marked as intended", Margin = new Thickness(6, 2, 6, 2),
+        ToolTip = "clashes you marked as intended stay hidden while the mark still applies" };
     internal static bool ShowFindingsOnly;
-    static readonly CheckBox FindingsOnlyRows = new() { Content = "show cells with only Findings rows", Margin = new Thickness(6, 2, 6, 2) };
+    static readonly CheckBox FindingsOnlyRows = new() { Content = "show places with only other issues", Margin = new Thickness(6, 2, 6, 2),
+        ToolTip = "places where the checks found other issues (Other issues tab) but no clash between mods" };
     static readonly HashSet<int> ExpandedScenes = new();
     internal static string? PendingLand;            // a reference to land on when the next scene arrives
     internal static Stopwatch? SwitchClock;         // runs from a cell switch's request to the next scene's arrival
@@ -98,7 +100,8 @@ internal static class Shell
     static readonly ListBox ConflictList = new();
     static readonly ListBox FindingList = new();
     static readonly TreeView Records = new();
-    static readonly CheckBox AllRows = new() { Content = "all rows on this arm", Margin = new Thickness(6, 2, 6, 2) };
+    static readonly CheckBox AllRows = new() { Content = "show every clash, not only the checked mod's", Margin = new Thickness(6, 2, 6, 2),
+        ToolTip = "off: only the clashes that involve the mod you checked; on: every clash this check found in the load order" };
     internal static IReadOnlyList<TreeNode> Tree = Array.Empty<TreeNode>();
     internal static WorkbenchHost? Current;
 
@@ -109,6 +112,10 @@ internal static class Shell
         $"{r.Rank}. {r.Row.Kind}  {r.Row.A} / {r.Row.B}{(r.Row.Mesh is not null ? " (its mesh)" : "")}  ref {r.Row.RefKey}{(r.Row.RefBaseEditorId is { } e ? " " + e : "")}"
         + $"  [physical {r.PhysicalLabel}; check's evidence grade {r.EvidenceLabel}; {r.NewLabel}; severity {r.Severity} ({r.SeverityLabel})]"
         + (r.Row.MeshSentence is { } ms ? "\n      " + ms : "");
+
+    /// <summary>A row as the list shows it: rank, what clashes, the two mods and the object; the grades are in its tooltip.</summary>
+    internal static string RowLabel(RankedRow r) =>
+        $"{r.Rank}. {r.Row.Kind}  {r.Row.A} / {r.Row.B}  ·  {r.Row.RefBaseEditorId ?? r.Row.RefKey}";
 
     internal const double MinWidth = 560 + 360, MinHeight = 480;   // the tabs' width plus a 360-wide view; device-independent units
 
@@ -153,16 +160,19 @@ internal static class Shell
         RankedFinding? Selected() => FindingList.SelectedItem is ListBoxItem { Tag: RankedFinding f } ? f : null;
         repairPreview.Click += async (_, _) =>
         {
-            if (Selected() is not { } f) { SetBanner("select a navmesh row in the Findings tab first."); return; }
+            if (Selected() is not { } f) { SetBanner("select a navmesh row under Other issues first."); return; }
             try { var p = await Repair.PreviewAsync(f); SetBanner("repair preview: " + p.Sentence); foreach (var e in p.Plans) foreach (var i in e.Invariants) WorkbenchHost.Say($"repair preview: {e.Navmesh}: {i}"); }
             catch (Exception ex) { SetBanner("repair preview refused: " + ex.Message); }
         };
         repairWrite.Click += async (_, _) =>
         {
-            if (Selected() is not { } f) { SetBanner("select a navmesh row in the Findings tab first."); return; }
+            if (Selected() is not { } f) { SetBanner("select a navmesh row under Other issues first."); return; }
             try { var r = await Repair.WriteAsync(f, "WbNavRepair"); SetBanner("repair: " + r.Sentence); foreach (var (row, kind, verdict) in r.Verdicts) WorkbenchHost.Say($"repair re-check: {kind} {row}: {verdict}"); }
             catch (Exception ex) { SetBanner("repair write refused: " + ex.Message); }
         };
+        repairPreview.IsEnabled = repairWrite.IsEnabled = false;
+        ToolTipService.SetShowOnDisabled(repairPreview, true); ToolTipService.SetShowOnDisabled(repairWrite, true);
+        FindingList.SelectionChanged += (_, _) => repairPreview.IsEnabled = repairWrite.IsEnabled = Selected() is not null;
         var repairBar = new StackPanel { Orientation = Orientation.Horizontal };
         repairBar.Children.Add(repairPreview); repairBar.Children.Add(repairWrite);
         var findingsTab = new DockPanel();
@@ -181,6 +191,8 @@ internal static class Shell
             ("Records", "Records", "the cells and references of the scene shown, by worldspace", Records),
             ("World", "World", "the map and cells of the loaded Data folder or profile", WorldView.Build())));
         tabs.SelectedIndex = Bundle is null ? 0 : 1;           // the Start tab until a bundle is open
+        ViewSlot.Content ??= EmptyView;
+        if (Records.Items.Count == 0) Records.Items.Add(new TreeViewItem { Header = "Open a clash or a place to list its cells and references here.", IsEnabled = false, FontStyle = FontStyles.Italic });
         var root = new DockPanel();
         // one Open control for anything the window opens; each kind is a reader (InputReaders)
         InputReaders.Register(new ResultsInputReader());
@@ -243,7 +255,13 @@ internal static class Shell
         Server = null;
     }
 
-    internal static void SetBanner(string text) { Banner.Text = text; WorkbenchHost.Say("banner: " + text); }
+    internal static void SetBanner(string text)
+    {
+        _bannerSaid = text;
+        Banner.Text = text.Length > 0 && char.IsLower(text[0]) ? char.ToUpperInvariant(text[0]) + text[1..] : text;
+        WorkbenchHost.Say("banner: " + text);
+    }
+    static string _bannerSaid = "";
 
     /// <summary>Select a Findings row in its tab, as a click does (the script's repair steps).</summary>
     internal static void SelectFinding(RankedFinding f)
@@ -251,11 +269,22 @@ internal static class Shell
         foreach (var it in FindingList.Items)
             if (it is ListBoxItem { Tag: RankedFinding g } li && g.Rank == f.Rank) { FindingList.SelectedItem = li; li.BringIntoView(); return; }
     }
-    internal static string BannerText => Banner.Text;
+    internal static string BannerText => _bannerSaid;
 
     /// <summary>Put a scene's view and bar into the window (replacing the last scene's).</summary>
     internal static void Mount(UIElement view, UIElement bar) { ViewSlot.Content = view; BarSlot.Content = bar; }
-    internal static void Unmount() { ViewSlot.Content = null; BarSlot.Content = null; }
+    internal static void Unmount() { ViewSlot.Content = EmptyView; BarSlot.Content = null; }
+
+    /// <summary>What the 3D view shows before any scene: what will appear there and how to get it.</summary>
+    static readonly UIElement EmptyView = new TextBlock
+    {
+        Text = "The 3D view shows a clash here." + Environment.NewLine + "Pick one under Conflicts › In the world, or a place under Explore › World.",
+        TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxWidth = 620, FontSize = 14,
+        HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Dim),
+    };
+
+    /// <summary>A list's empty state: one line, not selectable.</summary>
+    static ListBoxItem EmptyItem(string text) => new() { Content = text, IsEnabled = false, FontStyle = FontStyles.Italic, Foreground = Theme.Brush(Theme.Dim), Padding = new Thickness(6, 8, 6, 8) };
 
     /// <summary>Let WPF draw what was just set (the loading banner) before the thread goes to rebuild the scene.</summary>
     internal static void Flush()
@@ -301,16 +330,25 @@ internal static class Shell
                     "fold" => new ListBoxItem { Content = it.Text, Tag = it.Tag, FontStyle = FontStyles.Italic, Foreground = Brushes.LightSkyBlue },
                     _ => new ListBoxItem { Content = it.Text, FontStyle = FontStyles.Italic, Foreground = Brushes.DarkGray },
                 });
+            ConflictsEmpty();
             return;
         }
         foreach (var e in ReviewList.For(live, Visible, Standings, ShowDecided)) ConflictList.Items.Add(RowItem(e));
+        ConflictsEmpty();
+    }
+
+    static void ConflictsEmpty()
+    {
+        if (ConflictList.Items.Count > 0) return;
+        ConflictList.Items.Add(EmptyItem(Bundle is null ? "Nothing checked yet. Check a mod on the Start tab, or load earlier results."
+                                                         : "No clash to list with these switches. Turn one on above to see more."));
     }
 
     static ListBoxItem RowItem(ReviewEntry e)
     {
         var r = e.Row;
         string decided = e.Decision is { } d ? $"\n   {d.Verdict}: {d.Reason} — {e.Standing.Sentence}" : "";
-        var item = new ListBoxItem { Content = RowText(r) + decided, Tag = r };
+        var item = new ListBoxItem { Content = RowLabel(r) + decided, Tag = r, ToolTip = RowText(r) };
         if (r.InvolvesTarget) item.FontWeight = FontWeights.SemiBold;
         if (e.Standing.Standing == Standing.Reconsider) item.Foreground = Brushes.Salmon;
         else if (e.Decision is not null) item.Foreground = Brushes.DarkGray;
@@ -323,6 +361,7 @@ internal static class Shell
         FindingList.Items.Clear();
         // each ticked check first: ran with its rows, or why not, so a check that failed never reads as one that found nothing
         foreach (var c in Bundle?.Checks ?? Array.Empty<CheckStatus>()) FindingList.Items.Add(CheckItem(c));
+        if (Bundle is null) FindingList.Items.Add(EmptyItem("Nothing checked yet. Check a mod on the Start tab, or load earlier results."));
         foreach (var f in Findings)
         {
             var item = new ListBoxItem

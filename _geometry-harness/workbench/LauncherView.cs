@@ -182,6 +182,8 @@ internal static class LauncherView
         var run = new Button { Content = "Run", Margin = new Thickness(4, 0, 0, 0), VerticalAlignment = VerticalAlignment.Top };
         var abort = new Button { Content = "Abort", Margin = new Thickness(4, 0, 0, 0), VerticalAlignment = VerticalAlignment.Top, Visibility = Visibility.Collapsed };
         var sw = new ToggleButton { Style = (Style)Theme.Dark["Pill"], Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Top, ToolTip = "include in Run selected" };
+        System.Windows.Automation.AutomationProperties.SetName(sw, "include " + ProbeNames.Of(id) + " in Run selected");
+        System.Windows.Automation.AutomationProperties.SetName(run, "run " + ProbeNames.Of(id));
         run.Click += (_, _) => Try(() => L.Run(new[] { id }));
         abort.Click += (_, _) => Try(() => L.AbortProbe(id));
         sw.Click += (_, _) =>
