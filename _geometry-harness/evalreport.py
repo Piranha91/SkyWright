@@ -115,10 +115,12 @@ def patch_words(patches: list, words: dict, joiner=None) -> dict:
     return {"patches": said_, "verb": "is" if one_ else "are", "them": "it" if one_ else "them"}
 
 
-def patch_captions(findings: list, media: list, validation: dict, setups: dict, words: dict, first_frames: dict) -> None:
+def patch_captions(findings: list, media: list, validation: dict, setups: dict, words: dict, figure_frames: dict) -> None:
     """A clash new with the supplied patches is pictured with them loaded: its frames say "With / Without <patches>" in
-    place of the evaluated mod, and the figure's first frame says why it is pictured (skill data figureCaptions
-    setupWithPatches, setupWithoutPatches, patchNewWhy). Frames of any other finding are left as they are."""
+    place of the evaluated mod, and the figure's first frame with the patches loaded says why it is pictured (skill data
+    figureCaptions setupWithPatches, setupWithoutPatches, patchNewWhy); a figure with no such frame says it on its first
+    frame. `figure_frames`: each figure's frame ids in order, keyed by its capture request (or its one frame's id).
+    Frames of any other finding are left as they are."""
     val_ = validation or {}
     ids_ = {fid_ for n_ in val_.get("newByCheck") or [] for fid_ in n_.get("findingIds") or []}
     with_, without_ = val_.get("withPatchArm"), val_.get("withoutPatchArm")
@@ -126,6 +128,11 @@ def patch_captions(findings: list, media: list, validation: dict, setups: dict, 
         return
     slots_ = patch_words(list(val_.get("patchLabels") or val_.get("patches") or []), words)
     by_id_ = {m_.get("id"): m_ for m_ in media}
+
+    def why_frame(key_, mid_):
+        """The frame of figure key_ that says why: its first frame with the patches loaded, else its first frame."""
+        ids_f = list(figure_frames.get(key_) or [mid_])
+        return next((i_ for i_ in ids_f if ((by_id_.get(i_) or {}).get("subject") or {}).get("armId") == with_), ids_f[0])
     for f_ in findings:
         if f_.get("id") not in ids_ or f_.get("armId") != with_:
             continue
@@ -140,7 +147,7 @@ def patch_captions(findings: list, media: list, validation: dict, setups: dict, 
             if old_ and cap_.startswith(old_):
                 cap_ = new_ + cap_[len(old_):]
             prov_ = m_.get("provenance") or {}
-            if first_frames.get(prov_.get("captureRequest") or mid_) == mid_ and words.get("patchNewWhy"):
+            if why_frame(prov_.get("captureRequest") or mid_, mid_) == mid_ and words.get("patchNewWhy"):
                 cap_ += fill(str(words["patchNewWhy"]), **slots_)
             m_["caption"] = cap_
             m_["patchNew"] = True
@@ -10342,9 +10349,12 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     media_by_id0 = {m_["id"]: m_ for m_ in media}
     # the frame each figure shows first (figure_units' order), keyed by its capture request
     first_frame_ = {}
+    figure_frames_ = {}     # each figure's frames in that order, by the same key
     for u_ in figure_units(media):
         if u_:
-            first_frame_.setdefault((u_[0].get("provenance") or {}).get("captureRequest") or u_[0]["id"], u_[0]["id"])
+            key_ = (u_[0].get("provenance") or {}).get("captureRequest") or u_[0]["id"]
+            first_frame_.setdefault(key_, u_[0]["id"])
+            figure_frames_.setdefault(key_, [x_["id"] for x_ in u_])
     for f_ in findings:
         mids_ = list(f_.get("mediaIds") or [])
         for mid_ in list(mids_):
@@ -11213,7 +11223,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         if len(rest) < len(reader_missing):
             reader["missingCoveredLine"] = (reader_data.get("prediction") or {}).get("missingCoveredLine")
     reader["validation"] = lead["validation"]
-    patch_captions(findings, media, lead["validation"], caption_setup_, caption_words, first_frame_)
+    patch_captions(findings, media, lead["validation"], caption_setup_, caption_words, figure_frames_)
     # (eighth review, Snazzy 150) a refused comparison whose predicted clashes were re-measured gone says both: the rows
     # measured gone, and that it refused a verdict on the rest
     gone_ = (lead["validation"] or {}).get("measuredGoneRefused") or {}

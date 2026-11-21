@@ -310,6 +310,11 @@ def c2344_report_figure(tmp: Path):
           "the patch clash's frames are not captioned with the patch's setups", json.dumps(caps)[:500])
     check("C2344", sum("This clash appears only when ModA - ModB patch.esp is loaded" in c for c in caps) == 1,
           "the figure does not say once why it is pictured", json.dumps(caps)[:500])
+    # (plugin-name-case fold-in 4, patch-clash-pictures Gate C) the why goes with the frame that shows the clash: the
+    # first frame with the patches loaded, never the Without frame
+    why_ = [c for c in caps if "This clash appears only when ModA - ModB patch.esp is loaded" in c]
+    check("C2344", len(why_) == 1 and why_[0].startswith("With ModA - ModB patch.esp"),
+          "the why sentence sits on a frame without the patch", json.dumps(why_)[:300])
     md = out["report.md"]
     lines = md.splitlines()
     at = next((i for i, ln in enumerate(lines) if ln.startswith("- New clashes with the patch, by check")), None)
