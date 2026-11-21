@@ -30,7 +30,8 @@ internal sealed record ResultRow(
     ResultPlace Place,
     string DefaultSetup,
     IReadOnlyList<string> JoinedEdits,
-    string? Note)
+    string? Note,
+    string? Where = null)
 {
     /// <summary>Unique within the evaluation: the pair, the source list (f findings, e edits, o overlaps) and the position in it.</summary>
     internal string Key => $"{Pair}|{(Lane == "edit" ? "e" : Lane == "overlap" ? "o" : "f")}{Index}";
@@ -458,9 +459,10 @@ internal sealed class ResultPair
                 new ResultValue("winning mod's value", src.B, src.Winner ?? "(none)"),
                 new ResultValue("value beneath both", null, src.Overridden ?? "(none)"),
             };
-            string who = Who(editorId, named?.BaseType, named?.BaseEditorId);
-            string summary = src is null ? $"{(type.Length > 0 ? type : "record")} {fk}{who}: {field}"
-                : $"{type} {fk}{who}: {field}: {src.A}'s value loses to {src.B}'s";
+            // the record in words: its type, its editor ID (else its FormID and plugin), and its base object when it has one
+            string who = $"{(type.Length > 0 ? RecordWords.Type(type) : "record")} {RecordWords.Name(editorId, named?.BaseEditorId, fk)}"
+                       + (editorId is { Length: > 0 } && named?.BaseEditorId is { Length: > 0 } be ? $" ({be})" : "");
+            string summary = src is null ? $"{who}: {RecordWords.Field(field)}" : $"{who}: {RecordWords.Field(field)}: {src.A}'s value loses to {src.B}'s";
 
             ResultPlace place = type switch
             {
@@ -474,9 +476,6 @@ internal sealed class ResultPair
             return new ResultRow(index, f.ActedOn ? ResultGroup.Addressed : ResultGroup.NotAddressed, _p.Id, "record", field, type, fk, f.Field, editorId,
                 named?.BaseEditorId, named?.BaseType, null, null, null, summary, values, place, "before", joined, note);
         }
-
-        static string Who(string? editorId, string? baseType, string? baseEditorId) =>
-            (editorId is { Length: > 0 } ? $" '{editorId}'" : "") + (baseType is not null || baseEditorId is not null ? $" ({string.Join(" ", new[] { baseType, baseEditorId }.Where(x => x is { Length: > 0 }))})" : "");
 
         // A placed reference's place from the sealed bundle's names, with its partner's cell when its own is a persistent cell.
         ResultPlace RefPlace(string refKey, string? otherKey)
@@ -606,7 +605,7 @@ internal sealed class ResultPair
             }
             string type = navmesh ? "NAVM" : names?.BaseType == "Npc" ? "ACHR" : "REFR";
             string summary = row is not null ? Regex.Replace(row.Summary, @"\s+", " ").Trim()
-                : $"{(navmesh ? "navmesh" : "placement")} finding on {type} {key}{(other is null ? "" : $" and {other}")}";
+                : $"{(navmesh ? "navmesh" : "placement")} finding on {RecordWords.Type(type)} {RecordWords.Form(key)}{(other is null ? "" : $" and {RecordWords.Form(other)}")}";
             return new ResultRow(index, group, _p.Id, f.Lane, row?.Kind ?? "", type, key, null, null, names?.BaseEditorId, names?.BaseType,
                 null, null, null, summary, values, place, "before", joined, note);
         }
@@ -709,7 +708,7 @@ internal sealed class ResultPair
             "MOVE" => "moves", "ROTATE" => "turns", "SCALE" => "rescales", "DISABLE" => "disables", "ENABLE" => "enables", "ADD" => "adds",
             "BASE" => "swaps the base object of", "LOCATION-REF" => "sets the location reference of", "OWNER" => "changes the owner of",
             "BOUNDS" => "changes the bounds of", "RECORD-FLAGS" => "changes the record flags of", "ENABLE-PARENT" => "changes the enable parent of",
-            _ when kind.StartsWith("FIELD:", StringComparison.Ordinal) => $"changes {kind[6..]} of",
+            _ when kind.StartsWith("FIELD:", StringComparison.Ordinal) => $"changes the {RecordWords.Field(kind[6..])} of",
             _ => $"makes a {kind} change to",
         };
 
@@ -749,10 +748,14 @@ internal sealed class ResultPair
                 : tc.EditorId ?? tc.Name ?? (tc.Worldspace is not null ? $"{tc.Worldspace}{(tc.Grid is null ? "" : " cell " + tc.Grid)}" : tc.FormKey);
             string where = cellName is { Length: > 0 } && e.RecordType != "CELL" ? $" in {cellName}" : "";
             string change = before is { Length: <= 80 } && patch is { Length: <= 80 } && before != patch ? $": {before} → {patch}" : "";
-            string summary = $"the patch {Verb(e.Kind)} {e.RecordType} {e.FormKey}{Who(d?.EditorId, d?.BaseType, d?.BaseEditorId)}{where}{change}";
+            // the record in words: its type, its editor ID (else its FormID and plugin), and its base object when it has one
+            string name = RecordWords.Name(d?.EditorId, d?.BaseEditorId, e.FormKey);
+            string baseOf = d?.EditorId is { Length: > 0 } && d.BaseEditorId is { Length: > 0 } be ? $" ({be})" : "";
+            string summary = $"the patch {Verb(e.Kind)} {RecordWords.Type(e.RecordType)} {name}{baseOf}{where}{change}";
             return new ResultRow(index, ResultGroup.PatchChange, _p.Id, "edit", e.Kind, e.RecordType, e.FormKey,
                 e.Kind.StartsWith("FIELD:", StringComparison.Ordinal) ? e.Kind[6..] : null, d?.EditorId, d?.BaseEditorId, d?.BaseType,
-                e.Category, e.Rule, null, summary, values, place, e.Kind == "DISABLE" ? "before" : "after", Array.Empty<string>(), note);
+                e.Category, e.Rule, null, summary, values, place, e.Kind == "DISABLE" ? "before" : "after", Array.Empty<string>(), note,
+                e.RecordType == "CELL" ? null : cellName);
         }
 
         // ---- predicted overlaps the scorecard does not score ----

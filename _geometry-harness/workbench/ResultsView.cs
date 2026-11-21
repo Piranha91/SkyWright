@@ -79,7 +79,8 @@ internal static class ResultsView
     static readonly TextBox FilterBox = new() { MinWidth = 180, ToolTip = "list only rows whose text holds this (any case)" };
     static readonly TextBlock CountLine = new() { Margin = new Thickness(6, 2, 6, 2), Foreground = Theme.Brush(Theme.Dim) };
     static readonly TextBlock Legend = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(6, 0, 6, 2), Foreground = Theme.Brush(Theme.Dim), FontSize = 11 };
-    static readonly ListBox Rows = new();
+    // the rows as a table: a column per thing a modder sorts or reads by (ResultTableRow)
+    static readonly ListView Rows = new() { View = ResultTableRow.Grid() };
     static readonly TextBox Detail = new() { IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Height = 210, Margin = new Thickness(6, 2, 6, 4), FontSize = 12 };
 
     static EvaluationResults? _results;
@@ -104,7 +105,6 @@ internal static class ResultsView
     internal static string? OpenCell { get; private set; }
     internal static int Marked { get; private set; }
 
-    sealed record RowItem(ResultRow Row, string Text) { public override string ToString() => Text; }
 
     internal static UIElement Build()
     {
@@ -143,7 +143,18 @@ internal static class ResultsView
             _filterTimer.Tick -= FilterTick; _filterTimer.Tick += FilterTick;
             _filterTimer.Stop(); _filterTimer.Start();
         };
-        Rows.SelectionChanged += (_, _) => { if (_filling || Rows.SelectedItem is not RowItem item) return; Say(() => OpenRow(item.Row)); };
+        // a click on a column's header sorts by it; a second click turns the order round
+        Rows.AddHandler(GridViewColumnHeader.ClickEvent, new RoutedEventHandler((_, e) =>
+        {
+            if (e.OriginalSource is not GridViewColumnHeader { Column.DisplayMemberBinding: System.Windows.Data.Binding { Path.Path: { } path } }) return;
+            var view = System.Windows.Data.CollectionViewSource.GetDefaultView(Rows.ItemsSource);
+            if (view is null) return;
+            var dir = view.SortDescriptions.FirstOrDefault() is { } d && d.PropertyName == path && d.Direction == System.ComponentModel.ListSortDirection.Ascending
+                ? System.ComponentModel.ListSortDirection.Descending : System.ComponentModel.ListSortDirection.Ascending;
+            view.SortDescriptions.Clear();
+            view.SortDescriptions.Add(new System.ComponentModel.SortDescription(path, dir));
+        }));
+        Rows.SelectionChanged += (_, _) => { if (_filling || Rows.SelectedItem is not ResultTableRow item) return; Say(() => OpenRow(item.Row)); };
         Legend.Text = "In the scene: " + ResultMarks.Legend(Groups.Select(g => (g.Value.Mark, g.Value.Words)))
                     + "; cyan: the row's object, magenta: its other object. " + NotScoredMeans;
         // the finer filters, the notes and the marks' legend fold away, so the rows keep the height
@@ -247,7 +258,7 @@ internal static class ResultsView
         {
             var all = r.Pairs.Where(p => Loaded.ContainsKey(p.Id)).SelectMany(p => Loaded[p.Id]);
             _listed = Select(all, Pair, Shown, Categories, TextFilter);
-            Rows.ItemsSource = _listed.Select(x => new RowItem(x, Line(x))).ToList();
+            Rows.ItemsSource = _listed.Select(x => new ResultTableRow(x, Line(x))).ToList();
             var counts = Pair is null ? r.Totals : r.Pairs.First(p => p.Id == Pair).Counts;
             foreach (var (g, cb) in GroupBoxes)
                 {
@@ -328,8 +339,9 @@ internal static class ResultsView
             "",
             $"{g.Shape} {(r.Group == ResultGroup.PatchChange ? $"patch change nothing predicted, the scorecard's category {CategoryWords(r.Category)} ({r.Rule})" : g.Words)}"
                 + (r.Group is ResultGroup.Addressed or ResultGroup.NotAddressed ? $"  —  {AddressedMeans}" : r.Group == ResultGroup.NotScored ? $"  —  {NotScoredMeans}" : ""),
-            $"pair {r.Pair}; {r.RecordType} {r.FormKey}" + (r.EditorId is { } e ? $" '{e}'" : "") + (r.BaseEditorId is { } b ? $"; base {b}" + (r.BaseType is { } bt ? $" ({bt})" : "") : "")
-                + (r.Field is { } f ? $"; field {f}" : "") + (r.Attribution is { } a ? $"; attribution: {a}" : ""),
+            $"pair {r.Pair}; {RecordWords.Named(r.RecordType, r.EditorId, r.BaseEditorId, r.FormKey)}"
+                + (r.EditorId is not null && r.BaseEditorId is { } b ? $"; base object {b}" : "") + (r.BaseType is { } bt ? $" ({bt.ToLowerInvariant()})" : "")
+                + (r.Field is { } f ? $"; {RecordWords.Field(f)}" : "") + (r.Attribution is { } a ? $"; attribution: {a}" : ""),
         };
         if (r.Values.Count > 0) { lines.Add(""); foreach (var v in r.Values) lines.Add($"{v.Label}{(v.Plugin is { } p ? $" ({p})" : "")}: {v.Text}"); }
         if (r.JoinedEdits.Count > 0) { lines.Add(""); lines.Add("the patch's edits here:"); foreach (var j in r.JoinedEdits) lines.Add("  " + j); }
@@ -358,13 +370,13 @@ internal static class ResultsView
     {
         if (_results is not { } res) throw new InvalidOperationException("no evaluation is open.");
         Open = r; Detail.Text = DetailText(r); OpenCell = null; OpenSaid = null;
-        var item = (Rows.ItemsSource as List<RowItem>)?.FirstOrDefault(i => ReferenceEquals(i.Row, r));
+        var item = (Rows.ItemsSource as List<ResultTableRow>)?.FirstOrDefault(i => ReferenceEquals(i.Row, r));
         if (item is not null && !ReferenceEquals(Rows.SelectedItem, item)) { bool was = _filling; _filling = true; try { Rows.SelectedItem = item; Rows.ScrollIntoView(item); } finally { _filling = was; } }
         var pair = res.Pairs.First(p => p.Id == r.Pair);
         string setup = SetupOf(r); OpenSetup = setup;
         bool placedRef = r.Place.RefKey is not null && r.RecordType is not ("NAVM" or "LAND" or "CELL");
         if (r.Place.Cell is null && !placedRef && r.RecordType is not ("NAVM" or "LAND"))
-            return OpenSaid = $"{r.RecordType} {r.FormKey} has no view: {r.Place.WhyNot}.";
+            return OpenSaid = $"{RecordWords.Named(r.RecordType, r.EditorId, r.BaseEditorId, r.FormKey)} has no view: {r.Place.WhyNot}.";
         // the navmesh is drawn for a navmesh row and left out otherwise, where its wire only hides the objects
         var order = OrderOf(pair, setup) with { Navmesh = r.Lane == "navmesh" || r.RecordType == "NAVM" };
         int gen = ++_openGeneration;
@@ -395,16 +407,16 @@ internal static class ResultsView
                 else if (r.RecordType is "NAVM" or "LAND") cell = r.Place.Cell ?? x.Locate(r.FormKey)?.Cell;
                 else cell = r.Place.Cell;
                 if (cell is null)
-                    throw new InvalidOperationException(OpenSaid = $"{r.RecordType} {r.FormKey} has no view: {(placedRef ? "its position falls in no cell of its worldspace in this setup" : "this setup's load order files it under no cell")}.");
+                    throw new InvalidOperationException(OpenSaid = $"{RecordWords.Named(r.RecordType, r.EditorId, r.BaseEditorId, r.FormKey)} has no view: {(placedRef ? "its position falls in no cell of its worldspace in this setup" : "this setup's load order files it under no cell")}.");
                 OpenCell = cell;
                 Shell.PartnerFor = sel => string.Equals(sel, r.Place.RefKey, StringComparison.OrdinalIgnoreCase) ? r.Place.OtherKey
                                         : string.Equals(sel, r.Place.OtherKey, StringComparison.OrdinalIgnoreCase) ? r.Place.RefKey : null;
                 Shell.SceneCaption = setup == "after" ? $"AFTER the patch ({pair.PatchPlugin})" : "BEFORE the patch";
-                var said = SceneDirector.Request(new SceneRequest(order, cell, land, $"{Groups[r.Group].Words}: {r.RecordType} {r.FormKey}") { Shown = ApplyMarks });
+                var said = SceneDirector.Request(new SceneRequest(order, cell, land, $"{Groups[r.Group].Words}: {RecordWords.Named(r.RecordType, r.EditorId, r.BaseEditorId, r.FormKey)}") { Shown = ApplyMarks });
                 return OpenSaid = said + (extra is null ? "" : $" Note: {extra}.");
             });
         }), TaskScheduler.Default);
-        return waited ? $"reading the load order of {order.Label} to place {r.FormKey} (once per setup, a few seconds)" : $"opening {r.RecordType} {r.FormKey} on {order.Label}";
+        return waited ? $"reading the load order of {order.Label} to place {RecordWords.Named(r.RecordType, r.EditorId, r.BaseEditorId, r.FormKey)} (once per setup, a few seconds)" : $"opening {RecordWords.Named(r.RecordType, r.EditorId, r.BaseEditorId, r.FormKey)} on {order.Label}";
     }
 
     /// <summary>Mark, in the scene shown, every listed row of the open row's pair that the scene draws, each in its group's shape.</summary>

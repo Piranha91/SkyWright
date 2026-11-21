@@ -21,6 +21,41 @@ internal static class Theme
   <Style TargetType="Window"><Setter Property="Background" Value="#1E1E1E"/><Setter Property="Foreground" Value="#E6E6E6"/></Style>
   <Style TargetType="TabControl"><Setter Property="Background" Value="#252526"/><Setter Property="BorderBrush" Value="#3F3F46"/></Style>
   <Style TargetType="ListBox"><Setter Property="Background" Value="#1E1E1E"/><Setter Property="Foreground" Value="#E6E6E6"/><Setter Property="BorderBrush" Value="#3F3F46"/></Style>
+  <Style TargetType="ListView"><Setter Property="Background" Value="#1E1E1E"/><Setter Property="Foreground" Value="#E6E6E6"/><Setter Property="BorderBrush" Value="#3F3F46"/></Style>
+  <Style TargetType="ListViewItem">
+    <Setter Property="Foreground" Value="#E6E6E6"/><Setter Property="ToolTip" Value="{Binding Tip}"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ListViewItem">
+          <Border x:Name="Bd" Background="Transparent" Padding="0,3">
+            <GridViewRowPresenter Columns="{TemplateBinding GridView.ColumnCollection}" Content="{TemplateBinding Content}"/>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="#2D2D33"/></Trigger>
+            <Trigger Property="IsSelected" Value="True"><Setter TargetName="Bd" Property="Background" Value="#264F78"/></Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+  <Style TargetType="GridViewColumnHeader">
+    <Setter Property="Foreground" Value="#C8C8C8"/><Setter Property="HorizontalContentAlignment" Value="Left"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="GridViewColumnHeader">
+          <Grid>
+            <Border x:Name="Bd" Background="#252526" BorderBrush="#3F3F46" BorderThickness="0,0,1,1" Padding="6,4">
+              <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
+            </Border>
+            <Thumb x:Name="PART_HeaderGripper" HorizontalAlignment="Right" Width="6" Cursor="SizeWE" Opacity="0"/>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="#2D2D33"/></Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
   <Style TargetType="TreeView"><Setter Property="Background" Value="#1E1E1E"/><Setter Property="Foreground" Value="#E6E6E6"/><Setter Property="BorderBrush" Value="#3F3F46"/></Style>
   <Style TargetType="TreeViewItem"><Setter Property="Foreground" Value="#E6E6E6"/></Style>
   <Style TargetType="TextBox"><Setter Property="Background" Value="#2D2D30"/><Setter Property="Foreground" Value="#E6E6E6"/><Setter Property="BorderBrush" Value="#55555C"/><Setter Property="CaretBrush" Value="#E6E6E6"/></Style>
