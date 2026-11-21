@@ -115,7 +115,7 @@ internal static class ResultsView
         var filters = new WrapPanel { Margin = new Thickness(6, 2, 6, 2) };
         foreach (var (group, g) in Groups)
         {
-            var cb = new CheckBox { IsChecked = true, Margin = new Thickness(0, 0, 14, 2), Tag = group, Content = $"{g.Shape} {g.Words}" };
+            var cb = new CheckBox { IsChecked = true, Margin = new Thickness(0, 0, 14, 2), Tag = group, Content = GroupLabel(group, g.Words) };
             cb.Click += (_, _) => { if (_filling) return; if (cb.IsChecked == true) Shown.Add(group); else Shown.Remove(group); Refill(); };
             GroupBoxes[group] = cb; filters.Children.Add(cb);
         }
@@ -146,7 +146,9 @@ internal static class ResultsView
         // a click on a column's header sorts by it; a second click turns the order round
         Rows.AddHandler(GridViewColumnHeader.ClickEvent, new RoutedEventHandler((_, e) =>
         {
-            if (e.OriginalSource is not GridViewColumnHeader { Column.DisplayMemberBinding: System.Windows.Data.Binding { Path.Path: { } path } }) return;
+            if (e.OriginalSource is not GridViewColumnHeader { Column: { } col }) return;
+            // the result square's column sorts by the result's words
+            var path = col.DisplayMemberBinding is System.Windows.Data.Binding { Path.Path: { } p } ? p : nameof(ResultTableRow.Result);
             var view = System.Windows.Data.CollectionViewSource.GetDefaultView(Rows.ItemsSource);
             if (view is null) return;
             var dir = view.SortDescriptions.FirstOrDefault() is { } d && d.PropertyName == path && d.Direction == System.ComponentModel.ListSortDirection.Ascending
@@ -174,6 +176,15 @@ internal static class ResultsView
         body.Children.Add(Rows); body.Children.Add(split); body.Children.Add(Detail);
         panel.Children.Add(body);
         return panel;
+    }
+
+    /// <summary>A result filter's label: the table's colored square, then the words.</summary>
+    static StackPanel GroupLabel(ResultGroup g, string words)
+    {
+        var sp = new StackPanel { Orientation = Orientation.Horizontal };
+        var sq = ResultTableRow.Square(g); sq.Margin = new Thickness(0, 0, 6, 0);
+        sp.Children.Add(sq); sp.Children.Add(new TextBlock { Text = words });
+        return sp;
     }
 
     static void FilterTick(object? s, EventArgs e) { _filterTimer!.Stop(); TextFilter = FilterBox.Text.Trim(); Refill(); }
@@ -244,7 +255,9 @@ internal static class ResultsView
             PairBox.Items.Clear();
             PairBox.Items.Add(new ComboBoxItem { Content = $"All pairs  —  {CountsText(r.Totals)}", Tag = null });
             foreach (var p in r.Pairs)
-                PairBox.Items.Add(new ComboBoxItem { Content = $"{p.Id}  ({p.PatchPlugin})  —  {CountsText(p.Counts)}", Tag = p.Id });
+                // the pair by its mods, as a modder knows it; its id and patch in the tooltip
+                PairBox.Items.Add(new ComboBoxItem { Content = $"{string.Join(", ", p.Subject)} against {string.Join(", ", p.Partner)}  —  {CountsText(p.Counts)}", Tag = p.Id,
+                                                     ToolTip = $"{p.Id}; patch {p.PatchPlugin}" });
             PairBox.SelectedIndex = Pair is null ? 0 : 1 + r.Pairs.ToList().FindIndex(p => p.Id == Pair);
         }
         finally { _filling = was; }
@@ -258,12 +271,13 @@ internal static class ResultsView
         {
             var all = r.Pairs.Where(p => Loaded.ContainsKey(p.Id)).SelectMany(p => Loaded[p.Id]);
             _listed = Select(all, Pair, Shown, Categories, TextFilter);
-            Rows.ItemsSource = _listed.Select(x => new ResultTableRow(x, Line(x))).ToList();
+            var pairs = _results?.Pairs.ToDictionary(p => p.Id, StringComparer.OrdinalIgnoreCase);
+            Rows.ItemsSource = _listed.Select(x => new ResultTableRow(x, Line(x), pairs?.GetValueOrDefault(x.Pair))).ToList();
             var counts = Pair is null ? r.Totals : r.Pairs.First(p => p.Id == Pair).Counts;
             foreach (var (g, cb) in GroupBoxes)
                 {
                 int? n = g switch { ResultGroup.Addressed => counts.Addressed, ResultGroup.NotAddressed => counts.NotAddressed, ResultGroup.PatchChange => counts.PatchChange, _ => counts.NotScored };
-                cb.Content = $"{Groups[g].Shape} {Groups[g].Words}  ({n?.ToString("N0") ?? "reading"})";
+                cb.Content = GroupLabel(g, $"{Groups[g].Words}  ({n?.ToString("N0") ?? "reading"})");
             }
             foreach (var (c, cb) in CategoryBoxes)
                 cb.Content = $"{CategoryWords(c)}  ({(c == 3 ? counts.Category3 : c == 4 ? counts.Category4 : counts.Category5):N0})";

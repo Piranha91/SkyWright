@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Media;
 
 namespace Workbench;
 
@@ -81,17 +82,33 @@ internal static class RecordWords
     };
 }
 
-/// <summary>One results row as the table shows it: a column per thing a modder sorts or reads by.</summary>
-internal sealed record ResultTableRow(ResultRow Row, string Line)
+/// <summary>One results row as the table shows it: a column per thing a modder sorts or reads by. The pair's mods are
+/// named, not the pair's id; the result is a colored square (its words in the tooltip).</summary>
+internal sealed record ResultTableRow(ResultRow Row, string Line, ResultPair? Pair)
 {
-    public string Mark => ResultRules.Groups[Row.Group].Shape;
-    public string Result => Row.Group == ResultGroup.PatchChange ? Row.Category switch { 3 => "new value", 4 => "forwards a value", 5 => "not measured", _ => "patch change" }
-                                                                 : ResultRules.Groups[Row.Group].Words;
-    public string Pair => Row.Pair;
+    /// <summary>A result's color: green addressed, red not addressed, amber a patch change nothing predicted, grey an overlap not scored.</summary>
+    internal static Brush BrushOf(ResultGroup g) => Theme.Brush(g switch
+    {
+        ResultGroup.Addressed => "#4CAF50",
+        ResultGroup.NotAddressed => "#E5534B",
+        ResultGroup.PatchChange => "#E0A030",
+        _ => "#8A8A8A",
+    });
+
+    /// <summary>A small square of a result's color, for the table and the filters.</summary>
+    internal static Border Square(ResultGroup g) => new() { Width = 11, Height = 11, CornerRadius = new CornerRadius(2), Background = BrushOf(g), VerticalAlignment = VerticalAlignment.Center };
+
+    public string FormKey => Row.FormKey;
+    public string Type => RecordWords.Type(Row.RecordType) + (Row.BaseType is { Length: > 0 } b && Row.RecordType is "REFR" or "ACHR" ? $" ({System.Text.RegularExpressions.Regex.Replace(b, "(?<=[a-z])(?=[A-Z])", " ").ToLowerInvariant()})" : "");
+    public Brush ResultBrush => BrushOf(Row.Group);
+    public string Result => Row.Group == ResultGroup.PatchChange
+        ? "patch change nothing predicted: " + (Row.Category switch { 3 => "a new value", 4 => "forwards a value", 5 => "not measured", _ => "category " + Row.Category })
+        : ResultRules.Groups[Row.Group].Words;
+    /// <summary>The mod (or mods) the pair checks, and the one it is checked against, by plugin name.</summary>
+    public string Mod => Pair is null ? Row.Pair : string.Join(", ", Pair.Subject);
+    public string Against => Pair is null ? "" : string.Join(", ", Pair.Partner);
     public string What => Row.Lane == "record" ? $"{RecordWords.Field(Row.Field ?? Row.Kind)} lost" : RecordWords.Change(Row.Kind);
     public string Object => RecordWords.Name(Row.EditorId, Row.BaseEditorId, Row.FormKey);
-    public string Type => RecordWords.Type(Row.RecordType) + (Row.BaseType is { Length: > 0 } b && Row.RecordType is "REFR" or "ACHR" ? $" ({b.ToLowerInvariant()})" : "");
-    public string Plugin => RecordWords.Plugin(Row.FormKey);
     public string Where => Row.Where ?? (Row.Place.Cell is { } c ? RecordWords.Form(c) : "");
     /// <summary>Before → after, when both are short enough to read in a cell; else empty (the values pane has them).</summary>
     public string Change
@@ -108,27 +125,41 @@ internal sealed record ResultTableRow(ResultRow Row, string Line)
     public string Tip => Line;
     public override string ToString() => Line;
 
-    /// <summary>The table's columns, in order: header, the property shown, and the width it starts at.</summary>
-    internal static readonly (string Header, string Path, double Width, string Tip)[] Columns =
+    /// <summary>The table's columns, in order: header, the property shown (null: the result square), the width it starts at, and the header's tooltip.</summary>
+    internal static readonly (string Header, string? Path, double Width, string Tip)[] Columns =
     {
-        ("", nameof(Mark), 26, "the row's mark in the 3D view"),
-        ("Result", nameof(Result), 100, "addressed, not addressed, a patch change nothing predicted (by kind), or an overlap the scorecard does not score"),
-        ("Pair", nameof(Pair), 90, "the pair of mods the row belongs to"),
+        ("FormKey", nameof(FormKey), 150, "the record's FormID and the plugin it comes from"),
+        ("Type", nameof(Type), 175, "the kind of record"),
+        ("", null, 30, "green: addressed · red: not addressed · amber: a patch change nothing predicted · grey: an overlap the scorecard does not score"),
+        ("Mod", nameof(Mod), 190, "the mod the pair checks"),
+        ("Against", nameof(Against), 170, "the mod it is checked against"),
         ("Change", nameof(What), 130, "what was done to the record"),
         ("Object", nameof(Object), 190, "the record by its editor ID, else its FormID and plugin"),
-        ("Type", nameof(Type), 130, "the kind of record"),
-        ("Plugin", nameof(Plugin), 150, "the plugin the record comes from"),
         ("Where", nameof(Where), 170, "the cell it is in"),
         ("Before → after", nameof(Change), 200, "the value before the patch and the one the patch sets, when short"),
         ("View", nameof(View), 70, "'no view' when the row has no place to show; its tooltip says why"),
     };
 
-    /// <summary>A grid view with the table's columns.</summary>
+    /// <summary>A grid view with the table's columns; the result column draws its square.</summary>
     internal static GridView Grid()
     {
         var g = new GridView { AllowsColumnReorder = true };
         foreach (var (h, path, w, tip) in Columns)
-            g.Columns.Add(new GridViewColumn { Header = new TextBlock { Text = h, ToolTip = tip }, DisplayMemberBinding = new Binding(path), Width = w });
+        {
+            var col = new GridViewColumn { Header = new TextBlock { Text = h, ToolTip = tip, MinWidth = 14, Background = Brushes.Transparent }, Width = w };
+            if (path is not null) col.DisplayMemberBinding = new Binding(path);
+            else
+            {
+                var sq = new FrameworkElementFactory(typeof(Border));
+                sq.SetValue(FrameworkElement.WidthProperty, 11.0); sq.SetValue(FrameworkElement.HeightProperty, 11.0);
+                sq.SetValue(Border.CornerRadiusProperty, new CornerRadius(2));
+                sq.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+                sq.SetBinding(Border.BackgroundProperty, new Binding(nameof(ResultBrush)));
+                sq.SetBinding(FrameworkElement.ToolTipProperty, new Binding(nameof(Result)));
+                col.CellTemplate = new DataTemplate { VisualTree = sq };
+            }
+            g.Columns.Add(col);
+        }
         return g;
     }
 }
