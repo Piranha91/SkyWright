@@ -20,6 +20,12 @@ using Mutagen.Bethesda.Skyrim;
 //       planned geometry, links, doors and the grid NavGrid rebuilds, each kept triangle its cover fields, and every
 //       carried record must equal its winner. Refused when the load order differs, or PATCH.esp exists. Exit 0 on a
 //       read-back that holds.
+//   navedit write --repair-plan PLAN.json --out PATCH.esp
+//       houseCARL's request R1: writes a navownprobe --repair-plan (relink, follow the ground, NAVI) in this process, as a
+//       navedit plan is written: the plan's ops through the core write engine into a NEW patch, every carried cell and
+//       worldspace forwarded from its winner, then the plan's own read-back (_shared/NavRepairReadBack.cs, the one
+//       navownprobe --repair-readback runs) beside the patch as PATCH.readback.json. The order is the plan's. Refused
+//       navmeshes in the plan are not written, and are named. Exit 0 when the read-back holds.
 //   navedit marker --markers MARKERS.json --out RESULT.json [--instance DIR --game DIR --profile NAME] [--enable X.esp|PATH ...]
 //       The station marker check (_shared/NavMarker.cs): for each lab marker, the triangle it stands on, its nearest open
 //       edge over connected ground, what lies beyond that edge, and the step across each edge link near it, with a
@@ -49,7 +55,7 @@ using Mutagen.Bethesda.Skyrim;
 // other probes.
 
 if (args.Length >= 1 && args[0] == "--selftest") return NavEditSelfTest.Run();
-if (args.Length < 1 || args[0] is not ("plan" or "write" or "marker")) { Console.Error.WriteLine("usage: navedit plan --edits EDITS.json --out PLAN.json [--instance DIR --game DIR --profile NAME] | navedit write --plan PLAN.json --out PATCH.esp | navedit marker --markers MARKERS.json --out RESULT.json [--instance DIR --game DIR --profile NAME] | navedit --selftest"); return 2; }
+if (args.Length < 1 || args[0] is not ("plan" or "write" or "marker")) { Console.Error.WriteLine("usage: navedit plan --edits EDITS.json --out PLAN.json [--instance DIR --game DIR --profile NAME] | navedit write --plan PLAN.json --out PATCH.esp | navedit write --repair-plan PLAN.json --out PATCH.esp | navedit marker --markers MARKERS.json --out RESULT.json [--instance DIR --game DIR --profile NAME] | navedit --selftest"); return 2; }
 
 var flags = new Dictionary<string, string>(StringComparer.Ordinal);
 var enables = new List<string>();   // `marker` only: --enable may repeat (each a plugin name or a patch file's path)
@@ -63,12 +69,12 @@ string[] known = args[0] switch
 {
     "plan" => new[] { "--edits", "--out", "--instance", "--game", "--profile" },
     "marker" => new[] { "--markers", "--out", "--instance", "--game", "--profile" },
-    _ => new[] { "--plan", "--out" },
+    _ => new[] { "--plan", "--repair-plan", "--out" },
 };
 foreach (var k in flags.Keys)
     if (!known.Contains(k)) { Console.Error.WriteLine($"navedit {args[0]}: '{k}' is not one of its flags ({string.Join(", ", known)})."); return 2; }
 
-try { return args[0] switch { "plan" => NavEditCli.Plan(flags), "marker" => NavEditCli.Marker(flags, enables), _ => NavEditCli.Write(flags) }; }
+try { return args[0] switch { "plan" => NavEditCli.Plan(flags), "marker" => NavEditCli.Marker(flags, enables), _ => flags.ContainsKey("--repair-plan") ? NavEditCli.WriteRepair(flags) : NavEditCli.Write(flags) }; }
 catch (NavEditCli.Refusal r) { Console.Error.WriteLine(r.Message); return 2; }
 
 static class NavEditCli
@@ -572,6 +578,7 @@ static class NavEditCli
             return true;
         }
         foreach (var k in named) Load(k, true);
+        var absent = new HashSet<FormKey>();
         // the navmeshes the ARM puts under the markers, found rather than named (houseCARL, 2026-11-22: in a layout-change
         // arm which navmesh stands under a marker is exactly what is not known in advance): every navmesh of the interior
         // cell, or every navmesh of the worldspace whose own vertices come within reach of a marker in plan (by geometry,
@@ -590,6 +597,8 @@ static class NavEditCli
             var under = new HashSet<FormKey>();
             foreach (var p in order)
             {
+                try
+                {
                 using var mod = SkyrimMod.CreateFromBinaryOverlay(p, SkyrimRelease.SkyrimSE);
                 foreach (var nm in mod.EnumerateMajorRecords<INavigationMeshGetter>())
                 {
@@ -601,14 +610,18 @@ static class NavEditCli
                     };
                     if (here) under.Add(nm.FormKey);   // the winner's own geometry decides below (a later deletion drops it)
                 }
+                }
+                catch (Exception ex) when (ex is not Refusal)
+                {
+                    throw new Refusal($"navedit marker: the navmeshes of {Path.GetFileName(p)} could not be read ({ex.GetType().Name}: {ex.Message}); check the plugin, or name the navmeshes in MARKERS.json instead of a worldspace or cell.");
+                }
             }
             foreach (var k in under.OrderBy(k => k.ToString(), StringComparer.Ordinal))
-                if (!meshes.ContainsKey(k) && Load(k, false)) found.Add(k);
+                if (!meshes.ContainsKey(k)) { if (Load(k, false)) found.Add(k); else absent.Add(k); }   // a deleted or emptied winner: none there
         }
         // follow edge links outward from every loaded navmesh whose ground lies within reach of a marker, until none adds
         // one: a navmesh the load order does not have is absent (an edge into it is open), never silently skipped
         double reach = Math.Max(2 * margin, 128);
-        var absent = new HashSet<FormKey>();
         bool Near(NavmeshGeometry g) => markers.Any(m => g.Vertices.Count > 0
             && m.At.X >= g.Vertices.Min(v => v.X) - reach && m.At.X <= g.Vertices.Max(v => v.X) + reach
             && m.At.Y >= g.Vertices.Min(v => v.Y) - reach && m.At.Y <= g.Vertices.Max(v => v.Y) + reach);
@@ -705,16 +718,8 @@ static class NavEditCli
             if (!applied.Success) { Console.Error.WriteLine($"navedit write: the write engine refused the patch: {applied.Error}"); return 1; }
             foreach (var op in applied.Ops.Where(o => !o.Applied)) { Console.Error.WriteLine($"navedit write: {op.Label} was not applied: {op.Error}"); return 1; }
 
-            // the containers the engine carried (each navmesh's cell and worldspace) must be their winners' versions
-            JsonArray carried;
-            using (var patch = SkyrimMod.CreateFromBinaryOverlay(outPath, SkyrimRelease.SkyrimSE)) carried = NavRepairReadBack.Carried(patch, order).Records;
-            foreach (var g in carried.Where(c => (bool?)c!["holds"] == false && c["winner"] is not null).GroupBy(c => (string)c!["winner"]!, StringComparer.OrdinalIgnoreCase))
-            {
-                var fw = WritePatchBuilder.ForwardRecords(resolver,
-                    g.Select(c => new WritePatchBuilder.ForwardSpec { Target = FormKey.Factory((string)c!["record"]!), FromPlugin = g.Key }).ToList(),
-                    outPath, extend: true, sourceParam: g.Key);
-                if (!fw.Success) { Console.Error.WriteLine($"navedit write: forwarding the carried records from {g.Key} failed: {fw.Error}"); return 1; }
-            }
+            // a use_version that gains a neighbour, or a door edit, changes NAVI: never forward the winner's NAVI over it
+            if (ForwardCarried(resolver, outPath, order, NaviPlanned(again)) is { } ferr) { Console.Error.WriteLine(ferr); return 1; }
         }
         var masters = again.SelectMany(p => p.Row["useVersion"]?["masters"]?.AsArray().Select(x => (string)x!) ?? Array.Empty<string>())
                            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
@@ -728,6 +733,122 @@ static class NavEditCli
             naviAll["entries"] = new JsonArray(naviEntries.SelectMany(p => p.Row["navi"]!["entries"]!.AsArray()).Select(x => x!.DeepClone()).ToArray());
         }
         return ReadBack(outPath, order, again, masters, naviAll);
+    }
+
+    /// <summary>The containers the engine carried (each navmesh's cell and worldspace) made their winners' versions: every
+    /// carried record the read-back finds is not its winner's is forwarded from that winner. Null when done, else the error.</summary>
+    static bool NaviPlanned(IEnumerable<Planned> planned) => planned.Any(p => p.Row["navi"]?["entries"] is JsonArray { Count: > 0 });
+
+    static string? ForwardCarried(LoadOrderResolver resolver, string outPath, IReadOnlyList<string> order, bool naviPlanned = false)
+    {
+        // a NAVI the plan changes is not a carried record: forwarding its winner would undo the planned entries (the S2RN
+        // known answer, 2026-11-22: 144 entries written where 145 were planned); the read-back holds it to the plan instead
+        JsonArray carried;
+        using (var patch = SkyrimMod.CreateFromBinaryOverlay(outPath, SkyrimRelease.SkyrimSE)) carried = NavRepairReadBack.Carried(patch, order, naviPlanned).Records;
+        foreach (var g in carried.Where(c => (bool?)c!["holds"] == false && c["winner"] is not null).GroupBy(c => (string)c!["winner"]!, StringComparer.OrdinalIgnoreCase))
+        {
+            var fw = WritePatchBuilder.ForwardRecords(resolver,
+                g.Select(c => new WritePatchBuilder.ForwardSpec { Target = FormKey.Factory((string)c!["record"]!), FromPlugin = g.Key }).ToList(),
+                outPath, extend: true, sourceParam: g.Key);
+            if (!fw.Success) return $"navedit write: forwarding the carried records from {g.Key} failed: {fw.Error}";
+        }
+        return null;
+    }
+
+    // THE COMPOSE WIRE SHAPE, COPIED: a repair plan's op carries housecarl_apply's compose JSON ({type, fields, ctor_args,
+    // sets: [{path, verb, key, value, compose}]}, NAVI's NavigationMapInfo with its Parent arm among them). Its owner is the
+    // houseCARL server's WriteMappers.MapStruct and SplitPath (housecarl-mcp, which navedit does not reference); this is a
+    // faithful translation of them, and tests/test_navedit.py's drift case fingerprints both so a change there is reviewed.
+    static string[] SplitPath(string dotted) => dotted.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    static StructSpec MapCompose(JsonObject c)
+    {
+        var type = (string?)c["type"];
+        if (string.IsNullOrWhiteSpace(type)) throw new Refusal("navedit write: a compose in the repair plan names no type; write the plan again with navownprobe --repair-plan.");
+        List<WriteRequest>? sets = null;
+        if (c["sets"] is JsonArray ss && ss.Count > 0)
+        {
+            sets = new List<WriteRequest>(ss.Count);
+            foreach (var n in ss)
+            {
+                var path = (string?)n!["path"];
+                if (string.IsNullOrWhiteSpace(path)) throw new Refusal("navedit write: a compose's nested set in the repair plan has no path; write the plan again.");
+                var verb = (string?)n["verb"];
+                sets.Add(new WriteRequest
+                {
+                    RecordType = type!, Path = SplitPath(path!), Verb = string.IsNullOrWhiteSpace(verb) ? "Set" : verb!,
+                    Key = (string?)n["key"], Value = (string?)n["value"],
+                    Struct = n["compose"] is JsonObject nc ? MapCompose(nc) : null,
+                });
+            }
+        }
+        return new StructSpec
+        {
+            Type = type!,
+            Fields = (c["fields"] as JsonObject)?.ToDictionary(kv => kv.Key, kv => (string)kv.Value!),
+            CtorArgs = (c["ctor_args"] as JsonArray)?.Select(x => (string)x!).ToArray(),
+            Sets = sets,
+        };
+    }
+
+    /// <summary>`navedit write --repair-plan` (R1): a navownprobe repair plan written in this process.</summary>
+    public static int WriteRepair(Dictionary<string, string> f)
+    {
+        if (f.ContainsKey("--plan")) throw new Refusal("navedit write: give --plan (a navedit plan) or --repair-plan (a navownprobe repair plan), not both.");
+        var planPath = Need(f, "--repair-plan", "PLAN.json, from navownprobe --repair-plan");
+        var outPath = Path.GetFullPath(Need(f, "--out", "PATCH.esp, the new patch plugin"));
+        if (File.Exists(outPath)) throw new Refusal($"navedit write: {outPath} already exists; give a new patch name (navedit writes new patches only).");
+        JsonNode plan;
+        try { plan = JsonNode.Parse(File.ReadAllText(planPath))!; }
+        catch (Exception ex) { throw new Refusal($"navedit write: the repair plan '{planPath}' could not be read ({ex.Message}); write it with navownprobe --repair-plan."); }
+        var order = (plan["order"] as JsonArray)?.Select(x => (string)x!).ToList() ?? new List<string>();
+        if (order.Count == 0) throw new Refusal("navedit write: the repair plan names no load order; write it again with a current navownprobe --repair-plan.");
+        if (order.FirstOrDefault(p => !File.Exists(p)) is { } gone) throw new Refusal($"navedit write: the plan's load order names {gone}, which is not on disk; plan again on the current order.");
+        var plans = (plan["plans"] as JsonArray ?? new JsonArray()).Select(p => p!).ToList();
+        var refused = plans.Where(p => (string?)p["status"] == "refused").Select(p => (string)p["source"]!).ToList();
+        if (plans.Count == refused.Count) throw new Refusal("navedit write: the repair plan has nothing planned (every navmesh refused or none listed), so there is no patch to write.");
+        var ops = (plan["ops"] as JsonArray ?? new JsonArray()).Select(o => o!).ToList();
+        if (ops.Count == 0) throw new Refusal("navedit write: the repair plan carries no ops; write it again with navownprobe --repair-plan.");
+        var root = CheckoutLayout.FindRoot() ?? throw new Refusal("navedit write: the SkyWright checkout (SkyWright.sln) was not found above this program, so the rulebook cannot be located.");
+        var corpus = CheckoutLayout.Corpus(root);
+        if (!File.Exists(corpus)) throw new Refusal($"navedit write: the rulebook {corpus} is missing; generate it (see CLAUDE.md, Build and check).");
+        var rulebook = CorpusRulebook.Load(corpus);
+        Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
+        var edits = ops.Select(o => new WritePatchBuilder.PatchEdit
+        {
+            Target = FormKey.Factory((string)o["formid"]!), Path = SplitPath((string)o["field_path"]!), Verb = (string)o["op"]!,
+            Key = (string?)o["key"], Value = (string?)o["value"],
+            Struct = o["compose"] is JsonObject c ? MapCompose(c) : null,
+        }).ToList();
+        using (var resolver = LoadOrderResolver.Build(order))
+        {
+            var applied = WritePatchBuilder.Apply(resolver, rulebook, edits, outPath, extend: false);
+            if (!applied.Success) { Console.Error.WriteLine($"navedit write: the write engine refused the patch: {applied.Error}"); return 1; }
+            foreach (var op in applied.Ops.Where(o => !o.Applied)) { Console.Error.WriteLine($"navedit write: {op.Label} was not applied: {op.Error}"); return 1; }
+            bool naviPlanned = plan["navi"]?["entries"] is JsonArray ne && ne.Count > 0;
+            if (ForwardCarried(resolver, outPath, order, naviPlanned) is { } ferr) { Console.Error.WriteLine(ferr); return 1; }
+        }
+        // the ruling of 2026-11-22 (825ee14): a resolution patch masters every plugin whose version it supersedes; here the
+        // version carried is each overridden navmesh's winner, so each winner's plugin is a master (else a re-sort can put
+        // the patch below it, and the repair silently stops applying). The same master step as use_version.
+        var masters = plans.Where(p => (string?)p["status"] != "refused").Select(p => (string?)p["winner"]?["plugin"])
+                           .Where(x => !string.IsNullOrEmpty(x)).Select(x => x!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (masters.Count > 0 && AddMasters(outPath, order, masters) is { } merr) { Console.Error.WriteLine($"navedit write: {merr}"); return 1; }
+        foreach (var r in refused) Console.WriteLine($"not written (refused in the plan): {r}");
+        Console.WriteLine($"patch written: {outPath} ({ops.Count} ops, {plans.Count - refused.Count} navmesh plan(s)); its read-back:");
+        int rb = NavRepairReadBack.Run(planPath, outPath, Path.ChangeExtension(outPath, null) + ".readback.json");
+        using var written = SkyrimMod.CreateFromBinaryOverlay(outPath, SkyrimRelease.SkyrimSE);
+        var declared = written.ModHeader.MasterReferences.Select(m => m.Master.FileName.String).ToList();
+        var missing = masters.Where(m => !declared.Contains(m, StringComparer.OrdinalIgnoreCase)).ToList();
+        var pos = declared.Select(d => order.FindIndex(o => string.Equals(Path.GetFileName(o), d, StringComparison.OrdinalIgnoreCase))).ToList();
+        bool inOrder = pos.All(i => i >= 0) && pos.Zip(pos.Skip(1)).All(z => z.First < z.Second);
+        if (missing.Count > 0 || !inOrder)
+        {
+            Console.WriteLine($"   FAILS  the patch's masters [{string.Join(", ", declared)}] " + (missing.Count > 0 ? $"lack {string.Join(", ", missing)}, whose versions it supersedes" : "are not in load order"));
+            return 1;
+        }
+        Console.WriteLine($"   holds  the patch masters every winner it supersedes ({string.Join(", ", masters)}), in load order");
+        return rb;
     }
 
     /// <summary>The written patch against the plan: every changed navmesh's vertices, triangles (corners, edge fields, flags),

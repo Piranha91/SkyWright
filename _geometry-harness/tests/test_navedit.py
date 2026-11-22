@@ -117,6 +117,31 @@ def core_write_fingerprint():
     return hashlib.sha256(norm.encode("utf-8")).hexdigest()
 
 
+MCP_COMPOSE_FINGERPRINT = "8eae05ec0081e6656222661b763582a3d2c9342ed6158167db051b18daeaef2a"   # pin 461681f7
+
+
+def mcp_compose_fingerprint():
+    import hashlib
+    import re
+    t = (HARNESS.parent / "external" / "houseCARL" / "src" / "housecarl-mcp" / "WriteMappers.cs").read_text(encoding="utf-8").replace("\r\n", "\n")
+
+    def block(text, start):
+        i = text.index(start)
+        return text[i:text.index("\n    }\n", i) + 7]
+    parts = [block(t, "internal static StructSpec? MapStruct("),
+             t[t.index("static string[] SplitPath("):t.index("\n", t.index("=> dotted.Split"))]]
+    norm = "\n".join(re.sub(r"\s+", " ", x).strip() for x in parts)
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()
+
+
+def mcp_compose_drift():
+    got = mcp_compose_fingerprint()
+    assert got == MCP_COMPOSE_FINGERPRINT, (
+        f"the pinned server's compose mapping changed (fingerprint {got}, recorded {MCP_COMPOSE_FINGERPRINT}): review "
+        "navedit/Program.cs MapCompose and SplitPath against housecarl-mcp WriteMappers.MapStruct and SplitPath, then "
+        "record the new fingerprint")
+
+
 def core_write_drift():
     builder = (CORE / "WritePatchBuilder.cs").read_text(encoding="utf-8")
     assert not re.search(r"ExtraMasters|extraMasters|AdditionalMasters", builder), (
@@ -161,6 +186,7 @@ def ms_marker_known_answer():
 
 CASES = [
     ("core write drift: the copied core code is unchanged", core_write_drift),
+    ("compose drift: the copied server compose mapping is unchanged", mcp_compose_drift),
     ("2513 interior move planned with its grid and ops", lambda: selftest("2513")),
     ("2514 a fold is refused", lambda: selftest("2514")),
     ("2515 a linked edge holds sideways, moves in height", lambda: selftest("2515")),
