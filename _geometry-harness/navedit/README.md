@@ -78,17 +78,36 @@ not change the same navmesh; plan them separately.
   - passing 32,768 vertices or triangles.
 - An added triangle has no flags and no cover.
 
-**Every edit refuses an island navmesh**, whose own copy of the geometry in the navmesh info map would go stale. NavCut
-and fills come later (`C:/hc-runs/2026-11-21-navgrid/PLAN.md`, the plan gate).
+**Cut (NavCut).** `{"navmesh": K, "cut": {"outline": [[x, y], ...], "z": [bottom, top]}}` cuts the walkable surface out
+where a convex obstacle stands.
+- **What it cuts:** each triangle whose heights meet the band and whose plan overlaps the outline.
+  - A triangle wholly inside goes.
+  - A triangle partly inside is clipped into the convex pieces outside the outline, triangulated (a larger piece is
+    fanned from its centre), with heights on the original triangle's plane.
+- **Nothing is left half-joined.** The cut's lines can meet edges outside the hole, so an uncut neighbour on such an
+  edge is split at the same point, and every point is put into each piece edge it lies on.
+- **Pieces** keep their triangle's flags except the link bits, and have no cover.
+- **Numbering, links and doors** are the triangle edit's (swap-remove), with its refusals.
+- **Refused:**
+  - an outline that is not convex (cut a concave obstacle as convex parts), has under three corners, or has no area;
+  - an empty band;
+  - a cut that touches nothing;
+  - a cut reaching an edge that links into another navmesh.
+- **Not yet:** the outline is given, not taken from an obstacle's collision. Reading a placed reference's footprint
+  (through `ContactIndex`, which owns obstacle geometry) is the next step.
+
+**Every edit refuses an island navmesh**, whose own copy of the geometry in the navmesh info map would go stale. Fills
+come later (`C:/hc-runs/2026-11-21-navgrid/PLAN.md`, the plan gate).
 
 ## Evidence
 
-- `navedit --selftest`: C2513-C2529, run by `tests/test_navedit.py`. Twelve sabotage arms each turn their case red:
+- `navedit --selftest`: C2513-C2534, run by `tests/test_navedit.py`. Seventeen sabotage arms each turn their case red:
   - no fold, link, overlap, winding, third-triangle, door, last-link or cell-border check;
   - no coincident move;
   - no inbound re-point;
   - no self-link follow;
-  - closing up instead of swap-remove.
+  - closing up instead of swap-remove;
+  - for the cut: no neighbour split, no shared-point insertion, band ignored, no convex check, no linked-edge check.
 - Real data, 2026-11-21, on the lab's vanilla profile: `0E6430:Skyrim.esm` vertex 517 moved 48 u west.
   - Planned and written; the read-back held.
   - The patch's navmesh data is byte-identical to the patch an actor walked across in game. There the rebuilt-grid arm
@@ -97,6 +116,11 @@ and fills come later (`C:/hc-runs/2026-11-21-navgrid/PLAN.md`, the plan gate).
   - `0E6430` triangle 3 removed and added back: 15 write steps, cover kept on the moved triangle.
   - `101F28` (USSEP's version) triangle 0 removed and added back. Triangle 241 moved into slot 0, and `101F29`'s link
     to it was re-pointed in the same patch, with `101F29`'s own grid kept. Two navmeshes written in-process, 24 s.
+- Real data, NavCut, on the same profile: a 60 x 60 u hole cut from `0E6430` round the station's player start (band
+  z 1700-1950).
+  - 3 triangles became 25, with 12 new vertices, in 59 write steps. Written and read back.
+  - Against vanilla the patch removes exactly 3,600.0 u², leaves the hole's centre and corners uncovered, and has no
+    half-joined edge. Not yet seen in game.
 - The checks caught two real cases on this profile:
   - an edit built from Skyrim.esm's triangle corners when USSEP's version wins (refused: the edges were already
     shared);

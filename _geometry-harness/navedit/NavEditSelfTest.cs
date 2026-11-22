@@ -264,6 +264,85 @@ static class NavEditSelfTest
                 ? null : $"cut: {Fields(cut.After.Triangles[2])}; ops {string.Join(" | ", ops)}";
         });
 
+        // ---- NavCut ----
+        // What every cut must leave: no triangle over the hole, the area outside it unchanged, no vertex part-way along
+        // another triangle's edge (a half-joined edge), and the grid NavGrid's for the result.
+        string? Sound(TriEditResult r, double wantArea, (double X, double Y)[] holePoints)
+        {
+            if (r.Status != "planned") return "refused: " + string.Join(" ", r.Why);
+            var v = r.After!.Vertices; var tt = r.After.Triangles;
+            double area = tt.Sum(x => Math.Abs(((double)v[x.B].X - v[x.A].X) * ((double)v[x.C].Y - v[x.A].Y) - ((double)v[x.B].Y - v[x.A].Y) * ((double)v[x.C].X - v[x.A].X)) / 2);
+            if (Math.Abs(area - wantArea) > 0.5) return $"area {area:F2}, want {wantArea}";
+            bool In((double X, double Y) p, NavTri x)
+            {
+                double d(Vec3 a, Vec3 b) => ((double)b.X - a.X) * (p.Y - a.Y) - ((double)b.Y - a.Y) * (p.X - a.X);
+                double s1 = d(v[x.A], v[x.B]), s2 = d(v[x.B], v[x.C]), s3 = d(v[x.C], v[x.A]);
+                return (s1 > 1e-6 && s2 > 1e-6 && s3 > 1e-6) || (s1 < -1e-6 && s2 < -1e-6 && s3 < -1e-6);
+            }
+            foreach (var p in holePoints) if (tt.Any(x => In(p, x))) return $"a triangle still covers ({p.X}, {p.Y}) in the hole";
+            var used = tt.SelectMany(x => new[] { (int)x.A, x.B, x.C }).Distinct().ToList();
+            foreach (var x in tt)
+                foreach (var (a, b) in new[] { (x.A, x.B), (x.B, x.C), (x.C, x.A) })
+                    foreach (var k in used)
+                    {
+                        if (v[k] == v[a] || v[k] == v[b]) continue;
+                        double ex = v[b].X - v[a].X, ey = v[b].Y - v[a].Y, len2 = ex * ex + ey * ey;
+                        double s = ((v[k].X - v[a].X) * ex + (v[k].Y - v[a].Y) * ey) / len2;
+                        if (s <= 1e-6 || s >= 1 - 1e-6) continue;
+                        double dx = v[a].X + ex * s - v[k].X, dy = v[a].Y + ey * s - v[k].Y;
+                        if (dx * dx + dy * dy < 1e-6 && Math.Abs(v[a].Z + (v[b].Z - v[a].Z) * s - v[k].Z) < 0.01)
+                            return $"vertex {k} ({v[k].X}, {v[k].Y}) lies part-way along edge {a}-{b}: a half-joined edge";
+                    }
+            var g = NavGrid.Rebuild(v, tt.Select(x => ((int)x.A, (int)x.B, (int)x.C)).ToList());
+            return r.Grid!.CellBytes.SequenceEqual(g.CellBytes) ? null : "the grid is not NavGrid's for the result";
+        }
+        (float, float)[] Box(float x0, float y0, float x1, float y1) => new[] { (x0, y0), (x1, y0), (x1, y1), (x0, y1) };
+
+        // C2530: a 40 x 40 hole round the square's centre (vertex 4): every triangle touches it; 200² - 40² remains.
+        Case("2530 cut-centre-hole", () =>
+        {
+            var (v, t) = Linked();
+            return Sound(NavEdit.Cut(Geom(v, t), Box(80, 80, 120, 120), -50, 50, none), 40000 - 1600, new[] { (100.0, 100.0), (85.0, 115.0), (119.0, 81.0) });
+        });
+
+        // C2531: a 20 x 10 hole inside triangle 0 alone (x 20-40, y 5-15). The cut's lines meet triangle 0's edges shared
+        // with triangles 1 and 3, which are not cut: both are split at the same points, so nothing is left half-joined.
+        Case("2531 cut-splits-neighbours", () =>
+        {
+            var (v, t) = Linked();
+            var r = NavEdit.Cut(Geom(v, t), Box(20, 5, 40, 15), -50, 50, none);
+            if (Sound(r, 40000 - 200, new[] { (30.0, 10.0), (21.0, 6.0) }) is { } why) return why;
+            return r.Map[1] == -1 && r.Map[3] == -1 ? null : "triangles 1 and 3 should have been split (replaced)";
+        });
+
+        // C2532: an outline that is not convex, has two corners, or no area; an empty band; a cut that misses.
+        Case("2532 cut-refusals", () =>
+        {
+            var (v, t) = Linked();
+            var g = Geom(v, t);
+            return RefusedFor2(NavEdit.Cut(g, new[] { (0f, 0f), (100f, 0f), (50f, 20f), (100f, 100f), (0f, 100f) }, -50, 50, none), "not convex")
+                ?? RefusedFor2(NavEdit.Cut(g, new[] { (0f, 0f), (100f, 0f) }, -50, 50, none), "three corners")
+                ?? RefusedFor2(NavEdit.Cut(g, new[] { (0f, 0f), (100f, 0f), (200f, 0f) }, -50, 50, none), "no area")
+                ?? RefusedFor2(NavEdit.Cut(g, Box(80, 80, 120, 120), 50, -50, none), "height band is empty")
+                ?? RefusedFor2(NavEdit.Cut(g, Box(500, 500, 600, 600), -50, 50, none), "touches no triangle");
+        });
+
+        // C2533: the band decides the level: the same hole 300 u above the navmesh cuts nothing.
+        Case("2533 cut-height-band", () =>
+        {
+            var (v, t) = Linked();
+            return RefusedFor2(NavEdit.Cut(Geom(v, t), Box(80, 80, 120, 120), 300, 400, none), "touches no triangle");
+        });
+
+        // C2534: a cut reaching an edge that links into another navmesh is refused, saying so (the triangle edit underneath
+        // would refuse it too, less plainly).
+        Case("2534 cut-linked-edge", () =>
+        {
+            var (v, t) = Linked();
+            t[0] = t[0] with { Flags = 1, EdgeLink01 = 0 };                   // triangle 0's square edge 0-1 (y = 0) links out
+            return RefusedFor2(NavEdit.Cut(Geom(v, t, new List<NavEdgeLink> { new(O, 0) }), Box(40, -10, 60, 10), -50, 50, none), "cutting across a navmesh border");
+        });
+
         // C2528: bad input: a triangle index past the mesh, a corner that does not exist, nothing to do.
         Case("2528 bad-triangle-input", () =>
         {

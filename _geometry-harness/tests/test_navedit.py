@@ -1,4 +1,4 @@
-"""Known answers for navmesh editing (C2513-C2529), on _shared/NavEdit.cs through `navedit --selftest`.
+"""Known answers for navmesh editing (C2513-C2534), on _shared/NavEdit.cs through `navedit --selftest`.
 
     2513  an interior vertex moved: planned, the box kept, the grid NavGrid's for the moved mesh, ops for exactly that
           vertex, the box and the grid
@@ -18,6 +18,11 @@
     2527  an added triangle overlapping one on the same level is refused; 200 u up it is a bridge
     2528  bad triangle input is refused in one sentence
     2529  a navmesh's own table naming itself follows the moved triangle, or is cut
+    2530  NavCut: a hole round the centre leaves the area outside it, nothing over it, no half-joined edge, NavGrid's grid
+    2531  NavCut: a hole inside one triangle splits its uncut neighbours at the cut points
+    2532  NavCut: a non-convex, two-corner or flat outline, an empty band, and a cut that misses are refused
+    2533  NavCut: the height band picks the level; above the navmesh it cuts nothing
+    2534  NavCut: a cut reaching a linked edge is refused, saying so
 
 The real-data check (plan and write on a lab profile, read back, byte-compared with the in-game-tested patch) is in the
 2026-11-21 run folder; it needs a game and an MO2 instance, so it is not a test here.
@@ -65,6 +70,11 @@ CASES = [
     ("2527 added overlap refused, a bridge is not", lambda: selftest("2527")),
     ("2528 bad triangle input refused", lambda: selftest("2528")),
     ("2529 self-links follow or are cut", lambda: selftest("2529")),
+    ("2530 NavCut centre hole is sound", lambda: selftest("2530")),
+    ("2531 NavCut splits uncut neighbours", lambda: selftest("2531")),
+    ("2532 NavCut refusals", lambda: selftest("2532")),
+    ("2533 NavCut height band", lambda: selftest("2533")),
+    ("2534 NavCut linked edge refused", lambda: selftest("2534")),
 ]
 
 if __name__ == "__main__":

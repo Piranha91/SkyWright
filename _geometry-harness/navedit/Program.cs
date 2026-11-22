@@ -26,6 +26,7 @@ using Mutagen.Bethesda.Skyrim;
 // EDITS.json: {"edits": [EDIT, ...]}, one EDIT per navmesh, each one kind:
 //   {"navmesh": "0E6430:Skyrim.esm", "move": [{"vertex": 517, "to": [x, y, z]} | {"vertex": 517, "by": [dx, dy, dz]}, ...]}
 //   {"navmesh": "0E6430:Skyrim.esm", "remove": [12, 13], "add": {"vertices": [[x, y, z], ...], "triangles": [[a, b, c], ...]}}
+//   {"navmesh": "0E6430:Skyrim.esm", "cut": {"outline": [[x, y], ...], "z": [bottom, top]}}   (NavCut: a convex obstacle)
 //   An added triangle's corners index the navmesh's vertices, then the added ones (n, n+1, ...). A removed triangle's
 //   place is taken by the navmesh's last triangle (highest removal first); added triangles are appended after the kept ones.
 // The profile comes from the flags, then the environment and harness.local.json (_shared/HarnessTarget.cs), as for the
@@ -91,10 +92,10 @@ static class NavEditCli
                 var w = view.ResolveWinner(key);
                 var path = w is null ? null : order.FirstOrDefault(p => string.Equals(Path.GetFileName(p), w.Value.WinnerPlugin, StringComparison.OrdinalIgnoreCase));
                 var geom = path is null ? null : Winning(path, key);
-                bool isMove = e["move"] is not null, isTri = e["remove"] is not null || e["add"] is not null;
+                bool isMove = e["move"] is not null, isTri = e["remove"] is not null || e["add"] is not null, isCut = e["cut"] is not null;
                 if (w is null || path is null) refuse = $"{key} is in no plugin of this load order; check the FormKey and the profile.";
                 else if (geom is null) refuse = $"{key} has no geometry in its winner {w.Value.WinnerPlugin} (deleted or empty), so there is nothing to edit.";
-                else if (isMove == isTri) refuse = $"The edit of {key} must either move vertices or remove and add triangles, one kind per edit; split it into two plans.";
+                else if ((isMove ? 1 : 0) + (isTri ? 1 : 0) + (isCut ? 1 : 0) != 1) refuse = $"The edit of {key} must do one kind of thing: move vertices, remove and add triangles, or cut; split it into separate plans.";
                 else if (navi.Problem is { } np) refuse = $"The navmesh info map cannot be read ({np}), so whether {key} is an island is not known.";
                 else if (navi.Effective.TryGetValue(key, out var ent) && ent.Src.Map.MapInfos[ent.Index].Island is not null)
                     refuse = $"{key} is an island in the navmesh info map, which keeps its own copy of the geometry; editing islands is not supported yet.";
@@ -125,7 +126,17 @@ static class NavEditCli
                     var inbound = new Dictionary<FormKey, NavmeshGeometry>();
                     foreach (var (fk, (p, links)) in inboundIndex)
                         if (fk != key && links.Any(l => l.Mesh == key) && Winning(p, fk) is { } og) inbound[fk] = og;
-                    var r = NavEdit.EditTriangles(geom!, remove, addV, addT, inbound, Cover(path!, key));
+                    TriEditResult r;
+                    if (isCut)
+                    {
+                        var c = e["cut"]!;
+                        var outline = c["outline"]?.AsArray().Select(x => ((float)x![0]!, (float)x[1]!)).ToList();
+                        var z = c["z"]?.AsArray();
+                        r = outline is null || z is null || z.Count != 2
+                            ? TriEditResult.Refused($"The cut of {key} needs \"outline\" (corners [x, y] in order) and \"z\" [bottom, top].")
+                            : NavEdit.Cut(geom!, outline, (float)z[0]!, (float)z[1]!, inbound, Cover(path!, key));
+                    }
+                    else r = NavEdit.EditTriangles(geom!, remove, addV, addT, inbound, Cover(path!, key));
                     why = r.Why; ops = r.Ops.ToList();
                     if (r.Status == "planned")
                     {
@@ -134,7 +145,8 @@ static class NavEditCli
                         expect[key] = (r.After, old, path!, true);
                         // a navmesh whose links alone changed keeps its own grid, as its winner stores it
                         foreach (var (fk, og) in r.Others) expect[fk] = (og, Enumerable.Range(0, og.Triangles.Count).ToArray(), inboundIndex[fk].Path, false);
-                        row["removed"] = Arr(remove); row["addedTriangles"] = addT.Count; row["addedVertices"] = addV.Count;
+                        int gone = r.Map.Count(m => m < 0), added = r.After.Triangles.Count - (r.Map.Count - gone);
+                        row["removed"] = gone; row["addedTriangles"] = added; row["addedVertices"] = r.After.Vertices.Count - geom!.Vertices.Count;
                     }
                 }
                 foreach (var fk in expect.Keys)
