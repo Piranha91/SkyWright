@@ -1149,10 +1149,22 @@ if (emitPath is not null)
         var brokenRows = dangleStruct.Where(d => d.Kind is "EDGE-IDX" or "EDGE-NAV" && DanglingLinks.IsFinding(ModTouched(d.Rec, d.RecRole), ModTouched(d.Other, d.OtherRole)))
             .Select(d => new BrokenLink(d.Kind, d.Rec, d.Other, d.Tri ?? -1))
             .Concat(borderFindings.Select(r => new BrokenLink(r.Kind, r.Src, r.Target, r.TargetTri, r.SrcTri, r.Edge))).ToList();
-        var relinkPlan = NavRepair.Relink(winGeom, brokenRows, edgeTol, wideTol, scope);
-        var groundPlan = NavRepair.Ground(winGeom, groundFindings.Select(r => new GroundRow(r.Nav, r.Facts ?? Array.Empty<GroundVertex>())).ToList(), ground.Band, edgeTol, scope);
-        // the coarse map: every relink that joins a new pair of navmeshes adds it to both NAVI entries (NavRepairNavi.cs)
+        // the versions below each one-way row's far navmesh, latest first: a link back one of them authored is restored
+        // (houseCARL 2026-11-22), never invented
+        var lowerPlan = new Dictionary<int, HashSet<FormKey>>();
+        var oneWayTargets = brokenRows.Where(r => r.Kind == "EDGE-ONEWAY" && navProviders.ContainsKey(r.Target)).Select(r => r.Target).Distinct().ToList();
+        foreach (var nv in oneWayTargets)
+            foreach (var pi in navProviders[nv].Take(navProviders[nv].Count - 1)) PlanInto(lowerPlan, pi, nv);
+        var (lowerGeom, _) = LoadNavGeometry(lowerPlan);
+        var lower = oneWayTargets.ToDictionary(nv => nv, nv => (IReadOnlyList<(string Plugin, NavmeshGeometry Geom)>)navProviders[nv]
+            .Take(navProviders[nv].Count - 1).Reverse()
+            .Where(pi => lowerGeom.ContainsKey((nv, pi))).Select(pi => (pluginKey[pi].FileName.String, lowerGeom[(nv, pi)])).ToList());
+        var relinkPlan = NavRepair.Relink(winGeom, brokenRows, edgeTol, wideTol, scope, lower: lower);
+        // the coarse map: every relink that joins a new pair of navmeshes adds it to both NAVI entries (NavRepairNavi.cs); an
+        // island there (its own copy of the geometry) is never followed to the ground, by the island test navedit uses
         var (naviView, naviOpen) = NaviView.Read(paths);
+        var islands = naviView.Effective.Where(kv => kv.Value.Src.Map.MapInfos[kv.Value.Index].Island is not null).Select(kv => kv.Key).ToHashSet();
+        var groundPlan = NavRepair.Ground(winGeom, groundFindings.Select(r => new GroundRow(r.Nav, r.Facts ?? Array.Empty<GroundVertex>())).ToList(), ground.Band, edgeTol, scope, islands);
         NaviPlan naviPlan;
         try { naviPlan = NavRepairNavi.Plan(relinkPlan, winGeom, naviView); }
         finally { foreach (var m in naviOpen) m.Dispose(); }

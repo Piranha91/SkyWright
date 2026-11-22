@@ -208,6 +208,115 @@ static class NavRepairSelfTest
             return RowsAt.Unplaced(old) is { } why && why.Contains("emit it again") && RowsAt.Unplaced(placed) is null ? null : "old base not refused, or a placed one refused";
         });
 
+        // C2590: a border link whose far edge lies along it within the wider band (75 u in height, the RV station of
+        // 2026-11-22) is "unproven" only while the far triangle links back; with no link back it is EDGE-ONEWAY, a finding.
+        // In game (SkyWright overnight lab, Ruunvald 079A55 <-> 0FFE80): such a link walked 3 of 3 forward and 0 of 3 back
+        // where the far side had lost its link, 3 of 3 both ways where it had it.
+        Case("2590 band-link-without-link-back", () =>
+        {
+            // each navmesh carries an unrelated triangle 0 first, so the border triangles are index 1 on both sides
+            var a = K(0xC01); var b = K(0xC02);
+            WinningNav A() => Nav(a, new[] { new Vec3(0, 500, 0), new Vec3(50, 500, 0), new Vec3(0, 550, 0), new Vec3(0, 0, 0), new Vec3(100, 0, 0), new Vec3(100, 100, 0) },
+                                  new[] { new NavTri(0, 1, 2, 0), new NavTri(3, 4, 5, 2, -1, 0, -1) }, new[] { new NavEdgeLink(b, 1) });
+            // back: 1 links A's triangle 1 (both ways), 0 links nothing, 2 links A's unrelated triangle 0 instead
+            WinningNav B(int back) => Nav(b, new[] { new Vec3(300, 500, 75), new Vec3(350, 500, 75), new Vec3(300, 550, 75), new Vec3(100, 0, 75), new Vec3(200, 0, 75), new Vec3(100, 100, 75) },
+                                          new[] { new NavTri(0, 1, 2, 0), back == 0 ? new NavTri(3, 4, 5, 0, -1, -1, -1) : new NavTri(3, 4, 5, 4, -1, -1, 0) },
+                                          back == 0 ? Array.Empty<NavEdgeLink>() : new[] { new NavEdgeLink(a, (short)(back == 1 ? 1 : 0)) });
+            NavBorderLinks F(int back) => NavBorderLinks.Find(new Dictionary<FormKey, WinningNav> { [a] = A(), [b] = B(back) }, Tol, Wide);
+            string Show(NavBorderLinks r) => string.Join("; ", r.Rows.Select(x => $"{x.Kind}/{x.Tier} {x.Src}#{x.SrcTri}->{x.Target}#{x.TargetTri}"));
+            var both = F(1);
+            // linked both ways, each side's link lies in the band: two unproven rows, no finding; the census knows they link back
+            if (!(both.Rows.Count == 2 && both.Rows.All(x => x.Kind == "EDGE-NOMATCH" && x.Tier == "unproven")))
+                return $"with the link back, want an unproven EDGE-NOMATCH each way and no finding, got [{Show(both)}]";
+            if (!both.Judged.Where(c => !c.Matched).All(c => c.Reciprocal)) return "the census does not record that the band links link back";
+            foreach (var (back, word) in new[] { (0, "links nothing back"), (2, "instead") })
+            {
+                var o = F(back).Rows.Where(x => x.Src == a).ToList();
+                if (!(o.Count == 1 && o[0].Kind == "EDGE-ONEWAY" && o[0].Tier == "finding" && o[0].SrcTri == 1 && o[0].TargetTri == 1
+                      && o[0].Why.Contains("75 u in height") && o[0].Why.Contains(word)))
+                    return $"far side {(back == 0 ? "linking nothing" : "linking another triangle")}: want one EDGE-ONEWAY finding 1->1 naming the 75 u height and '{word}', got [{Show(F(back))}]";
+            }
+            // outside the band (130 u apart) no one-way is said: it stays a broken link (EDGE-NOMATCH finding) as before
+            var farOff = NavBorderLinks.Find(new Dictionary<FormKey, WinningNav> { [a] = A(), [b] = Nav(b, new[] { new Vec3(300, 500, 130), new Vec3(350, 500, 130), new Vec3(300, 550, 130), new Vec3(100, 0, 130), new Vec3(200, 0, 130), new Vec3(100, 100, 130) },
+                new[] { new NavTri(0, 1, 2, 0), new NavTri(3, 4, 5, 0, -1, -1, -1) }, Array.Empty<NavEdgeLink>()) }, Tol, Wide);
+            var fo = farOff.Rows.Where(x => x.Src == a).ToList();
+            return fo.Count == 1 && fo[0].Kind == "EDGE-NOMATCH" && fo[0].Tier == "finding" ? null : $"130 u apart: want one EDGE-NOMATCH finding, got [{Show(farOff)}]";
+        });
+
+        // C2591: the plan for a band one-way row writes no link back across the band: refused by name.
+        Case("2591 band-oneway-repair-refused", () =>
+        {
+            var a = K(0xC11); var b = K(0xC12);
+            var nav = new Dictionary<FormKey, WinningNav>
+            {
+                [a] = Nav(a, new[] { new Vec3(0, 0, 0), new Vec3(100, 0, 0), new Vec3(100, 100, 0) }, new[] { new NavTri(0, 1, 2, 2, -1, 0, -1) }, new[] { new NavEdgeLink(b, 0) }),
+                [b] = Nav(b, new[] { new Vec3(100, 0, 75), new Vec3(200, 0, 75), new Vec3(100, 100, 75) }, new[] { new NavTri(0, 1, 2, 0, -1, -1, -1) }, Array.Empty<NavEdgeLink>()),
+            };
+            var plan = NavRepair.Relink(nav, new[] { new BrokenLink("EDGE-ONEWAY", a, b, 0) }, Tol, Wide);
+            var links = plan.Plans.SelectMany(p => p.Links).ToList();
+            bool refused = links.Any(l => l.Status == "refused" && l.Why.Contains("75 u in height"));
+            bool written = links.Any(l => l.Status == "linked-back");
+            return refused && !written ? null : $"want the link back refused for the band, got [{string.Join("; ", links.Select(l => l.Status + ": " + l.Why))}]";
+        });
+
+        // C2592: a band one-way row whose far navmesh had the link back in a lower version gets it restored, labelled with
+        // that plugin and "in the band" (houseCARL 2026-11-22, the RV pair): from an edge within the fitted tolerance, and
+        // from an edge in the band too (an author's link is evidence whatever its gap); a lower version whose linking edge
+        // lies beyond the band (200 u) does not lie along the source edge, and the row stays refused.
+        Case("2592 band-oneway-restored-from-lower-version", () =>
+        {
+            var a = K(0xC21); var b = K(0xC22);
+            var nav = new Dictionary<FormKey, WinningNav>
+            {
+                [a] = Nav(a, new[] { new Vec3(0, 0, 0), new Vec3(100, 0, 0), new Vec3(100, 100, 0) }, new[] { new NavTri(0, 1, 2, 2, -1, 0, -1) }, new[] { new NavEdgeLink(b, 0) }),
+                [b] = Nav(b, new[] { new Vec3(100, 0, 75), new Vec3(200, 0, 75), new Vec3(100, 100, 75) }, new[] { new NavTri(0, 1, 2, 0, -1, -1, -1) }, Array.Empty<NavEdgeLink>()),
+            };
+            NavmeshGeometry Lower(float z) => Nav(b, new[] { new Vec3(100, 0, z), new Vec3(200, 0, z), new Vec3(100, 100, z) },
+                                                  new[] { new NavTri(0, 1, 2, 4, -1, -1, 0) }, new[] { new NavEdgeLink(a, 0) }).Geom;
+            List<LinkRepair> Run(float z) => NavRepair.Relink(nav, new[] { new BrokenLink("EDGE-ONEWAY", a, b, 0) }, Tol, Wide,
+                lower: new Dictionary<FormKey, IReadOnlyList<(string, NavmeshGeometry)>> { [b] = new List<(string, NavmeshGeometry)> { ("Lower.esp", Lower(z)) } })
+                .Plans.SelectMany(p => p.Links).ToList();
+            string Show(List<LinkRepair> l) => string.Join("; ", l.Select(x => x.Status + ": " + x.Why));
+            var near = Run(5); var inBand = Run(75); var beyond = Run(200);
+            if (!near.Any(l => l.Status == "linked-back" && l.Why.Contains("restored from Lower.esp, in the band") && l.To == a && l.ToTri == 0))
+                return "an authored link back (edge within the tolerance) was not restored: " + Show(near);
+            if (!inBand.Any(l => l.Status == "linked-back" && l.Why.Contains("restored from Lower.esp, in the band") && l.Why.Contains("from an edge in the band too")))
+                return "an authored link back from an edge in the band was not restored: " + Show(inBand);
+            return beyond.Any(l => l.Status == "refused") && !beyond.Any(l => l.Status == "linked-back")
+                ? null : "a lower version linking back from beyond the band was taken as authored: " + Show(beyond);
+        });
+
+        // C2593: a follow-the-ground plan on an island of the navmesh info map is refused by name (NAVI keeps its own copy
+        // of an island's geometry), where the same rows plan when the navmesh is not an island (houseCARL's sweep, 0DEEFB).
+        Case("2593 ground-refuses-island", () =>
+        {
+            var (nav, g, h) = Pair();
+            var rows = new[] { Moved(g, 4, 200), Moved(h, 3, 200) };
+            var plain = NavRepair.Ground(nav, rows, 38, Tol).Plans.Single(x => x.Nav == g);
+            var island = NavRepair.Ground(nav, rows, 38, Tol, islands: new HashSet<FormKey> { g }).Plans.Single(x => x.Nav == g);
+            if (plain.Status != "planned") return $"without the island the row should plan, got {plain.Status}: {string.Join("; ", plain.Why)}";
+            return island.Status == "refused" && island.Edits.Count == 0 && island.Why.Any(w => w.Contains("is an island") && w.Contains("R7"))
+                ? null : $"on an island: status {island.Status}, edits {island.Edits.Count}: {string.Join("; ", island.Why)}";
+        });
+
+        // C2594: a one-way row whose far triangle's matching edge joins one of its own triangles is refused naming that
+        // triangle, never an empty link target (houseCARL's sweep: 11 refusals read "links  triangle ").
+        Case("2594 oneway-refusal-names-own-neighbour", () =>
+        {
+            var a = K(0xC31); var b = K(0xC32);
+            var nav = new Dictionary<FormKey, WinningNav>
+            {
+                [a] = Nav(a, new[] { new Vec3(0, 0, 0), new Vec3(100, 0, 0), new Vec3(100, 100, 0) }, new[] { new NavTri(0, 1, 2, 2, -1, 0, -1) }, new[] { new NavEdgeLink(b, 0) }),
+                // B's triangle 0 edge 2 (x = 100) joins B's own triangle 1 (no link flag)
+                [b] = Nav(b, new[] { new Vec3(100, 0, 0), new Vec3(200, 0, 0), new Vec3(100, 100, 0), new Vec3(50, 50, 0) },
+                          new[] { new NavTri(0, 1, 2, 0, -1, -1, 1), new NavTri(2, 3, 0, 0, -1, -1, -1) }, Array.Empty<NavEdgeLink>()),
+            };
+            var links = NavRepair.Relink(nav, new[] { new BrokenLink("EDGE-ONEWAY", a, b, 0) }, Tol, Wide).Plans.SelectMany(p => p.Links).ToList();
+            var r = links.FirstOrDefault(l => l.Status == "refused");
+            return r is not null && r.Why.Contains("joins its own triangle 1") && !r.Why.Contains("links  triangle")
+                ? null : "want a refusal naming its own triangle 1, got: " + string.Join("; ", links.Select(l => l.Status + ": " + l.Why));
+        });
+
         Console.WriteLine($"{(fail == 0 ? "all" : $"{fail} failed of")} navrepair self-test cases");
         return fail == 0 ? 0 : 1;
     }

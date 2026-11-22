@@ -9,7 +9,8 @@ using Mutagen.Bethesda.Plugins;
 //   EDGE-NOMATCH  a source triangle edge links a triangle that exists, but no edge of that triangle lies along it within the
 //                 tolerance: a re-cut renumbered the far side and left the index in range, naming the wrong triangle.
 //   EDGE-ONEWAY   the far triangle's edge lies along the source edge, but it does not link back to the source triangle (it
-//                 links nothing, or another triangle).
+//                 links nothing, or another triangle). Also when the far edge lies along it only within the unproven band:
+//                 a link with no way back is one way whatever the gap (2026-11-22 lab), never hidden as "unproven".
 //
 // Every broken link (these two, and DanglingLinks' EDGE-IDX and EDGE-NAV) also gets its CANDIDATES: the triangles of other
 // navmeshes with an open edge along the source edge. One is the match a relink can take; two or more are ambiguous and none
@@ -78,7 +79,7 @@ sealed class NavBorderLinks
                     var (fe, gap) = NavBorderMatch.BestEdge(a, b, far.Geom, j);
                     bool matched = fe >= 0 && gap.Within(tol);
                     bool recip = false;
-                    if (matched)
+                    if (fe >= 0)   // whether the far edge links back, for every edge that lies along it (the census reads it too)
                     {
                         var ft = far.Geom.Triangles[j];
                         var flinks = far.Geom.EdgeLinks ?? Array.Empty<NavEdgeLink>();
@@ -91,6 +92,24 @@ sealed class NavBorderLinks
                         var c = Cands(w, s, a, b);
                         r.Candidates.TryAdd((s, m, j), c);
                         bool band = fe >= 0 && gap.Within(wide);
+                        if (band)
+                        {
+                            // Inside the unproven band the far edge lies along this one: the link is "unproven" only while the
+                            // far triangle links back. With no link back the border is one way whatever the gap, which the game
+                            // honours (SkyWright overnight lab 2026-11-22, Ruunvald: 3 of 3 forward, 0 of 3 back): EDGE-ONEWAY.
+                            var bt = far.Geom.Triangles[j];
+                            var bl = far.Geom.EdgeLinks ?? Array.Empty<NavEdgeLink>();
+                            int bk = NavBorderMatch.EdgeLink(bt, fe);
+                            bool linksBack = NavBorderMatch.EdgeIsLink(bt, fe) && bk >= 0 && bk < bl.Count && bl[bk].Mesh == s && bl[bk].TriangleIndex == t;
+                            if (!linksBack)
+                            {
+                                string back = NavBorderMatch.EdgeIsLink(bt, fe) && bk >= 0 && bk < bl.Count
+                                    ? $"links {bl[bk].Mesh} triangle {bl[bk].TriangleIndex} instead" : "links nothing back";
+                                r.Rows.Add(new Row("EDGE-ONEWAY", s, t, e, m, j, gap, FormattableString.Invariant(
+                                    $"triangle {t} links {m} triangle {j}, whose edge lies {gap.Plan:0.#} u off in plan and {gap.Height:0.#} u in height (the unproven band), and that edge {back}")));
+                                continue;
+                            }
+                        }
                         r.Rows.Add(new Row("EDGE-NOMATCH", s, t, e, m, j, gap,
                             band ? FormattableString.Invariant($"triangle {t} links {m} triangle {j}, whose edge lies {gap.Plan:0.#} u off in plan and {gap.Height:0.#} u in height: within {wide} but not {tol}, a band not yet walked in game, so it is unproven, not a finding")
                                  : $"triangle {t} links {m} triangle {j}, whose edges do not lie along it within the tolerance; {c.Sentence(m)}",

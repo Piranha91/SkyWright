@@ -74,6 +74,13 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
           triangle and where it stands; one triangle one place, one place one triangle; an EDGE-IDX row names no place
     2555  self-test: a row listing several navmeshes (CLOBBERED) keys on the navmesh asked about and its plugin pair; a
           NAV-GROUND row whose owner became the patch is unchanged
+    2590  self-test: a border link inside the unproven height band is EDGE-ONEWAY, a finding, when the far triangle does
+          not link back (the RV station: 3 of 3 forward, 0 of 3 back in game); with the link back it stays unproven
+    2591  self-test: the plan writes no link back for a band one-way row: refused by name
+    2592  self-test: a link back a lower version authored (its edge within the band) is restored, "restored from" it, "in
+          the band"; one linking from beyond the band is not taken
+    2593  self-test: a follow-the-ground plan on a NAVI island is refused by name until R7
+    2594  self-test: a one-way refusal whose match joins its own triangle names it, never an empty target
     2563  navedit on the fixture: use_version of G4 from Skyrim.esm masters RpD.esp, whose version it supersedes (read from the
           written header), the read-back says so, and no staging folder is left
     2566  self-test: NAVI linked doors: added in place on the winner's entry with the base game's Unknown; a door already linked,
@@ -846,6 +853,11 @@ CASES = [
     ("2553 self-test: a base emit without places is refused", lambda: selftest("2553")),
     ("2554 the emit says where each link row's triangles stand", t2554),
     ("2555 self-test: grouped rows keyed per navmesh", lambda: selftest("2555")),
+    ("2590 self-test: a band link with no link back is EDGE-ONEWAY", lambda: selftest("2590")),
+    ("2591 self-test: no link back is written across the band", lambda: selftest("2591")),
+    ("2592 self-test: an authored link back is restored", lambda: selftest("2592")),
+    ("2593 self-test: no ground plan on an island", lambda: selftest("2593")),
+    ("2594 self-test: a one-way refusal names its own neighbour", lambda: selftest("2594")),
     ("2563 a use_version patch masters what it supersedes", t2563),
     ("2566 self-test: NAVI linked doors", lambda: selftest("2566")),
     ("2499 the fix forwards that cell from its winner, and it holds", t2499),

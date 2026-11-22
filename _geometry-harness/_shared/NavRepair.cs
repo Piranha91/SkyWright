@@ -13,7 +13,9 @@ namespace HarnessShared;
 //   that lies along it within the tolerance (NavBorderMatch, OpenEdgeIndex). Two or more such edges: refused by name,
 //   never the nearest (Gate A review finding 2). None: the link is cut (its edge field, flag bit and table entry go) and
 //   the plan says so, unless an edge lies within the unproven band, when it is refused (Gate B review finding 2). Every
-//   link it makes is written both ways. An EDGE-ONEWAY link gains its link back, or is said resolved by another repair.
+//   link it makes is written both ways. An EDGE-ONEWAY link gains its link back, or is said resolved by another repair;
+//   one whose match lies only in the unproven band is refused (2026-11-22: such a row is a finding, but no link is
+//   written across a gap not yet walked both ways).
 //   CLASS 3, FOLLOW THE GROUND. A NAV-GROUND navmesh's vertices that sat on the ground its author saw move up or down by
 //   what the ground moved under each; the box's z is recomputed from the used vertices; x and y never move, so the grid
 //   stays valid (Gate A, Q2).
@@ -137,9 +139,11 @@ public static class NavRepair
 
     /// <summary>The relink plan for <paramref name="broken"/> over the winning navmeshes <paramref name="nav"/>.
     /// <paramref name="unproven"/> is the wider tolerance whose band the lab has not settled. <paramref name="scope"/>, when
-    /// given, keeps only rows whose source navmesh is in it.</summary>
+    /// given, keeps only rows whose source navmesh is in it. <paramref name="lower"/>: the versions of a navmesh below its
+    /// winner (plugin, geometry), latest first, for restoring a link back one of them authored.</summary>
     public static NavRepairPlan Relink(IReadOnlyDictionary<FormKey, WinningNav> nav, IReadOnlyList<BrokenLink> broken, EdgeTolerance tol,
-                                       EdgeTolerance unproven, ISet<FormKey>? scope = null, OpenEdgeIndex? index = null)
+                                       EdgeTolerance unproven, ISet<FormKey>? scope = null, OpenEdgeIndex? index = null,
+                                       IReadOnlyDictionary<FormKey, IReadOnlyList<(string Plugin, NavmeshGeometry Geom)>>? lower = null)
     {
         var idx = index ?? new OpenEdgeIndex(nav);
         var work = new Dictionary<FormKey, Work>();
@@ -257,6 +261,26 @@ public static class NavRepair
             var (fe, gap) = NavBorderMatch.BestEdge(a, b, far.Geom, r.TargetTri);
             if (fe < 0) continue;
             var fw = W(r.Target); var back = fw.Link(r.TargetTri, fe);
+            if (!gap.Within(tol) && Authored(r.Src, t, a, b, lower?.GetValueOrDefault(r.Target), tol, unproven) is { } author
+                && !fw.Flag[r.TargetTri, fe] && fw.Field[r.TargetTri, fe] < 0)
+            {
+                // houseCARL 2026-11-22: a link back a lower version of this navmesh authored is restored, even across the
+                // band: restoring what the losing version had is not inventing a link (the RV station's 0FFE80: Dawnguard's
+                // version links back to 079A55 t59, Moon and Star's dropped it)
+                fw.LinkTo(r.TargetTri, fe, r.Src, t);
+                P(r.Target).Links.Add(On("linked-back", FormattableString.Invariant(
+                    $"triangle {r.TargetTri} gains its link back to {r.Src} triangle {t}, restored from {author.Plugin}, in the band (its triangle {author.Tri} linked back there{(author.InTol ? "" : ", from an edge in the band too")}); the winner's edge lies {gap.Plan:0.#} u off in plan and {gap.Height:0.#} u in height, not yet walked both ways"), r.Src, t));
+                continue;
+            }
+            if (!gap.Within(tol))
+            {
+                // the match lies only in the unproven band (an EDGE-ONEWAY found there, 2026-11-22): the row is a finding,
+                // but no link back is written across a gap no walker has been seen to take both ways
+                P(r.Target).Links.Add(new LinkRepair(r.Kind, r.Target, r.TargetTri, fe, r.Target, r.TargetTri, "refused",
+                    FormattableString.Invariant($"{r.Src} triangle {t}'s one-way link is refused: its match, triangle {r.TargetTri}, lies {gap.Plan:0.#} u off in plan and {gap.Height:0.#} u in height, in the band not yet walked both ways, so no link back is written across it"),
+                    null, null, RowSrc: r.Src));
+                continue;
+            }
             LinkRepair On(string status, string why, FormKey? to = null, int? toTri = null)
                 => new(r.Kind, r.Target, r.TargetTri, fe, r.Target, r.TargetTri, status, why, to, toTri, RowSrc: r.Src);
             if (back == (r.Src, t))
@@ -275,8 +299,11 @@ public static class NavRepair
                 P(r.Target).Links.Add(On("linked-back", $"triangle {r.TargetTri} gains its link back to {r.Src} triangle {t}", r.Src, t));
                 continue;
             }
+            string holds = back is { } bk ? $"links {bk.Mesh} triangle {bk.Tri}"
+                         : fw.Flag[r.TargetTri, fe] ? $"names edge-link entry {fw.Field[r.TargetTri, fe]}, which is not in its table"
+                         : $"joins its own triangle {fw.Field[r.TargetTri, fe]}";
             P(r.Target).Links.Add(On("refused",
-                $"{r.Src} triangle {t}'s one-way link is refused: its match, triangle {r.TargetTri}, links {back?.Mesh} triangle {back?.Tri}, which is not overwritten"));
+                $"{r.Src} triangle {t}'s one-way link is refused: its match, triangle {r.TargetTri}, {holds}, which is not overwritten"));
         }
 
         var plan = new NavRepairPlan();
@@ -285,10 +312,35 @@ public static class NavRepair
         return plan;
     }
 
+    /// <summary>A lower version of the far navmesh that authored the link back: one of its triangles has an edge along the
+    /// source edge (a, b) within the unproven band that links back to <paramref name="src"/> triangle <paramref name="t"/>.
+    /// An author's link is evidence whatever its gap (houseCARL, 2026-11-22); whether the game walks it is the lab's question,
+    /// and the row says so. Beyond the band the edge does not lie along the source, so it is not taken. The latest such
+    /// version, or null; InTol says whether its edge was within the fitted tolerance.</summary>
+    static (string Plugin, int Tri, bool InTol)? Authored(FormKey src, int t, Vec3 a, Vec3 b, IReadOnlyList<(string Plugin, NavmeshGeometry Geom)>? versions,
+                                                         EdgeTolerance tol, EdgeTolerance wide)
+    {
+        foreach (var (plugin, g) in versions ?? Array.Empty<(string, NavmeshGeometry)>())
+        {
+            var links = g.EdgeLinks ?? Array.Empty<NavEdgeLink>();
+            for (int i = 0; i < g.Triangles.Count; i++)
+                for (int e = 0; e < 3; e++)
+                {
+                    var tr = g.Triangles[i];
+                    if (!NavBorderMatch.EdgeIsLink(tr, e)) continue;
+                    int k = NavBorderMatch.EdgeLink(tr, e);
+                    if (k < 0 || k >= links.Count || links[k].Mesh != src || links[k].TriangleIndex != t) continue;
+                    var (fe, gap) = NavBorderMatch.BestEdge(a, b, g, i);
+                    if (fe == e && gap.Within(wide)) return (plugin, i, gap.Within(tol));
+                }
+        }
+        return null;
+    }
+
     /// <summary>The follow-the-ground plan for <paramref name="rows"/>: every used vertex within <paramref name="band"/> of its
     /// author's ground moves by what the ground moved under it, and the box's z is recomputed.</summary>
     public static NavRepairPlan Ground(IReadOnlyDictionary<FormKey, WinningNav> nav, IReadOnlyList<GroundRow> rows, float band, EdgeTolerance tol,
-                                       ISet<FormKey>? scope = null)
+                                       ISet<FormKey>? scope = null, ISet<FormKey>? islands = null)
     {
         var plan = new NavRepairPlan();
         var moved = new Dictionary<FormKey, NavmeshGeometry>();
@@ -298,6 +350,14 @@ public static class NavRepair
             if (!nav.TryGetValue(r.Nav, out var w)) continue;
             var p = new NavPlan { Nav = r.Nav, Class = "ground" };
             plan.Plans.Add(p);
+            if (islands is not null && islands.Contains(r.Nav))
+            {
+                // the navmesh info map keeps its own copy of an island's geometry: moving the vertices would leave it stale
+                // (houseCARL's sweep, 2026-11-22: 0DEEFB in the Clockwork order); refused until island support (R7)
+                p.Status = "refused";
+                p.Why.Add($"{r.Nav} is an island in the navmesh info map, which keeps its own copy of the geometry; following the ground is refused until island support (R7)");
+                continue;
+            }
             int unclear = r.Vertices.Count(v => v.CannotTell);
             var verts = w.Geom.Vertices.ToArray();
             var ch = new NavChange();
