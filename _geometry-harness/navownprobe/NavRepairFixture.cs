@@ -247,6 +247,42 @@ static class NavRepairFixture
         return planPath;
     }
 
+    /// <summary>The mover's re-cut navmesh, in the mover case.</summary>
+    public static readonly FormKey GM = S(0xB10);
+    public static readonly string[] MoverOrder = { "Skyrim.esm", "Mover.esp", "Revert.esp" };
+
+    /// <summary>THE MOVER CASE (C2599-C2601; the use_version rows of 2026-11-22): Skyrim.esm has flat ground at z 0 in (3,0) and
+    /// navmesh GM on it (a fan of three triangles over five vertices), stated in its NAVI; Mover.esp (masters Skyrim) raises
+    /// (3,0)'s LAND to 200 and ships its own re-cut of GM at z 200 (four triangles round a centre vertex: other vertices, other
+    /// triangles); Revert.esp (masters Skyrim only) overrides GM with Skyrim's geometry, as Clockwork does with the great cities'.
+    /// So GM is a NAV-GROUND row owned by Revert whose ground Mover moved, and a CLOBBERED row (Mover > Revert); GM links nothing,
+    /// so carrying Mover's version plans. Returns <paramref name="dir"/>, holding the three plugins of <see cref="MoverOrder"/>.</summary>
+    public static string WriteMoverCase(string dir)
+    {
+        Directory.CreateDirectory(dir);
+        var mKey = new ModKey("Mover", ModType.Plugin); var rKey = new ModKey("Revert", ModType.Plugin);
+        string sp = Path.Combine(dir, "Skyrim.esm"), mp = Path.Combine(dir, "Mover.esp"), rp = Path.Combine(dir, "Revert.esp");
+        var sky = new SkyrimMod(SkyKey, Rel);
+        var c3 = GridCell(3, Flat(LandK(3), 0));
+        c3.NavigationMeshes.Add(Fan(GM, 3, 12500, 500, 0));
+        sky.Worldspaces.Add(World(c3));
+        sky.NavigationMeshInfoMaps.Add(Navi(Info(GM, 3, 12500, 500)));
+        sky.BeginWrite.ToPath(sp).WithLoadOrder(Array.Empty<ISkyrimModGetter>()).Write();
+        using var skyRead = SkyrimMod.CreateFromBinaryOverlay(sp, Rel);
+        var mover = new SkyrimMod(mKey, Rel);
+        var m3 = GridCell(3, Flat(LandK(3), 200));
+        m3.NavigationMeshes.Add(Nav(GM, InGrid(3), new[] { (12300f, 500f, 200f), (12800f, 500f, 200f), (12800f, 800f, 200f), (12300f, 800f, 200f), (12550f, 650f, 200f) },
+                                    new T3(0, 1, 4), new T3(1, 2, 4), new T3(2, 3, 4), new T3(3, 0, 4)));
+        mover.Worldspaces.Add(World(m3));
+        mover.BeginWrite.ToPath(mp).WithLoadOrder(skyRead).Write();
+        var rev = new SkyrimMod(rKey, Rel);
+        var r3 = GridCell(3, null);
+        r3.NavigationMeshes.Add(Fan(GM, 3, 12500, 500, 0));
+        rev.Worldspaces.Add(World(r3));
+        rev.BeginWrite.ToPath(rp).WithLoadOrder(skyRead).Write();
+        return dir;
+    }
+
     /// <summary>Write the five plugins into <paramref name="dir"/> (created) and return their paths in <see cref="Order"/>.</summary>
     public static IReadOnlyList<string> Write(string dir)
     {

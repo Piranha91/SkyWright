@@ -772,6 +772,50 @@ static class NavEditSelfTest
             return UsePlanned(r) ?? (r.Matched == 2 && r.Changed == 0 && r.Repointed == 0 && r.Others.Count == 0 ? null : $"matched {r.Matched}, changed {r.Changed}, re-pointed {r.Repointed}, others {r.Others.Count}");
         });
 
+        // C2602: every refusal UseVersion gives is classified by NavUseVersionPlan.ReasonKind as the kind its cause is (a repair
+        // plan's one sentence counts a refused row's reasons by kind, so a sentence reworded out of its kind must fail here).
+        Case("2602 use-version-reason-kinds", () =>
+        {
+            var (w, n) = Pair();
+            var near = new Dictionary<FormKey, NavmeshGeometry> { [NK] = n };
+            var v = w.Vertices.ToList();
+            foreach (var i in new[] { 2, 5, 8 }) v[i] = v[i] with { X = 190 };
+            var moved = NavEdit.UseVersion(w, w with { Vertices = v }, "Ver.esp", near, tol);
+            var (w0, n0) = Pair(linkN: false);
+            var nv = n0.Vertices.ToList(); nv.Add(new Vec3(200, 50, 0));
+            var nt = n0.Triangles.ToList();
+            nt[1] = new NavTri(0, 4, 9, 0) with { EdgeLink01 = nt[1].EdgeLink01, EdgeLink12 = -1, EdgeLink20 = -1 };
+            nt.Add(new NavTri(9, 4, 3, 0) with { EdgeLink01 = -1, EdgeLink12 = nt[1].EdgeLink12, EdgeLink20 = -1 });
+            var two = NavEdit.UseVersion(w0, w0 with { EdgeLinks = new List<NavEdgeLink> { new(NK, 3), new(NK, 5) } }, "Ver.esp",
+                                         new Dictionary<FormKey, NavmeshGeometry> { [NK] = n0 with { Vertices = nv, Triangles = nt } }, tol);
+            var (bare, _) = Pair(linkW: false);
+            var lost = NavEdit.UseVersion(w, bare, "Ver.esp", near, tol);
+            var doors = NavEdit.UseVersion(w, w with { DoorTriangles = new List<NavDoorTriangle> { new(DoorRef, 0) } }, "Ver.esp", near, tol);
+            var (w1, n1) = Pair(linkN: false);
+            var past = NavEdit.UseVersion(w1, w1 with { EdgeLinks = new List<NavEdgeLink> { new(NK, 99, 2), new(NK, 5) } }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n1 }, tol);
+            var (w2, n2) = Pair();
+            var ledgeIn = NavEdit.UseVersion(w2, Reversed(w2), "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n2 with { EdgeLinks = new List<NavEdgeLink> { new(K, 2, 1), new(K, 6) } } }, tol);
+            string Kind(string why) => NavUseVersionPlan.ReasonKind(why);
+            var want = new (string Case, UseVersionResult R, Func<string, string> Expect)[]
+            {
+                ("border moved", moved, why => why.Contains("that link cannot be re-pointed") ? "neighbour link into it that cannot be re-pointed" : "border link meeting no edge"),
+                ("two along", two, _ => "border link meeting no edge"),
+                ("lost neighbour", lost, _ => "neighbour the navmesh info map names, dropped"),
+                ("doors", doors, _ => "different door table"),
+                ("ledge past its neighbour", past, _ => "other reason"),
+                ("neighbour's ledge renumbered", ledgeIn, _ => "neighbour link into it that cannot be re-pointed"),
+            };
+            var bad = new List<string>();
+            foreach (var (c, r, expect) in want)
+            {
+                if (r.Status != "refused" || r.Why.Count == 0) { bad.Add($"{c}: not refused"); continue; }
+                foreach (var why in r.Why) if (Kind(why) != expect(why)) bad.Add($"{c}: '{why}' read as '{Kind(why)}', want '{expect(why)}'");
+            }
+            if (!moved.Why.Any(x => Kind(x) == "border link meeting no edge") || !moved.Why.Any(x => Kind(x) == "neighbour link into it that cannot be re-pointed"))
+                bad.Add("the border-moved case does not give both an outbound and an inbound reason");
+            return bad.Count == 0 ? null : string.Join(" | ", bad);
+        });
+
         // C2528: bad input: a triangle index past the mesh, a corner that does not exist, nothing to do.
         Case("2528 bad-triangle-input", () =>
         {

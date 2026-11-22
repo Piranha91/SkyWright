@@ -45,6 +45,13 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
     2487  ground plan: G1's five vertices follow the ground up 200 u, and the box's z becomes 200 to 200; x and y stay.
     2488  ground plan: G6's four vertices on the ground move; the one up on a rock, off its author's ground, does not.
     2489  ground plan: G4 (RpD's re-cut, blind to RpA's LAND) moves to 200 and G5 to 400; G2 (a deck) and G3 have no plan.
+    2595-2598  self-test: the ground plan refuses for a mover's own re-cut (2595); which mover qualifies (2596); refusal order
+          and other movers named (2597); a band one-way link yields to an in-tolerance match (2598); a use_version row
+          is refused beside a row touching what it changes or was matched against (2603).
+    2599-2601  the mover case (navownprobe --write-mover-fixture: Mover.esp raises the ground under GM and re-cuts it, Revert.esp
+          reverts it): the ground row is refused and a use_version row carries Mover's version (2599); R1 writes it, reads it
+          back against the re-planned version and masters Revert.esp (2600); a tampered row and a stand-alone read-back of
+          a use_version row are refused (2601).
     2490-2493  the plan on in-memory navmeshes (navownprobe --navrepair-selftest): a cut renumbers a later table entry; a
           height move that would leave a matched link 200 u apart is refused; the same move with the neighbour moving too
           is planned; a vertex that cannot be told refuses its navmesh.
@@ -797,6 +804,115 @@ def t2497():
     assert not made, f"rows the patch made: {made}"
 
 
+# ---- the mover case: a ground row whose mover ships its own re-cut, carried by a use_version row (2026-11-22) ----
+
+MOVER_ORDER = ["Skyrim.esm", "Mover.esp", "Revert.esp"]
+GM = sk("000B10")
+_MOVER = None
+
+
+class MoverLab:
+    """navownprobe --write-mover-fixture laid out as an MO2 instance; one plan run and one R1 write."""
+
+    def __init__(self, tmp: Path):
+        keep = tmp / "fixture"
+        w = run([exe("navownprobe"), "--write-mover-fixture", keep])
+        if w.returncode != 0 or not all((keep / n).exists() for n in MOVER_ORDER):
+            raise RuntimeError(f"the mover fixture was not written (exit {w.returncode}): {(w.stdout + w.stderr)[-600:]}")
+        inst, game = tmp / "instance", tmp / "game"
+        prof = inst / "profiles" / "P"
+        prof.mkdir(parents=True); (inst / "overwrite").mkdir(); (game / "Data").mkdir(parents=True)
+        for n in MOVER_ORDER:
+            d = inst / "mods" / Path(n).stem
+            d.mkdir(parents=True)
+            shutil.copyfile(keep / n, d / n)
+        (prof / "plugins.txt").write_text("".join("*" + n + "\n" for n in MOVER_ORDER), encoding="utf-8")
+        (prof / "loadorder.txt").write_text("".join(n + "\n" for n in MOVER_ORDER), encoding="utf-8")
+        (prof / "modlist.txt").write_text("".join("+" + Path(n).stem + "\n" for n in reversed(MOVER_ORDER)), encoding="utf-8")
+        self.tmp, self.plan_path = tmp, tmp / "plan.json"
+        self.log = run([exe("navownprobe"), "--instance", inst, "--game", game, "--profile", "P", "--emit", tmp / "emit.json", "--repair-plan", self.plan_path])
+        self.plan = json.loads(self.plan_path.read_text(encoding="utf-8")) if self.log.returncode == 0 and self.plan_path.exists() else None
+        navedit = PROBES / "navedit" / "bin" / "Release" / "net9.0" / "navedit.exe"
+        self.navedit = navedit
+        self.out = tmp / "patch" / "MoverFix.esp"
+        self.write = run([navedit, "write", "--repair-plan", self.plan_path, "--out", self.out]) if self.plan else None
+
+
+def mover():
+    global _MOVER
+    if _MOVER is None:
+        _MOVER = MoverLab(Path(tempfile.mkdtemp(prefix="navmesh-repair-mover-")))
+    return _MOVER
+
+
+def _rows(plan, nav):
+    return [p for p in plan["plans"] if p["source"].lower() == nav.lower()]
+
+
+def t2599():
+    """Rejects: a ground plan that lays the winner's navmesh over a mover's ground when the mover ships its own re-cut, or no
+    use_version row carrying that re-cut (planned, naming its source, its one-sentence why, and the CLOBBERED row)."""
+    M = mover()
+    assert M.plan is not None, f"no plan (exit {M.log.returncode}): {(M.log.stdout + M.log.stderr)[-800:]}"
+    rows = _rows(M.plan, GM)
+    ground = [p for p in rows if p["class"] == "ground"]
+    uv = [p for p in rows if p["class"] == "use_version"]
+    assert len(ground) == 1 and ground[0]["status"] == "refused", f"the ground row: {ground}"
+    gw = ground[0]["why"]
+    assert "Mover.esp moved the ground under" in gw and "use_version" in gw and "CLOBBERED row" in gw and "(Mover.esp > Revert.esp)" in gw, gw
+    assert len(uv) == 1, f"want one use_version row for GM, got {uv}"
+    u = uv[0]
+    assert u["status"] == "planned" and u["winner"]["plugin"] == "Mover.esp" and u["winner"]["sha256"], u
+    assert u["useVersion"]["masters"] == ["Revert.esp"], u["useVersion"]
+    assert any(e["op"] == "CopyFrom" and e.get("from_plugin") == "Mover.esp" for e in u["edits"]), u["edits"]
+    assert [c.lower() for c in u["changes"]] == [GM.lower()], u["changes"]
+    assert not any(o["formid"].lower() == GM.lower() for o in M.plan["ops"]), "the use_version row's ops leaked into the plan's top-level ops"
+
+
+def t2600():
+    """Rejects: an R1 patch that does not carry the mover's version (read back against the re-planned version), or does not
+    master the plugin whose version it supersedes."""
+    import struct
+    M = mover()
+    allout = (M.write.stdout + M.write.stderr) if M.write else ""
+    # one-line messages (the runner prints an assertion's last line): GM's read-back lines and R1's last line
+    said = f"GM lines {[l.strip() for l in allout.splitlines() if '000B10' in l]}; last {[l.strip() for l in allout.splitlines()[-2:]]}"
+    assert M.write is not None and M.write.returncode == 0, f"R1 exit {M.write.returncode if M.write else None}: {said}"
+    out = M.write.stdout
+    assert "holds  000B10:Skyrim.esm" in out, f"GM does not read back: {said}"
+    assert "masters every winner it supersedes" in out and "Revert.esp" in out, f"masters: {said}"
+    rb = json.loads(M.out.with_suffix("").with_name("MoverFix.readback.json").read_text(encoding="utf-8"))
+    assert rb["holds"] is True, rb
+    rec = [r for r in rb["records"] if r["navmesh"].lower() == GM.lower()]
+    assert rec and rec[0].get("useVersion") and rec[0]["holds"], rb["records"]
+    b = M.out.read_bytes()
+    size = struct.unpack_from("<I", b, 4)[0]
+    i, masters = 24, []
+    while i < 24 + size:
+        sig, ln = b[i:i + 4], struct.unpack_from("<H", b, i + 4)[0]
+        if sig == b"MAST":
+            masters.append(b[i + 6:i + 6 + ln].rstrip(b"\0").decode("latin-1"))
+        i += 6 + ln
+    assert "Mover.esp" in masters and "Revert.esp" in masters and masters.index("Mover.esp") < masters.index("Revert.esp"), masters
+
+
+def t2601():
+    """Rejects: an R1 that writes a use_version row whose ops no longer match what navedit re-plans (one edit tampered), or
+    a read-back that passes a use_version row it cannot hold to the re-planned version (navownprobe --repair-readback)."""
+    M = mover()
+    assert M.plan is not None
+    bad = json.loads(json.dumps(M.plan))
+    u = [p for p in bad["plans"] if p["class"] == "use_version"][0]
+    u["edits"][-1]["value"] = "0"
+    bp = M.tmp / "tampered.json"
+    bp.write_text(json.dumps(bad), encoding="utf-8")
+    w = run([M.navedit, "write", "--repair-plan", bp, "--out", M.tmp / "patch2" / "Tampered.esp"])
+    assert w.returncode != 0 and "no longer plans the same" in (w.stdout + w.stderr), f"exit {w.returncode}: {(w.stdout + w.stderr)[-600:]}"
+    assert not (M.tmp / "patch2" / "Tampered.esp").exists(), "a patch was written from a tampered use_version row"
+    r = run([exe("navownprobe"), "--repair-readback", M.plan_path, M.out, M.tmp / "standalone-readback.json"])
+    assert r.returncode == 1 and "only navedit write --repair-plan can hold" in (r.stdout + r.stderr), f"exit {r.returncode}: {(r.stdout + r.stderr)[-600:]}"
+
+
 CASES = [
     ("2450 the fixture's five plugins in order", t2450),
     ("2451 a link into a deleted navmesh is EDGE-NAV naming the deleter", t2451),
@@ -861,6 +977,14 @@ CASES = [
     ("2563 a use_version patch masters what it supersedes", t2563),
     ("2566 self-test: NAVI linked doors", lambda: selftest("2566")),
     ("2499 the fix forwards that cell from its winner, and it holds", t2499),
+    ("2595 self-test: the ground plan prefers the mover's own re-cut", lambda: selftest("2595")),
+    ("2596 self-test: which mover's version replaces following the ground", lambda: selftest("2596")),
+    ("2597 self-test: the mover refusal keeps the refusal order", lambda: selftest("2597")),
+    ("2598 self-test: a band one-way link yields to an in-tolerance match", lambda: selftest("2598")),
+    ("2603 self-test: a use_version row shares a patch only with rows it does not touch", lambda: selftest("2603")),
+    ("2599 plan, mover case: ground refused, use_version planned", t2599),
+    ("2600 R1, mover case: the mover's version written, read back, its superseded plugin mastered", t2600),
+    ("2601 R1, mover case: a tampered use_version row and a stand-alone read-back are refused", t2601),
 ]
 
 if __name__ == "__main__":

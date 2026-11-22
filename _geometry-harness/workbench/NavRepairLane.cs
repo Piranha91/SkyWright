@@ -75,6 +75,10 @@ internal static class NavRepairLane
     internal static async Task<RepairWritten> WriteAsync(PatchWriter writer, RepairPreview p, string patchName, string probe,
                                                          string instance, string profile, string game, string work, CancellationToken ct = default)
     {
+        // a use_version row (another plugin's version of a navmesh carried over its winner) is written and read back only by
+        // navedit write --repair-plan, which re-plans it; this lane writes the plan's top-level ops alone, so it would drop it
+        if (JsonNode.Parse(File.ReadAllText(p.Plan))!["plans"]!.AsArray().FirstOrDefault(x => (string?)x!["class"] == "use_version" && (string?)x["status"] != "refused") is { } uv)
+            throw new InvalidOperationException($"the plan for {p.Navmesh} carries {(string)uv["winner"]!["plugin"]!}'s version of {(string)uv["source"]!}, which only navedit write --repair-plan writes and reads back; write the plan there.");
         if (p.Ops.Count == 0) throw new InvalidOperationException($"the plan for {p.Navmesh} has no edit to write ({p.Sentence}).");
         if (writer.Target.Output is not { } outDir) throw new InvalidOperationException("no Output Folder is chosen, so the repair has nowhere to go; choose one in the launcher.");
         var plugin = WorkbenchHost.PluginName(patchName);

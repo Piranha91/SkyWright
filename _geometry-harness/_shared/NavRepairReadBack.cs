@@ -280,6 +280,16 @@ public static class NavRepairReadBack
         using (var wmod = SkyrimMod.CreateFromBinaryOverlay(winnerPath, SkyrimRelease.SkyrimSE))
         {
             var wd = wmod.EnumerateMajorRecords<INavigationMeshGetter>().First(n => n.FormKey == key).Data!;
+            // where it stands and its format, as its source has them (review of slice B, finding 5: a version copied from a plugin
+            // that put the navmesh under another cell passed the geometry checks)
+            static string ParentOf(INavigationMeshDataGetter x) => x.Parent switch
+            {
+                IWorldspaceNavmeshParentGetter w => $"worldspace {w.Parent.FormKey} cell {w.Coordinates.X},{w.Coordinates.Y}",
+                ICellNavmeshParentGetter c => $"cell {c.Parent.FormKey}",
+                var o => o?.GetType().Name ?? "none",
+            };
+            if (ParentOf(d) != ParentOf(wd)) why.Add($"it stands in {ParentOf(d)}, where its source has {ParentOf(wd)}");
+            if (d.NavmeshVersion != wd.NavmeshVersion) why.Add($"its navmesh version is {d.NavmeshVersion}, its source's {wd.NavmeshVersion}");
             if (rebuilt)
             {
                 var g = NavGrid.Rebuild(got.Vertices, got.Triangles.Select(x => ((int)x.A, (int)x.B, (int)x.C)).ToList());
@@ -299,6 +309,10 @@ public static class NavRepairReadBack
         }
         return why;
     }
+
+    /// <summary>A repair plan's planned use_version rows.</summary>
+    public static List<JsonNode> UseVersionRows(JsonNode plan) => (plan["plans"] as JsonArray ?? new JsonArray())
+        .Where(p => (string?)p!["class"] == "use_version" && (string?)p["status"] != "refused").Select(p => p!).ToList();
 
     /// <summary>The union of one navmesh's planned changes (a relink's entries, edge fields and flags; a ground plan's vertices
     /// and box): the later row's value where both set the same thing.</summary>
@@ -323,8 +337,11 @@ public static class NavRepairReadBack
     /// its winner with the plan applied, every NAVM in the patch a planned one, and every other record the patch carries (the
     /// CELL and WRLD containers) equal to its winner on the plan's order. Exit 0 when every check holds, 1 when one fails (each
     /// said in one sentence; a failing container names the forward that makes it the winner's), 2 when the inputs cannot be
-    /// read.</summary>
-    public static int Run(string planPath, string patchPath, string outPath)
+    /// read. A planned use_version row (navownprobe's class "use_version") is held to <paramref name="expect"/>, the expected
+    /// state navedit write --repair-plan re-plans it to (GeometryDifferences, and its NAVI entries); without that map the row
+    /// fails, saying where it is checked, since this read alone cannot re-plan it.</summary>
+    public static int Run(string planPath, string patchPath, string outPath,
+                          IReadOnlyDictionary<FormKey, (NavmeshGeometry Geom, int[] OldIndex, string WinnerPath, bool Rebuilt)>? expect = null)
     {
         JsonNode plan;
         try { plan = JsonNode.Parse(File.ReadAllText(planPath))!; }
@@ -339,7 +356,7 @@ public static class NavRepairReadBack
         {
             // one navmesh can carry a relink row and a follow-the-ground row: the patch holds both, so the read-back holds it to
             // their union (the Winterhold ground station, 2026-11-22: each row alone failed against the combined write)
-            var rows = plan["plans"]!.AsArray().Where(p => (string)p!["status"]! != "refused")
+            var rows = plan["plans"]!.AsArray().Where(p => (string)p!["status"]! != "refused" && (string?)p!["class"] != "use_version")
                 .GroupBy(p => (string)p!["source"]!).Select(g => (Row: g.First()!, Change: Merge(g.Select(r => NavRepairRunJson.ChangeOf(r!["change"]!))))).ToList();
             foreach (var (p, change) in rows)
             {
@@ -359,6 +376,20 @@ public static class NavRepairReadBack
                 if (diff.Count > 0) failed++;
                 results.Add(new JsonObject { ["navmesh"] = key.ToString(), ["holds"] = diff.Count == 0, ["differences"] = new JsonArray(diff.Select(x => (JsonNode)x).ToArray()) });
             }
+            // use_version rows: every navmesh each changes (the carried one, and each neighbour whose links were re-pointed)
+            var geoms = PlacementExtract.FromMod(patch).SelectMany(cp => cp.Navmeshes).GroupBy(n => n.FormKey).ToDictionary(g => g.Key, g => g.First());
+            foreach (var p in UseVersionRows(plan))
+                foreach (var k in p["changes"]!.AsArray().Select(x => FormKey.Factory((string)x!)))
+                {
+                    planned.Add(k);
+                    List<string> diff;
+                    if (expect is null || !expect.TryGetValue(k, out var e))
+                        diff = new() { $"{k} is carried by a use_version row, whose written state only navedit write --repair-plan can hold to the re-planned version; read the patch back with it" };
+                    else diff = GeometryDifferences(k, e.Geom, e.OldIndex, e.WinnerPath, e.Rebuilt, geoms.GetValueOrDefault(k), written.GetValueOrDefault(k))
+                                ?? new() { $"{k} is planned but not in the patch" };
+                    if (diff.Count > 0) failed++;
+                    results.Add(new JsonObject { ["navmesh"] = k.ToString(), ["useVersion"] = (string?)p["source"], ["holds"] = diff.Count == 0, ["differences"] = new JsonArray(diff.Select(x => (JsonNode)x).ToArray()) });
+                }
         }
         finally { foreach (var m in opened.Values) m.Dispose(); }
         var extra = written.Keys.Where(k => !planned.Contains(k)).ToList();
@@ -367,7 +398,13 @@ public static class NavRepairReadBack
         JsonArray carried, fixes; int carriedFailed;
         if (order.Count == 0) { carried = new JsonArray(); fixes = new JsonArray(); carriedFailed = 0; Console.Error.WriteLine("the plan names no order, so the carried records cannot be held to their winners; re-write it with navownprobe --repair-plan."); return 2; }
         var navi = plan["navi"];
-        bool naviPlanned = navi?["entries"] is JsonArray ne && ne.Count > 0;
+        // a use_version row that gains a neighbour carries its own NAVI change (the planner never lets it share a plan with
+        // the relinks' NAVI change), held to its entries like the relinks' are
+        var uvNavi = UseVersionRows(plan).Select(p => p["useVersion"]?["navi"]).Where(n => n?["entries"] is JsonArray { Count: > 0 }).ToList();
+        bool naviPlanned = navi?["entries"] is JsonArray ne && ne.Count > 0 || uvNavi.Count > 0;
+        if (navi?["entries"] is not JsonArray { Count: > 0 } && uvNavi.Count > 0) navi = uvNavi[0];
+        if (uvNavi.Count > 1 || (uvNavi.Count == 1 && !ReferenceEquals(navi, uvNavi[0])))
+        { Console.Error.WriteLine("the plan carries more than one change to the navmesh info map, which one patch cannot be held to; write the plan again with a current navownprobe --repair-plan."); return 2; }
         try { (carried, fixes, carriedFailed) = Carried(patch, order, naviPlanned); }
         catch (Exception ex) { Console.Error.WriteLine($"the plan's order could not be read to find the carried records' winners ({ex.Message}); check the plugins it names are on disk."); return 2; }
         failed += carriedFailed;
@@ -418,4 +455,19 @@ public static class NavRepairRunJson
         foreach (var f in j["flagBits"]!.AsArray()) c.FlagBits[((int)f!["tri"]!, (int)f["edge"]!)] = (bool)f["on"]!;
         return c;
     }
+
+    /// <summary>The repair plan's op wire shape (navownprobe writes it, navedit write --repair-plan compares a re-planned row
+    /// against it): formid, field_path, op, and key, value, from_plugin (a CopyFrom's source: use_version carries a
+    /// navmesh's Data from it) and compose when set. Its one owner.</summary>
+    public static JsonArray OpsJson(IEnumerable<RepairOp> ops) => new(ops.Select(o =>
+    {
+        var j = new JsonObject { ["formid"] = o.FormId, ["field_path"] = o.FieldPath, ["op"] = o.Op };
+        if (o.Key is not null) j["key"] = o.Key;
+        if (o.Value is not null) j["value"] = o.Value;
+        if (o.FromPlugin is not null) j["from_plugin"] = o.FromPlugin;
+        if (o.Compose is not null)
+            j["compose"] = new JsonObject { ["type"] = "EdgeLink", ["fields"] = new JsonObject(o.Compose.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))) };
+        if (o.ComposeNode is not null) j["compose"] = o.ComposeNode.DeepClone();
+        return (JsonNode)j;
+    }).ToArray());
 }

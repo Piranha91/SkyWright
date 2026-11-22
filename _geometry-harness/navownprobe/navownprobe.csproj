@@ -31,6 +31,7 @@
     <Compile Include="..\_shared\NavRepair.cs" Link="NavRepair.cs" />
     <Compile Include="..\_shared\NavRepairReadBack.cs" Link="NavRepairReadBack.cs" />
     <Compile Include="..\_shared\NavRepairNavi.cs" Link="NavRepairNavi.cs" />
+    <Compile Include="..\_shared\NavEdit.cs" Link="NavEdit.cs" />
     <Compile Include="..\_shared\NavGrid.cs" Link="NavGrid.cs" />
     <Compile Include="..\_shared\CellBoundaryIndex.cs" Link="CellBoundaryIndex.cs" />
   </ItemGroup>

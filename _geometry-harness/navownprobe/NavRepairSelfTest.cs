@@ -265,6 +265,33 @@ static class NavRepairSelfTest
             return o.Count == 1 && o[0].Kind == "EDGE-ONEWAY" ? null : $"without C: want EDGE-ONEWAY, got [{Show(without)}]";
         });
 
+        // C2603: a use_version row shares the plan's patch only with rows that touch nothing it changes or was matched against
+        // (review of slice B, 2026-11-22, finding 1: a neighbour whose link already fits the version is matched against, not
+        // changed, and its relink planned on the old winner went unchecked).
+        Case("2603 use-version-clash", () =>
+        {
+            FormKey gm = K(0xD01), b = K(0xD02), c = K(0xD03), other = K(0xD04);
+            var none = new Dictionary<FormKey, FormKey>();
+            string? Clash(IEnumerable<FormKey> ch, IEnumerable<FormKey> around, ISet<FormKey> planned, IReadOnlyDictionary<FormKey, FormKey>? claimed = null, IReadOnlyDictionary<FormKey, FormKey>? matched = null)
+                => NavRepairRun.UseVersionClash(gm, "City.esp", ch, around, planned, claimed ?? none, matched ?? none);
+            var bad = new List<string>();
+            var x0 = Clash(new[] { gm }, new[] { b }, new HashSet<FormKey> { other });
+            if (x0 is not null) bad.Add("disjoint rows refused: " + x0);
+            var x1 = Clash(new[] { gm }, new[] { b }, new HashSet<FormKey> { b });
+            if (x1 is null || !x1.Contains($"is matched against {b}") || !x1.Contains("a relink or ground row"))
+                bad.Add("a relink of a neighbour it was matched against is not refused by name: " + x1);
+            var x2 = Clash(new[] { gm, c }, Array.Empty<FormKey>(), new HashSet<FormKey> { c });
+            if (x2 is null || !x2.Contains($"changes {c}"))
+                bad.Add("a navmesh it changes, also a relink's, is not refused: " + x2);
+            var x3 = Clash(new[] { gm }, new[] { b }, new HashSet<FormKey>(), claimed: new Dictionary<FormKey, FormKey> { [b] = other });
+            if (x3 is null || !x3.Contains($"carrying a version of {other}"))
+                bad.Add("a neighbour an earlier use_version changes is not refused: " + x3);
+            var x4 = Clash(new[] { gm }, Array.Empty<FormKey>(), new HashSet<FormKey>(), matched: new Dictionary<FormKey, FormKey> { [gm] = other });
+            if (x4 is null || !x4.Contains("was matched"))
+                bad.Add("a navmesh an earlier use_version was matched against is not refused: " + x4);
+            return bad.Count == 0 ? null : string.Join(" | ", bad);
+        });
+
         // C2591: the plan for a band one-way row writes no link back across the band: refused by name.
         Case("2591 band-oneway-repair-refused", () =>
         {

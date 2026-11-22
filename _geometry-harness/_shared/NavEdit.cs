@@ -1090,6 +1090,30 @@ public static class NavUseVersionPlan
         };
     }
 
+    /// <summary>The kind of one of <see cref="NavEdit.UseVersion"/>'s refusal sentences, read from that sentence's own wording
+    /// (written above, in this file; the two change together, and navedit's self-test C2602 holds every kind): a border
+    /// link of the version that meets no edge (or several) of its neighbour; a neighbour's link into the navmesh that cannot be
+    /// re-pointed; a neighbour the navmesh info map names that the version drops; a different door table; or another reason
+    /// (a broken table, a missing navmesh, a ledge). A repair plan names the kinds of a refused row in its one sentence, so a
+    /// reader sees every cause, not only the first (the master's condition, 2026-11-22).</summary>
+    public static string ReasonKind(string why) =>
+        why.Contains("no edge of its winning version lies along it") || why.Contains(" of its triangles lie along it") ? "border link meeting no edge"
+        : why.Contains("lies along it") || why.Contains("triangles of ") && why.Contains("'s version lie along it") || why.Contains("cannot be re-pointed") ? "neighbour link into it that cannot be re-pointed"
+        : why.Contains("which the navmesh info map's entry for") ? "neighbour the navmesh info map names, dropped"
+        : why.Contains("other doors than the winner's") ? "different door table"
+        : "other reason";
+
+    /// <summary>Why <paramref name="key"/> cannot be edited for the navmesh info map, in one sentence, or null: the map cannot be
+    /// read, or the navmesh is an island in it (the map keeps its own copy of an island's geometry). The rule's one owner,
+    /// for every navedit edit and for navownprobe's use_version rows.</summary>
+    public static string? IslandRefusal(NaviView navi, FormKey key)
+    {
+        if (navi.Problem is { } np) return $"The navmesh info map cannot be read ({np}), so whether {key} is an island is not known.";
+        if (navi.Effective.TryGetValue(key, out var ent) && ent.Src.Map.MapInfos[ent.Index].Island is not null)
+            return $"{key} is an island in the navmesh info map, which keeps its own copy of the geometry; editing islands is not supported yet.";
+        return null;
+    }
+
     /// <summary>Every navmesh's winning link table on the order: FormKey to (winning plugin path, its links). Read once per
     /// plan, so a triangle edit finds every navmesh whose links name the one it renumbers.</summary>
     public static Dictionary<FormKey, (string Path, List<NavEdgeLink> Links)> InboundIndex(IReadOnlyList<string> order)

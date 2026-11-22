@@ -12,9 +12,10 @@ static class NavRepairRun
 {
     public static JsonObject Write(string path, NavRepairPlan relink, NavRepairPlan ground, IEnumerable<NavBorderLinks.Row> unproven,
                                    Func<FormKey, (string Plugin, string Path)?> winner, EdgeTolerance tol, EdgeTolerance wide, IReadOnlyList<string> order,
-                                   NaviPlan navi)
+                                   NaviPlan navi, IReadOnlyList<JsonObject>? useVersions = null)
     {
         var plans = new JsonArray();
+        foreach (var u in useVersions ?? Array.Empty<JsonObject>()) plans.Add(u);
         foreach (var p in relink.Plans.Concat(ground.Plans).OrderBy(p => p.Nav.ToString(), StringComparer.Ordinal))
         {
             var w = winner(p.Nav);
@@ -59,16 +60,61 @@ static class NavRepairRun
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(fs)).ToLowerInvariant();
     }
 
-    static JsonArray Ops(IEnumerable<RepairOp> ops) => new(ops.Select(o =>
+    static JsonArray Ops(IEnumerable<RepairOp> ops) => NavRepairRunJson.OpsJson(ops);
+
+    /// <summary>A use_version row (class "use_version"): where the ground plan refused in favour of a mover's re-cut, the plan
+    /// of carrying that re-cut (NavUseVersionPlan, navedit's own code). Its "winner" is the plugin whose version is carried
+    /// (the patch's source, hashed like any winner), "useVersion" navedit's row object, "edits" its ops and "changes" the
+    /// navmeshes it changes. Its ops are not in the plan's top-level "ops": navedit write --repair-plan re-plans the row on
+    /// the order and writes its own ops after requiring them equal to these.</summary>
+    /// <summary>Why carrying <paramref name="mover"/>'s version of <paramref name="nav"/> cannot share this plan's patch, in one
+    /// sentence, or null. It changes <paramref name="changes"/> and was matched against <paramref name="around"/> (the navmeshes
+    /// linking into it, those its version links into, and the planned rows pointing a link at it) as they stand before the patch.
+    /// Refused: a navmesh it changes or was matched against is a planned relink or ground row's (<paramref name="planned"/>), or
+    /// an earlier use_version row changes it (<paramref name="claimed"/>); or a navmesh it changes was an earlier use_version
+    /// row's match (<paramref name="matched"/>). Review of slice B, 2026-11-22, finding 1: a neighbour whose link already fits
+    /// the version is not re-pointed, so a relink of it planned on the old winner went unchecked.</summary>
+    public static string? UseVersionClash(FormKey nav, string mover, IEnumerable<FormKey> changes, IEnumerable<FormKey> around,
+                                          ISet<FormKey> planned, IReadOnlyDictionary<FormKey, FormKey> claimed, IReadOnlyDictionary<FormKey, FormKey> matched)
     {
-        var j = new JsonObject { ["formid"] = o.FormId, ["field_path"] = o.FieldPath, ["op"] = o.Op };
-        if (o.Key is not null) j["key"] = o.Key;
-        if (o.Value is not null) j["value"] = o.Value;
-        if (o.Compose is not null)
-            j["compose"] = new JsonObject { ["type"] = "EdgeLink", ["fields"] = new JsonObject(o.Compose.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))) };
-        if (o.ComposeNode is not null) j["compose"] = o.ComposeNode.DeepClone();
-        return (JsonNode)j;
-    }).ToArray());
+        var ch = changes.ToList();
+        foreach (var k in ch.Concat(around))
+        {
+            if (planned.Contains(k))
+                return $"Carrying {mover}'s version of {nav} {(ch.Contains(k) ? "changes" : "is matched against")} {k}, which a relink or ground row in this plan changes too; write them as separate patches.";
+            if (claimed.TryGetValue(k, out var by))
+                return $"Carrying {mover}'s version of {nav} {(ch.Contains(k) ? "changes" : "is matched against")} {k}, which carrying a version of {by} in this plan changes too; write them as separate patches.";
+        }
+        foreach (var k in ch)
+            if (matched.TryGetValue(k, out var by))
+                return $"Carrying {mover}'s version of {nav} changes {k}, against which carrying a version of {by} in this plan was matched; write them as separate patches.";
+        return null;
+    }
+
+    public static JsonObject UseVersionRow(FormKey nav, string mover, string moverPath, string? refused, UseVersionPlan? u)
+    {
+        bool ok = refused is null && u is { Planned: true };
+        return new JsonObject
+        {
+            ["source"] = nav.ToString(), ["class"] = "use_version", ["status"] = ok ? "planned" : "refused",
+            // one sentence: the first reason, then every reason counted by kind (NavUseVersionPlan.ReasonKind), each in "whyAll"
+            ["why"] = refused ?? (u is null || u.Why.Count == 0 ? "" : u.Why.Count == 1 ? u.Why[0]
+                                  : $"{u.Why[0].TrimEnd('.')}; in all {u.Why.Count} reasons: "
+                                    + string.Join(", ", u.Why.GroupBy(NavUseVersionPlan.ReasonKind).OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.Ordinal)
+                                                         .Select(g => $"{g.Count()} {g.Key}"))
+                                    + " (each in whyAll)."),
+            ["whyKinds"] = new JsonArray((refused is not null ? Array.Empty<string>() : u?.Why ?? Array.Empty<string>()).Select(w => (JsonNode)NavUseVersionPlan.ReasonKind(w)).ToArray()),
+            ["whyAll"] = new JsonArray((refused is not null ? (IReadOnlyList<string>)new[] { refused } : u?.Why ?? Array.Empty<string>()).Select(w => (JsonNode)w).ToArray()),
+            ["winner"] = new JsonObject { ["plugin"] = mover, ["path"] = moverPath, ["sha256"] = Sha(moverPath) },
+            ["links"] = new JsonArray(),
+            // the fields every plan row has (the workbench's repair lane reads them on each row)
+            ["adjacencyChange"] = ok && (u!.Row?["gainedNeighbours"] as JsonArray)?.Count > 0,
+            ["invariants"] = new JsonArray(),
+            ["useVersion"] = u?.Row?.DeepClone(),
+            ["edits"] = ok ? Ops(u!.Ops) : new JsonArray(),
+            ["changes"] = new JsonArray((ok ? u!.Expect.Keys.Select(k => (JsonNode)k.ToString()) : Array.Empty<JsonNode>()).ToArray()),
+        };
+    }
 
     /// <summary>The plan's NAVI change (its one owner is NavRepairNavi.NaviJson).</summary>
     public static JsonObject NaviJson(NaviPlan n) => NavRepairNavi.NaviJson(n);

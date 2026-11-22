@@ -81,6 +81,7 @@ if (args.Length >= 1 && args[0] == "--navrepair-selftest") return NavRepairSelfT
 if (args.Length >= 3 && args[0] == "--navgrid-oracle") return NavGridOracle.Run(args[1], args[2..]);
 if (args.Length is 1 or 2 && args[0] == "--navgrid-selftest") return NavGridSelfTest.Run(args.Length == 2 ? args[1] : null);
 if (args.Length >= 2 && args[0] == "--write-navi-master-fixture") { Console.WriteLine(NavRepairFixture.WriteNaviMasterCase(args[1])); return 0; }
+if (args.Length >= 2 && args[0] == "--write-mover-fixture") { Console.WriteLine(NavRepairFixture.WriteMoverCase(args[1])); return 0; }
 if (args.Length >= 2 && args[0] == "--write-navrepair-fixture") { Console.WriteLine(string.Join(Environment.NewLine, NavRepairFixture.Write(args[1]))); return 0; }
 
 // The command line (NavownArgs.cs): an argument it does not know is refused by name, before anything is read.
@@ -1194,15 +1195,67 @@ if (emitPath is not null)
         }
         var groundPlan = NavRepair.Ground(winGeom, groundFindings.Select(r => new GroundRow(r.Nav, r.Facts ?? Array.Empty<GroundVertex>(), MoverOf(r))).ToList(), ground.Band, edgeTol, scope, islands, naviView.Problem);
         NaviPlan naviPlan;
-        try { naviPlan = NavRepairNavi.Plan(relinkPlan, winGeom, naviView); }
+        var useVersions = new List<System.Text.Json.Nodes.JsonObject>();
+        try
+        {
+            naviPlan = NavRepairNavi.Plan(relinkPlan, winGeom, naviView);
+            // USE_VERSION ROWS (houseCARL 2026-11-22): where the ground plan refused in favour of a mover's re-cut, the plan of
+            // carrying that re-cut, by navedit's own code (NavUseVersionPlan). One patch carries it with the other rows, so a
+            // navmesh another planned row (or an earlier use_version) changes, or a NAVI change beside the relinks' own, is
+            // refused by name rather than written twice.
+            var plannedNavs = relinkPlan.Plans.Concat(groundPlan.Plans).Where(p => p.Status != "refused").Select(p => p.Nav).ToHashSet();
+            var claimedBy = new Dictionary<FormKey, FormKey>();
+            var matchedBy = new Dictionary<FormKey, FormKey>();   // navmeshes an earlier use_version row was matched against
+            // planned rows whose change points a link at a navmesh (a relink into it): that navmesh's triangles are theirs too
+            var linkedByPlan = relinkPlan.Plans.Concat(groundPlan.Plans).Where(p => p.Status != "refused")
+                .SelectMany(p => p.Change.SetEntries.Values.Select(v => v.Mesh).Concat(p.Change.AddedEntries.Select(a => a.Mesh)).Select(m => (Into: m, By: p.Nav)))
+                .GroupBy(x => x.Into).ToDictionary(g => g.Key, g => g.Select(x => x.By).ToList());
+            FormKey? naviBy = null;
+            Dictionary<FormKey, (string Path, List<NavEdgeLink> Links)>? inbound = null;
+            using var uvResolver = LoadOrderResolver.Build(paths);
+            var uvView = uvResolver.Capture();
+            foreach (var r in groundFindings)
+            {
+                if (scope is not null && !scope.Contains(r.Nav)) continue;
+                if (MoverOf(r) is not { } mv || !winGeom.TryGetValue(r.Nav, out var wgeom)) continue;
+                var moverIx = Array.FindIndex(pluginKey, k => string.Equals(k.FileName.String, mv.Mover, StringComparison.OrdinalIgnoreCase));
+                string? refused = NavUseVersionPlan.IslandRefusal(naviView, r.Nav);   // navedit's own rule for every edit
+                var u = refused is null ? NavUseVersionPlan.Plan(uvView, naviView, paths, r.Nav, wgeom.Geom, mv.Winner, mv.Mover, () => inbound ??= NavUseVersionPlan.InboundIndex(paths)) : null;
+                refused ??= u!.Refuse;
+                if (refused is null && u!.Planned)
+                {
+                    // every navmesh the version was matched against: the winners linking into it, the version's own link
+                    // targets, and the planned rows that point a link at it (review of slice B, 2026-11-22, finding 1: a
+                    // neighbour whose link already fits the version is not re-pointed, so it is not among the changes)
+                    var around = new HashSet<FormKey>(inbound!.Where(kv => kv.Value.Links.Any(l => l.Mesh == r.Nav)).Select(kv => kv.Key));
+                    if (moverGeom.TryGetValue((r.Nav, moverIx), out var vg)) foreach (var l in vg.EdgeLinks ?? Array.Empty<NavEdgeLink>()) around.Add(l.Mesh);
+                    if (linkedByPlan.TryGetValue(r.Nav, out var into)) foreach (var b in into) around.Add(b);
+                    around.Remove(r.Nav);
+                    bool naviChange = u.Row?["navi"] is System.Text.Json.Nodes.JsonObject;
+                    refused = NavRepairRun.UseVersionClash(r.Nav, mv.Mover, u.Expect.Keys, around, plannedNavs, claimedBy, matchedBy)
+                           ?? (naviChange && naviPlan.Ops.Count > 0 ? $"Carrying {mv.Mover}'s version of {r.Nav} changes the navmesh info map, which this plan's relinks change too; write it as its own patch."
+                             : naviChange && naviBy is { } nb ? $"Carrying {mv.Mover}'s version of {r.Nav} changes the navmesh info map, which carrying a version of {nb} in this plan changes too; write them as separate patches."
+                             : null);
+                    if (refused is null)
+                    {
+                        foreach (var k in u.Expect.Keys) claimedBy[k] = r.Nav;
+                        foreach (var k in around) matchedBy.TryAdd(k, r.Nav);
+                        if (naviChange) naviBy = r.Nav;
+                    }
+                }
+                useVersions.Add(NavRepairRun.UseVersionRow(r.Nav, mv.Mover, paths[moverIx], refused, u));
+            }
+        }
         finally { foreach (var m in naviOpen) m.Dispose(); }
         NavRepairRun.Write(planPath, relinkPlan, groundPlan, borderUnproven,
-            k => winNav.TryGetValue(k, out var x) ? (pluginKey[x.Owner].FileName.String, paths[x.Owner]) : null, edgeTol, wideTol, paths, naviPlan);
+            k => winNav.TryGetValue(k, out var x) ? (pluginKey[x.Owner].FileName.String, paths[x.Owner]) : null, edgeTol, wideTol, paths, naviPlan, useVersions);
+        foreach (var u in useVersions)
+            Console.WriteLine($"   {(string)u["status"]!,-8} use_version {(string)u["source"]!} from {(string)u["winner"]!["plugin"]!}: {(string)u["why"]!}");
         var all = relinkPlan.Plans.Concat(groundPlan.Plans).ToList();
         Console.WriteLine($"\n==== REPAIR PLAN -> {planPath} ====");
         Console.WriteLine($"   {all.Count:N0} navmeshes: " + string.Join(", ", all.GroupBy(p => p.Status).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}"))
                         + $"; links " + string.Join(", ", all.SelectMany(p => p.Links).GroupBy(l => l.Status).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}"))
-                        + $"; {relinkPlan.Ops.Count() + naviPlan.Ops.Count + groundPlan.Ops.Count():N0} ops; {borderUnproven.Count:N0} unproven links offered no repair");
+                        + $"; {relinkPlan.Ops.Count() + naviPlan.Ops.Count + groundPlan.Ops.Count():N0} ops (and {useVersions.Sum(u => ((System.Text.Json.Nodes.JsonArray)u["edits"]!).Count):N0} in use_version rows); {borderUnproven.Count:N0} unproven links offered no repair");
         Console.WriteLine($"   NAVI ({naviPlan.Record?.ToString() ?? "none"}, winner {naviPlan.WinnerPlugin ?? "none"}): {string.Join("; ", naviPlan.Why)}");
         foreach (var p in all.Take(listN)) Console.WriteLine($"   {p.Status,-8} {p.Class,-6} {p.Nav}: {string.Join("; ", p.Why)}");
     }

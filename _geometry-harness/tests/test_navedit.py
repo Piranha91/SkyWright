@@ -1,4 +1,4 @@
-"""Known answers for navmesh editing (C2513-C2550, C2556-C2562, C2564-C2565, C2580-C2589), on _shared/NavEdit.cs, _shared/NavCutFootprint.cs and _shared/NavMarker.cs through `navedit --selftest`.
+"""Known answers for navmesh editing (C2513-C2550, C2556-C2562, C2564-C2565, C2580-C2589, C2602), on _shared/NavEdit.cs, _shared/NavCutFootprint.cs and _shared/NavMarker.cs through `navedit --selftest`.
 
     2513  an interior vertex moved: planned, the box kept, the grid NavGrid's for the moved mesh, ops for exactly that
           vertex, the box and the grid
@@ -59,6 +59,7 @@
     2587  marker check: a marker 300 u above the only navmesh at its XY is refused; 20 u above stands inside
     2588  marker check: a navmesh whose record box is stale is still found (the box comes from its vertices)
     2589  marker check: a link naming a triangle the linked navmesh does not have is an open edge
+    2602  use_version: every refusal is classified as the kind its cause is (the repair plan counts reasons by kind)
 
 The real-data check (plan and write on a lab profile, read back, byte-compared with the in-game-tested patch) is in the
 2026-11-21 run folder; it needs a game and an MO2 instance, so it is not a test here.
@@ -244,6 +245,7 @@ CASES = [
     ("2587 a marker far above the navmesh refused", lambda: selftest("2587")),
     ("2588 stale record bounds do not hide a navmesh", lambda: selftest("2588")),
     ("2589 a link to a missing triangle is open", lambda: selftest("2589")),
+    ("2602 every use_version refusal has its kind", lambda: selftest("2602")),
 ] + ([("MS marker known answer on the lab (real data)", ms_marker_known_answer)] if str(LAB) not in ("", ".") else [])
 
 if __name__ == "__main__":

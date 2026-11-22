@@ -140,9 +140,7 @@ static class NavEditCli
                 if (w is null || path is null) refuse = $"{key} is in no plugin of this load order; check the FormKey and the profile.";
                 else if (geom is null) refuse = $"{key} has no geometry in its winner {w.Value.WinnerPlugin} (deleted or empty), so there is nothing to edit.";
                 else if ((isMove ? 1 : 0) + (isTri ? 1 : 0) + (isCut ? 1 : 0) + (isUse ? 1 : 0) + (isDoor ? 1 : 0) != 1) refuse = $"The edit of {key} must do one kind of thing: move vertices, remove and add triangles, cut, use a version, or add a door; split it into separate plans.";
-                else if (navi.Problem is { } np) refuse = $"The navmesh info map cannot be read ({np}), so whether {key} is an island is not known.";
-                else if (navi.Effective.TryGetValue(key, out var ent) && ent.Src.Map.MapInfos[ent.Index].Island is not null)
-                    refuse = $"{key} is an island in the navmesh info map, which keeps its own copy of the geometry; editing islands is not supported yet.";
+                else if (NavUseVersionPlan.IslandRefusal(navi, key) is { } isl) refuse = isl;
                 row["winner"] = w is null ? null : new JsonObject { ["plugin"] = w.Value.WinnerPlugin, ["path"] = path };
                 if (refuse is null && isMove)
                 {
@@ -728,7 +726,48 @@ static class NavEditCli
                 throw new Refusal($"navedit write: {Path.GetFileName(wp)} changed since the repair plan was made, so its ops may land on other triangles; plan again.");
         }
         var ops = (plan["ops"] as JsonArray ?? new JsonArray()).Select(o => o!).ToList();
-        if (ops.Count == 0) throw new Refusal("navedit write: the repair plan carries no ops; write it again with navownprobe --repair-plan.");
+        // use_version rows: re-planned here on the plan's order by navedit's own code (NavUseVersionPlan), and written from that
+        // plan after its ops are required to equal the row's, as navedit write --plan does; their ops carry a CopyFrom's source
+        var uvRows = NavRepairReadBack.UseVersionRows(plan);
+        var uv = new List<(JsonNode Row, UseVersionPlan U)>();
+        if (uvRows.Count > 0)
+        {
+            using var uvResolver = LoadOrderResolver.Build(order);
+            var uvView = uvResolver.Capture();
+            var (uvNavi, uvNaviOpen) = NaviView.Read(order);
+            Dictionary<FormKey, (string Path, List<NavEdgeLink> Links)>? inbound = null;
+            try
+            {
+                foreach (var row in uvRows)
+                {
+                    var key = FormKey.Factory((string)row["source"]!);
+                    var from = (string)row["winner"]!["plugin"]!;
+                    var w = uvView.ResolveWinner(key);
+                    var wp = w is null ? null : order.FirstOrDefault(o => string.Equals(Path.GetFileName(o), w.Value.WinnerPlugin, StringComparison.OrdinalIgnoreCase));
+                    var geom = wp is null ? null : Winning(wp, key);
+                    if (geom is null) throw new Refusal($"navedit write: {key} has no winning geometry on the plan's order now, so carrying {from}'s version cannot be re-planned; plan again.");
+                    var u = NavUseVersionPlan.IslandRefusal(uvNavi, key) is { } isl
+                        ? new UseVersionPlan(isl, Array.Empty<string>(), new List<RepairOp>(), new(), null)
+                        : NavUseVersionPlan.Plan(uvView, uvNavi, order, key, geom, w!.Value.WinnerPlugin, from, () => inbound ??= InboundIndex(order));
+                    if (!u.Planned || NavRepairRunJson.OpsJson(u.Ops).ToJsonString() != row["edits"]!.ToJsonString())
+                        throw new Refusal($"navedit write: carrying {from}'s version of {key} no longer plans the same on this load order ({u.Refuse ?? (u.Why.Count > 0 ? string.Join(" ", u.Why) : "other ops")}); plan again.");
+                    uv.Add((row, u));
+                }
+            }
+            finally { foreach (var m in uvNaviOpen) m.Dispose(); }
+        }
+        if (ops.Count == 0 && uv.Count == 0) throw new Refusal("navedit write: the repair plan carries no ops; write it again with navownprobe --repair-plan.");
+        // the planner's exclusions, held again before anything is written (review of slice B, finding 3): a stale or edited plan
+        // must not leave a patch on disk that no read-back can hold
+        int uvNavis = uv.Count(x => x.Row["useVersion"]?["navi"]?["entries"] is JsonArray { Count: > 0 });
+        if (uvNavis > 1 || (uvNavis == 1 && plan["navi"]?["entries"] is JsonArray { Count: > 0 }))
+            throw new Refusal("navedit write: the repair plan carries more than one change to the navmesh info map, which one patch cannot be held to; plan again with a current navownprobe --repair-plan.");
+        var rowSources = plans.Where(p => (string?)p["status"] != "refused" && (string?)p["class"] != "use_version").Select(p => FormKey.Factory((string)p["source"]!)).ToHashSet();
+        var uvSeen = new HashSet<FormKey>();
+        foreach (var (row, u) in uv)
+            foreach (var k in u.Expect.Keys)
+                if (rowSources.Contains(k) || !uvSeen.Add(k))
+                    throw new Refusal($"navedit write: {k} is changed by carrying a version of {(string)row["source"]!} and by another row of the plan, which one patch cannot hold both of; plan again with a current navownprobe --repair-plan.");
         var root = CheckoutLayout.FindRoot() ?? throw new Refusal("navedit write: the SkyWright checkout (SkyWright.sln) was not found above this program, so the rulebook cannot be located.");
         var corpus = CheckoutLayout.Corpus(root);
         if (!File.Exists(corpus)) throw new Refusal($"navedit write: the rulebook {corpus} is missing; generate it (see CLAUDE.md, Build and check).");
@@ -740,12 +779,18 @@ static class NavEditCli
             Key = (string?)o["key"], Value = (string?)o["value"],
             Struct = o["compose"] is JsonObject c ? MapCompose(c) : null,
         }).ToList();
+        edits.AddRange(uv.SelectMany(x => x.U.Ops).Select(o => new WritePatchBuilder.PatchEdit
+        {
+            Target = FormKey.Factory(o.FormId), Path = o.FieldPath.Split('.'), Verb = o.Op, Key = o.Key, Value = o.Value, FromPlugin = o.FromPlugin,
+            Struct = o.ComposeNode is JsonObject uc ? MapCompose(uc) : null,   // the same mapping navedit write --plan uses
+        }));
+        var uvNaviRow = uv.Select(x => x.Row["useVersion"]?["navi"]).FirstOrDefault(n => n?["entries"] is JsonArray { Count: > 0 });
         using (var resolver = LoadOrderResolver.Build(order))
         {
             var applied = WritePatchBuilder.Apply(resolver, rulebook, edits, outPath, extend: false);
             if (!applied.Success) { Console.Error.WriteLine($"navedit write: the write engine refused the patch: {applied.Error}"); return 1; }
             foreach (var op in applied.Ops.Where(o => !o.Applied)) { Console.Error.WriteLine($"navedit write: {op.Label} was not applied: {op.Error}"); return 1; }
-            bool naviPlanned = plan["navi"]?["entries"] is JsonArray ne && ne.Count > 0;
+            bool naviPlanned = plan["navi"]?["entries"] is JsonArray ne && ne.Count > 0 || uvNaviRow is not null;
             if (ForwardCarried(resolver, outPath, order, naviPlanned) is { } ferr) { Console.Error.WriteLine(ferr); return 1; }
         }
         // the ruling of 2026-11-22 (825ee14): a resolution patch masters every plugin whose version it supersedes; here the
@@ -754,13 +799,19 @@ static class NavEditCli
         // a patch that carries a NAVI change supersedes the NAVI winner too: master it, or a re-sort below it loses the NAVI
         // change while the navmesh edits stay (houseCARL, 2026-11-22)
         var naviWinner = plan["navi"]?["entries"] is JsonArray { Count: > 0 } ? (string?)plan["navi"]?["winner"]?["plugin"] : null;
-        var masters = plans.Where(p => (string?)p["status"] != "refused").Select(p => (string?)p["winner"]?["plugin"]).Append(naviWinner)
+        // a use_version row supersedes every version after its source (its row's masters) and, with a NAVI change, the NAVI winner
+        // ... and each re-pointed neighbour's winner, whose version its override supersedes (review of slice B, finding 4)
+        var uvMasters = uv.SelectMany(x => x.Row["useVersion"]?["masters"]?.AsArray().Select(m => (string?)m) ?? Array.Empty<string?>())
+                          .Concat(uv.SelectMany(x => x.U.Expect.Values.Where(e => !e.Rebuilt).Select(e => (string?)Path.GetFileName(e.WinnerPath))))
+                          .Append(uvNaviRow is not null ? (string?)uvNaviRow["winner"]?["plugin"] : null);
+        var masters = plans.Where(p => (string?)p["status"] != "refused").Select(p => (string?)p["winner"]?["plugin"]).Append(naviWinner).Concat(uvMasters)
                            .Where(x => !string.IsNullOrEmpty(x)).Select(x => x!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (masters.Count > 0 && AddMasters(outPath, order, masters) is { } merr) { Console.Error.WriteLine($"navedit write: {merr}"); return 1; }
         foreach (var r in refused) Console.WriteLine($"not written (refused in the plan): {r}");
-        Console.WriteLine($"patch written: {outPath} ({ops.Count} ops, {plans.Count - refused.Count} navmesh plan(s)); its read-back:");
+        Console.WriteLine($"patch written: {outPath} ({ops.Count + uv.Sum(x => x.U.Ops.Count)} ops, {plans.Count - refused.Count} navmesh plan(s)); its read-back:");
         var rbPath = Path.ChangeExtension(outPath, null) + ".readback.json";
-        int rb = NavRepairReadBack.Run(planPath, outPath, rbPath);
+        var uvExpect = uv.SelectMany(x => x.U.Expect).ToDictionary(kv => kv.Key, kv => kv.Value);
+        int rb = NavRepairReadBack.Run(planPath, outPath, rbPath, uvExpect);
         using var written = SkyrimMod.CreateFromBinaryOverlay(outPath, SkyrimRelease.SkyrimSE);
         var declared = written.ModHeader.MasterReferences.Select(m => m.Master.FileName.String).ToList();
         var missing = masters.Where(m => !declared.Contains(m, StringComparer.OrdinalIgnoreCase)).ToList();
