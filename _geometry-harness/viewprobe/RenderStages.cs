@@ -14,9 +14,11 @@ namespace ViewProbe;
 /// The cuts here are the ones the cost model already measures, so a saving can be read out of
 /// history rather than re-measured by hand:
 ///
-///   find-cell     walking the order until the cell is found — per shot, because the tool
-///                 re-walks per shot
-///   record-walk   the winning state: every plugin, for the refs and navmeshes that win
+///   find-cell     walking the order until the cell is found — once per cell under cell reuse
+///                 (--reuse-cell, the default for a static worklist), once per shot with
+///                 --no-reuse-cell
+///   record-walk   the winning state: every plugin, for the refs and navmeshes that win — once
+///                 per cell like find-cell, its scene serving every shot there
 ///   scene-build   resolving and building the meshes and textures of every reference, and drawing
 ///   report        the occlusion report's own per-shape visibility work, when one is asked for
 ///   encode        encoding the frame and writing it
