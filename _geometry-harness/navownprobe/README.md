@@ -19,6 +19,12 @@ The instance, game and profile come from the flags, then the environment, then t
 (`_shared/HarnessTarget.cs`). An argument the probe does not know is refused by name with exit 2 before anything is read.
 A misspelt flag does not fall back to the default report.
 
+`--enable` takes a plugin name (switched on at its `loadorder.txt` position; refused without one) or a path to a plugin
+file outside the profile, such as a patch `navedit write` made. A path loads **last**, after the profile's order, since a
+patch planned against that order's winners is meant to win. The identity's limits say so, and its masters must be loaded.
+A missing file, or a name already in the order, is refused in one sentence (`tests/test_order_input_refusal.py`,
+C1325-C1327).
+
 ## Deletions by the shipped game: `--list-master-deletions`
 
 Bethesda's own masters delete navmeshes: the DLCs and Update delete base-game navmeshes they replace. Those deletions

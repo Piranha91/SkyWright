@@ -117,7 +117,7 @@ public sealed record ResolvedConfiguration(
 
 public static class HarnessOrderCli
 {
-    public const string Usage = "[--order FILE] [--enable X.esp] [--disable X.esp]";
+    public const string Usage = "[--order FILE] [--enable X.esp | --enable PATH/TO/PATCH.esp] [--disable X.esp]";
 
     /// <summary>Decide what this run evaluates. Three sources, one shape:
     /// <list type="bullet">
@@ -202,17 +202,40 @@ public static class HarnessOrderCli
         {
             source = $"synthetic:{profileName}";
             viewMods = comp.EnabledMods;
-            var syn = SyntheticOrder.Build(profileDir, modsDir, dataDir, overwriteDir, enable, disable);
+            // A PATCH FILE: an --enable naming a path, not a name (a patch navedit or the Workbench wrote, outside every
+            // mod folder). It has no load-order position, and here one is not invented: a patch planned against this
+            // order's winners is meant to win, so it loads LAST, after the order the names below build, and the identity
+            // says so. A bare name keeps SyntheticOrder's rule (refused without a loadorder.txt position).
+            var patchFiles = new List<string>();
+            var named = new List<string>();
+            foreach (var e in enable ?? Array.Empty<string>())
+            {
+                if (!IsPatchPath(e)) { named.Add(e); continue; }
+                if (!File.Exists(e)) return Refuse($"--enable {e}: no plugin file is there; give the path to a written patch, or a plugin name.");
+                patchFiles.Add(Path.GetFullPath(e));
+            }
+            var syn = SyntheticOrder.Build(profileDir, modsDir, dataDir, overwriteDir, named, disable);
             // A --enable the order could not take would leave the run measuring the order without it.
             if (syn.Unbuildable.Count > 0) return Refuse(EnableRefusal(syn.Unbuildable));
             if (syn.RefusedForMasters.Count > 0)
                 return Refuse(OrderMasters.Sentence(syn.RefusedForMasters,
                     g => $"also --enable {OrderMasters.Names(g.Masters)} (install it first if no folder has it) or leave '{g.Plugin}' off"));
             paths = syn.OrderedPaths.ToList();
+            foreach (var pf in patchFiles)
+            {
+                var fn = Path.GetFileName(pf);
+                if (paths.Any(x => string.Equals(Path.GetFileName(x), fn, StringComparison.OrdinalIgnoreCase)))
+                    return Refuse($"--enable {pf}: a plugin named '{fn}' is already in this order, and the game loads one file of a name; rename the patch.");
+                paths.Add(pf);
+                applied.Add($"ENABLED  {fn} (patch file, loaded last) from {pf}");
+                limits.Add($"'{fn}' is a patch file from outside the MO2 layout, loaded LAST: it has no load-order position of its "
+                         + "own, and last is where a patch planned against this order's winners belongs. Registered in MO2 at "
+                         + "another position, it could lose records it wins here.");
+            }
             names = paths.Select(Path.GetFileName).ToList()!;
             warnings.AddRange(syn.Warnings);
             applied.AddRange(syn.Applied);
-            if (syn.Applied.Count == 0)
+            if (syn.Applied.Count == 0 && patchFiles.Count == 0)
                 applied.Add("(nothing changed — every named plugin was already in that state)");
         }
         else
@@ -472,6 +495,11 @@ public static class HarnessOrderCli
 
     /// <summary>Which layer a resolved path came from: "overwrite", the mod folder's own name, "Data", or — when it is
     /// under none of the three — the directory itself, said plainly rather than guessed at.</summary>
+    /// <summary>Whether an --enable value names a plugin FILE by path (a patch outside the layout) rather than a plugin by
+    /// name: it holds a directory separator or is rooted.</summary>
+    public static bool IsPatchPath(string enable) =>
+        Path.IsPathRooted(enable) || enable.Contains('/') || enable.Contains('\\');
+
     static string ProviderOf(string path, string overwriteDir, string modsDir, string dataDir, IReadOnlyList<string>? viewMods = null)
     {
         string full = Path.GetFullPath(path);

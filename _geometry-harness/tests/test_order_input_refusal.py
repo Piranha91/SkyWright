@@ -27,6 +27,11 @@ Cases (1300-1313 are the reader-level cases in proofprobe's ConfigurationProof):
     1322  overlapprobe's scene preflight already refuses the mismatch before the reader: still one refusal, not two.
     1323  controls: `--enable Off.esp` and cand-good.json are not refused for either reason.
     1324  evalrun's and ordersweep's refusal markers recognise both sentences, as they do MISSING MASTER.
+    1325  a PATCH FILE (an --enable given as a path, outside every mod folder: a navedit patch) loads LAST: navownprobe
+          --enable PATH --emit runs, the emit's plugin list ends with it, the run prints it as enabled last, and the
+          identity's limits say it was loaded last.
+    1326  a patch file whose master is not loaded is refused, MISSING MASTER naming it, exit 2, nothing written.
+    1327  a path with no file, and a patch named like a plugin already in the order, are refused in one sentence, exit 2.
 
 A missing Release exe is a FAILURE, never a skip. Exit 0 when every case passes.
 """
@@ -235,6 +240,50 @@ def main() -> int:
                 label, code, out, n, _ = got
                 check(n == 0 and "is not the BaseProfile" not in out and "Unhandled exception" not in out,
                       f"{label}: a candidate built on --profile is not refused for its profile", f"exit {code}\n{out[-600:]}")
+
+        # 1325-1327: a patch file given by path.
+        patch = tmp / "out" / "NavEditPatch.esp"
+        plugin(patch, ["Base.esm", "Parent.esp"])
+        work = tmp / "work" / "1325-navownprobe"
+        code, out = run("navownprobe", ["--enable", str(patch), "--emit", "out.json"], tmp, "Good", inst, game, work)
+        names: list[str] = []
+        emit = work / "out.json"
+        if emit.exists():
+            def plugin_lists(n):
+                if isinstance(n, dict):
+                    for v in n.values():
+                        yield from plugin_lists(v)
+                elif isinstance(n, list):
+                    if n and all(isinstance(x, dict) and "Sha256" in x and "Name" in x for x in n):
+                        yield [x["Name"] for x in n]
+                    for v in n:
+                        yield from plugin_lists(v)
+            names = next(plugin_lists(json.loads(emit.read_text(encoding="utf-8"))), [])
+        text = emit.read_text(encoding="utf-8") if emit.exists() else ""
+        check(code == 0 and names[-1:] == ["NavEditPatch.esp"] and "patch file, loaded last" in out
+              and "loaded LAST" in text and "Unhandled exception" not in out,
+              "1325 navownprobe --enable PATH: the patch file loads last and the identity says so",
+              f"exit {code}; plugins {names}\n{out[-1200:]}")
+
+        orphan = tmp / "out2" / "Orphan.esp"
+        plugin(orphan, ["Base.esm", "Missing.esm"])
+        work = tmp / "work" / "1326-navownprobe"
+        code, out = run("navownprobe", ["--enable", str(orphan), "--emit", "out.json"], tmp, "Good", inst, game, work)
+        check(code == 2 and "MISSING MASTER" in out and "Missing.esm" in out and not written(work)
+              and "Unhandled exception" not in out,
+              "1326 a patch file with a master not loaded is refused, naming it, nothing written",
+              f"exit {code}; written {written(work)}\n{out[-1200:]}")
+
+        work = tmp / "work" / "1327a-navownprobe"
+        code, out = run("navownprobe", ["--enable", str(tmp / "nowhere" / "Gone.esp"), "--emit", "out.json"], tmp, "Good", inst, game, work)
+        check(code == 2 and out.count("no plugin file is there") == 1 and not written(work),
+              "1327 a patch path with no file is refused in one sentence", f"exit {code}\n{out[-800:]}")
+        twin = tmp / "out3" / "Child.esp"
+        plugin(twin, ["Base.esm"])
+        work = tmp / "work" / "1327b-navownprobe"
+        code, out = run("navownprobe", ["--enable", str(twin), "--emit", "out.json"], tmp, "Good", inst, game, work)
+        check(code == 2 and out.count("is already in this order") == 1 and not written(work),
+              "1327 a patch named like a plugin in the order is refused in one sentence", f"exit {code}\n{out[-800:]}")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
