@@ -81,7 +81,7 @@ if (args.Length >= 1 && args[0] == "--navrepair-selftest") return NavRepairSelfT
 if (args.Length >= 3 && args[0] == "--navgrid-oracle") return NavGridOracle.Run(args[1], args[2..]);
 if (args.Length is 1 or 2 && args[0] == "--navgrid-selftest") return NavGridSelfTest.Run(args.Length == 2 ? args[1] : null);
 if (args.Length >= 2 && args[0] == "--write-navi-master-fixture") { Console.WriteLine(NavRepairFixture.WriteNaviMasterCase(args[1])); return 0; }
-if (args.Length >= 2 && args[0] == "--write-mover-fixture") { Console.WriteLine(NavRepairFixture.WriteMoverCase(args[1], doors: args.Length >= 3 && args[2] == "doors")); return 0; }
+if (args.Length >= 2 && args[0] == "--write-mover-fixture") { Console.WriteLine(NavRepairFixture.WriteMoverCase(args[1], doors: args.Skip(2).Contains("doors"), neighbour: args.Skip(2).Contains("neighbour"))); return 0; }
 if (args.Length >= 2 && args[0] == "--write-navrepair-fixture") { Console.WriteLine(string.Join(Environment.NewLine, NavRepairFixture.Write(args[1]))); return 0; }
 
 // The command line (NavownArgs.cs): an argument it does not know is refused by name, before anything is read.

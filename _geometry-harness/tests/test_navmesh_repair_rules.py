@@ -812,24 +812,30 @@ _MOVER = None
 _MOVER_DOORS = None
 
 
+def _mover_instance(tmp: Path, flags):
+    """navownprobe --write-mover-fixture (with FLAGS) laid out as an MO2 instance with profile P; returns (instance, game)."""
+    keep = tmp / "fixture"
+    w = run([exe("navownprobe"), "--write-mover-fixture", keep] + list(flags))
+    if w.returncode != 0 or not all((keep / n).exists() for n in MOVER_ORDER):
+        raise RuntimeError(f"the mover fixture was not written (exit {w.returncode}): {(w.stdout + w.stderr)[-600:]}")
+    inst, game = tmp / "instance", tmp / "game"
+    prof = inst / "profiles" / "P"
+    prof.mkdir(parents=True); (inst / "overwrite").mkdir(); (game / "Data").mkdir(parents=True)
+    for n in MOVER_ORDER:
+        d = inst / "mods" / Path(n).stem
+        d.mkdir(parents=True)
+        shutil.copyfile(keep / n, d / n)
+    (prof / "plugins.txt").write_text("".join("*" + n + "\n" for n in MOVER_ORDER), encoding="utf-8")
+    (prof / "loadorder.txt").write_text("".join(n + "\n" for n in MOVER_ORDER), encoding="utf-8")
+    (prof / "modlist.txt").write_text("".join("+" + Path(n).stem + "\n" for n in reversed(MOVER_ORDER)), encoding="utf-8")
+    return inst, game
+
+
 class MoverLab:
     """navownprobe --write-mover-fixture laid out as an MO2 instance; one plan run and one R1 write."""
 
     def __init__(self, tmp: Path, doors: bool = False):
-        keep = tmp / "fixture"
-        w = run([exe("navownprobe"), "--write-mover-fixture", keep] + (["doors"] if doors else []))
-        if w.returncode != 0 or not all((keep / n).exists() for n in MOVER_ORDER):
-            raise RuntimeError(f"the mover fixture was not written (exit {w.returncode}): {(w.stdout + w.stderr)[-600:]}")
-        inst, game = tmp / "instance", tmp / "game"
-        prof = inst / "profiles" / "P"
-        prof.mkdir(parents=True); (inst / "overwrite").mkdir(); (game / "Data").mkdir(parents=True)
-        for n in MOVER_ORDER:
-            d = inst / "mods" / Path(n).stem
-            d.mkdir(parents=True)
-            shutil.copyfile(keep / n, d / n)
-        (prof / "plugins.txt").write_text("".join("*" + n + "\n" for n in MOVER_ORDER), encoding="utf-8")
-        (prof / "loadorder.txt").write_text("".join(n + "\n" for n in MOVER_ORDER), encoding="utf-8")
-        (prof / "modlist.txt").write_text("".join("+" + Path(n).stem + "\n" for n in reversed(MOVER_ORDER)), encoding="utf-8")
+        inst, game = _mover_instance(tmp, ["doors"] if doors else [])
         self.tmp, self.plan_path = tmp, tmp / "plan.json"
         self.log = run([exe("navownprobe"), "--instance", inst, "--game", game, "--profile", "P", "--emit", tmp / "emit.json", "--repair-plan", self.plan_path])
         self.plan = json.loads(self.plan_path.read_text(encoding="utf-8")) if self.log.returncode == 0 and self.plan_path.exists() else None
@@ -950,6 +956,48 @@ def t2604():
     assert [d.lower() for d in entries[0]["doorsAfter"]] == [DB.lower(), DC.lower(), DA.lower()] and entries[0]["keepDoors"] == 0, entries[0]
 
 
+GN = sk("000B11")
+_NAVEDIT_MOVER = None
+
+
+def navedit_mover():
+    """The mover fixture with doors and a neighbour, planned and written by navedit itself (use_version of GM from Mover.esp)."""
+    global _NAVEDIT_MOVER
+    if _NAVEDIT_MOVER is None:
+        tmp = Path(tempfile.mkdtemp(prefix="navmesh-repair-navedit-mover-"))
+        inst, game = _mover_instance(tmp, ["doors", "neighbour"])
+        navedit = PROBES / "navedit" / "bin" / "Release" / "net9.0" / "navedit.exe"
+        (tmp / "edits.json").write_text(json.dumps({"edits": [{"navmesh": GM, "use_version": "Mover.esp"}]}), encoding="utf-8")
+        plan = run([navedit, "plan", "--edits", tmp / "edits.json", "--out", tmp / "plan.json", "--instance", inst, "--game", game, "--profile", "P"])
+        out = tmp / "patch" / "Carried.esp"
+        write = run([navedit, "write", "--plan", tmp / "plan.json", "--out", out]) if plan.returncode == 0 else None
+        _NAVEDIT_MOVER = (tmp, plan, write)
+    return _NAVEDIT_MOVER
+
+
+def t2606():
+    """Rejects: a carried version that no longer links into a neighbour refused, or written with the navmesh info map still
+    naming it (houseCARL's item 3), through navedit's own plan and write. GM's vanilla version links one way into GN, and its
+    entry names GN; Mover's re-cut links nothing and stands before [DB, DC, DA]. The patch's entry for GM must name no
+    neighbour and link [DB, DC, DA]; GN's entry is not touched. navedit's read-back holds both to the version itself."""
+    tmp, plan, write = navedit_mover()
+    # the row first, in one line (navedit plan exits 1 when an edit is refused, and its last output line is only the path)
+    rows = json.loads((tmp / "plan.json").read_text(encoding="utf-8"))["edits"] if (tmp / "plan.json").exists() else []
+    assert len(rows) == 1 and rows[0].get("status") == "planned", f"the use_version row: {[(r.get('status'), r.get('why')) for r in rows]}"
+    assert plan.returncode == 0, f"navedit plan exit {plan.returncode}: {(plan.stdout + plan.stderr).strip().splitlines()[-3:]}"
+    allout = (write.stdout + write.stderr) if write else ""
+    said = f"NAVI lines {[l.strip() for l in allout.splitlines() if 'NAVI' in l]}; last {[l.strip() for l in allout.splitlines()[-1:]]}"
+    # the written patch first: navedit's read-back holds the entry the game takes to the version, then the plan's entries
+    assert write is not None and write.returncode == 0, f"navedit write exit {write.returncode if write else None}: {said}"
+    assert "ok   NAVI follows Mover.esp's version of 000B10:Skyrim.esm" in write.stdout, f"the version check: {said}"
+    assert "ok   NAVI 000C00:Skyrim.esm is its winner's with exactly the planned entries changed" in write.stdout, f"the NAVI check: {said}"
+    entries = rows[0]["navi"]["entries"]
+    assert [e["navmesh"].lower() for e in entries] == [GM.lower()], f"entries {entries} (GN's must not be touched)"
+    e = entries[0]
+    assert [m.lower() for m in e["remove"]] == [GN.lower()] and e["add"] == [] and e["removePreferred"] == [], e
+    assert [d.lower() for d in e["doorsAfter"]] == [DB.lower(), DC.lower(), DA.lower()] and e["keepDoors"] == 0, e
+
+
 CASES = [
     ("2450 the fixture's five plugins in order", t2450),
     ("2451 a link into a deleted navmesh is EDGE-NAV naming the deleter", t2451),
@@ -1021,6 +1069,7 @@ CASES = [
     ("2603 self-test: a use_version row shares a patch only with rows it does not touch", lambda: selftest("2603")),
     ("2604 R1, mover door case: the navmesh info map's linked doors follow the version's door table", t2604),
     ("2605 self-test: the navmesh info map change for a carried version", lambda: selftest("2605")),
+    ("2606 navedit, mover neighbour case: the navmesh info map drops a neighbour the version no longer links into", t2606),
     ("2599 plan, mover case: ground refused, use_version planned", t2599),
     ("2600 R1, mover case: the mover's version written, read back, its superseded plugin mastered", t2600),
     ("2601 R1, mover case: a tampered use_version row and a stand-alone read-back are refused", t2601),

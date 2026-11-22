@@ -260,10 +260,17 @@ static class NavRepairFixture
     /// With <paramref name="doors"/> (C2604, houseCARL's item 2): Skyrim.esm also places doors DA, DB and DC in (3,0); its GM (and
     /// Revert's copy) stands before DA and DB, and its NAVI entry for GM links [DA, DB], as the base game's entries follow their
     /// door table; Mover's re-cut stands before [DB, DC, DA]: reordered, with a door more. Carrying it, the entry's linked doors
-    /// must become [DB, DC, DA].</summary>
-    public static readonly FormKey DA = S(0xD31), DB = S(0xD32), DC = S(0xD33);
-    public static string WriteMoverCase(string dir, bool doors = false)
+    /// must become [DB, DC, DA]. With <paramref name="neighbour"/> (C2606, houseCARL's item 3): Skyrim.esm also has navmesh GN in
+    /// (3,0), far east, and its GM (and Revert's copy) links one way into GN (GN links nothing back); GM's NAVI entry names GN,
+    /// GN's names nothing, as each follows its own link table. Mover's re-cut links nothing, so carrying it, GM's entry must
+    /// drop GN, and GN's entry stays as it is. Planned through navedit (navownprobe's detector would file the one-way link).</summary>
+    public static readonly FormKey DA = S(0xD31), DB = S(0xD32), DC = S(0xD33), GN = S(0xB11);
+    public static string WriteMoverCase(string dir, bool doors = false, bool neighbour = false)
     {
+        // the vanilla GM: Fan's three triangles, the first's edge 1-2 linked into GN's triangle 0 when there is a neighbour
+        NavigationMesh VanillaGM() => !neighbour ? Fan(GM, 3, 12500, 500, 0)
+            : Nav(GM, InGrid(3), new[] { (12500f, 500f, 0f), (12800f, 500f, 0f), (12800f, 800f, 0f), (12500f, 800f, 0f), (12300f, 650f, 0f) },
+                  new T3(0, 1, 2, E12: (GN, 0)), new T3(0, 2, 3), new T3(0, 3, 4));
         Directory.CreateDirectory(dir);
         var mKey = new ModKey("Mover", ModType.Plugin); var rKey = new ModKey("Revert", ModType.Plugin);
         string sp = Path.Combine(dir, "Skyrim.esm"), mp = Path.Combine(dir, "Mover.esp"), rp = Path.Combine(dir, "Revert.esp");
@@ -274,14 +281,15 @@ static class NavRepairFixture
         }
         var sky = new SkyrimMod(SkyKey, Rel);
         var c3 = GridCell(3, Flat(LandK(3), 0));
-        c3.NavigationMeshes.Add(WithDoors(Fan(GM, 3, 12500, 500, 0), (DA, 0), (DB, 1)));
+        c3.NavigationMeshes.Add(WithDoors(VanillaGM(), (DA, 0), (DB, 1)));
+        if (neighbour) c3.NavigationMeshes.Add(Fan(GN, 3, 14000, 500, 0));
         if (doors)
             foreach (var (d, x) in new[] { (DA, 12520f), (DB, 12600f), (DC, 12700f) })
                 c3.Temporary.Add(new PlacedObject(d, Rel) { EditorID = $"RpMoverDoor{d.ID:X}", Placement = new Placement { Position = new P3Float(x, 560, 0) } });
         sky.Worldspaces.Add(World(c3));
-        var gmInfo = Info(GM, 3, 12500, 500);
+        var gmInfo = neighbour ? Info(GM, 3, 12500, 500, GN) : Info(GM, 3, 12500, 500);
         if (doors) foreach (var d in new[] { DA, DB }) gmInfo.LinkedDoors.Add(new LinkedDoor { Unknown = HarnessShared.NavRepairNavi.LinkedDoorUnknown, Door = new FormLink<IPlacedObjectGetter>(d) });
-        sky.NavigationMeshInfoMaps.Add(Navi(gmInfo));
+        sky.NavigationMeshInfoMaps.Add(neighbour ? Navi(gmInfo, Info(GN, 3, 14000, 500)) : Navi(gmInfo));
         sky.BeginWrite.ToPath(sp).WithLoadOrder(Array.Empty<ISkyrimModGetter>()).Write();
         using var skyRead = SkyrimMod.CreateFromBinaryOverlay(sp, Rel);
         var mover = new SkyrimMod(mKey, Rel);
@@ -292,7 +300,7 @@ static class NavRepairFixture
         mover.BeginWrite.ToPath(mp).WithLoadOrder(skyRead).Write();
         var rev = new SkyrimMod(rKey, Rel);
         var r3 = GridCell(3, null);
-        r3.NavigationMeshes.Add(WithDoors(Fan(GM, 3, 12500, 500, 0), (DA, 0), (DB, 1)));
+        r3.NavigationMeshes.Add(WithDoors(VanillaGM(), (DA, 0), (DB, 1)));
         rev.Worldspaces.Add(World(r3));
         rev.BeginWrite.ToPath(rp).WithLoadOrder(skyRead).Write();
         return dir;

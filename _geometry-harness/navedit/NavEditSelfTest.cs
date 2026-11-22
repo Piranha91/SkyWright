@@ -683,12 +683,21 @@ static class NavEditSelfTest
             return (UsePlanned(keep) is { } k ? "naming one: " + k : null) ?? UseRefused(bad, "2 of its triangles lie along it");
         });
 
-        // C2559: a version that no longer links into N (whose entry in the navmesh info map names it) is refused by name.
+        // C2559: a version that no longer links into N, where N links nothing back, is planned, N named as lost (the navmesh
+        // info map's entry drops it: NavRepairNavi.ForVersion, C2605). Where N still links into W, carrying the version would leave
+        // a one-way border: refused, naming N. CORRECTED 2026-11-22 (houseCARL's item 3): this expected a refusal in both cases,
+        // the behaviour before a dropped neighbour was carried; the review of item 3 kept the two-way case refused.
         Case("2559 use-version-lost-neighbour", () =>
         {
-            var (w, n) = Pair();
-            var (bare, _) = Pair(linkW: false);
-            return UseRefused(NavEdit.UseVersion(w, bare, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol), "no longer links into");
+            var (w, n) = Pair(linkN: false);
+            var (bare, _) = Pair(linkW: false, linkN: false);
+            var r = NavEdit.UseVersion(w, bare, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol);
+            var (w2, n2) = Pair();
+            var (bare2, _) = Pair(linkW: false);
+            var twoWay = NavEdit.UseVersion(w2, bare2, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n2 }, tol);
+            return UsePlanned(r) ?? (r.Lost.SequenceEqual(new[] { NK }) && r.Gained.Count == 0 ? null : $"lost [{string.Join(",", r.Lost)}], gained [{string.Join(",", r.Gained)}]")
+                ?? UseRefused(twoWay, "so carrying it would leave a one-way border")
+                ?? (twoWay.Why.Any(x => x.StartsWith($"{NK} still links into")) ? null : "the one-way refusal does not name N: " + string.Join(" | ", twoWay.Why));
         });
 
         // C2560: a version standing before a door the winner has no door at is planned, the door named as added (the info map's
@@ -793,19 +802,20 @@ static class NavEditSelfTest
             nt.Add(new NavTri(9, 4, 3, 0) with { EdgeLink01 = -1, EdgeLink12 = nt[1].EdgeLink12, EdgeLink20 = -1 });
             var two = NavEdit.UseVersion(w0, w0 with { EdgeLinks = new List<NavEdgeLink> { new(NK, 3), new(NK, 5) } }, "Ver.esp",
                                          new Dictionary<FormKey, NavmeshGeometry> { [NK] = n0 with { Vertices = nv, Triangles = nt } }, tol);
-            var (bare, _) = Pair(linkW: false);
-            var lost = NavEdit.UseVersion(w, bare, "Ver.esp", near, tol);
             var (w1, n1) = Pair(linkN: false);
             var past = NavEdit.UseVersion(w1, w1 with { EdgeLinks = new List<NavEdgeLink> { new(NK, 99, 2), new(NK, 5) } }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n1 }, tol);
             var (w2, n2) = Pair();
             var ledgeIn = NavEdit.UseVersion(w2, Reversed(w2), "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n2 with { EdgeLinks = new List<NavEdgeLink> { new(K, 2, 1), new(K, 6) } } }, tol);
+            var (wl, nl2) = Pair();
+            var (barel, _) = Pair(linkW: false);
+            var oneWay = NavEdit.UseVersion(wl, barel, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = nl2 }, tol);
             string Kind(string why) => NavUseVersionPlan.ReasonKind(why);
             var want = new (string Case, UseVersionResult R, Func<string, string> Expect)[]
             {
                 ("border moved", moved, why => why.Contains("that link cannot be re-pointed") ? "neighbour link into it that cannot be re-pointed" : "border link meeting no edge"),
                 ("two along", two, _ => "border link meeting no edge"),
-                ("lost neighbour", lost, _ => "neighbour the navmesh info map names, dropped"),
                 ("ledge past its neighbour", past, _ => "other reason"),
+                ("a dropped neighbour that still links in", oneWay, why => why.Contains("one-way border") ? "neighbour that still links in, dropped" : Kind(why)),
                 ("neighbour's ledge renumbered", ledgeIn, _ => "neighbour link into it that cannot be re-pointed"),
             };
             var bad = new List<string>();
@@ -816,7 +826,8 @@ static class NavEditSelfTest
             }
             if (!moved.Why.Any(x => Kind(x) == "border link meeting no edge") || !moved.Why.Any(x => Kind(x) == "neighbour link into it that cannot be re-pointed"))
                 bad.Add("the border-moved case does not give both an outbound and an inbound reason");
-            // CORRECTED 2026-11-22 (houseCARL's item 2): a different door table is carried, not refused, so its kind is gone; the
+            // CORRECTED 2026-11-22 (houseCARL's items 2 and 3): a different door table and a dropped neighbour are carried, not
+            // refused, so their kinds are gone; the
             // info map's own refusal, NavUseVersionPlan.Plan's sentence over NavRepairNavi.ForVersion's reason, has its kind
             var naviWhy = $"The navmesh info map cannot follow the version (no plugin's NAVI states {K}); keep the winner's version, or give the map an entry the patch can change first.";
             if (Kind(naviWhy) != "navmesh info map entry that cannot follow") bad.Add($"'{naviWhy}' read as '{Kind(naviWhy)}'");

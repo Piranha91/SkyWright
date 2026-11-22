@@ -178,10 +178,17 @@ a clobber, where a later mod's version replaced an earlier one's).
     never cut silently);
   - a neighbour's link into K that meets no edge of the version;
   - a ledge link out of range, or one into K that the version renumbers;
-  - a version that no longer links into a neighbour the winner did (its info map entry would still name it), or whose
-    doors differ from the winner's (the info map's linked doors would not follow).
-- **Doors named.** A door refusal names each door the version adds and each it lacks, with the triangle before it, door
-  by door (a door can stand before several triangles). The plan row's `useVersion.doors` lists the same, `added` and
+  - a version that no longer links into a neighbour that still links into K (the border would be one-way).
+- **The navmesh info map follows the version** (2026-11-22, houseCARL's items 2 and 3). The entry's linked doors become the
+  version's door table, in order, and its MergedTo and PreferredMerges together the version's link-table targets: a
+  neighbour it drops is removed (by value, from the list naming it), one it gains is added to MergedTo, and the neighbour's
+  own entry gains it back. These are the base game's rules (all 15,461 Skyrim.esm and 1,863 Dawnguard.esm entries). The
+  read-back holds the entry the game takes, with the patch last, to the version's own record. Refused by name: an entry to
+  change that no plugin's NAVI states, and a whole interior entry (the write engine cannot compose one yet). Not measured:
+  which targets the base game keeps in PreferredMerges rather than MergedTo, and its PreferredMergesFlag (copied as it is).
+- **Doors named.** The plan row's `useVersion.doors` names each door the version adds and each it lacks, with the triangle
+  before it, door by door (a door can stand before several triangles), and `useVersion.lostNeighbours` each neighbour it
+  no longer links into. `doors` lists `added` and
   `dropped`, each with the door reference, the plugin whose version of it wins (`placedBy`), `triangleBeforeDoor`, and
   where it leads (`leadsTo`: its teleport's door, that door's cell and the cell's editor ID). On NR2-V this showed that
   USSEP's versions of `04C081` and `019F24` lack Legacy of the Dragonborn's doors into `DBMJournalDungeon01` and

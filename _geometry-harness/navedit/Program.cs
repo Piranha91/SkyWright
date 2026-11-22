@@ -874,7 +874,7 @@ static class NavEditCli
             var key = FormKey.Factory((string)p.Row["navmesh"]!);
             var from = (string?)p.Row["useVersion"]!["fromPath"] ?? "";
             var fd = NavRepairReadBack.NaviFollowsVersion(order, patchPath, key, from);
-            Console.WriteLine(fd.Count == 0 ? $"ok   NAVI follows {Path.GetFileName(from)}'s version of {key}: its linked doors are the version's door table, in order"
+            Console.WriteLine(fd.Count == 0 ? $"ok   NAVI follows {Path.GetFileName(from)}'s version of {key}: its linked doors are the version's door table, in order, and its neighbours the version's link targets"
                                             : $"FAIL NAVI does not follow {Path.GetFileName(from)}'s version of {key}: {string.Join("; ", fd)}");
             if (fd.Count > 0) failed++;
         }

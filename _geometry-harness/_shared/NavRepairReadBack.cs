@@ -231,10 +231,19 @@ public static class NavRepairReadBack
                     }
                     foreach (var d in doors) m.LinkedDoors.Add(new LinkedDoor { Unknown = NavRepairNavi.LinkedDoorUnknown, Door = new FormLink<IPlacedObjectGetter>(d) });
                 }
+                // a carried version's dropped neighbours (item 3): each removed once, by value, from the list that names it
+                var dropM = (e["remove"] as JsonArray ?? new JsonArray()).Select(x => FormKey.Factory((string)x!)).ToList();
+                var dropP = (e["removePreferred"] as JsonArray ?? new JsonArray()).Select(x => FormKey.Factory((string)x!)).ToList();
+                void Drop(NavigationMapInfo m)
+                {
+                    foreach (var d in dropM) { int j = m.MergedTo.FindIndex(x => x.FormKey == d); if (j >= 0) m.MergedTo.RemoveAt(j); }
+                    foreach (var d in dropP) { int j = m.PreferredMerges.FindIndex(x => x.FormKey == d); if (j >= 0) m.PreferredMerges.RemoveAt(j); }
+                }
                 if (e["winnerIndex"] is { } wi)
                 {
                     int i = (int)wi;
                     if (i >= want.MapInfos.Count || want.MapInfos[i].NavigationMesh.FormKey != nav) { diff.Add($"the winner's entry {i} is not {nav}'s; the plan is stale"); continue; }
+                    Drop(want.MapInfos[i]);
                     foreach (var m in add) want.MapInfos[i].MergedTo.Add(new FormLink<INavigationMeshGetter>(m));
                     Doors(want.MapInfos[i]);
                 }
@@ -244,6 +253,7 @@ public static class NavRepairReadBack
                     var src = File.Exists(fpath) ? Open(fpath).NavigationMeshInfoMaps.FirstOrDefault(m => m.FormKey == key) : null;
                     if (src is null || fi >= src.MapInfos.Count || src.MapInfos[fi].NavigationMesh.FormKey != nav) { diff.Add($"{nav}'s entry is not at {Path.GetFileName(fpath)}'s index {fi}; the plan is stale"); continue; }
                     var copy = src.MapInfos[fi].DeepCopy();
+                    Drop(copy);
                     foreach (var m in add) copy.MergedTo.Add(new FormLink<INavigationMeshGetter>(m));
                     Doors(copy);
                     want.MapInfos.Add(copy);
@@ -275,8 +285,10 @@ public static class NavRepairReadBack
     /// <paramref name="key"/> with the patch loaded last (the last plugin of <paramref name="order"/>, then
     /// <paramref name="patchPath"/>, that states it), read from the written files, against <paramref name="versionPath"/>'s own
     /// record of the navmesh: its LinkedDoors are the version's door table, door for door and in order, each with
-    /// <see cref="NavRepairNavi.LinkedDoorUnknown"/> (the base game's rule, 15,461 of 15,461 entries). One sentence per
-    /// difference; empty when the entry follows the version.</summary>
+    /// <see cref="NavRepairNavi.LinkedDoorUnknown"/>, and its MergedTo and PreferredMerges together name exactly the navmeshes the
+    /// version's link table names (the base game's rules, 15,461 of 15,461 entries). One sentence per difference; empty when the
+    /// entry follows the version. A navmesh no NAVI states follows when the version has no doors (its links then have no entry
+    /// to follow).</summary>
     public static List<string> NaviFollowsVersion(IReadOnlyList<string> order, string patchPath, FormKey key, string versionPath)
     {
         var version = File.Exists(versionPath) ? NavUseVersionPlan.Winning(versionPath, key) : null;
@@ -297,6 +309,12 @@ public static class NavRepairReadBack
                 if (e.LinkedDoors[i].Door.FormKey != table[i]) diff.Add($"{key}'s linked door {i} is {e.LinkedDoors[i].Door.FormKey}, where the version's door table has {table[i]}");
                 if (e.LinkedDoors[i].Unknown != NavRepairNavi.LinkedDoorUnknown) diff.Add($"{key}'s linked door {i} has Unknown {e.LinkedDoors[i].Unknown}, not the base game's {NavRepairNavi.LinkedDoorUnknown}");
             }
+            var targets = (version.EdgeLinks ?? Array.Empty<NavEdgeLink>()).Select(l => l.Mesh).Where(m => m != key).ToHashSet();
+            var named = e.MergedTo.Select(x => x.FormKey).Concat(e.PreferredMerges.Select(x => x.FormKey)).ToHashSet();
+            foreach (var m in named.Where(m => !targets.Contains(m)).OrderBy(m => m.ToString()))
+                diff.Add($"{key}'s navmesh info map entry ({ef.Src.Plugin}) names neighbour {m}, which the version does not link into");
+            foreach (var m in targets.Where(m => !named.Contains(m)).OrderBy(m => m.ToString()))
+                diff.Add($"{key}'s navmesh info map entry ({ef.Src.Plugin}) does not name {m}, which the version links into");
             return diff;
         }
         finally { foreach (var o in open) o.Dispose(); }

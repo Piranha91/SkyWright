@@ -42,7 +42,8 @@
     2556  use_version: another numbering of the same places: links match again, the neighbour's links are re-pointed, CopyFrom first
     2557  use_version: a border that no longer meets its neighbour is refused, listing its edges both ways
     2558  use_version: two triangles along one edge: the one the link names stands; naming neither is refused
-    2559  use_version: a version that no longer links into a neighbour is refused
+    2559  use_version: a version that no longer links into a neighbour is carried, the neighbour named as lost; refused where
+          that neighbour still links in (a one-way border)
     2560  use_version: other doors are carried, the door added named; a gained neighbour is returned for the navmesh info map
     2561  use_version: ledge links are carried or kept in place, never matched by geometry; out of range or renumbered, refused
     2562  use_version: the winner itself plans with nothing changed
@@ -229,7 +230,7 @@ CASES = [
     ("2556 use_version re-points a renumbered version", lambda: selftest("2556")),
     ("2557 use_version moved border refused", lambda: selftest("2557")),
     ("2558 use_version keeps the named of two", lambda: selftest("2558")),
-    ("2559 use_version lost neighbour refused", lambda: selftest("2559")),
+    ("2559 use_version lost neighbour carried; one still linking in refused", lambda: selftest("2559")),
     ("2560 use_version doors refused, neighbour gained", lambda: selftest("2560")),
     ("2561 use_version ledge links", lambda: selftest("2561")),
     ("2562 use_version the winner itself", lambda: selftest("2562")),

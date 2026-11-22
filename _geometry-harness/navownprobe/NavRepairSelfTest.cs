@@ -178,46 +178,73 @@ static class NavRepairSelfTest
                 return new NaviSource(s.Plugin, "", map);
             }).ToList());
             const int U = NavRepairNavi.LinkedDoorUnknown;
+            // the door cases name no neighbours: the version's link targets are none beyond what is gained
+            (NaviPlan, string?) FV(FormKey k, IReadOnlyList<FormKey> doors, IReadOnlyCollection<FormKey> gained, NaviView v) => NavRepairNavi.ForVersion(k, doors, Array.Empty<FormKey>(), gained, v);
             string Ops(NaviPlan p) => string.Join(" ", p.Ops.Select(o => $"{o.FieldPath}:{o.Op}" + (o.Key is { } k ? $"@{k}" : "") + (o.ComposeNode?["fields"]?["Door"] is { } d ? $"={FormKey.Factory((string)d!).ID:X}" : o.Value is { } v ? $"={FormKey.Factory(v).ID:X}" : "")));
             var bad = new List<string>();
             // in place: [A, B, C] -> [A, C, B]: A kept, C and B removed from the back (2, then 1), C and B appended. Two removals,
             // so their order shows (corrected after the first arms run: with one removal the order could not be seen)
-            var (p1, r1) = NavRepairNavi.ForVersion(nv, new[] { dA, dC, dB }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(m, false), Entry(nv, false, (dA, U), (dB, U), (dC, U)) })));
+            var (p1, r1) = FV(nv, new[] { dA, dC, dB }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(m, false), Entry(nv, false, (dA, U), (dB, U), (dC, U)) })));
             if (r1 is not null) bad.Add("in place refused: " + r1);
             else if (Ops(p1) != "MapInfos[1].LinkedDoors:Remove@2 MapInfos[1].LinkedDoors:Remove@1 MapInfos[1].LinkedDoors:Add=D83 MapInfos[1].LinkedDoors:Add=D82") bad.Add("in place ops " + Ops(p1));
             else if (p1.Entries.Single() is var e1 && (e1.KeepDoors != 1 || e1.DoorsAfter is null || !e1.DoorsAfter.SequenceEqual(new[] { dA, dC, dB }) || e1.WinnerIndex != 1)) bad.Add($"in place entry keep {p1.Entries[0].KeepDoors}");
             // a strict prefix ([A, B, C] -> [A]), an empty table on linked doors ([A, B] -> []), a repeated door ([A] -> [A, A])
-            var (q1, _) = NavRepairNavi.ForVersion(nv, new[] { dA }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, U), (dB, U), (dC, U)) })));
-            var (q2, _) = NavRepairNavi.ForVersion(nv, Array.Empty<FormKey>(), Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, U), (dB, U)) })));
-            var (q3, _) = NavRepairNavi.ForVersion(nv, new[] { dA, dA }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, U)) })));
+            var (q1, _) = FV(nv, new[] { dA }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, U), (dB, U), (dC, U)) })));
+            var (q2, _) = FV(nv, Array.Empty<FormKey>(), Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, U), (dB, U)) })));
+            var (q3, _) = FV(nv, new[] { dA, dA }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, U)) })));
             if (Ops(q1) != "MapInfos[0].LinkedDoors:Remove@2 MapInfos[0].LinkedDoors:Remove@1") bad.Add("prefix ops " + Ops(q1));
             if (Ops(q2) != "MapInfos[0].LinkedDoors:Remove@1 MapInfos[0].LinkedDoors:Remove@0") bad.Add("empty table ops " + Ops(q2));
             if (Ops(q3) != "MapInfos[0].LinkedDoors:Add=D81") bad.Add("repeated door ops " + Ops(q3));
             // already standing so: nothing
-            var (p2, r2) = NavRepairNavi.ForVersion(nv, new[] { dA, dB }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, U), (dB, U)) })));
+            var (p2, r2) = FV(nv, new[] { dA, dB }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, U), (dB, U)) })));
             if (r2 is not null || p2.Entries.Count != 0 || p2.Ops.Count != 0) bad.Add($"already following: refused {r2}, {p2.Entries.Count} entries");
             // another Unknown on the first door: rewritten from there
-            var (p3, r3) = NavRepairNavi.ForVersion(nv, new[] { dA, dB }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, 7), (dB, U)) })));
+            var (p3, r3) = FV(nv, new[] { dA, dB }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, 7), (dB, U)) })));
             if (r3 is not null) bad.Add("other Unknown refused: " + r3);
             if (Ops(p3) != "MapInfos[0].LinkedDoors:Remove@1 MapInfos[0].LinkedDoors:Remove@0 MapInfos[0].LinkedDoors:Add=D81 MapInfos[0].LinkedDoors:Add=D82") bad.Add("other Unknown ops " + Ops(p3));
             // stated only by an earlier plugin: added whole, its linked doors the table
-            var (p4, r4) = NavRepairNavi.ForVersion(nv, new[] { dB }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, U)) }), ("Later.esp", new[] { Entry(m, false) })));
+            var (p4, r4) = FV(nv, new[] { dB }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, U)) }), ("Later.esp", new[] { Entry(m, false) })));
             var sets = p4.Ops.SingleOrDefault()?.ComposeNode?["sets"]?.AsArray().Where(x => (string?)x!["path"] == "LinkedDoors").Select(x => (string?)x!["compose"]!["fields"]!["Door"]).ToList();
             if (r4 is not null || p4.Ops.Count != 1 || p4.Ops[0].FieldPath != "MapInfos" || sets is null || !sets.SequenceEqual(new[] { dB.ToString() })) bad.Add($"whole entry: refused {r4}, ops {Ops(p4)}, doors [{string.Join(",", sets ?? new())}]");
             // a whole entry keeping its first door: [A, B] -> [A, C]
-            var (p4k, _) = NavRepairNavi.ForVersion(nv, new[] { dA, dC }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, U), (dB, U)) }), ("Later.esp", new[] { Entry(m, false) })));
+            var (p4k, _) = FV(nv, new[] { dA, dC }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, U), (dB, U)) }), ("Later.esp", new[] { Entry(m, false) })));
             var setsK = p4k.Ops.SingleOrDefault()?.ComposeNode?["sets"]?.AsArray().Where(x => (string?)x!["path"] == "LinkedDoors").Select(x => (string?)x!["compose"]!["fields"]!["Door"]).ToList();
             if (setsK is null || !setsK.SequenceEqual(new[] { dA.ToString(), dC.ToString() }) || p4k.Entries.Single().KeepDoors != 1) bad.Add($"whole entry keeping one: doors [{string.Join(",", setsK ?? new())}]");
             // a whole interior entry, and an unstated navmesh with doors: refused; unstated with no doors and nothing gained: nothing
-            var (_, r5) = NavRepairNavi.ForVersion(nv, new[] { dB }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, true, (dA, U)) }), ("Later.esp", new[] { Entry(m, false) })));
-            var (_, r6) = NavRepairNavi.ForVersion(nv, new[] { dB }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(m, false) })));
-            var (p7, r7) = NavRepairNavi.ForVersion(nv, Array.Empty<FormKey>(), Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(m, false) })));
+            var (_, r5) = FV(nv, new[] { dB }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, true, (dA, U)) }), ("Later.esp", new[] { Entry(m, false) })));
+            var (_, r6) = FV(nv, new[] { dB }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(m, false) })));
+            var (p7, r7) = FV(nv, Array.Empty<FormKey>(), Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(m, false) })));
             if (r5?.Contains("cannot yet compose a whole interior entry") != true || r6?.Contains("no plugin's NAVI states") != true || r7 is not null || p7.Entries.Count != 0)
                 bad.Add($"refusals: interior '{r5}', unstated '{r6}', nothing '{r7}' ({p7.Entries.Count} entries)");
             // a gained neighbour, both ways, with the door table on the carried navmesh
-            var (p8, _) = NavRepairNavi.ForVersion(nv, new[] { dA }, new[] { m }, View(("SelfTest.esm", new[] { Entry(m, false), Entry(nv, false) })));
+            var (p8, _) = FV(nv, new[] { dA }, new[] { m }, View(("SelfTest.esm", new[] { Entry(m, false), Entry(nv, false) })));
             // entries in FormKey order: the carried navmesh (A80, entry 1) first, then its neighbour (A81, entry 0)
             if (Ops(p8) != "MapInfos[1].MergedTo:Add=A81 MapInfos[1].LinkedDoors:Add=D81 MapInfos[0].MergedTo:Add=A80") bad.Add("gained ops " + Ops(p8));
+            // item 3: the entry's neighbour lists become the version's link targets. [x] in MergedTo and [y] in PreferredMerges,
+            // the version linking into m only: m added, x and y removed by value from the list naming each
+            FormKey x = K(0xA82), y = K(0xA83), z = K(0xA84);
+            var withNbrs = Entry(nv, false); withNbrs.MergedTo.Add(new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.INavigationMeshGetter>(x));
+            withNbrs.PreferredMerges.Add(new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.INavigationMeshGetter>(y));
+            var (p9, r9) = NavRepairNavi.ForVersion(nv, Array.Empty<FormKey>(), new[] { m }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { withNbrs })));
+            if (r9 is not null || Ops(p9) != "MapInfos[0].MergedTo:Remove=A82 MapInfos[0].PreferredMerges:Remove=A83 MapInfos[0].MergedTo:Add=A81"
+                || !p9.Entries.Single().Remove.SequenceEqual(new[] { x }) || !p9.Entries.Single().RemovePreferred.SequenceEqual(new[] { y }))
+                bad.Add($"neighbours: refused {r9}, ops {Ops(p9)}");
+            // duplicates and both lists: MergedTo [x, x, m] and PreferredMerges [x, y], the version linking into m and y: x removed
+            // twice from MergedTo and once from PreferredMerges, y kept where it is (PreferredMerges), m kept, nothing added
+            var dup = Entry(nv, false);
+            foreach (var k in new[] { x, x, m }) dup.MergedTo.Add(new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.INavigationMeshGetter>(k));
+            foreach (var k in new[] { x, y }) dup.PreferredMerges.Add(new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.INavigationMeshGetter>(k));
+            var (p12, _) = NavRepairNavi.ForVersion(nv, Array.Empty<FormKey>(), new[] { m, y }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { dup })));
+            if (Ops(p12) != "MapInfos[0].MergedTo:Remove=A82 MapInfos[0].MergedTo:Remove=A82 MapInfos[0].PreferredMerges:Remove=A82") bad.Add("duplicates and both lists: ops " + Ops(p12));
+            // a gained neighbour's entry is never trimmed: m names z, which K's version does not; m only gains K
+            var mWithZ = Entry(m, false); mWithZ.MergedTo.Add(new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.INavigationMeshGetter>(z));
+            var (p10, _) = NavRepairNavi.ForVersion(nv, Array.Empty<FormKey>(), new[] { m }, new[] { m }, View(("SelfTest.esm", new[] { Entry(nv, false), mWithZ })));
+            if (Ops(p10) != "MapInfos[0].MergedTo:Add=A81 MapInfos[1].MergedTo:Add=A80") bad.Add("neighbour trimmed? ops " + Ops(p10));
+            // a whole entry drops a neighbour too: an earlier plugin's entry names x; the version links into nothing
+            var earlier = Entry(nv, false); earlier.MergedTo.Add(new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.INavigationMeshGetter>(x));
+            var (p11, _) = NavRepairNavi.ForVersion(nv, Array.Empty<FormKey>(), Array.Empty<FormKey>(), Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { earlier }), ("Later.esp", new[] { Entry(m, false) })));
+            var merged11 = p11.Ops.SingleOrDefault()?.ComposeNode?["sets"]?.AsArray().Where(s => (string?)s!["path"] == "MergedTo").ToList();
+            if (p11.Ops.Count != 1 || p11.Ops[0].FieldPath != "MapInfos" || merged11 is null || merged11.Count != 0) bad.Add($"whole entry drop: ops {Ops(p11)}, MergedTo sets {merged11?.Count}");
             return bad.Count == 0 ? null : string.Join(" | ", bad);
         });
 
