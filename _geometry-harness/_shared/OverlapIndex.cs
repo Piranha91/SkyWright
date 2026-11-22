@@ -569,6 +569,17 @@ public sealed class PairSweep
 
 public sealed class OverlapIndex
 {
+    /// <summary>The model a base record is drawn with in the world, as the record gives it: armour's ground model from its
+    /// WorldModel (the male one, else the female), any other modeled record's Model. Null when it has none. The one rule
+    /// for <see cref="BaseMesh"/>, and for navedit's cut by a placed obstacle.</summary>
+    public static string? ModelOf(Mutagen.Bethesda.Plugins.Records.IMajorRecordGetter rec)
+    {
+        if (rec is IArmorGetter ar)
+            return ar.WorldModel?.Male?.Model?.File is { } m && !string.IsNullOrWhiteSpace(m.GivenPath) ? m.GivenPath
+                 : ar.WorldModel?.Female?.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath) ? f.GivenPath : null;
+        return rec is IModeledGetter mo && mo.Model?.File is { } mf && !string.IsNullOrWhiteSpace(mf.GivenPath) ? mf.GivenPath : null;
+    }
+
     public PlacementHistory History { get; } = new();
     /// <summary>base record -> its Mutagen type name and editor id, winner wins. Modeled records only.</summary>
     public Dictionary<FormKey, (string Type, string? Edid)> BaseInfo { get; } = new();
@@ -764,7 +775,7 @@ public sealed class OverlapIndex
                 BaseInfo[ar.FormKey] = (rec.GetType().Name.Replace("BinaryOverlay", ""), ar.EditorID);
                 string? male = ar.WorldModel?.Male?.Model?.File is { } mf0 && !string.IsNullOrWhiteSpace(mf0.GivenPath) ? mf0.GivenPath : null;
                 string? female = ar.WorldModel?.Female?.Model?.File is { } ff0 && !string.IsNullOrWhiteSpace(ff0.GivenPath) ? ff0.GivenPath : null;
-                if ((male ?? female) is { } any) BaseMesh[ar.FormKey] = any; else BaseMesh.Remove(ar.FormKey);
+                if (ModelOf(ar) is { } any) BaseMesh[ar.FormKey] = any; else BaseMesh.Remove(ar.FormKey);
                 NoteAlternates(ar.FormKey, male is not null ? ar.WorldModel?.Male?.Model?.AlternateTextures : ar.WorldModel?.Female?.Model?.AlternateTextures);
                 if ((female ?? male) is { } anyF) BaseMeshFemale[ar.FormKey] = anyF; else BaseMeshFemale.Remove(ar.FormKey);
                 if ((ar.MajorRecordFlagsRaw & EnableState.IsMarkerFlag) != 0) BaseIsMarker.Add(ar.FormKey); else BaseIsMarker.Remove(ar.FormKey);
@@ -786,7 +797,7 @@ public sealed class OverlapIndex
             if (rec is IModeledGetter mo && rec is ISkyrimMajorRecordGetter sm)
             {
                 BaseInfo[sm.FormKey] = (rec.GetType().Name.Replace("BinaryOverlay", ""), sm.EditorID);
-                if (mo.Model?.File is { } mf && !string.IsNullOrWhiteSpace(mf.GivenPath)) BaseMesh[sm.FormKey] = mf.GivenPath;
+                if (ModelOf(rec) is { } mf) BaseMesh[sm.FormKey] = mf;
                 else BaseMesh.Remove(sm.FormKey);
                 NoteAlternates(sm.FormKey, mo.Model?.AlternateTextures);
                 if ((sm.MajorRecordFlagsRaw & EnableState.IsMarkerFlag) != 0) BaseIsMarker.Add(sm.FormKey); else BaseIsMarker.Remove(sm.FormKey);

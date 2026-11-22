@@ -343,6 +343,63 @@ static class NavEditSelfTest
             return RefusedFor2(NavEdit.Cut(Geom(v, t, new List<NavEdgeLink> { new(O, 0) }), Box(40, -10, 60, 10), -50, 50, none), "cutting across a navmesh border");
         });
 
+        // ---- the cut outline of a placed obstacle (NavCutFootprint) ----
+        TriangleSoup BoxSoup(float x0, float y0, float z0, float x1, float y1, float z1)
+        {
+            var c = new System.Numerics.Vector3[8];
+            for (int i = 0; i < 8; i++) c[i] = new((i & 1) == 0 ? x0 : x1, (i & 2) == 0 ? y0 : y1, (i & 4) == 0 ? z0 : z1);
+            int[] f = { 0, 2, 1, 1, 2, 3, 4, 5, 6, 5, 7, 6, 0, 1, 4, 1, 5, 4, 2, 6, 3, 3, 6, 7, 0, 4, 2, 2, 4, 6, 1, 3, 5, 3, 7, 5 };
+            return new TriangleSoup(c, f);
+        }
+        string Ring(IReadOnlyList<(float X, float Y)> o) => string.Join(" ", o.OrderBy(p => p.X).ThenBy(p => p.Y).Select(p => $"({p.X:0.##},{p.Y:0.##})"));
+
+        // C2535: a 40 x 20 box standing 200 u tall on a floor at 0: its outline is the box, and the band runs from step
+        // height below the floor (-48) to an actor's top above it (108.8).
+        Case("2535 footprint-box", () =>
+        {
+            var fp = NavCutFootprint.Of(BoxSoup(80, 90, -10, 120, 110, 190), 0);
+            if (fp.Status != "planned") return "refused: " + fp.Why;
+            if (Ring(fp.Outline) != "(80,90) (80,110) (120,90) (120,110)") return "outline " + Ring(fp.Outline);
+            return fp.ZLo == -48 && Math.Abs(fp.ZHi - 108.8f) < 1e-3 ? null : $"band {fp.ZLo}..{fp.ZHi}";
+        });
+
+        // C2536: a margin of 8 grows the outline to 56 x 36.
+        Case("2536 footprint-margin", () =>
+        {
+            var fp = NavCutFootprint.Of(BoxSoup(80, 90, -10, 120, 110, 190), 0, margin: 8);
+            return fp.Status == "planned" && Ring(fp.Outline) == "(72,82) (72,118) (128,82) (128,118)" ? null : $"{fp.Status} {fp.Why} {Ring(fp.Outline)}";
+        });
+
+        // C2537: an obstacle wholly above an actor's top (z 150-300), and one below step height (z 0-30), block nobody:
+        // both refused, naming the band.
+        Case("2537 footprint-out-of-band", () =>
+        {
+            var high = NavCutFootprint.Of(BoxSoup(80, 90, 150, 120, 110, 300), 0);
+            var low = NavCutFootprint.Of(BoxSoup(80, 90, 0, 120, 110, 30), 0);
+            return high.Status == "refused" && high.Why!.Contains("step height") && low.Status == "refused" && low.Why!.Contains("step height") ? null : $"high {high.Status}, low {low.Status}";
+        });
+
+        // C2538: the floor under an obstacle is taken on the level nearest its height: with a bridge triangle 200 u over the
+        // square, an obstacle at z 190 stands on the bridge, one at z 5 on the square.
+        Case("2538 footprint-floor-level", () =>
+        {
+            var (v, t) = Linked();
+            v.Add(new Vec3(50, 50, 200)); v.Add(new Vec3(150, 50, 200)); v.Add(new Vec3(100, 150, 200));
+            t.Add(new NavTri(9, 10, 11, 0));
+            var g = Geom(v, t);
+            var lo = new System.Numerics.Vector2(90, 90); var hi = new System.Numerics.Vector2(110, 110);
+            float? up = NavCutFootprint.FloorUnder(g, 100, 80, 190, lo, hi), down = NavCutFootprint.FloorUnder(g, 100, 80, 5, lo, hi);
+            return up == 200 && down == 0 ? null : $"floor at 190: {up}, at 5: {down}";
+        });
+
+        // C2539: the footprint through the cut: the box's outline and band cut exactly its 800 u² out of the square.
+        Case("2539 footprint-cut", () =>
+        {
+            var (v, t) = Linked();
+            var fp = NavCutFootprint.Of(BoxSoup(80, 90, -10, 120, 110, 190), 0);
+            return Sound(NavEdit.Cut(Geom(v, t), fp.Outline, fp.ZLo, fp.ZHi, none), 40000 - 800, new[] { (100.0, 100.0), (81.0, 91.0) });
+        });
+
         // C2528: bad input: a triangle index past the mesh, a corner that does not exist, nothing to do.
         Case("2528 bad-triangle-input", () =>
         {

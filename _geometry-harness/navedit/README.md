@@ -93,21 +93,42 @@ where a convex obstacle stands.
   - an empty band;
   - a cut that touches nothing;
   - a cut reaching an edge that links into another navmesh.
-- **Not yet:** the outline is given, not taken from an obstacle's collision. Reading a placed reference's footprint
-  (through `ContactIndex`, which owns obstacle geometry) is the next step.
+- **Cut by a placed obstacle.** `{"navmesh": K, "cut": {"ref": "0E6420:Skyrim.esm", "margin": 0}}` takes the outline
+  from the obstacle (`_shared/NavCutFootprint.cs`), each step through its owner:
+  - its winning placement (`PlacementExtract.RefOf`);
+  - its base's model (`OverlapIndex.ModelOf`, the rule `BaseMesh` uses);
+  - the mesh through this load order's files (`AssetResolver`, from `HarnessOrderCli`'s mods and archives);
+  - its collision on the layers an actor meets (`CollisionLayers.RoleSoups`);
+  - placed in the world (`SpatialOverlap.TransformSoup`).
+
+  That collision is sliced between step height (48 u) and a scale-1 humanoid's controller top (108.8 u) above the
+  navmesh floor under the obstacle (taken on its own level), and its convex hull in plan, grown by the margin, is the
+  outline. The band runs from step height below the floor to the controller's top above it. The plan row records the
+  mesh, where it was read from, the floor, the band and the outline.
+- **Refused:**
+  - an obstacle that is deleted, starts disabled, or has an enable parent (whether it stands at load is not settled
+    here);
+  - a base with no model;
+  - a mesh the order's files lack, or one with no collision on an actor's layers (a shrub);
+  - an obstacle nothing of which stands in the actor's band;
+  - no navmesh under it.
+- **Known limit: the hull over-cuts a concave obstacle.** On `0E6420`, a rock pile, vanilla left 673 of 2,033 sample
+  points inside the hull walkable between the rocks; the hull cut removes those (18,135 u²). Cutting each collision
+  body by its own hull is the next step.
 
 **Every edit refuses an island navmesh**, whose own copy of the geometry in the navmesh info map would go stale. Fills
 come later (`C:/hc-runs/2026-11-21-navgrid/PLAN.md`, the plan gate).
 
 ## Evidence
 
-- `navedit --selftest`: C2513-C2534, run by `tests/test_navedit.py`. Seventeen sabotage arms each turn their case red:
+- `navedit --selftest`: C2513-C2539, run by `tests/test_navedit.py`. Twenty sabotage arms each turn their case red:
   - no fold, link, overlap, winding, third-triangle, door, last-link or cell-border check;
   - no coincident move;
   - no inbound re-point;
   - no self-link follow;
   - closing up instead of swap-remove;
-  - for the cut: no neighbour split, no shared-point insertion, band ignored, no convex check, no linked-edge check.
+  - for the cut: no neighbour split, no shared-point insertion, band ignored, no convex check, no linked-edge check;
+  - for the obstacle outline: no band slice, margin ignored, floor ignoring the level.
 - Real data, 2026-11-21, on the lab's vanilla profile: `0E6430:Skyrim.esm` vertex 517 moved 48 u west.
   - Planned and written; the read-back held.
   - The patch's navmesh data is byte-identical to the patch an actor walked across in game. There the rebuilt-grid arm
@@ -121,6 +142,11 @@ come later (`C:/hc-runs/2026-11-21-navgrid/PLAN.md`, the plan gate).
   - 3 triangles became 25, with 12 new vertices, in 59 write steps. Written and read back.
   - Against vanilla the patch removes exactly 3,600.0 u², leaves the hole's centre and corners uncovered, and has no
     half-joined edge. Not yet seen in game.
+- Real data, cut by a placed obstacle, on the same profile:
+  - The shrub `0713F2` was refused (no collision on an actor's layers).
+  - The rock pile `0E6420` was planned: its mesh came from USSEP's archive, as this order resolves it. 174 of its 255
+    collision triangles stood in the band over a floor at z 2035.8; the 22-point hull replaced 10 triangles with 47.
+    Written and read back, with no half-joined edge. Not yet seen in game.
 - The checks caught two real cases on this profile:
   - an edit built from Skyrim.esm's triangle corners when USSEP's version wins (refused: the edges were already
     shared);

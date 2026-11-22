@@ -27,6 +27,9 @@ using Mutagen.Bethesda.Skyrim;
 //   {"navmesh": "0E6430:Skyrim.esm", "move": [{"vertex": 517, "to": [x, y, z]} | {"vertex": 517, "by": [dx, dy, dz]}, ...]}
 //   {"navmesh": "0E6430:Skyrim.esm", "remove": [12, 13], "add": {"vertices": [[x, y, z], ...], "triangles": [[a, b, c], ...]}}
 //   {"navmesh": "0E6430:Skyrim.esm", "cut": {"outline": [[x, y], ...], "z": [bottom, top]}}   (NavCut: a convex obstacle)
+//   {"navmesh": "0E6430:Skyrim.esm", "cut": {"ref": "0A1B2C:Skyrim.esm", "margin": 0}}      (NavCut by a placed obstacle: its
+//       outline from its collision on the layers an actor meets, between step height and an actor's top above the navmesh;
+//       _shared/NavCutFootprint.cs)
 //   An added triangle's corners index the navmesh's vertices, then the added ones (n, n+1, ...). A removed triangle's
 //   place is taken by the navmesh's last triangle (highest removal first); added triangles are appended after the kept ones.
 // The profile comes from the flags, then the environment and harness.local.json (_shared/HarnessTarget.cs), as for the
@@ -62,6 +65,18 @@ static class NavEditCli
             if (o.OrderedPaths.Count == 0) throw new Refusal($"navedit: the profile '{Profile}' in {Instance} has no plugins in its load order; check the instance and profile.");
             return o.OrderedPaths;
         }
+
+        /// <summary>The profile's files as the probes read them (HarnessOrderCli, the configuration's owner): the asset
+        /// resolver a cut by reference reads the obstacle's mesh through. Refused when its load order is not this one.</summary>
+        public AssetResolver Assets(IReadOnlyList<string> order)
+        {
+            string mods = Path.Combine(Instance, "mods"), data = Path.Combine(Game, "Data"), ow = Path.Combine(Instance, "overwrite");
+            var cfg = HarnessOrderCli.Resolve(Profile, Path.Combine(Instance, "profiles", Profile), mods, data, ow, Game, null, null, null);
+            if (cfg.Refused) throw new Refusal($"navedit: the profile's configuration could not be read ({cfg.RefusedReason}).");
+            if (!cfg.OrderedPaths.SequenceEqual(order, StringComparer.OrdinalIgnoreCase))
+                throw new Refusal("navedit: the profile's configuration and its load order disagree, so its files cannot be trusted for an obstacle's mesh; check the profile.");
+            return AssetResolver.Build(ow, mods, data, cfg.EnabledMods, cfg.Archives.Archives);
+        }
     }
 
     /// <summary>One planned edit: its row for PLAN.json, and the expected state of every navmesh it changes (with the old
@@ -73,10 +88,12 @@ static class NavEditCli
 
     /// <summary>Plan every edit on this load order. The one planning path: `plan` writes its rows, `write` re-runs it and
     /// requires the same ops.</summary>
-    static List<Planned> Compute(IReadOnlyList<string> order, JsonArray edits)
+    static List<Planned> Compute(Target target, IReadOnlyList<string> order, JsonArray edits)
     {
         using var resolver = LoadOrderResolver.Build(order);
         var view = resolver.Capture();
+        using var session = view.OpenSession();
+        AssetResolver? assets = null;
         var (navi, naviOpen) = NaviView.Read(order);
         var outp = new List<Planned>();
         var claimed = new Dictionary<FormKey, string>();
@@ -132,8 +149,14 @@ static class NavEditCli
                         var c = e["cut"]!;
                         var outline = c["outline"]?.AsArray().Select(x => ((float)x![0]!, (float)x[1]!)).ToList();
                         var z = c["z"]?.AsArray();
-                        r = outline is null || z is null || z.Count != 2
-                            ? TriEditResult.Refused($"The cut of {key} needs \"outline\" (corners [x, y] in order) and \"z\" [bottom, top].")
+                        if (c["ref"] is not null)
+                        {
+                            assets ??= target.Assets(order);
+                            var fp = Footprint(view, session, assets, geom!, FormKey.Factory((string)c["ref"]!), (float?)c["margin"] ?? 0f, row);
+                            r = fp.Status != "planned" ? TriEditResult.Refused(fp.Why!) : NavEdit.Cut(geom!, fp.Outline, fp.ZLo, fp.ZHi, inbound, Cover(path!, key));
+                        }
+                        else r = outline is null || z is null || z.Count != 2
+                            ? TriEditResult.Refused($"The cut of {key} needs \"ref\" (a placed obstacle) or \"outline\" (corners [x, y] in order) with \"z\" [bottom, top].")
                             : NavEdit.Cut(geom!, outline, (float)z[0]!, (float)z[1]!, inbound, Cover(path!, key));
                     }
                     else r = NavEdit.EditTriangles(geom!, remove, addV, addT, inbound, Cover(path!, key));
@@ -163,6 +186,48 @@ static class NavEditCli
         }
         finally { foreach (var o in naviOpen) o.Dispose(); }
         return outp;
+    }
+
+    /// <summary>A placed obstacle's cut outline: its winning placement, its base's model (OverlapIndex.ModelOf), the mesh
+    /// through this order's files, its collision on the layers an actor meets (CollisionLayers.RoleSoups), placed in the
+    /// world (SpatialOverlap.TransformSoup), sliced and hulled by NavCutFootprint over the navmesh floor under it. What
+    /// was read goes into the plan row, so a reader sees which mesh and which floor the outline came from.</summary>
+    static CutFootprint Footprint(LoadOrderResolver.IndexView view, LoadOrderResolver.OverlaySession session, AssetResolver assets,
+                                  NavmeshGeometry g, FormKey refKey, float margin, JsonObject row)
+    {
+        var w = view.ResolveWinner(refKey);
+        if (w is null) return CutFootprint.Refused($"The obstacle {refKey} is in no plugin of this load order; check its FormKey.");
+        if (view.GetRecord(session, w.Value.WinnerPlugin, refKey, typeof(IPlacedObjectGetter)) is not IPlacedGetter placed || PlacementExtract.RefOf(placed) is not { } pr)
+            return CutFootprint.Refused($"{refKey} is not a placed object in {w.Value.WinnerPlugin}; name the obstacle's placed reference.");
+        if (pr.Deleted) return CutFootprint.Refused($"{refKey} is deleted in {w.Value.WinnerPlugin}, so it stands nowhere.");
+        if (pr.InitiallyDisabled || pr.EnableParent is not null)
+            return CutFootprint.Refused($"{refKey} starts disabled or is switched by an enable parent, so whether it stands at load is not settled here; cut it by outline if it does.");
+        if (pr.Base is not { } bk) return CutFootprint.Refused($"{refKey} has no base object.");
+        var bw = view.ResolveWinner(bk);
+        var brec = bw is null ? null : view.GetRecord(session, bw.Value.WinnerPlugin, bk, null);
+        if (brec is null || OverlapIndex.ModelOf(brec) is not { } model) return CutFootprint.Refused($"The base {bk} of {refKey} has no model, so it has no collision to cut by.");
+        string full = (model.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? model : Path.Combine("meshes", model)).Replace('/', '\\');
+        var res = assets.ResolveForPlacement(full);
+        if (res.Sources.Count == 0) return CutFootprint.Refused($"The mesh {full} of {refKey} is in none of this load order's files.");
+        var (bytes, err) = AssetResolver.ReadPlacementSource(res.Sources[0]);
+        if (bytes is null) return CutFootprint.Refused($"The mesh {full} could not be read ({err}).");
+        if (NifGeometry.Measure(bytes, includeTriangles: true).Model is not { } m) return CutFootprint.Refused($"The mesh {full} could not be measured.");
+        var (host, hs, _, _) = CollisionLayers.RoleSoups(m);
+        if (hs != 'c') return CutFootprint.Refused($"The mesh {full} has no collision on the layers an actor meets, so the game would not cut navmesh round it; cut it by outline if it should be.");
+        var world = SpatialOverlap.TransformSoup(host, pr.Position, pr.Rotation, pr.Scale);
+        var box = SpatialOverlap.SoupBounds(world);
+        var floor = NavCutFootprint.FloorUnder(g, pr.Position.X, pr.Position.Y, pr.Position.Z, new System.Numerics.Vector2(box.Min.X, box.Min.Y), new System.Numerics.Vector2(box.Max.X, box.Max.Y));
+        if (floor is null) return CutFootprint.Refused($"{g.FormKey} has no navmesh under {refKey} or within its outline and 256 u of its height, so there is nothing to cut.");
+        var fp = NavCutFootprint.Of(world, floor.Value, margin);
+        row["footprint"] = new JsonObject
+        {
+            ["ref"] = refKey.ToString(), ["winner"] = w.Value.WinnerPlugin, ["base"] = bk.ToString(), ["mesh"] = full,
+            ["meshFrom"] = res.Sources[0].ArchivePath ?? res.Sources[0].LooseFilePath, ["collisionTriangles"] = host.TriangleCount,
+            ["position"] = Arr(new[] { pr.Position.X, pr.Position.Y, pr.Position.Z }), ["floor"] = floor.Value, ["margin"] = margin,
+            ["sliceTriangles"] = fp.SliceTriangles, ["band"] = fp.Status == "planned" ? Arr(new[] { fp.ZLo, fp.ZHi }) : null,
+            ["outline"] = new JsonArray(fp.Outline.Select(p => (JsonNode)Arr(new[] { p.X, p.Y })).ToArray()),
+        };
+        return fp;
     }
 
     static JsonNode OpJson(RepairOp o)
@@ -218,7 +283,7 @@ static class NavEditCli
         try { edits = JsonNode.Parse(File.ReadAllText(editsPath))!["edits"]!.AsArray(); }
         catch (Exception ex) { throw new Refusal($"navedit: the edits file '{editsPath}' could not be read as {{\"edits\": [...]}} ({ex.Message}); see the usage for its shape."); }
         var order = t.Order();
-        var planned = Compute(order, edits);
+        var planned = Compute(t, order, edits);
         var doc = new JsonObject
         {
             ["tool"] = "navedit plan", ["instance"] = t.Instance, ["game"] = t.Game, ["profile"] = t.Profile,
@@ -245,7 +310,7 @@ static class NavEditCli
             throw new Refusal($"navedit write: the load order of '{t.Profile}' changed since the plan was made; run navedit plan again.");
         var rows = plan["edits"]!.AsArray();
         if (rows.Any(r => (string?)r!["status"] != "planned")) throw new Refusal("navedit write: the plan has refused edits; fix or drop them and plan again, so a patch never carries half an edit set.");
-        var again = Compute(order, new JsonArray(rows.Select(r => r!["edit"]!.DeepClone()).ToArray()));
+        var again = Compute(t, order, new JsonArray(rows.Select(r => r!["edit"]!.DeepClone()).ToArray()));
         for (int i = 0; i < rows.Count; i++)
             if (!again[i].Ok || again[i].Row["ops"]!.ToJsonString() != rows[i]!["ops"]!.ToJsonString())
                 throw new Refusal($"navedit write: {rows[i]!["navmesh"]} no longer plans the same on this load order; run navedit plan again.");

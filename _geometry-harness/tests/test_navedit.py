@@ -1,4 +1,4 @@
-"""Known answers for navmesh editing (C2513-C2534), on _shared/NavEdit.cs through `navedit --selftest`.
+"""Known answers for navmesh editing (C2513-C2539), on _shared/NavEdit.cs through `navedit --selftest`.
 
     2513  an interior vertex moved: planned, the box kept, the grid NavGrid's for the moved mesh, ops for exactly that
           vertex, the box and the grid
@@ -23,6 +23,11 @@
     2532  NavCut: a non-convex, two-corner or flat outline, an empty band, and a cut that misses are refused
     2533  NavCut: the height band picks the level; above the navmesh it cuts nothing
     2534  NavCut: a cut reaching a linked edge is refused, saying so
+    2535  cut outline of an obstacle: a box's outline and the band (step below the floor to an actor's top above it)
+    2536  the outline grown by a margin
+    2537  an obstacle wholly above an actor's top, or below step height, is refused
+    2538  the floor under an obstacle is taken on its own level (a bridge over a floor)
+    2539  an obstacle's outline through the cut removes exactly its area
 
 The real-data check (plan and write on a lab profile, read back, byte-compared with the in-game-tested patch) is in the
 2026-11-21 run folder; it needs a game and an MO2 instance, so it is not a test here.
@@ -75,6 +80,11 @@ CASES = [
     ("2532 NavCut refusals", lambda: selftest("2532")),
     ("2533 NavCut height band", lambda: selftest("2533")),
     ("2534 NavCut linked edge refused", lambda: selftest("2534")),
+    ("2535 obstacle outline and band", lambda: selftest("2535")),
+    ("2536 obstacle outline margin", lambda: selftest("2536")),
+    ("2537 obstacle out of the actor band refused", lambda: selftest("2537")),
+    ("2538 obstacle floor on its own level", lambda: selftest("2538")),
+    ("2539 obstacle outline cuts its area", lambda: selftest("2539")),
 ]
 
 if __name__ == "__main__":
