@@ -25,8 +25,11 @@ using Mutagen.Bethesda.Skyrim;
 //       edge over connected ground, what lies beyond that edge, and the step across each edge link near it, with a
 //       verdict "inside" or "refused". Reads the winning version of each named navmesh and, outward through edge links, of
 //       every navmesh within reach of a marker; a linked navmesh the load order does not have is listed as absent.
-//       MARKERS.json: {"navmeshes": ["0E6430:Skyrim.esm", ...], "markers": [{"name": "N start", "at": [x, y, z]}, ...],
-//       "margin": 64, "stepLimit": 64} (margin and stepLimit optional). Writes nothing but RESULT.json. Exit 0 when every
+//       MARKERS.json: {"worldspace": "00003C:Skyrim.esm" | "cell": "<interior cell FormKey>", "navmeshes": [...],
+//       "markers": [{"name": "N start", "at": [x, y, z]}, ...], "margin": 64, "stepLimit": 64}: with "worldspace" (or "cell")
+//       every winning navmesh in the cells within reach of a marker is found and checked, so an arm that changes the
+//       layout needs no list; "navmeshes" adds named ones (all optional but one of the three; margin and stepLimit
+//       default to 64). Writes nothing but RESULT.json. Exit 0 when every
 //       marker is inside, 1 when any is refused, 2 when the inputs cannot be read. --enable (repeatable) builds the arm's
 //       order as navownprobe does (_shared/HarnessOrderCli.cs): a name the profile's layout holds, or a patch file's path,
 //       loaded last with its masters checked; so one profile plus a patch covers a patched arm.
@@ -517,11 +520,13 @@ static class NavEditCli
             HarnessTarget.Require(f.GetValueOrDefault("--instance") ?? HarnessTarget.Instance, "MO2 instance directory", "instance", "--instance"),
             HarnessTarget.Require(f.GetValueOrDefault("--game") ?? HarnessTarget.Game, "game directory", "game", "--game"),
             HarnessTarget.Require(f.GetValueOrDefault("--profile") ?? HarnessTarget.Profile, "MO2 profile name", "profile", "--profile"));
-        List<FormKey> named; List<(string Name, Vec3 At)> markers; double margin, stepLimit;
+        List<FormKey> named; List<(string Name, Vec3 At)> markers; double margin, stepLimit; FormKey? inWorld = null, inCell = null;
         try
         {
             var doc = JsonNode.Parse(File.ReadAllText(inPath))!;
-            named = doc["navmeshes"]!.AsArray().Select(x => FormKey.Factory((string)x!)).ToList();
+            named = (doc["navmeshes"] as JsonArray ?? new JsonArray()).Select(x => FormKey.Factory((string)x!)).ToList();
+            if (doc["worldspace"] is { } ws) inWorld = FormKey.Factory((string)ws!);
+            if (doc["cell"] is { } ce) inCell = FormKey.Factory((string)ce!);
             markers = doc["markers"]!.AsArray().Select((m, i) =>
             {
                 var a = m!["at"]!.AsArray();
@@ -531,7 +536,10 @@ static class NavEditCli
             stepLimit = (double?)doc["stepLimit"] ?? NavMarker.DefaultStepLimit;
         }
         catch (Exception ex) { throw new Refusal($"navedit marker: the markers file '{inPath}' could not be read as {{\"navmeshes\": [...], \"markers\": [{{\"name\", \"at\": [x, y, z]}}]}} ({ex.Message}); see the usage for its shape."); }
-        if (named.Count == 0 || markers.Count == 0) throw new Refusal("navedit marker: name at least one navmesh and one marker.");
+        if (markers.Count == 0) throw new Refusal("navedit marker: give at least one marker.");
+        if (named.Count == 0 && inWorld is null && inCell is null)
+            throw new Refusal("navedit marker: give \"worldspace\" (an exterior, e.g. \"00003C:Skyrim.esm\") or \"cell\" (an interior) so the navmeshes under the markers can be found, or name them in \"navmeshes\".");
+        if (inWorld is not null && inCell is not null) throw new Refusal("navedit marker: give \"worldspace\" or \"cell\", not both: a marker stands in one of them.");
         if (margin <= 0 || stepLimit <= 0) throw new Refusal("navedit marker: margin and stepLimit must be positive distances in game units.");
         // the arm's layout: the profile's order, or with --enable the order HarnessOrderCli (its one owner) builds, a
         // patch file loaded last with its masters checked, as navownprobe takes it
@@ -564,6 +572,39 @@ static class NavEditCli
             return true;
         }
         foreach (var k in named) Load(k, true);
+        // the navmeshes the ARM puts under the markers, found rather than named (houseCARL, 2026-11-22: in a layout-change
+        // arm which navmesh stands under a marker is exactly what is not known in advance): every navmesh of the interior
+        // cell, or every navmesh of the worldspace whose own vertices come within reach of a marker in plan (by geometry,
+        // not by the record's grid coordinates, whose stored order is not something this tool should rely on)
+        var found = new List<FormKey>();
+        if (inWorld is not null || inCell is not null)
+        {
+            double r0 = Math.Max(2 * margin, 128);
+            bool Reaches(IReadOnlyList<Noggog.P3Float> vs)
+            {
+                if (vs.Count == 0) return false;
+                float x0 = float.MaxValue, y0 = float.MaxValue, x1 = float.MinValue, y1 = float.MinValue;
+                foreach (var v in vs) { x0 = MathF.Min(x0, v.X); y0 = MathF.Min(y0, v.Y); x1 = MathF.Max(x1, v.X); y1 = MathF.Max(y1, v.Y); }
+                return markers.Any(m => m.At.X >= x0 - r0 && m.At.X <= x1 + r0 && m.At.Y >= y0 - r0 && m.At.Y <= y1 + r0);
+            }
+            var under = new HashSet<FormKey>();
+            foreach (var p in order)
+            {
+                using var mod = SkyrimMod.CreateFromBinaryOverlay(p, SkyrimRelease.SkyrimSE);
+                foreach (var nm in mod.EnumerateMajorRecords<INavigationMeshGetter>())
+                {
+                    bool here = nm.Data?.Parent switch
+                    {
+                        IWorldspaceNavmeshParentGetter w => inWorld is { } wk && w.Parent.FormKey == wk && Reaches(nm.Data!.Vertices),
+                        ICellNavmeshParentGetter c => inCell is { } ck && c.Parent.FormKey == ck,
+                        _ => false,
+                    };
+                    if (here) under.Add(nm.FormKey);   // the winner's own geometry decides below (a later deletion drops it)
+                }
+            }
+            foreach (var k in under.OrderBy(k => k.ToString(), StringComparer.Ordinal))
+                if (!meshes.ContainsKey(k) && Load(k, false)) found.Add(k);
+        }
         // follow edge links outward from every loaded navmesh whose ground lies within reach of a marker, until none adds
         // one: a navmesh the load order does not have is absent (an edge into it is open), never silently skipped
         double reach = Math.Max(2 * margin, 128);
@@ -616,7 +657,8 @@ static class NavEditCli
             ["tool"] = "navedit marker", ["instance"] = t.Instance, ["game"] = t.Game, ["profile"] = t.Profile, ["enable"] = Arr(enables),
             ["orderNotes"] = applied, ["order"] = Arr(order),
             ["margin"] = margin, ["stepLimit"] = stepLimit, ["maxAbove"] = NavMarker.DefaultMaxAbove, ["navmeshes"] = winners,
-            ["absent"] = Arr(absent.Select(k => k.ToString()).OrderBy(x => x, StringComparer.Ordinal)), ["markers"] = rows,
+            ["absent"] = Arr(absent.Select(k => k.ToString()).OrderBy(x => x, StringComparer.Ordinal)),
+            ["found"] = Arr(found.Select(k => k.ToString())), ["worldspace"] = inWorld?.ToString(), ["cell"] = inCell?.ToString(), ["markers"] = rows,
         };
         File.WriteAllText(outPath, outDoc.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine($"markers: {markers.Count - refused} inside, {refused} refused; written to {outPath}");

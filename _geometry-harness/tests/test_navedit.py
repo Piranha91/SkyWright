@@ -133,26 +133,30 @@ LAB = Path(os.environ.get("HC_NAVEDIT_LAB") or "")
 
 
 def ms_marker_known_answer():
-    """Real data (only with HC_NAVEDIT_LAB=<the lab instance>, which holds profile NR2-V): the Moon and Star north start
-    N (177792,-48952,2250) sat on a hole edge with the rock slab beyond it (SkyWright C:/hc-runs/2026-11-21-navgrid/
-    LAB-RESULT.md, addendum). `navedit marker` must refuse it for the open edge and name the higher ground beyond; Ni,
-    40 u further in, is still inside the 64 u margin and refused too; the south marker S stands inside on 079A5A."""
+    """Real data (only with HC_NAVEDIT_LAB=<the lab instance>, which holds profiles NR2-U and NR2-V): the Moon and Star
+    north start N (177792,-48952,2250) sat on a hole edge with the rock slab beyond it (SkyWright C:/hc-runs/2026-11-21-
+    navgrid/LAB-RESULT.md, addendum). No navmesh is named: each arm's own are found in Tamriel by cell. N is refused for
+    the open edge with higher ground beyond; Ni, 40 u further in, is still inside the 64 u margin and refused; the south
+    marker S stands inside on the arm's own navmesh, Moon and Star's own 026F59:MoonAndStar_MAS.esp in NR2-U and the base game's 079A5A in NR2-V
+    (houseCARL, 2026-11-22: naming them in advance is what a layout-change arm cannot do)."""
     import json, tempfile
     tmp = Path(tempfile.mkdtemp(prefix="nm-"))
-    (tmp / "m.json").write_text(json.dumps({"navmeshes": ["0E6430:Skyrim.esm", "079A5A:Skyrim.esm"], "markers": [
+    (tmp / "m.json").write_text(json.dumps({"worldspace": "00003C:Skyrim.esm", "markers": [
         {"name": "N", "at": [177792.0, -48952.0, 2250.0]}, {"name": "Ni", "at": [177792.0, -48912.0, 2250.0]},
         {"name": "S", "at": [177792.0, -49352.0, 2430.0]}]}), encoding="utf-8")
     exe = PROBES / "navedit" / "bin" / "Release" / "net9.0" / "navedit.exe"
-    p = subprocess.run([str(exe), "marker", "--markers", str(tmp / "m.json"), "--out", str(tmp / "r.json"),
-                        "--instance", str(LAB), "--game", os.environ.get("HC_NAVEDIT_GAME", r"C:\Games\Steam\steamapps\common\Skyrim Special Edition"),
-                        "--profile", "NR2-V"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900)
-    assert p.returncode == 1, f"exit {p.returncode} (want 1: some marker refused): {p.stdout[-400:]} {p.stderr[-300:]}"
-    rows = {m["name"]: m for m in json.loads((tmp / "r.json").read_text(encoding="utf-8"))["markers"]}
-    n, ni, s = rows["N"], rows["Ni"], rows["S"]
-    b = (n["openEdge"] or {}).get("beyond") or {}
-    assert n["verdict"] == "refused" and n["openEdge"]["distance"] < 16 and 75 <= (b.get("step") or 0) <= 110, n
-    assert ni["verdict"] == "refused" and 16 <= ni["openEdge"]["distance"] < 64, ni
-    assert s["verdict"] == "inside" and s["standing"]["navmesh"] == "079A5A:Skyrim.esm", s
+    for profile, south in (("NR2-U", "026F59:MoonAndStar_MAS.esp"), ("NR2-V", "079A5A:Skyrim.esm")):
+        out = tmp / f"r-{profile}.json"
+        p = subprocess.run([str(exe), "marker", "--markers", str(tmp / "m.json"), "--out", str(out),
+                            "--instance", str(LAB), "--game", os.environ.get("HC_NAVEDIT_GAME", r"C:\Games\Steam\steamapps\common\Skyrim Special Edition"),
+                            "--profile", profile], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900)
+        assert p.returncode == 1, f"{profile}: exit {p.returncode} (want 1: some marker refused): {p.stdout[-400:]} {p.stderr[-300:]}"
+        rows = {m["name"]: m for m in json.loads(out.read_text(encoding="utf-8"))["markers"]}
+        n, ni, s = rows["N"], rows["Ni"], rows["S"]
+        b = (n["openEdge"] or {}).get("beyond") or {}
+        assert n["verdict"] == "refused" and n["openEdge"]["distance"] < 16 and 75 <= (b.get("step") or 0) <= 110, (profile, n)
+        assert ni["verdict"] == "refused" and 16 <= ni["openEdge"]["distance"] < 64, (profile, ni)
+        assert s["verdict"] == "inside" and s["standing"]["navmesh"] == south, (profile, s)
 
 
 CASES = [
