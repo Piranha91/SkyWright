@@ -72,6 +72,8 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
     2553  self-test: a base emit whose link rows carry no place is refused in one sentence
     2554  the fixture's emit: an EDGE-NAV, NOMATCH or ONEWAY row's source, and a NOMATCH or ONEWAY row's far end, names its
           triangle and where it stands; one triangle one place, one place one triangle; an EDGE-IDX row names no place
+    2555  self-test: a row listing several navmeshes (CLOBBERED) keys on the navmesh asked about and its plugin pair; a
+          NAV-GROUND row whose owner became the patch is unchanged
 
 Probes come from this checkout's Release builds unless HC_NR_HARNESS names another harness folder; the houseCARL server
 and generator from this checkout's src (HC_NR_SRC another). HC_NR_CASES (e.g. "2463,2483") runs those cases only.
@@ -811,6 +813,7 @@ CASES = [
     ("2552 self-test: rows gone, new and on another navmesh", lambda: selftest("2552")),
     ("2553 self-test: a base emit without places is refused", lambda: selftest("2553")),
     ("2554 the emit says where each link row's triangles stand", t2554),
+    ("2555 self-test: grouped rows keyed per navmesh", lambda: selftest("2555")),
     ("2499 the fix forwards that cell from its winner, and it holds", t2499),
 ]
 

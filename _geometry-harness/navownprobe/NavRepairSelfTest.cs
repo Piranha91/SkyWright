@@ -156,6 +156,18 @@ static class NavRepairSelfTest
                 ? null : $"A: gone {gone.Count}, new {fresh.Count}, unchanged {string.Join(",", same)}; Z: {zg.Count}/{zn.Count}/{zs.Count}";
         });
 
+        // C2555: a CLOBBERED row lists every navmesh of its plugin pair: A's finding is unchanged when the pair's group loses Z,
+        // and gone (one new) when another pair now clobbers A; a NAV-GROUND row whose owner became the patch is unchanged.
+        Case("2555 rows-at-grouped-rows", () =>
+        {
+            Conflict Clob(string a, string b, params string[] navs) => new("CLOBBERED", a, b, "re-cut", navs.Select(n => new ConflictRecord(n, "navmesh", null)).ToList());
+            Conflict Ground(string owner) => new("NAV-GROUND", owner, "Land.esp", "off the ground", new[] { new ConflictRecord(A, "navmesh", null) });
+            var same = RowsAt.Compare(new[] { Clob("U.esp", "N.esp", A, Z), Ground("Skyrim.esm") }, new[] { Clob("U.esp", "N.esp", A), Ground("Patch.esp") }, A);
+            var moved = RowsAt.Compare(new[] { Clob("U.esp", "N.esp", A) }, new[] { Clob("N.esp", "Patch.esp", A) }, A);
+            return same.Gone.Count == 0 && same.New.Count == 0 && same.Same.Count == 2 && moved.Gone.Count == 1 && moved.New.Count == 1
+                ? null : $"same pair {same.Gone.Count}/{same.New.Count}/{same.Same.Count}; another pair {moved.Gone.Count}/{moved.New.Count}";
+        });
+
         // C2553: a base emit whose link rows carry no place (written before places) is refused in one sentence, not compared
         // by index; one with places is not.
         Case("2553 rows-at-unplaced-base", () =>

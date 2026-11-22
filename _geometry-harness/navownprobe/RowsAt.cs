@@ -7,11 +7,22 @@ using HarnessShared;
 // (ConflictRecord.At) instead; a row without triangles keeps its records and kind. Pure: two emits in, counts out.
 public static class RowsAt
 {
-    /// <summary>A row's key: its kind, then each record as FormKey@place (or the bare FormKey when it names no triangle,
-    /// or "FormKey#index" when its index names none), necessary records first, the first alternative after.</summary>
-    public static string Key(Conflict c)
+    /// <summary>A row's key as navmesh <paramref name="nav"/> sees it. A link row: its kind, then each record as FormKey@place
+    /// (or "FormKey#index" when its index names no triangle, or the bare FormKey), necessary records first, the first
+    /// alternative after; its plugins are left out, since a patch becomes the owner of what it wins. A row without triangles
+    /// lists every navmesh of its finding (a CLOBBERED row, every navmesh of one plugin pair), so it keys on this navmesh and
+    /// what names the finding: the pair for CLOBBERED, the deleter for DELETED or EMPTIED, nothing more for NAV-GROUND.</summary>
+    public static string Key(Conflict c, string nav)
     {
         static string One(ConflictRecord r) => r.At is { } at ? $"{r.FormKey}@{at}" : r.Triangle is { } t ? $"{r.FormKey}#{t}" : r.FormKey;
+        var all = c.Necessary.Concat(c.Alternative ?? new List<ConflictRecord>());
+        if (!all.Any(r => r.Triangle is not null))
+            return c.Kind switch
+            {
+                "CLOBBERED" => $"{c.Kind}|{nav}|{c.A}>{c.B}",
+                "DELETED" or "EMPTIED" => $"{c.Kind}|{nav}|{c.A}",
+                _ => $"{c.Kind}|{nav}",
+            };
         var parts = c.Necessary.Select(One).ToList();
         if (c.Alternative is { Count: > 0 } alt) parts.Add(One(alt[0]));
         return $"{c.Kind}|{string.Join("|", parts)}";
@@ -20,7 +31,7 @@ public static class RowsAt
     /// <summary>The rows of <paramref name="emit"/> that name navmesh <paramref name="nav"/> in any record.</summary>
     public static HashSet<string> Of(IEnumerable<Conflict> emit, string nav) =>
         emit.Where(c => c.Necessary.Concat(c.Alternative ?? new List<ConflictRecord>()).Any(r => string.Equals(r.FormKey, nav, StringComparison.OrdinalIgnoreCase)))
-            .Select(Key).ToHashSet();
+            .Select(c => Key(c, nav)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Navmesh <paramref name="nav"/>'s rows, base against now: gone, new, unchanged.</summary>
     public static (List<string> Gone, List<string> New, List<string> Same) Compare(IEnumerable<Conflict> baseEmit, IEnumerable<Conflict> now, string nav)
