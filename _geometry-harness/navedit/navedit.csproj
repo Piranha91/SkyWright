@@ -14,6 +14,7 @@
     <Compile Include="..\_shared\CheckoutLayout.cs" Link="CheckoutLayout.cs" />
     <Compile Include="..\_shared\NavGrid.cs" Link="NavGrid.cs" />
     <Compile Include="..\_shared\NavEdit.cs" Link="NavEdit.cs" />
+    <Compile Include="..\_shared\NavMarker.cs" Link="NavMarker.cs" />
     <Compile Include="..\_shared\NavBorderMatch.cs" Link="NavBorderMatch.cs" />
     <Compile Include="..\_shared\NavRepair.cs" Link="NavRepair.cs" />
     <Compile Include="..\_shared\NavRepairReadBack.cs" Link="NavRepairReadBack.cs" />

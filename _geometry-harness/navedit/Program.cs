@@ -20,6 +20,16 @@ using Mutagen.Bethesda.Skyrim;
 //       planned geometry, links, doors and the grid NavGrid rebuilds, each kept triangle its cover fields, and every
 //       carried record must equal its winner. Refused when the load order differs, or PATCH.esp exists. Exit 0 on a
 //       read-back that holds.
+//   navedit marker --markers MARKERS.json --out RESULT.json [--instance DIR --game DIR --profile NAME] [--enable X.esp|PATH ...]
+//       The station marker check (_shared/NavMarker.cs): for each lab marker, the triangle it stands on, its nearest open
+//       edge over connected ground, what lies beyond that edge, and the step across each edge link near it, with a
+//       verdict "inside" or "refused". Reads the winning version of each named navmesh and, outward through edge links, of
+//       every navmesh within reach of a marker; a linked navmesh the load order does not have is listed as absent.
+//       MARKERS.json: {"navmeshes": ["0E6430:Skyrim.esm", ...], "markers": [{"name": "N start", "at": [x, y, z]}, ...],
+//       "margin": 64, "stepLimit": 64} (margin and stepLimit optional). Writes nothing but RESULT.json. Exit 0 when every
+//       marker is inside, 1 when any is refused, 2 when the inputs cannot be read. --enable (repeatable) builds the arm's
+//       order as navownprobe does (_shared/HarnessOrderCli.cs): a name the profile's layout holds, or a patch file's path,
+//       loaded last with its masters checked; so one profile plus a patch covers a patched arm.
 //   navedit --selftest
 //       Known answers for the edit model on small in-memory navmeshes (tests/test_navedit.py runs it).
 //
@@ -36,19 +46,26 @@ using Mutagen.Bethesda.Skyrim;
 // other probes.
 
 if (args.Length >= 1 && args[0] == "--selftest") return NavEditSelfTest.Run();
-if (args.Length < 1 || args[0] is not ("plan" or "write")) { Console.Error.WriteLine("usage: navedit plan --edits EDITS.json --out PLAN.json [--instance DIR --game DIR --profile NAME] | navedit write --plan PLAN.json --out PATCH.esp | navedit --selftest"); return 2; }
+if (args.Length < 1 || args[0] is not ("plan" or "write" or "marker")) { Console.Error.WriteLine("usage: navedit plan --edits EDITS.json --out PLAN.json [--instance DIR --game DIR --profile NAME] | navedit write --plan PLAN.json --out PATCH.esp | navedit marker --markers MARKERS.json --out RESULT.json [--instance DIR --game DIR --profile NAME] | navedit --selftest"); return 2; }
 
 var flags = new Dictionary<string, string>(StringComparer.Ordinal);
+var enables = new List<string>();   // `marker` only: --enable may repeat (each a plugin name or a patch file's path)
 for (int i = 1; i < args.Length; i++)
 {
     if (!args[i].StartsWith("--", StringComparison.Ordinal) || i + 1 >= args.Length) { Console.Error.WriteLine($"navedit: '{args[i]}' is not a flag with a value; see navedit with no arguments for the usage."); return 2; }
+    if (args[i] == "--enable" && args[0] == "marker") { enables.Add(args[++i]); continue; }
     flags[args[i]] = args[++i];
 }
-string[] known = args[0] == "plan" ? new[] { "--edits", "--out", "--instance", "--game", "--profile" } : new[] { "--plan", "--out" };
+string[] known = args[0] switch
+{
+    "plan" => new[] { "--edits", "--out", "--instance", "--game", "--profile" },
+    "marker" => new[] { "--markers", "--out", "--instance", "--game", "--profile" },
+    _ => new[] { "--plan", "--out" },
+};
 foreach (var k in flags.Keys)
     if (!known.Contains(k)) { Console.Error.WriteLine($"navedit {args[0]}: '{k}' is not one of its flags ({string.Join(", ", known)})."); return 2; }
 
-try { return args[0] == "plan" ? NavEditCli.Plan(flags) : NavEditCli.Write(flags); }
+try { return args[0] switch { "plan" => NavEditCli.Plan(flags), "marker" => NavEditCli.Marker(flags, enables), _ => NavEditCli.Write(flags) }; }
 catch (NavEditCli.Refusal r) { Console.Error.WriteLine(r.Message); return 2; }
 
 static class NavEditCli
@@ -488,6 +505,122 @@ static class NavEditCli
             Console.WriteLine($"{p.Row["navmesh"]}: {p.Row["status"]}" + (p.Ok ? $" (changes {p.Expect.Count} navmesh(es), {p.Ops.Count} ops)" : " - " + string.Join(" ", p.Row["why"]!.AsArray().Select(x => (string)x!))));
         Console.WriteLine($"plan written to {outPath}");
         return planned.All(p => p.Ok) ? 0 : 1;
+    }
+
+    /// <summary>`navedit marker`: the station marker check on the winning versions of the named navmeshes and of every
+    /// navmesh they link to (one hop), so an edge link is followed and what lies beyond an open edge is seen.</summary>
+    public static int Marker(Dictionary<string, string> f, IReadOnlyList<string> enables)
+    {
+        var inPath = Need(f, "--markers", "MARKERS.json, the navmeshes and the markers to check");
+        var outPath = Need(f, "--out", "RESULT.json, where the result goes");
+        var t = new Target(
+            HarnessTarget.Require(f.GetValueOrDefault("--instance") ?? HarnessTarget.Instance, "MO2 instance directory", "instance", "--instance"),
+            HarnessTarget.Require(f.GetValueOrDefault("--game") ?? HarnessTarget.Game, "game directory", "game", "--game"),
+            HarnessTarget.Require(f.GetValueOrDefault("--profile") ?? HarnessTarget.Profile, "MO2 profile name", "profile", "--profile"));
+        List<FormKey> named; List<(string Name, Vec3 At)> markers; double margin, stepLimit;
+        try
+        {
+            var doc = JsonNode.Parse(File.ReadAllText(inPath))!;
+            named = doc["navmeshes"]!.AsArray().Select(x => FormKey.Factory((string)x!)).ToList();
+            markers = doc["markers"]!.AsArray().Select((m, i) =>
+            {
+                var a = m!["at"]!.AsArray();
+                return ((string?)m["name"] ?? $"marker {i + 1}", new Vec3((float)a[0]!, (float)a[1]!, (float)a[2]!));
+            }).ToList();
+            margin = (double?)doc["margin"] ?? NavMarker.DefaultMargin;
+            stepLimit = (double?)doc["stepLimit"] ?? NavMarker.DefaultStepLimit;
+        }
+        catch (Exception ex) { throw new Refusal($"navedit marker: the markers file '{inPath}' could not be read as {{\"navmeshes\": [...], \"markers\": [{{\"name\", \"at\": [x, y, z]}}]}} ({ex.Message}); see the usage for its shape."); }
+        if (named.Count == 0 || markers.Count == 0) throw new Refusal("navedit marker: name at least one navmesh and one marker.");
+        if (margin <= 0 || stepLimit <= 0) throw new Refusal("navedit marker: margin and stepLimit must be positive distances in game units.");
+        // the arm's layout: the profile's order, or with --enable the order HarnessOrderCli (its one owner) builds, a
+        // patch file loaded last with its masters checked, as navownprobe takes it
+        IReadOnlyList<string> order; var applied = new JsonArray();
+        if (enables.Count == 0) order = t.Order();
+        else
+        {
+            string mods = Path.Combine(t.Instance, "mods"), data = Path.Combine(t.Game, "Data"), ow = Path.Combine(t.Instance, "overwrite");
+            var cfg = HarnessOrderCli.Resolve(t.Profile, Path.Combine(t.Instance, "profiles", t.Profile), mods, data, ow, t.Game, null, enables, null);
+            if (cfg.Refused) throw new Refusal($"navedit marker: the order with {string.Join(", ", enables)} could not be built ({cfg.RefusedReason}).");
+            order = cfg.OrderedPaths;
+            foreach (var a in cfg.Applied.Concat(cfg.Limits)) applied.Add(a);
+        }
+        using var resolver = LoadOrderResolver.Build(order);
+        var view = resolver.Capture();
+        var meshes = new Dictionary<FormKey, NavmeshGeometry>();
+        var winners = new JsonObject();
+        bool Load(FormKey k, bool required)
+        {
+            if (meshes.ContainsKey(k)) return true;
+            var w = view.ResolveWinner(k);
+            var path = w is null ? null : order.FirstOrDefault(p => string.Equals(Path.GetFileName(p), w.Value.WinnerPlugin, StringComparison.OrdinalIgnoreCase));
+            var g = path is null ? null : Winning(path, k);
+            if (g is null)
+            {
+                if (required) throw new Refusal($"navedit marker: {k} has no navmesh geometry on this load order (absent, deleted or empty); check the FormKey and the profile.");
+                return false;
+            }
+            meshes[k] = g; winners[k.ToString()] = w!.Value.WinnerPlugin;
+            return true;
+        }
+        foreach (var k in named) Load(k, true);
+        // follow edge links outward from every loaded navmesh whose ground lies within reach of a marker, until none adds
+        // one: a navmesh the load order does not have is absent (an edge into it is open), never silently skipped
+        double reach = Math.Max(2 * margin, 128);
+        var absent = new HashSet<FormKey>();
+        bool Near(NavmeshGeometry g) => markers.Any(m => g.Vertices.Count > 0
+            && m.At.X >= g.Vertices.Min(v => v.X) - reach && m.At.X <= g.Vertices.Max(v => v.X) + reach
+            && m.At.Y >= g.Vertices.Min(v => v.Y) - reach && m.At.Y <= g.Vertices.Max(v => v.Y) + reach);
+        for (bool grew = true; grew;)
+        {
+            grew = false;
+            foreach (var g in meshes.Values.Where(Near).ToList())
+                foreach (var l in (g.EdgeLinks ?? Array.Empty<NavEdgeLink>()).Select(l => l.Mesh).Distinct())
+                {
+                    if (meshes.ContainsKey(l) || absent.Contains(l)) continue;
+                    if (Load(l, false)) grew = true; else absent.Add(l);
+                }
+        }
+        static JsonNode? Fk(FormKey? k) => k is null ? null : JsonValue.Create(k.Value.ToString());
+        static double R(double v) => Math.Round(v, 1);
+        var rows = new JsonArray();
+        int refused = 0;
+        foreach (var (name, at) in markers)
+        {
+            var r = NavMarker.Check(meshes, at, margin, stepLimit, absent);
+            if (r.Verdict != "inside") refused++;
+            rows.Add(new JsonObject
+            {
+                ["name"] = name, ["at"] = Arr(new[] { at.X, at.Y, at.Z }), ["verdict"] = r.Verdict, ["why"] = Arr(r.Why),
+                ["standing"] = r.Mesh is null ? null : new JsonObject { ["navmesh"] = Fk(r.Mesh), ["triangle"] = r.Triangle, ["z"] = R(r.StandZ!.Value), ["markerAbove"] = R(r.Above!.Value) },
+                ["openEdge"] = r.OpenEdge is null ? null : new JsonObject
+                {
+                    ["navmesh"] = Fk(r.OpenEdge.Mesh), ["triangle"] = r.OpenEdge.Triangle, ["edge"] = r.OpenEdge.Edge, ["distance"] = R(r.OpenEdge.Distance),
+                    ["at"] = Arr(new[] { R(r.OpenEdge.At.X), R(r.OpenEdge.At.Y), R(r.OpenEdge.At.Z) }),
+                    ["beyond"] = r.Beyond is null ? null : r.Beyond.Mesh is null ? new JsonObject { ["nothingWithin"] = NavMarker.BeyondReach }
+                        : new JsonObject { ["navmesh"] = Fk(r.Beyond.Mesh), ["triangle"] = r.Beyond.Triangle, ["step"] = R(r.Beyond.Step),
+                                           ["gapAtLeast"] = R(r.Beyond.Gap), ["gapUnder"] = R(r.Beyond.Gap + NavMarker.BeyondStep) },
+                },
+                ["noOpenEdgeWithin"] = r.OpenEdge is null && r.Mesh is not null ? R(r.Reach) : null,
+                ["linkSteps"] = new JsonArray(r.LinkSteps.Select(s => (JsonNode)new JsonObject
+                {
+                    ["navmesh"] = Fk(s.Mesh), ["triangle"] = s.Triangle, ["edge"] = s.Edge, ["to"] = Fk(s.ToMesh), ["toTriangle"] = s.ToTriangle,
+                    ["type"] = s.Type, ["distance"] = R(s.Distance), ["step"] = R(s.Step),
+                }).ToArray()),
+                ["unfollowedLinks"] = new JsonArray(r.Unfollowed.Select(u => (JsonNode)new JsonObject { ["navmesh"] = u.Mesh.ToString(), ["distance"] = R(u.Distance) }).ToArray()),
+            });
+            Console.WriteLine($"{name}: {r.Verdict}" + (r.OpenEdge is { } oe ? $" (open edge {oe.Distance:0} u)" : "") + (r.Why.Count > 0 ? " - " + string.Join(" ", r.Why) : ""));
+        }
+        var outDoc = new JsonObject
+        {
+            ["tool"] = "navedit marker", ["instance"] = t.Instance, ["game"] = t.Game, ["profile"] = t.Profile, ["enable"] = Arr(enables),
+            ["orderNotes"] = applied, ["order"] = Arr(order),
+            ["margin"] = margin, ["stepLimit"] = stepLimit, ["maxAbove"] = NavMarker.DefaultMaxAbove, ["navmeshes"] = winners,
+            ["absent"] = Arr(absent.Select(k => k.ToString()).OrderBy(x => x, StringComparer.Ordinal)), ["markers"] = rows,
+        };
+        File.WriteAllText(outPath, outDoc.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        Console.WriteLine($"markers: {markers.Count - refused} inside, {refused} refused; written to {outPath}");
+        return refused == 0 ? 0 : 1;
     }
 
     public static int Write(Dictionary<string, string> f)

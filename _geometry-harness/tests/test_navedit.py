@@ -1,4 +1,4 @@
-"""Known answers for navmesh editing (C2513-C2550, C2556-C2562, C2564-C2565), on _shared/NavEdit.cs and _shared/NavCutFootprint.cs through `navedit --selftest`.
+"""Known answers for navmesh editing (C2513-C2550, C2556-C2562, C2564-C2565, C2580-C2589), on _shared/NavEdit.cs, _shared/NavCutFootprint.cs and _shared/NavMarker.cs through `navedit --selftest`.
 
     2513  an interior vertex moved: planned, the box kept, the grid NavGrid's for the moved mesh, ops for exactly that
           vertex, the box and the grid
@@ -48,11 +48,24 @@
     2562  use_version: the winner itself plans with nothing changed
     2564  use_version: the door refusal names each door added and lacked, with its triangle, door by door
     2565  door: the triangle under the arrival marker, nearest in height; flagged Door; refusals by name
+    2580  marker check: a marker in the middle of a square stands inside, 100 u from the open edge
+    2581  marker check: a marker 20 u from the square's edge is refused, with a gap beyond
+    2582  marker check: a marker off every navmesh is refused, naming the nearest triangle's distance
+    2583  marker check: an open edge with unlinked ground 87 u lower beyond it (Moon and Star's north start) is refused
+    2584  marker check: an edge linked to another navmesh is not open; the link's step is measured
+    2585  marker check: a linked edge whose sides stand 80 u apart is refused; 60 u stands
+    2586  marker check: a deleted neighbour leaves its edge open; a link into a navmesh not given is refused as unfollowed;
+          one into a navmesh the order does not have is open
+    2587  marker check: a marker 300 u above the only navmesh at its XY is refused; 20 u above stands inside
+    2588  marker check: a navmesh whose record box is stale is still found (the box comes from its vertices)
+    2589  marker check: a link naming a triangle the linked navmesh does not have is an open edge
 
 The real-data check (plan and write on a lab profile, read back, byte-compared with the in-game-tested patch) is in the
 2026-11-21 run folder; it needs a game and an MO2 instance, so it is not a test here.
 
     python tests/test_navedit.py           (HC_NR_CASES=2514,2515 to pick cases)
+    HC_NAVEDIT_LAB="X:/Skyrim Conflict Lab" python tests/test_navedit.py   (adds the Moon and Star marker known answer on
+                                            real data: the lab's profile NR2-V; light, reads plugins only)
 """
 import os
 import re
@@ -116,6 +129,32 @@ def core_write_drift():
         "PluginTextEncoding.ReadFor/WriteInPlace and AtomicFile.Commit, then record the new fingerprint")
 
 
+LAB = Path(os.environ.get("HC_NAVEDIT_LAB") or "")
+
+
+def ms_marker_known_answer():
+    """Real data (only with HC_NAVEDIT_LAB=<the lab instance>, which holds profile NR2-V): the Moon and Star north start
+    N (177792,-48952,2250) sat on a hole edge with the rock slab beyond it (SkyWright C:/hc-runs/2026-11-21-navgrid/
+    LAB-RESULT.md, addendum). `navedit marker` must refuse it for the open edge and name the higher ground beyond; Ni,
+    40 u further in, is still inside the 64 u margin and refused too; the south marker S stands inside on 079A5A."""
+    import json, tempfile
+    tmp = Path(tempfile.mkdtemp(prefix="nm-"))
+    (tmp / "m.json").write_text(json.dumps({"navmeshes": ["0E6430:Skyrim.esm", "079A5A:Skyrim.esm"], "markers": [
+        {"name": "N", "at": [177792.0, -48952.0, 2250.0]}, {"name": "Ni", "at": [177792.0, -48912.0, 2250.0]},
+        {"name": "S", "at": [177792.0, -49352.0, 2430.0]}]}), encoding="utf-8")
+    exe = PROBES / "navedit" / "bin" / "Release" / "net9.0" / "navedit.exe"
+    p = subprocess.run([str(exe), "marker", "--markers", str(tmp / "m.json"), "--out", str(tmp / "r.json"),
+                        "--instance", str(LAB), "--game", os.environ.get("HC_NAVEDIT_GAME", r"C:\Games\Steam\steamapps\common\Skyrim Special Edition"),
+                        "--profile", "NR2-V"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900)
+    assert p.returncode == 1, f"exit {p.returncode} (want 1: some marker refused): {p.stdout[-400:]} {p.stderr[-300:]}"
+    rows = {m["name"]: m for m in json.loads((tmp / "r.json").read_text(encoding="utf-8"))["markers"]}
+    n, ni, s = rows["N"], rows["Ni"], rows["S"]
+    b = (n["openEdge"] or {}).get("beyond") or {}
+    assert n["verdict"] == "refused" and n["openEdge"]["distance"] < 16 and 75 <= (b.get("step") or 0) <= 110, n
+    assert ni["verdict"] == "refused" and 16 <= ni["openEdge"]["distance"] < 64, ni
+    assert s["verdict"] == "inside" and s["standing"]["navmesh"] == "079A5A:Skyrim.esm", s
+
+
 CASES = [
     ("core write drift: the copied core code is unchanged", core_write_drift),
     ("2513 interior move planned with its grid and ops", lambda: selftest("2513")),
@@ -165,7 +204,17 @@ CASES = [
     ("2562 use_version the winner itself", lambda: selftest("2562")),
     ("2564 use_version names the doors", lambda: selftest("2564")),
     ("2565 door added on the marker's triangle", lambda: selftest("2565")),
-]
+    ("2580 marker in the middle stands inside", lambda: selftest("2580")),
+    ("2581 marker near the edge refused, a gap beyond", lambda: selftest("2581")),
+    ("2582 marker off the navmesh refused", lambda: selftest("2582")),
+    ("2583 marker on a hole edge with a ledge beyond refused", lambda: selftest("2583")),
+    ("2584 a linked edge is not open", lambda: selftest("2584")),
+    ("2585 a linked step over the limit refused", lambda: selftest("2585")),
+    ("2586 a deleted neighbour is open, an unfollowed link refused, an absent one open", lambda: selftest("2586")),
+    ("2587 a marker far above the navmesh refused", lambda: selftest("2587")),
+    ("2588 stale record bounds do not hide a navmesh", lambda: selftest("2588")),
+    ("2589 a link to a missing triangle is open", lambda: selftest("2589")),
+] + ([("MS marker known answer on the lab (real data)", ms_marker_known_answer)] if str(LAB) not in ("", ".") else [])
 
 if __name__ == "__main__":
     for name, fn in CASES:

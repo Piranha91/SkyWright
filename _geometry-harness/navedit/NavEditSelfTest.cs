@@ -781,6 +781,143 @@ static class NavEditSelfTest
                 ?? RefusedFor2(NavEdit.EditTriangles(Geom(v, t), Array.Empty<int>(), Array.Empty<Vec3>(), Array.Empty<(int, int, int)>(), none), "No triangle");
         });
 
+        // C2580-C2586: the station marker check (R5, _shared/NavMarker.cs). A square of 200 u, its triangles joined by their
+        // shared edges (Joined), so only the outside of the square is open; a second square (key MK2) east of it at x 200-400.
+        var MK2 = new FormKey(new ModKey("SelfTest", ModType.Master), 0xE02);
+        List<NavTri> Joined(List<NavTri> t)
+        {
+            var o = t.ToList();
+            for (int i = 0; i < t.Count; i++)
+            {
+                var c = new[] { (int)t[i].A, t[i].B, t[i].C }; var n = new short[] { -1, -1, -1 };
+                for (int j = 0; j < t.Count; j++)
+                {
+                    if (j == i) continue;
+                    var d = new[] { (int)t[j].A, t[j].B, t[j].C };
+                    for (int e = 0; e < 3; e++) { int p = c[e], q = c[(e + 1) % 3]; if (d.Contains(p) && d.Contains(q)) n[e] = (short)j; }
+                }
+                o[i] = o[i] with { EdgeLink01 = n[0], EdgeLink12 = n[1], EdgeLink20 = n[2] };
+            }
+            return o;
+        }
+        (List<Vec3> V, List<NavTri> T) Shifted(float dx, float z) { var (v, t) = Square(); return (v.Select(p => new Vec3(p.X + dx, p.Y, z)).ToList(), Joined(t)); }
+        NavmeshGeometry GeomK(FormKey k, List<Vec3> v, List<NavTri> t, List<NavEdgeLink>? links = null) => Geom(v, t, links) with { FormKey = k };
+        // the east edge (x 200) of the west square links to the west edge (x 200) of the east one, both ways, by edge links
+        Dictionary<FormKey, NavmeshGeometry> Linked2(float eastZ)
+        {
+            var (wv, wt) = Shifted(0, 0); var (ev, et) = Shifted(200, eastZ);
+            var wl = new List<NavEdgeLink>(); var el = new List<NavEdgeLink>();
+            void Tie(List<Vec3> v, List<NavTri> t, float x, List<NavEdgeLink> links, FormKey to, List<Vec3> ov, List<NavTri> ot, float ox)
+            {
+                for (int i = 0; i < t.Count; i++)
+                {
+                    var c = new[] { (int)t[i].A, t[i].B, t[i].C };
+                    for (int e = 0; e < 3; e++)
+                    {
+                        Vec3 p = v[c[e]], q = v[c[(e + 1) % 3]];
+                        if (p.X != x || q.X != x) continue;
+                        float my = (p.Y + q.Y) / 2;
+                        int other = Enumerable.Range(0, ot.Count).First(j => { var d = new[] { ov[ot[j].A], ov[ot[j].B], ov[ot[j].C] }; return d.Count(z => z.X == ox) == 2 && d.Where(z => z.X == ox).Average(z => z.Y) == my; });
+                        links.Add(new NavEdgeLink(to, (short)other));
+                        short idx = (short)(links.Count - 1);
+                        t[i] = e switch { 0 => t[i] with { EdgeLink01 = idx, Flags = t[i].Flags | 1 }, 1 => t[i] with { EdgeLink12 = idx, Flags = t[i].Flags | 2 }, _ => t[i] with { EdgeLink20 = idx, Flags = t[i].Flags | 4 } };
+                    }
+                }
+            }
+            Tie(wv, wt, 200, wl, MK2, ev, et, 200); Tie(ev, et, 200, el, K, wv, wt, 200);
+            return new Dictionary<FormKey, NavmeshGeometry> { [K] = GeomK(K, wv, wt, wl), [MK2] = GeomK(MK2, ev, et, el) };
+        }
+        Dictionary<FormKey, NavmeshGeometry> One() { var (v, t) = Shifted(0, 0); return new() { [K] = GeomK(K, v, t) }; }
+
+        Case("2580 marker-centre-inside", () =>
+        {
+            var r = NavMarker.Check(One(), new Vec3(100, 100, 5));
+            return r.Verdict != "inside" ? $"want inside, got {r.Verdict}: {string.Join(" ", r.Why)}"
+                : r.Mesh != K || r.StandZ != 0 || r.Above != 5 ? $"standing {r.Mesh} z {r.StandZ} above {r.Above}, want K z 0 above 5"
+                : r.OpenEdge is not { } o || Math.Abs(o.Distance - 100) > 1e-6 ? $"open edge {r.OpenEdge?.Distance}, want 100" : null;
+        });
+        Case("2581 marker-near-edge-refused", () =>
+        {
+            var r = NavMarker.Check(One(), new Vec3(20, 100, 0));
+            return r.Verdict != "refused" || !r.Why.Any(w => w.Contains("20 u from an open edge") && w.Contains("no navmesh within 128 u")) ? $"want refused naming 20 u and a gap, got {r.Verdict}: {string.Join(" ", r.Why)}"
+                : r.Beyond is not { Mesh: null } ? "want nothing beyond the edge" : null;
+        });
+        Case("2582 marker-off-navmesh", () =>
+        {
+            var r = NavMarker.Check(One(), new Vec3(500, 100, 0));
+            return r.Verdict == "refused" && r.Mesh is null && r.Why.Any(w => w.Contains("stands on no walkable") && w.Contains("300 u away")) ? null : $"got {r.Verdict}: {string.Join(" ", r.Why)}";
+        });
+        Case("2583 marker-ledge-beyond-hole-edge", () =>
+        {   // Moon and Star's north start: an open edge with lower ground 87 u below just beyond it, not linked
+            var m = One(); var (ev, et) = Shifted(200, -87); m[MK2] = GeomK(MK2, ev, et);
+            var r = NavMarker.Check(m, new Vec3(180, 100, 0));
+            if (!(r.Verdict == "refused" && r.Beyond is { } b && b.Mesh == MK2 && Math.Abs(b.Step + 87) < 1e-6 && b.Gap == 0 && r.Why.Any(w => w.Contains("87 u lower"))))
+                return $"got {r.Verdict}, beyond {r.Beyond}: {string.Join(" ", r.Why)}";
+            // the real north start's shape: 70 u of no navmesh, then ground 87 u HIGHER (a slab): the gap's width and the step
+            var m2 = One(); var (sv, stt) = Shifted(270, 87); m2[MK2] = GeomK(MK2, sv, stt);
+            var r2 = NavMarker.Check(m2, new Vec3(195, 100, 0));
+            return r2.Verdict == "refused" && r2.Beyond is { } b2 && b2.Mesh == MK2 && Math.Abs(b2.Step - 87) < 1e-6 && b2.Gap >= 64 && b2.Gap <= 72
+                   && r2.Why.Any(w => w.Contains("87 u higher") && w.Contains("5 u from an open edge"))
+                ? null : $"slab past a gap: {r2.Verdict}, beyond {r2.Beyond}: {string.Join(" ", r2.Why)}";
+        });
+        Case("2584 marker-linked-edge-not-open", () =>
+        {
+            var m = Linked2(0);
+            var r = NavMarker.Check(m, new Vec3(190, 100, 0));
+            return r.Verdict != "inside" ? $"want inside, got {string.Join(" ", r.Why)}"
+                : r.OpenEdge is not { } o || Math.Abs(o.Distance - 100) > 1e-6 ? $"open edge {r.OpenEdge?.Distance}, want 100 (the linked x 200 edge is not open)"
+                : r.LinkSteps.Count == 0 || r.LinkSteps.Any(s => Math.Abs(s.Step) > 1e-6) ? $"link steps [{string.Join(",", r.LinkSteps.Select(s => s.Step))}], want some at 0" : null;
+        });
+        Case("2585 marker-linked-step-over-limit", () =>
+        {
+            var m = Linked2(80);
+            var r = NavMarker.Check(m, new Vec3(180, 100, 0));
+            var m2 = Linked2(60);
+            var r2 = NavMarker.Check(m2, new Vec3(180, 100, 0));
+            return r.Verdict == "refused" && r.Why.Any(w => w.Contains("80 u apart")) && r2.Verdict == "inside"
+                ? null : $"80 u: {r.Verdict} {string.Join(" ", r.Why)}; 60 u: {r2.Verdict} {string.Join(" ", r2.Why)}";
+        });
+        Case("2586 marker-deleted-neighbour-and-links-it-cannot-follow", () =>
+        {
+            var (v, t) = Shifted(0, 0);
+            // triangle 1 (the south-west square's other half) deleted: the edge to it is open from triangle 0
+            t[1] = t[1] with { Flags = t[1].Flags | 0x08 };
+            var r = NavMarker.Check(new Dictionary<FormKey, NavmeshGeometry> { [K] = GeomK(K, v, t) }, new Vec3(70, 40, 0));
+            if (r.Verdict != "refused" || r.OpenEdge is not { } o || o.Distance > 30) return $"deleted neighbour: {r.Verdict}, open edge {r.OpenEdge?.Distance} (want under 30)";
+            // the east navmesh not given: its links 10 u away are unfollowed, never "inside"
+            var m = Linked2(0); m.Remove(MK2);
+            var u = NavMarker.Check(m, new Vec3(190, 100, 0));
+            if (u.Verdict != "refused" || !u.Unfollowed.Any(x => x.Mesh == MK2 && Math.Abs(x.Distance - 10) < 1e-6) || !u.Why.Any(w => w.Contains("was not loaded")))
+                return $"unfollowed link: {u.Verdict}, [{string.Join(",", u.Unfollowed)}]: {string.Join(" ", u.Why)}";
+            // the east navmesh absent from the load order: the linked edge is open, 10 u away
+            var a = NavMarker.Check(m, new Vec3(190, 100, 0), absent: new HashSet<FormKey> { MK2 });
+            return a.Verdict == "refused" && a.OpenEdge is { } ao && Math.Abs(ao.Distance - 10) < 1e-6 && a.Unfollowed.Count == 0
+                ? null : $"absent target: {a.Verdict}, open edge {a.OpenEdge?.Distance}, unfollowed {a.Unfollowed.Count}";
+        });
+        Case("2587 marker-far-above-the-navmesh", () =>
+        {   // a marker on a roof or a floor with no navmesh, 300 u over the only navmesh at its XY
+            var r = NavMarker.Check(One(), new Vec3(100, 100, 300));
+            var ok = NavMarker.Check(One(), new Vec3(100, 100, 20));
+            return r.Verdict == "refused" && r.Why.Any(w => w.Contains("not on the navmesh") && w.Contains("300 u above")) && ok.Verdict == "inside"
+                ? null : $"300 u: {r.Verdict} {string.Join(" ", r.Why)}; 20 u: {ok.Verdict} {string.Join(" ", ok.Why)}";
+        });
+        Case("2588 marker-stale-record-bounds", () =>
+        {   // the record's stated box is stale (far from its vertices): the box comes from the vertices
+            var g = One()[K];
+            var stale = g with { Min = new Vec3(5000, 5000, 0), Max = new Vec3(5001, 5001, 0) };
+            var r = NavMarker.Check(new Dictionary<FormKey, NavmeshGeometry> { [K] = stale }, new Vec3(100, 100, 0));
+            return r.Verdict == "inside" && r.Mesh == K ? null : $"got {r.Verdict}: {string.Join(" ", r.Why)}";
+        });
+        Case("2589 marker-link-to-a-triangle-out-of-range", () =>
+        {   // a link entry naming a triangle the linked navmesh does not have is an open edge, not an unknown
+            var m = Linked2(0);
+            var w = m[K];
+            m[K] = w with { EdgeLinks = w.EdgeLinks!.Select(l => l with { TriangleIndex = 999 }).ToList() };
+            var r = NavMarker.Check(m, new Vec3(190, 100, 0));
+            return r.Verdict == "refused" && r.OpenEdge is { } o && Math.Abs(o.Distance - 10) < 1e-6 && r.Unfollowed.Count == 0
+                ? null : $"got {r.Verdict}, open edge {r.OpenEdge?.Distance}: {string.Join(" ", r.Why)}";
+        });
+
         Console.WriteLine(fail == 0 ? "navedit self-test: all cases ok" : $"navedit self-test: {fail} failed");
         return fail == 0 ? 0 : 1;
     }
