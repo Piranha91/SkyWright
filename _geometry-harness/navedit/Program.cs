@@ -717,7 +717,9 @@ static class NavEditCli
             // a use_version that gains a neighbour, or a door edit, changes NAVI: never forward the winner's NAVI over it
             if (ForwardCarried(resolver, outPath, order, NaviPlanned(again)) is { } ferr) { Console.Error.WriteLine(ferr); return 1; }
         }
-        var masters = again.SelectMany(p => p.Row["useVersion"]?["masters"]?.AsArray().Select(x => (string)x!) ?? Array.Empty<string>())
+        var masters = again.SelectMany(p => (p.Row["useVersion"]?["masters"]?.AsArray().Select(x => (string)x!) ?? Array.Empty<string>())
+                               .Concat(p.Row["useVersion"]?["navi"]?["entries"] is JsonArray { Count: > 0 } && (string?)p.Row["useVersion"]?["navi"]?["winner"]?["plugin"] is { } nw
+                                       ? new[] { nw } : Array.Empty<string>()))   // the NAVI winner too, when the row changes NAVI
                            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (masters.Count > 0 && AddMasters(outPath, order, masters) is { } merr) { Console.Error.WriteLine($"navedit write: {merr}"); return 1; }
         // every edit's NAVI change, as one: the read-back holds the patch's NAVI to the winner's plus all of them
@@ -838,7 +840,10 @@ static class NavEditCli
         // the ruling of 2026-11-22 (825ee14): a resolution patch masters every plugin whose version it supersedes; here the
         // version carried is each overridden navmesh's winner, so each winner's plugin is a master (else a re-sort can put
         // the patch below it, and the repair silently stops applying). The same master step as use_version.
-        var masters = plans.Where(p => (string?)p["status"] != "refused").Select(p => (string?)p["winner"]?["plugin"])
+        // a patch that carries a NAVI change supersedes the NAVI winner too: master it, or a re-sort below it loses the NAVI
+        // change while the navmesh edits stay (houseCARL, 2026-11-22)
+        var naviWinner = plan["navi"]?["entries"] is JsonArray { Count: > 0 } ? (string?)plan["navi"]?["winner"]?["plugin"] : null;
+        var masters = plans.Where(p => (string?)p["status"] != "refused").Select(p => (string?)p["winner"]?["plugin"]).Append(naviWinner)
                            .Where(x => !string.IsNullOrEmpty(x)).Select(x => x!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (masters.Count > 0 && AddMasters(outPath, order, masters) is { } merr) { Console.Error.WriteLine($"navedit write: {merr}"); return 1; }
         foreach (var r in refused) Console.WriteLine($"not written (refused in the plan): {r}");
