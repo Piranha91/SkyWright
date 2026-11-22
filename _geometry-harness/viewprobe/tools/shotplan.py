@@ -338,6 +338,10 @@ CONFIG_FINGERPRINT = re.compile(r"capture input configuration:\s*([0-9a-fA-F]{16
 RAY_AXES = ("+x", "-x", "+y", "-y", "up", "down")
 # The renderer's cell header carries the CELL record's interior flag: outdoors a camera stands on the navmesh at its own level.
 CELL_KIND = re.compile(r"^cell .*? \((interior|exterior)\)\s", re.M)
+# viewprobe's line after an exterior cell header: the target cell's grid, which the drawn ring is centred on
+TARGET_GRID = re.compile(r"^\s*target grid (-?\d+),(-?\d+)\s*$", re.M)
+# viewprobe's terrain summary: how many cells of LAND it drew
+TERRAIN_CELLS = re.compile(r"^\s*terrain: (\d+) cell\(s\) of LAND", re.M)
 
 
 class Probe:
@@ -380,6 +384,26 @@ class Probe:
         """'interior' or 'exterior' from the renderer's cell header, or None when it printed none."""
         m = CELL_KIND.search(self.stdout)
         return m[1] if m else None
+
+    def target_grid(self):
+        """(x, y) of the exterior cell the renderer loaded, from its `target grid` line, or None when it printed none."""
+        m = TARGET_GRID.search(self.stdout)
+        return (int(m[1]), int(m[2])) if m else None
+
+    def terrain_cells(self):
+        """How many cells of LAND the renderer drew, or None when it printed no terrain summary (or --no-terrain)."""
+        m = TERRAIN_CELLS.search(self.stdout)
+        return int(m[1]) if m else None
+
+    def background_picks(self):
+        """The picks the renderer answered `background`: the ray met nothing it drew. A `degenerate` or `outside` pick
+        is not that answer (picks() lists all three as None)."""
+        out = set()
+        for line in self.stdout.splitlines():
+            m = PICK_BG.match(line)
+            if m and m[3] == "background":
+                out.add((int(m[1]), int(m[2])))
+        return out
 
     def census(self):
         """{'unreadable': {asset: {...}}, 'notDrawn': {asset: {...}}} from the census blocks.
@@ -879,12 +903,20 @@ class Clearance:
     rays all found nothing is stored as None -- UNKNOWN, not infinite. In an interior a ray that
     hits nothing has left the shell through a hole the renderer does not close, and treating
     that as open space is precisely how a camera ends up outside the building.
+
+    OUTDOORS it is different (2026-11-11 capture follow-ups 6.2, WRW 708f: 13 of 20 candidates
+    refused on bearings out over the valley). The renderer draws the cell and its ring of
+    neighbours, terrain included, so a ray that the renderer answers with background left that
+    drawn ground unobstructed: the bearing is clear at least to the drawn cells' edge
+    (`drawn_edge`), a lower bound, never infinity. A pick the output does not answer at all stays
+    unknown.
     """
 
     def __init__(self, origin, step):
         self.origin, self.step = origin, step
         self.bins: dict[int, float | None] = {}
         self.hits: dict[int, tuple] = {}
+        self.open_to_edge: set[int] = set()   # exterior bins bounded by the drawn cells' edge, not by a hit
 
     def key(self, deg):
         return int(round((deg % 360.0) / self.step)) % int(round(360.0 / self.step))
@@ -913,6 +945,49 @@ class Clearance:
         return sum(1 for v in self.bins.values() if v is not None)
 
 
+#: an exterior cell's side in game units
+EXTERIOR_CELL = 4096.0
+
+
+def drawn_ring(passthrough):
+    """How many cells around an exterior cell the renderer draws in full (references and terrain) for these pass-through
+    flags: 1 by default; N for --ring N; 0 for --no-ring-refs (terrain without the neighbours' references proves nothing
+    beyond the cell) and for --ring visible (a set chosen by sight, not a square). None when a missed ray proves nothing
+    at all: --no-terrain (a hillside that is not drawn cannot stop a ray) or --allow-unreadable-assets (an unread mesh
+    leaves a hole)."""
+    args = list(passthrough or ())
+    if "--no-terrain" in args or "--allow-unreadable-assets" in args:
+        return None
+    if "--no-ring-refs" in args:
+        return 0
+    if "--ring" in args and args.index("--ring") + 1 < len(args):
+        v = args[args.index("--ring") + 1]
+        return int(v) if v.isdigit() else 0
+    return 1
+
+
+def drawn_edge(origin, deg, ring, grid):
+    """How far, horizontally, a ray from `origin` along bearing `deg` travels before it leaves the exterior cells the
+    renderer draws: the (2 * ring + 1)-cell square around the target cell at `grid`. None when `origin` is not inside
+    that square (then a missed ray says nothing about the distance)."""
+    cx, cy = grid
+    lo_x, hi_x = (cx - ring) * EXTERIOR_CELL, (cx + ring + 1) * EXTERIOR_CELL
+    lo_y, hi_y = (cy - ring) * EXTERIOR_CELL, (cy + ring + 1) * EXTERIOR_CELL
+    if not (lo_x <= origin[0] < hi_x and lo_y <= origin[1] < hi_y):
+        return None
+    dx, dy = math.sin(math.radians(deg)), math.cos(math.radians(deg))
+    ts = []
+    if dx > 1e-12:
+        ts.append((hi_x - origin[0]) / dx)
+    elif dx < -1e-12:
+        ts.append((lo_x - origin[0]) / dx)
+    if dy > 1e-12:
+        ts.append((hi_y - origin[1]) / dy)
+    elif dy < -1e-12:
+        ts.append((lo_y - origin[1]) / dy)
+    return min(ts)
+
+
 def build_clearance(run: Runner, origin, floor_z, args) -> Clearance:
     """One clearance map, from `--map-yaws` renders taken AT the origin.
 
@@ -921,6 +996,7 @@ def build_clearance(run: Runner, origin, floor_z, args) -> Clearance:
     step is exactly what was asked for at every bearing including the frame edges.
     """
     cl = Clearance(origin, args.bearing_step)
+    kinds, silent, grids, terrain = set(), set(), set(), set()
     eye = (origin[0], origin[1], floor_z + args.eye_height)
     n_bear = int(round(360.0 / args.bearing_step))
     bearings = [i * args.bearing_step for i in range(n_bear)]
@@ -943,14 +1019,34 @@ def build_clearance(run: Runner, origin, floor_z, args) -> Clearance:
                  "--yaw", f"{yaw:g}", "--pitch", "0", "--fov", f"{args.fov_map:g}"]
         for ix, iy in px:
             flags += ["--pick", f"{ix},{iy}"]
-        got = run.probe(*flags).picks()
+        p = run.probe(*flags)
+        got, bg = p.picks(), p.background_picks()
+        kinds.add(p.cell_kind())
+        grids.add(p.target_grid())
+        terrain.add(p.terrain_cells())
         for pix, (b, e) in meta.items():
             hit = got.get(pix)
+            if hit is None and pix not in bg:
+                silent.add(cl.key(b))       # unanswered, degenerate or outside the frame: never read as open
             if hit is None:
                 cl.add(b, None, None)
             else:
                 d2 = math.hypot(hit[0] - eye[0], hit[1] - eye[1])
                 cl.add(b, d2, hit)
+    ring = drawn_ring(getattr(run, "passthrough", ()))
+    grid = next(iter(grids)) if len(grids) == 1 else None
+    if (kinds == {"exterior"} and ring is not None and grid is not None
+            and not getattr(run, "unreadable", None)
+            and all(t is not None and t >= (2 * ring + 1) ** 2 for t in terrain)):
+        # outdoors, with every drawn cell's LAND drawn: a bearing every ray of which the renderer answered with
+        # background is clear at least to the drawn cells' edge
+        for b in bearings:
+            k = cl.key(b)
+            if k in cl.bins and cl.bins[k] is None and k not in silent:
+                edge = drawn_edge(origin, b, ring, grid)
+                if edge is not None:
+                    cl.bins[k] = edge
+                    cl.open_to_edge.add(k)
     return cl
 
 
@@ -1809,9 +1905,16 @@ def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False, insid
         soft = s.kind == "surface"
         if c is None:
             msg = f"{s.label}: {why} (bearing {b:.0f} deg)"
+        elif c <= d + args.sight_margin and s.cl.key(b) in s.cl.open_to_edge:
+            msg = (f"{s.label}: the drawn cells end {c:.0f} u out on bearing {b:.0f} deg, short of the "
+                   f"{d:.0f} u sightline (needs {args.sight_margin:.0f} u of margin); nothing beyond them was drawn")
         elif c <= d + args.sight_margin:
             msg = (f"{s.label}: geometry at {c:.0f} u blocks the {d:.0f} u sightline "
                    f"on bearing {b:.0f} deg (needs {args.sight_margin:.0f} u of margin)")
+        elif s.cl.key(b) in s.cl.open_to_edge:
+            v["note"].append(f"{s.label}: clear -- no geometry within the drawn cells, {c:.0f} u out, along a {d:.0f} u ray"
+                             + (" (eye-height map: RANKING only for a surface target)" if soft else ""))
+            continue
         else:
             v["note"].append(f"{s.label}: clear -- first geometry {c:.0f} u along a {d:.0f} u ray"
                              + (" (eye-height map: RANKING only for a surface target)" if soft else ""))
@@ -2724,10 +2827,12 @@ def cmd_plan(args):
     n_bear = int(round(360.0 / args.bearing_step))
     for s in subjects:
         s.cl = build_clearance(run, s.pos(), floor_z, args)
-        vals = sorted(v for v in s.cl.bins.values() if v)
-        print(f"  {s.label:<18} {s.cl.sampled()}/{n_bear} bearings bounded"
+        vals = sorted(v for k, v in s.cl.bins.items() if v and k not in s.cl.open_to_edge)
+        n_open = len(s.cl.open_to_edge)
+        print(f"  {s.label:<18} {s.cl.sampled() - n_open}/{n_bear} bearings bounded"
               + (f", clearance {vals[0]:.0f}-{vals[-1]:.0f} u, median {vals[len(vals)//2]:.0f} u"
-                 if vals else " -- NOTHING was bounded, so nothing can be planned"))
+                 if vals else (" -- NOTHING was bounded, so nothing can be planned" if not n_open else ""))
+              + (f"; {n_open} open to the drawn cells' edge" if n_open else ""))
 
     # Pass 2 -- score every candidate on sightline and framing alone. Both are pure arithmetic
     # over pass 1, so the whole polar grid is judged without another render.

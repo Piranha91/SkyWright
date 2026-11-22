@@ -1506,6 +1506,81 @@ def test_a_candidate_without_a_wall_margin_prints():
     check("a candidate with no wall in reach prints its line", "wall margin none u" in line, line)
 
 
+
+class _StubProbe:
+    """One canned answer for build_clearance: `answer` maps a pick to a hit or None; `bg` says whether a None is the
+    renderer's `background` (else degenerate / outside); the probe reports `kind`, `grid` and `terrain`."""
+    def __init__(self, kind, answer, grid, terrain, bg):
+        self.kind, self.answer, self.grid, self.terrain, self.bg = kind, answer, grid, terrain, bg
+    def cell_kind(self):
+        return self.kind
+    def target_grid(self):
+        return self.grid
+    def terrain_cells(self):
+        return self.terrain
+    def picks(self):
+        return self.answer
+    def background_picks(self):
+        return {p for p, h in self.answer.items() if h is None} if self.bg else set()
+
+
+class _StubRunner:
+    """Stands in for Runner: answers each clearance render from `answer(pixels) -> {pixel: hit | None}`."""
+    size = 320
+    def __init__(self, kind, answer, grid=(0, 0), terrain=9, bg=True, passthrough=()):
+        self.kind, self.answer, self.grid, self.terrain, self.bg = kind, answer, grid, terrain, bg
+        self.passthrough, self.unreadable = list(passthrough), {}
+    def probe(self, *flags):
+        px = [tuple(int(v) for v in flags[i + 1].split(",")) for i, f in enumerate(flags) if f == "--pick"]
+        return _StubProbe(self.kind, self.answer(px), self.grid, self.terrain, self.bg)
+
+
+def _clearance_args():
+    import argparse
+    return argparse.Namespace(bearing_step=5.0, eye_height=120.0, elevations="-4,0,4", fov_map=100.0,
+                              edge_margin=2.0, map_yaws=[0.0, 90.0, 180.0, 270.0])
+
+
+def test_exterior_rays_that_meet_nothing_are_clear_to_the_drawn_cells():
+    """2026-11-11 capture follow-ups 6.2 (WRW 708f): outdoors, a bearing whose every ray the renderer answered
+    `background` left the drawn cells unobstructed, so it is clear at least to their edge along it, not unknown. The
+    subject stands at (1000, 2000) in target cell (0, 0): north (bearing 0) the drawn 3x3 ends at y 8192, 6192 u away;
+    east (90) at x 8192, 7192 u away. Each condition the reading rests on, when it fails, keeps the bearing unknown."""
+    origin, floor, A = (1000.0, 2000.0, 0.0), 0.0, _clearance_args()
+    bg = lambda px: {p: None for p in px}
+    def at(runner, deg=0.0):
+        return S.build_clearance(runner, origin, floor, A).at(deg)
+    c0, why0 = at(_StubRunner("exterior", bg))
+    c90, _ = at(_StubRunner("exterior", bg), 90.0)
+    check("exterior miss north is clear to the drawn edge", c0 is not None and abs(c0 - 6192.0) < 1e-6, f"got {c0} ({why0})")
+    check("exterior miss east is clear to the drawn edge", c90 is not None and abs(c90 - 7192.0) < 1e-6, f"got {c90}")
+    ci, whyi = at(_StubRunner("interior", bg))
+    check("interior miss stays unknown", ci is None and "without hitting" in (whyi or ""), f"got {ci} ({whyi})")
+    check("a missing pick is never open", at(_StubRunner("exterior", lambda px: {}))[0] is None)
+    check("a degenerate or outside pick is never open", at(_StubRunner("exterior", bg, bg=False))[0] is None)
+    check("no target grid line: unknown", at(_StubRunner("exterior", bg, grid=None))[0] is None)
+    check("the subject outside the drawn cells: unknown", at(_StubRunner("exterior", bg, grid=(5, 5)))[0] is None)
+    check("the drawn square centred on the target cell, not the subject's",
+          abs((at(_StubRunner("exterior", bg, grid=(0, 1)))[0] or 0) - 10288.0) < 1e-6)
+    check("LAND missing in a drawn cell: unknown", at(_StubRunner("exterior", bg, terrain=8))[0] is None)
+    check("no terrain summary: unknown", at(_StubRunner("exterior", bg, terrain=None))[0] is None)
+    check("--no-terrain: unknown", at(_StubRunner("exterior", bg, passthrough=["--no-terrain"]))[0] is None)
+    check("--allow-unreadable-assets: unknown", at(_StubRunner("exterior", bg, passthrough=["--allow-unreadable-assets"]))[0] is None)
+    holes = _StubRunner("exterior", bg); holes.unreadable = {"meshes/x.nif": {}}
+    check("an unreadable mesh seen by the probes: unknown", at(holes)[0] is None)
+    # one elevation hits a rock 300 u out along every bearing: the hit bounds the bearing, the misses do not widen it
+    def one_hit(px):
+        return {p: (None if i % 3 else (origin[0], origin[1] + 300.0, 120.0, 300.0)) for i, p in enumerate(px)}
+    cm, _ = at(_StubRunner("exterior", one_hit))
+    check("a hit bounds an exterior bearing", cm is not None and cm <= 300.0 + 1e-6, f"got {cm}")
+    cl0, _ = at(_StubRunner("exterior", bg, terrain=1, passthrough=["--no-ring-refs"]))
+    cl2, _ = at(_StubRunner("exterior", bg, terrain=25, passthrough=["--ring", "2"]))
+    check("without ring references the cell's own edge bounds it", cl0 is not None and abs(cl0 - 2096.0) < 1e-6, f"got {cl0}")
+    check("--ring 2 widens the drawn edge", cl2 is not None and abs(cl2 - 10288.0) < 1e-6, f"got {cl2}")
+    cl = S.build_clearance(_StubRunner("exterior", bg), origin, floor, A)
+    check("an open bearing is marked open, not bounded by geometry", cl.key(0.0) in cl.open_to_edge)
+
+
 ALL = [test_a_candidate_without_a_wall_margin_prints, test_devbench_reads_a_worklist_in_either_spelling_or_refuses_by_name,
        test_failed_verification_cannot_export_success,
        test_an_eye_inside_a_solid_is_refused_at_any_thickness,
@@ -1576,7 +1651,8 @@ ALL = [test_a_candidate_without_a_wall_margin_prints, test_devbench_reads_a_work
        test_an_incomplete_plan_labels_its_shot,
        test_nodepth_subject_with_nothing_opaque_before_it_is_framed,
        test_nodepth_subject_behind_geometry_is_blocked,
-       test_nodepth_subject_in_the_open_is_framed_and_accepted]
+       test_nodepth_subject_in_the_open_is_framed_and_accepted,
+       test_exterior_rays_that_meet_nothing_are_clear_to_the_drawn_cells]
 
 
 if __name__ == "__main__":

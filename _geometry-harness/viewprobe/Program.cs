@@ -2460,6 +2460,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     }
 
     Console.WriteLine($"cell {cellLabel} {(interior ? "(interior)" : "(exterior)")}  {cellKey}");
+    // the exterior cell's grid, on its own line: shotplan centres the drawn cells it reads a clear bearing against on it
+    if (!interior && targetGrid is { } tgg) Console.WriteLine($"   target grid {tgg.X},{tgg.Y}");
     if (!interior && targetGrid is { } tgp)
     {
         // Persistent refs merge by position over the whole REF-LOADED area (WinningRefs.cs).
