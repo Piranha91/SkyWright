@@ -25,6 +25,11 @@ internal sealed class ConflictMarks : IRenderOverlay
     const double CreaseCos = 0.77;                                        // an edge between faces more than about 40° apart is drawn
 
     internal RefOcclusion? Selected, Partner;
+    /// <summary>A stand-in for an object with no model that the view landed on (Y-up segments), and what it stands for.</summary>
+    internal List<(Vector3 A, Vector3 B)> StandIn = new();
+    /// <summary>The stand-in's own triangles (an occlusion plane's), tinted like a selected object; empty for a diamond or marker.</summary>
+    internal List<float> StandInTris = new();
+    internal string? StandInFor;
     internal bool Enabled = Environment.GetEnvironmentVariable("WB_MARKS") != "off";
     /// <summary>Asked for a new frame when the crossing measured off the window's thread arrives.</summary>
     internal Action? Changed;
@@ -90,7 +95,7 @@ internal sealed class ConflictMarks : IRenderOverlay
         }
     }
 
-    static void AddTriangle(List<float> into, Vector3 a, Vector3 b, Vector3 c)
+    internal static void AddTriangle(List<float> into, Vector3 a, Vector3 b, Vector3 c)
     {
         var n = Vector3.Cross(b - a, c - a);
         n = n.LengthSquared() > 0 ? Vector3.Normalize(n) : Vector3.UnitY;
@@ -164,7 +169,7 @@ internal sealed class ConflictMarks : IRenderOverlay
 
     public void Draw(GlRenderer renderer, in OverlayContext context)
     {
-        if (!Enabled || (Selected is null && Partner is null)) return;
+        if (!Enabled || (Selected is null && Partner is null && StandIn.Count == 0)) return;
         if (!ReferenceEquals(Selected, _builtSel) || !ReferenceEquals(Partner, _builtPartner)) Rebuild();
         // the solid tints, on the objects' own visible surfaces
         if (renderer.BeginOverlaySurfacePass(context, out var st))
@@ -172,6 +177,7 @@ internal sealed class ConflictMarks : IRenderOverlay
             var none = Array.Empty<(int, int, GlVec3)>();
             if (_partnerTris.Count >= 18) renderer.DrawOverlayTranslucentTint(_partnerTris, PartnerColour, TintAlpha, none);
             if (_selTris.Count >= 18) renderer.DrawOverlayTranslucentTint(_selTris, SelectedColour, TintAlpha, none);
+            if (StandInTris.Count >= 18) renderer.DrawOverlayTranslucentTint(StandInTris, SelectedColour, TintAlpha, none);
             var overlap = _overlapTris;
             if (overlap.Count >= 18) renderer.DrawOverlayTranslucentTint(overlap, OverlapColour, OverlapAlpha, none);
             renderer.EndOverlaySurfacePass(st);
@@ -190,6 +196,12 @@ internal sealed class ConflictMarks : IRenderOverlay
         if (renderer.BeginOverlayLinePass(context, out var ls))
         {
             if (_lines.Count > 0) renderer.DrawOverlayLines(_lines, 1.2f, context);
+            if (StandIn.Count > 0)
+            {
+                _lines.Clear();
+                foreach (var (a, b) in StandIn) _lines.Add(new OverlayLineSegment { A = new GlVec3(a.X, a.Y, a.Z), B = new GlVec3(b.X, b.Y, b.Z), Color = SelectedColour });
+                renderer.DrawOverlayLines(_lines, 3f, context);
+            }
             var crossing = _crossing;
             if (crossing.Count > 0)
             {

@@ -186,6 +186,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 PartnerNote = $"the conflict's other reference {o} is not drawn in this scene ({why}), so it cannot be marked";
             }
         }
+        if (_marks.Selected is not null) { _marks.StandIn = new(); _marks.StandInTris = new(); _marks.StandInFor = null; }
         _marks.Set(_marks.Selected, _marks.Partner);
         UpdateKey();
         LoadOrderPanel.Selection(_session.Selected?.ToString(), other);
@@ -211,6 +212,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             return sp;
         }
         static System.Windows.Media.Color C(OpenTK.Mathematics.Vector3 v) => System.Windows.Media.Color.FromRgb((byte)(v.X * 255), (byte)(v.Y * 255), (byte)(v.Z * 255));
+        if (_marks.StandInFor is { } standIn) _key.Children.Add(Item(C(ConflictMarks.SelectedColour), true, "stand-in for " + standIn, "an object with no model has nothing of its own to draw; this outline stands in for it"));
         if (_marks.Selected is { } sel) _key.Children.Add(Item(C(ConflictMarks.SelectedColour), false, $"{NameOf(sel)}, selected", "tinted cyan; its outline shows through anything in front"));
         if (_marks.Partner is { } par) _key.Children.Add(Item(C(ConflictMarks.PartnerColour), false, $"{NameOf(par)}, the other object of the clash", "tinted magenta; its outline shows through anything in front"));
         if (_marks.Selected is not null && _marks.Partner is not null)
@@ -685,6 +687,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     /// reference (other geometry can stand in front). Says which pose it kept and whether the centre pick named it.</summary>
     internal bool Land(FormKey key)
     {
+        if (!_session.IsDrawn(key) && LandOnStandIn(key)) return true;
         if (!_session.IsDrawn(key))
         {
             // why, in the walk's own word when it read the reference: no model (a light, a marker), disabled, deleted; else it is not in this cell's scene
@@ -701,6 +704,71 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         Shell.SetBanner(clear ? $"landed on {key}" : crossing ? $"landed on {key}; it is inside or behind {coveredBy} from every side tried" : $"landed near {key}; the view's centre misses its shapes");
         Say("landing: " + Shell.LastLanding);
         return clear || crossing;
+    }
+
+    /// <summary>An object with no model (an occlusion plane's marker, a light, a sound or editor marker) has nothing of its
+    /// own to land on (walkthrough problem 8): the view lands on its stand-in instead, outlined in cyan: an occlusion
+    /// plane as the plane its record sizes, anything else as the diamond or marker the Markers layer draws at its place.
+    /// Only this object's stand-in is drawn; the layers stay as they are. False when the scene has no place for it either.</summary>
+    bool LandOnStandIn(FormKey key)
+    {
+        string outcome = _opt.RefOutcomes is { } ro && ro.TryGetValue(key, out var w) ? w.Outcome : "";
+        Vector3 min, max; string what;
+        var lines = new List<(Vector3 A, Vector3 B)>(); var tris = new List<float>();
+        float? faceYaw = null;
+        if (_opt.PickShapes.FirstOrDefault(sh => sh.Kind == PickKind.Plane && sh.Plane?.Key == key) is { } plane)
+        {
+            // the plane's own triangles (Y-up), back to Skyrim space for the camera
+            var corners = plane.Verts.Select(v => new Vector3(v.X, -v.Z, v.Y)).ToList();
+            min = corners.Aggregate(Vector3.Min); max = corners.Aggregate(Vector3.Max);
+            var b = plane.Plane!.Bounds;
+            what = FormattableString.Invariant($"its occlusion plane, {b.X:0} by {b.Z:0} units as the record sizes it");
+            for (int t = 0; t + 2 < plane.Tris.Length; t += 3)
+            {
+                Vector3 a = plane.Verts[plane.Tris[t]], b2 = plane.Verts[plane.Tris[t + 1]], c2 = plane.Verts[plane.Tris[t + 2]];
+                ConflictMarks.AddTriangle(tris, a, b2, c2);
+                ConflictMarks.AddTriangle(tris, a, c2, b2);      // a plane has one face; both sides are tinted
+                for (int e = 0; e < 3; e++) lines.Add((plane.Verts[plane.Tris[t + e]], plane.Verts[plane.Tris[t + (e + 1) % 3]]));
+            }
+            // look at the plane square on: the heading along its face's normal, in Skyrim space
+            if (corners.Count >= 3)
+            {
+                var n = Vector3.Cross(corners[1] - corners[0], corners[2] - corners[0]);
+                if (n.X * n.X + n.Y * n.Y > 1e-6f) faceYaw = (MathF.Atan2(n.X, n.Y) * 180f / MathF.PI + 360f) % 360f;
+            }
+        }
+        else if (_opt.UndrawnAt is { } at && at.TryGetValue(key, out var place))
+        {
+            var p = new Vector3(place.Position.X, place.Position.Y, place.Position.Z);
+            bool marker = outcome == "marker";
+            min = p - new Vector3(48f); max = p + new Vector3(48f, 48f, marker ? 96f : 48f);
+            what = marker ? "a diamond around the marker the Markers layer draws at its place (a stem with an arrow the way it faces)" : "a diamond at its place";
+            // a marker's stem and arrow, inside a diamond so the small mark is found among the others
+            foreach (var (a, b2) in (marker ? MarkerGizmos.MarkerLines(p, place.Rotation) : Enumerable.Empty<(Vector3, Vector3)>()).Concat(MarkerGizmos.DiamondLines(p + new Vector3(0, 0, marker ? 48f : 0f), marker ? 64f : 40f)))
+                lines.Add((TexturedScene.YUp(a), TexturedScene.YUp(b2)));
+        }
+        else return false;
+        Select(null);
+        _marks.StandIn = lines; _marks.StandInTris = tris;
+        _marks.StandInFor = $"{key}, which has no model: {what}";
+        var c = (min + max) * 0.5f;
+        float r = MathF.Max((max - min).Length() * 0.5f, 48f);
+        if (faceYaw is { } fy) _yaw = fy;
+        _pitch = faceYaw is null ? 30f : 12f; _eye = c - Forward() * MathF.Max(r * (faceYaw is null ? 3f : 1.4f), 300f);
+        // above the ground and the stand-in's top, then aimed back at its middle: a plane often reaches under the land or water
+        float floor = MathF.Max(max.Z, _opt.TerrainHeightAt?.Invoke(_eye.X, _eye.Y) ?? float.MinValue) + 150f;
+        if (_eye.Z < floor)
+        {
+            _eye = new Vector3(_eye.X, _eye.Y, floor);
+            var flat = MathF.Sqrt((c.X - _eye.X) * (c.X - _eye.X) + (c.Y - _eye.Y) * (c.Y - _eye.Y));
+            _pitch = MathF.Atan2(_eye.Z - c.Z, MathF.Max(flat, 1f)) * 180f / MathF.PI;
+        }
+        SyncCamera();
+        string why = outcome.Length > 0 ? NotDrawnWords(outcome) : "it is not drawn";
+        Shell.SetBanner($"{key} has no model of its own ({why}); the view shows a stand-in, outlined in cyan: {what}.");
+        Shell.LastLanding = $"{key}: a stand-in, {what}";
+        UpdateKey(); Invalidate("stand-in");
+        return true;
     }
 
     /// <summary>The walk's one-word outcome for a reference it did not draw, in a few plain words.</summary>
