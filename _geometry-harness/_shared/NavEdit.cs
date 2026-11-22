@@ -743,8 +743,9 @@ public static class NavEdit
     /// <item>A LEDGE link (Type 1 or 2) is not made by edge geometry, so it is not matched: the version's own is carried while
     /// it names a triangle its neighbour has (counted, unverified); a neighbour's into this navmesh is kept while the version's
     /// triangle of that index stands on the winner's corners, else refused.</item>
-    /// <item>Refused too: a version whose doors differ from the winner's (the navmesh info map's linked doors), and a link
-    /// field past the table.</item>
+    /// <item>Refused too: a link field past the table. A version whose doors differ from the winner's is carried: the doors
+    /// added and dropped come back on the result, and the caller's navmesh info map change makes the entry's linked doors the
+    /// version's door table (NavRepairNavi.ForVersion).</item>
     /// </list></summary>
     public static UseVersionResult UseVersion(NavmeshGeometry winner, NavmeshGeometry version, string fromPlugin,
                                               IReadOnlyDictionary<FormKey, NavmeshGeometry> near, EdgeTolerance tol)
@@ -851,7 +852,6 @@ public static class NavEdit
         var was = NavRepairNavi.Neighbours(winner); var now = NavRepairNavi.Neighbours(after);
         var lost = was.Where(m => m != key && !now.Contains(m)).OrderBy(m => m.ToString()).ToList();
         if (lost.Count > 0) why.Add($"{fromPlugin}'s version no longer links into {string.Join(" and ", lost)}, which the navmesh info map's entry for {key} names; removing a neighbour there is not supported yet.");
-        var doorsWas = (winner.DoorTriangles ?? Array.Empty<NavDoorTriangle>()).Select(d => d.Door).OrderBy(d => d.ToString()).ToList();
         var doorsNow = (V.DoorTriangles ?? Array.Empty<NavDoorTriangle>()).Select(d => d.Door).OrderBy(d => d.ToString()).ToList();
         // the door entries one side has beyond the other, door by door (a door can stand before several triangles)
         static List<NavDoorTriangle> Beyond(IReadOnlyList<NavDoorTriangle>? a, IReadOnlyList<NavDoorTriangle>? b)
@@ -864,11 +864,8 @@ public static class NavEdit
         }
         var added = Beyond(V.DoorTriangles, winner.DoorTriangles);
         var dropped = Beyond(winner.DoorTriangles, V.DoorTriangles);
-        string Doors(List<NavDoorTriangle> ds) => string.Join(", ", ds.Select(d => $"{d.Door} (before triangle {d.TriangleBeforeDoor})"));
-        if (added.Count + dropped.Count > 0)
-            why.Add($"{fromPlugin}'s version has other doors than the winner's ({doorsNow.Count} against {doorsWas.Count}: "
-                    + string.Join("; ", new[] { added.Count > 0 ? $"it adds {Doors(added)}" : null, dropped.Count > 0 ? $"it lacks {Doors(dropped)}" : null }.Where(x => x is not null))
-                    + "), and the navmesh info map's linked doors would not follow; that is not supported yet.");
+        // other doors than the winner's are carried (item 2, 2026-11-22): the navmesh info map's linked doors follow the version's
+        // door table (NavRepairNavi.ForVersion, planned by the caller); the doors added and dropped are named on the row
         if (why.Count > 0) return UseVersionResult.Refused(why.Distinct().ToArray()) with { DoorsAdded = added, DoorsDropped = dropped };
 
         var grid = NavGrid.Rebuild(after.Vertices, after.Triangles.Select(t => ((int)t.A, (int)t.B, (int)t.C)).ToList());
@@ -881,7 +878,8 @@ public static class NavEdit
         ops.AddRange(Ops(id, Array.Empty<int>(), after.Vertices, grid));
         ops.AddRange(otherOps);
         return new UseVersionResult("planned", Array.Empty<string>(), after, grid, others, ops, matched, changed, repointed,
-                                    now.Where(m => m != key && !was.Contains(m)).OrderBy(m => m.ToString()).ToList(), doorsNow) { LedgesCarried = ledges };
+                                    now.Where(m => m != key && !was.Contains(m)).OrderBy(m => m.ToString()).ToList(), doorsNow)
+               { LedgesCarried = ledges, DoorsAdded = added, DoorsDropped = dropped };
     }
 
     /// <summary>A door's arrival marker may stand this far, in u, above or below the triangle it is set on: past the base game's
@@ -1029,15 +1027,15 @@ public static class NavUseVersionPlan
         // each door's reference must resolve in this order
         var badDoors = r.Doors.Where(d => view.ResolveWinner(d) is null).ToList();
         if (r.Status == "planned" && badDoors.Count > 0) { why = new[] { $"{from}'s version stands before door(s) {string.Join(", ", badDoors)}, which no plugin of this order provides." }; ops = new(); }
-        // the navmesh info map: each neighbour the version gains, both ways
+        // the navmesh info map follows the version: the entry's linked doors become its door table, in order, and each neighbour
+        // it gains is added both ways (NavRepairNavi.ForVersion; nothing is written where the entry already stands so)
         System.Text.Json.Nodes.JsonObject? naviRow = null;
-        if (why.Count == 0 && r.Gained.Count > 0)
+        if (why.Count == 0)
         {
-            var need = new Dictionary<FormKey, IReadOnlyCollection<FormKey>> { [key] = r.Gained };
-            foreach (var m in r.Gained) need[m] = new[] { key };
-            var (np, refusedNavi) = NavRepairNavi.ForPairs(need, navi);
-            if (refusedNavi.Count > 0) { why = refusedNavi.Select(kv => $"The navmesh info map cannot gain the version's new neighbours: {kv.Value}.").ToArray(); ops = new(); }
-            else { ops.AddRange(np.Ops); naviRow = NavRepairNavi.NaviJson(np); }   // its entries: what the read-back holds NAVI to
+            var doorTable = (r.After!.DoorTriangles ?? Array.Empty<NavDoorTriangle>()).Select(d => d.Door).ToList();
+            var (np, refusedNavi) = NavRepairNavi.ForVersion(key, doorTable, r.Gained, navi);
+            if (refusedNavi is not null) { why = new[] { $"The navmesh info map cannot follow the version ({refusedNavi}); keep the winner's version, or give the map an entry the patch can change first." }; ops = new(); }
+            else if (np.Entries.Count > 0) { ops.AddRange(np.Ops); naviRow = NavRepairNavi.NaviJson(np); }   // its entries: what the read-back holds NAVI to
         }
         if (why.Count == 0)
         {
@@ -1093,14 +1091,15 @@ public static class NavUseVersionPlan
     /// <summary>The kind of one of <see cref="NavEdit.UseVersion"/>'s refusal sentences, read from that sentence's own wording
     /// (written above, in this file; the two change together, and navedit's self-test C2602 holds every kind): a border
     /// link of the version that meets no edge (or several) of its neighbour; a neighbour's link into the navmesh that cannot be
-    /// re-pointed; a neighbour the navmesh info map names that the version drops; a different door table; or another reason
-    /// (a broken table, a missing navmesh, a ledge). A repair plan names the kinds of a refused row in its one sentence, so a
+    /// re-pointed; a neighbour the navmesh info map names that the version drops; a navmesh info map entry that cannot follow
+    /// the version (<see cref="NavUseVersionPlan.Plan"/>'s sentence for NavRepairNavi.ForVersion's refusal); or another reason
+    /// (a broken table, a missing navmesh, a ledge). A different door table is no longer a reason: it is carried (item 2). A repair plan names the kinds of a refused row in its one sentence, so a
     /// reader sees every cause, not only the first (the master's condition, 2026-11-22).</summary>
     public static string ReasonKind(string why) =>
         why.Contains("no edge of its winning version lies along it") || why.Contains(" of its triangles lie along it") ? "border link meeting no edge"
         : why.Contains("lies along it") || why.Contains("triangles of ") && why.Contains("'s version lie along it") || why.Contains("cannot be re-pointed") ? "neighbour link into it that cannot be re-pointed"
         : why.Contains("which the navmesh info map's entry for") ? "neighbour the navmesh info map names, dropped"
-        : why.Contains("other doors than the winner's") ? "different door table"
+        : why.Contains("The navmesh info map cannot follow the version") ? "navmesh info map entry that cannot follow"
         : "other reason";
 
     /// <summary>Why <paramref name="key"/> cannot be edited for the navmesh info map, in one sentence, or null: the map cannot be

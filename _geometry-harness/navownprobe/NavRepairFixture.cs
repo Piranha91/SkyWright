@@ -256,28 +256,43 @@ static class NavRepairFixture
     /// (3,0)'s LAND to 200 and ships its own re-cut of GM at z 200 (four triangles round a centre vertex: other vertices, other
     /// triangles); Revert.esp (masters Skyrim only) overrides GM with Skyrim's geometry, as Clockwork does with the great cities'.
     /// So GM is a NAV-GROUND row owned by Revert whose ground Mover moved, and a CLOBBERED row (Mover > Revert); GM links nothing,
-    /// so carrying Mover's version plans. Returns <paramref name="dir"/>, holding the three plugins of <see cref="MoverOrder"/>.</summary>
-    public static string WriteMoverCase(string dir)
+    /// so carrying Mover's version plans. Returns <paramref name="dir"/>, holding the three plugins of <see cref="MoverOrder"/>.
+    /// With <paramref name="doors"/> (C2604, houseCARL's item 2): Skyrim.esm also places doors DA, DB and DC in (3,0); its GM (and
+    /// Revert's copy) stands before DA and DB, and its NAVI entry for GM links [DA, DB], as the base game's entries follow their
+    /// door table; Mover's re-cut stands before [DB, DC, DA]: reordered, with a door more. Carrying it, the entry's linked doors
+    /// must become [DB, DC, DA].</summary>
+    public static readonly FormKey DA = S(0xD31), DB = S(0xD32), DC = S(0xD33);
+    public static string WriteMoverCase(string dir, bool doors = false)
     {
         Directory.CreateDirectory(dir);
         var mKey = new ModKey("Mover", ModType.Plugin); var rKey = new ModKey("Revert", ModType.Plugin);
         string sp = Path.Combine(dir, "Skyrim.esm"), mp = Path.Combine(dir, "Mover.esp"), rp = Path.Combine(dir, "Revert.esp");
+        NavigationMesh WithDoors(NavigationMesh n, params (FormKey Door, short Tri)[] ds)
+        {
+            if (doors) foreach (var (d, t) in ds) n.Data!.DoorTriangles.Add(new DoorTriangle { Door = new FormLink<IPlacedObjectGetter>(d), TriangleBeforeDoor = t, Unknown = HarnessShared.NavRepairNavi.LinkedDoorUnknown });
+            return n;
+        }
         var sky = new SkyrimMod(SkyKey, Rel);
         var c3 = GridCell(3, Flat(LandK(3), 0));
-        c3.NavigationMeshes.Add(Fan(GM, 3, 12500, 500, 0));
+        c3.NavigationMeshes.Add(WithDoors(Fan(GM, 3, 12500, 500, 0), (DA, 0), (DB, 1)));
+        if (doors)
+            foreach (var (d, x) in new[] { (DA, 12520f), (DB, 12600f), (DC, 12700f) })
+                c3.Temporary.Add(new PlacedObject(d, Rel) { EditorID = $"RpMoverDoor{d.ID:X}", Placement = new Placement { Position = new P3Float(x, 560, 0) } });
         sky.Worldspaces.Add(World(c3));
-        sky.NavigationMeshInfoMaps.Add(Navi(Info(GM, 3, 12500, 500)));
+        var gmInfo = Info(GM, 3, 12500, 500);
+        if (doors) foreach (var d in new[] { DA, DB }) gmInfo.LinkedDoors.Add(new LinkedDoor { Unknown = HarnessShared.NavRepairNavi.LinkedDoorUnknown, Door = new FormLink<IPlacedObjectGetter>(d) });
+        sky.NavigationMeshInfoMaps.Add(Navi(gmInfo));
         sky.BeginWrite.ToPath(sp).WithLoadOrder(Array.Empty<ISkyrimModGetter>()).Write();
         using var skyRead = SkyrimMod.CreateFromBinaryOverlay(sp, Rel);
         var mover = new SkyrimMod(mKey, Rel);
         var m3 = GridCell(3, Flat(LandK(3), 200));
-        m3.NavigationMeshes.Add(Nav(GM, InGrid(3), new[] { (12300f, 500f, 200f), (12800f, 500f, 200f), (12800f, 800f, 200f), (12300f, 800f, 200f), (12550f, 650f, 200f) },
-                                    new T3(0, 1, 4), new T3(1, 2, 4), new T3(2, 3, 4), new T3(3, 0, 4)));
+        m3.NavigationMeshes.Add(WithDoors(Nav(GM, InGrid(3), new[] { (12300f, 500f, 200f), (12800f, 500f, 200f), (12800f, 800f, 200f), (12300f, 800f, 200f), (12550f, 650f, 200f) },
+                                    new T3(0, 1, 4), new T3(1, 2, 4), new T3(2, 3, 4), new T3(3, 0, 4)), (DB, 0), (DC, 2), (DA, 3)));
         mover.Worldspaces.Add(World(m3));
         mover.BeginWrite.ToPath(mp).WithLoadOrder(skyRead).Write();
         var rev = new SkyrimMod(rKey, Rel);
         var r3 = GridCell(3, null);
-        r3.NavigationMeshes.Add(Fan(GM, 3, 12500, 500, 0));
+        r3.NavigationMeshes.Add(WithDoors(Fan(GM, 3, 12500, 500, 0), (DA, 0), (DB, 1)));
         rev.Worldspaces.Add(World(r3));
         rev.BeginWrite.ToPath(rp).WithLoadOrder(skyRead).Write();
         return dir;

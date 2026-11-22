@@ -867,6 +867,17 @@ static class NavEditCli
             Console.WriteLine(ndiff.Count == 0 ? $"ok   NAVI {navi["record"]} is its winner's with exactly the planned entries changed ({ncompared} entries compared)" : $"FAIL NAVI {navi["record"]}: {string.Join("; ", ndiff)}");
             if (ndiff.Count > 0) failed++;
         }
+        // each carried version's NAVI entry, as the game takes it with the patch last, against the version itself (one owner:
+        // NavRepairReadBack.NaviFollowsVersion, R1's read-back holds its use_version rows to it too)
+        foreach (var p in planned.Where(p => p.Ok && p.Row["useVersion"] is JsonObject))
+        {
+            var key = FormKey.Factory((string)p.Row["navmesh"]!);
+            var from = (string?)p.Row["useVersion"]!["fromPath"] ?? "";
+            var fd = NavRepairReadBack.NaviFollowsVersion(order, patchPath, key, from);
+            Console.WriteLine(fd.Count == 0 ? $"ok   NAVI follows {Path.GetFileName(from)}'s version of {key}: its linked doors are the version's door table, in order"
+                                            : $"FAIL NAVI does not follow {Path.GetFileName(from)}'s version of {key}: {string.Join("; ", fd)}");
+            if (fd.Count > 0) failed++;
+        }
         foreach (var c in recs) Console.WriteLine($"{((bool)c!["holds"]! ? "ok  " : "FAIL")} carried {c["type"]} {c["record"]} equals its winner {c["winner"]}" + ((bool)c["holds"]! ? "" : ": " + string.Join("; ", c["differences"]!.AsArray().Select(x => (string)x!))));
         failed += bad;
         Console.WriteLine(failed == 0 ? $"patch written and read back: {patchPath}" : $"navedit write: {failed} check(s) failed on {patchPath}; do not enable it.");

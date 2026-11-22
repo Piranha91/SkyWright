@@ -71,6 +71,10 @@ public sealed record NaviEntryChange(FormKey Nav, string FromPlugin, string From
 {
     /// <summary>Doors the entry gains in its LinkedDoors (navedit's door edit), each with <see cref="NavRepairNavi.LinkedDoorUnknown"/>.</summary>
     public IReadOnlyList<FormKey> AddDoors { get; init; } = Array.Empty<FormKey>();
+    /// <summary>The LinkedDoors the entry ends with (a carried navmesh version's door table, in its order; null: unchanged), and how
+    /// many of the entry's own LinkedDoors are kept as they are before the rest is written (<see cref="NavRepairNavi.KeptDoors"/>).</summary>
+    public IReadOnlyList<FormKey>? DoorsAfter { get; init; }
+    public int KeepDoors { get; init; }
 }
 
 /// <summary>The NAVI change of a relink plan, and its ops for housecarl_apply.</summary>
@@ -135,6 +139,77 @@ public static class NavRepairNavi
         ["fields"] = new JsonObject { ["Unknown"] = LinkedDoorUnknown.ToString(CultureInfo.InvariantCulture), ["Door"] = door.ToString() },
     };
 
+    /// <summary>How many of <paramref name="e"/>'s LinkedDoors already stand as <paramref name="target"/> wants them, counted from
+    /// the front: the same door, with <see cref="LinkedDoorUnknown"/>. Those are kept; every later one is removed and the rest of
+    /// the target appended, so the entry ends exactly as the target, in order.</summary>
+    public static int KeptDoors(INavigationMapInfoGetter e, IReadOnlyList<FormKey> target)
+    {
+        int k = 0;
+        while (k < e.LinkedDoors.Count && k < target.Count && e.LinkedDoors[k].Door.FormKey == target[k] && e.LinkedDoors[k].Unknown == LinkedDoorUnknown) k++;
+        return k;
+    }
+
+    /// <summary>THE NAVI CHANGE FOR A CARRIED VERSION (use_version; houseCARL's item 2). In the base game an entry's LinkedDoors
+    /// are its navmesh's door table exactly, in order and with repeats (15,461 of 15,461 Skyrim.esm entries and 1,863 of 1,863
+    /// Dawnguard.esm's; SkyWright run 2026-11-22-overnight-non-ui, evidence/doorset). So when <paramref name="key"/>'s version is
+    /// carried, its entry's LinkedDoors become <paramref name="doorTable"/>, the version's door table; its MergedTo gains each of
+    /// <paramref name="gained"/>, and each gained neighbour's entry gains <paramref name="key"/>, as a relink's pair does. In place
+    /// on an entry the NAVI winner states, else the entry added whole from the plugin that states it; an entry already standing
+    /// so is left alone. Refused in one sentence: the map unreadable, an entry to change that no plugin's NAVI states, or a
+    /// whole interior entry (the write engine's known gap).</summary>
+    public static (NaviPlan Plan, string? Refused) ForVersion(FormKey key, IReadOnlyList<FormKey> doorTable, IReadOnlyCollection<FormKey> gained, NaviView view)
+    {
+        var np = new NaviPlan { Record = view.Record, WinnerPlugin = view.Winner?.Plugin, WinnerPath = view.Winner?.Path };
+        if (view.Problem is { } pr) return (np, pr);
+        var want = new SortedDictionary<FormKey, (IReadOnlyCollection<FormKey> Add, IReadOnlyList<FormKey>? Doors)>(Comparer<FormKey>.Create((a, b) => string.CompareOrdinal(a.ToString(), b.ToString())));
+        want[key] = (gained, doorTable);
+        foreach (var m in gained) if (m != key) want[m] = (new[] { key }, null);
+        foreach (var (n, (add, doors)) in want)
+            if (!view.Effective.ContainsKey(n) && (add.Count > 0 || doors is { Count: > 0 }))
+                return (np, view.Record is null ? "no plugin of the order carries a NAVI record"
+                                                : $"no plugin's NAVI states {n}");
+        string id = view.Record?.ToString() ?? "";
+        foreach (var (n, (adds, doors)) in want)
+        {
+            if (!view.Effective.TryGetValue(n, out var ef)) continue;
+            var (src, idx) = ef;
+            var e = src.Map.MapInfos[idx];
+            var merged = e.MergedTo.Select(x => x.FormKey).ToList(); var pref = e.PreferredMerges.Select(x => x.FormKey).ToList();
+            var add = adds.Where(m => !merged.Contains(m) && !pref.Contains(m)).ToList();
+            int keep = doors is null ? 0 : KeptDoors(e, doors);
+            bool doorsChange = doors is not null && (keep < e.LinkedDoors.Count || keep < doors.Count);
+            if (add.Count == 0 && !doorsChange) { np.Why.Add($"{n}'s entry ({src.Plugin}) already follows the version"); continue; }
+            int? wi = src == view.Winner ? idx : null;
+            np.Entries.Add(new NaviEntryChange(n, src.Plugin, src.Path, idx, wi, add, merged, pref) { DoorsAfter = doorsChange ? doors!.ToList() : null, KeepDoors = doorsChange ? keep : 0 });
+            var what = string.Join(", and ", new[]
+            {
+                add.Count > 0 ? $"gains {string.Join(" and ", add)}" : null,
+                doorsChange ? $"its linked doors become the version's door table [{string.Join(", ", doors!)}] (were [{string.Join(", ", e.LinkedDoors.Select(d => d.Door.FormKey))}])" : null,
+            }.Where(x => x is not null));
+            if (wi is { } w)
+            {
+                foreach (var m in add) np.Ops.Add(new RepairOp(id, $"MapInfos[{w}].MergedTo", "Add", Value: m.ToString()));
+                if (doorsChange)
+                {
+                    // from the back, so each index still names the door it did when planned; then the rest of the table, in order
+                    for (int i = e.LinkedDoors.Count - 1; i >= keep; i--) np.Ops.Add(new RepairOp(id, $"MapInfos[{w}].LinkedDoors", "Remove", Key: i.ToString(CultureInfo.InvariantCulture)));
+                    for (int j = keep; j < doors!.Count; j++) np.Ops.Add(new RepairOp(id, $"MapInfos[{w}].LinkedDoors", "Add", ComposeNode: LinkedDoor(doors[j])));
+                }
+                np.Why.Add($"{n}'s entry in {src.Plugin}, the NAVI winner, {what}");
+            }
+            else if (e.Parent is INavigationMapInfoCellParentGetter)
+                // the KNOWN CORE GAP of ForDoors: a whole interior entry cannot be composed yet
+                return (new NaviPlan { Record = view.Record, WinnerPlugin = view.Winner?.Plugin, WinnerPath = view.Winner?.Path },
+                        $"{n}'s entry is stated by {src.Plugin}, not by the NAVI winner {view.Winner!.Plugin}, so it would be added whole, and the write engine cannot yet compose a whole interior entry");
+            else
+            {
+                np.Ops.Add(new RepairOp(id, "MapInfos", "Add", ComposeNode: Compose(e, add, doorsAfter: doorsChange ? doors : null)));
+                np.Why.Add($"{n}'s entry, from {src.Plugin} (the winner {view.Winner!.Plugin} does not state it), is added whole, and it {what}");
+            }
+        }
+        return (np, null);
+    }
+
     /// <summary>A NAVI change as the plan and the read-back carry it: the record, its winner, and each entry changed.</summary>
     public static JsonObject NaviJson(NaviPlan n) => new()
     {
@@ -146,6 +221,8 @@ public static class NavRepairNavi
             ["navmesh"] = e.Nav.ToString(), ["from"] = new JsonObject { ["plugin"] = e.FromPlugin, ["path"] = e.FromPath, ["index"] = e.FromIndex },
             ["winnerIndex"] = e.WinnerIndex, ["add"] = new JsonArray(e.Add.Select(m => (JsonNode)m.ToString()).ToArray()),
             ["addDoors"] = new JsonArray(e.AddDoors.Select(m => (JsonNode)m.ToString()).ToArray()),
+            ["doorsAfter"] = e.DoorsAfter is null ? null : new JsonArray(e.DoorsAfter.Select(m => (JsonNode)m.ToString()).ToArray()),
+            ["keepDoors"] = e.DoorsAfter is null ? null : e.KeepDoors,
             ["mergedToBefore"] = new JsonArray(e.MergedToBefore.Select(m => (JsonNode)m.ToString()).ToArray()),
             ["preferredMerges"] = new JsonArray(e.PreferredMerges.Select(m => (JsonNode)m.ToString()).ToArray()),
         }).ToArray()),
@@ -242,13 +319,16 @@ public static class NavRepairNavi
     }
 
     /// <summary>A whole NAVI entry as a housecarl_apply compose: every field of <paramref name="e"/>, with <paramref name="add"/>
-    /// appended to its MergedTo and <paramref name="doors"/> to its LinkedDoors.</summary>
-    public static JsonObject Compose(INavigationMapInfoGetter e, IEnumerable<FormKey> add, IEnumerable<FormKey>? doors = null)
+    /// appended to its MergedTo and <paramref name="doors"/> to its LinkedDoors; with <paramref name="doorsAfter"/>, its LinkedDoors
+    /// are those instead (its own kept as far as <see cref="KeptDoors"/> reaches, the rest written new).</summary>
+    public static JsonObject Compose(INavigationMapInfoGetter e, IEnumerable<FormKey> add, IEnumerable<FormKey>? doors = null, IReadOnlyList<FormKey>? doorsAfter = null)
     {
         var sets = new JsonArray();
         foreach (var m in e.MergedTo.Select(x => x.FormKey).Concat(add)) sets.Add(Set("MergedTo", "Add", m.ToString()));
         foreach (var m in e.PreferredMerges) sets.Add(Set("PreferredMerges", "Add", m.FormKey.ToString()));
-        foreach (var d in e.LinkedDoors)
+        int keep = doorsAfter is null ? e.LinkedDoors.Count : KeptDoors(e, doorsAfter);
+        if (doorsAfter is not null) doors = doorsAfter.Skip(keep).Concat(doors ?? Array.Empty<FormKey>()).ToList();
+        foreach (var d in e.LinkedDoors.Take(keep))
             sets.Add(Set("LinkedDoors", "Add", compose: new JsonObject
             {
                 ["type"] = "LinkedDoor",

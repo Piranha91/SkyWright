@@ -691,20 +691,26 @@ static class NavEditSelfTest
             return UseRefused(NavEdit.UseVersion(w, bare, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol), "no longer links into");
         });
 
-        // C2560: a version standing before a door the winner has no door at is refused (the info map's linked doors would not
-        // follow); a version that gains N as a neighbour is planned, N returned for the info map.
+        // C2560: a version standing before a door the winner has no door at is planned, the door named as added (the info map's
+        // linked doors follow it: NavRepairNavi.ForVersion, C2605); a version that gains N as a neighbour is planned, N returned
+        // for the info map. CORRECTED 2026-11-22 (houseCARL's item 2): the door half expected a refusal, the behaviour before
+        // a different door table was carried.
         Case("2560 use-version-doors-and-gained", () =>
         {
             var (w, n) = Pair();
             var doors = NavEdit.UseVersion(w, w with { DoorTriangles = new List<NavDoorTriangle> { new(DoorRef, 0) } }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol);
             var (bare, nn) = Pair(linkW: false, linkN: false);
             var gained = NavEdit.UseVersion(bare, w, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = nn }, tol);
-            return UseRefused(doors, "other doors") ?? UsePlanned(gained) ?? (gained.Gained.SequenceEqual(new[] { NK }) ? null : "gained " + string.Join(",", gained.Gained));
+            return (UsePlanned(doors) is { } dw ? "doors: " + dw : null)
+                ?? (doors.DoorsAdded.Select(d => d.Door).SequenceEqual(new[] { DoorRef }) && doors.DoorsDropped.Count == 0 && doors.After!.DoorTriangles!.Single().Door == DoorRef ? null
+                    : $"doors added [{string.Join(",", doors.DoorsAdded)}], dropped [{string.Join(",", doors.DoorsDropped)}]")
+                ?? UsePlanned(gained) ?? (gained.Gained.SequenceEqual(new[] { NK }) ? null : "gained " + string.Join(",", gained.Gained));
         });
 
-        // C2564: the door refusal names each door: one the version adds (D1 before triangle 3), one it lacks (D2 before 5), and
-        // a door standing before two triangles in the version and one in the winner (D3: the extra entry, before 7); the
-        // same lists come back on the result for the plan row.
+        // C2564: each door is named: one the version adds (D1 before triangle 3), one it lacks (D2 before 5), and a door standing
+        // before two triangles in the version and one in the winner (D3: the extra entry, before 7), on the result for the plan
+        // row (its doors.added and doors.dropped). CORRECTED 2026-11-22 (houseCARL's item 2): these were a refusal's sentence;
+        // the version is now carried, so the lists come back on a planned result and the carried door table is the version's.
         Case("2564 use-version-names-doors", () =>
         {
             var (w, n) = Pair();
@@ -712,11 +718,10 @@ static class NavEditSelfTest
             var win = w with { DoorTriangles = new List<NavDoorTriangle> { new(D(0xD02), 5), new(D(0xD03), 6) } };
             var ver = w with { DoorTriangles = new List<NavDoorTriangle> { new(D(0xD01), 3), new(D(0xD03), 6), new(D(0xD03), 7) } };
             var r = NavEdit.UseVersion(win, ver, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol);
-            if (UseRefused(r, "other doors") is { } why) return why;
+            if (UsePlanned(r) is { } why) return why;
             string L(IReadOnlyList<NavDoorTriangle> ds) => string.Join(" ", ds.Select(d => $"{d.Door.ID:X}@{d.TriangleBeforeDoor}"));
             if (L(r.DoorsAdded) != "D01@3 D03@7" || L(r.DoorsDropped) != "D02@5") return $"added {L(r.DoorsAdded)}, dropped {L(r.DoorsDropped)}";
-            var text = string.Join(" ", r.Why);
-            return text.Contains($"it adds {D(0xD01)} (before triangle 3), {D(0xD03)} (before triangle 7)") && text.Contains($"it lacks {D(0xD02)} (before triangle 5)") ? null : "the sentence does not name the doors: " + text;
+            return L(r.After!.DoorTriangles!) == "D01@3 D03@6 D03@7" ? null : "the carried door table is not the version's: " + L(r.After.DoorTriangles!);
         });
 
         // C2565: a door goes on the triangle under its arrival marker, nearest in height (a bridge 200 u over the square: a marker
@@ -790,7 +795,6 @@ static class NavEditSelfTest
                                          new Dictionary<FormKey, NavmeshGeometry> { [NK] = n0 with { Vertices = nv, Triangles = nt } }, tol);
             var (bare, _) = Pair(linkW: false);
             var lost = NavEdit.UseVersion(w, bare, "Ver.esp", near, tol);
-            var doors = NavEdit.UseVersion(w, w with { DoorTriangles = new List<NavDoorTriangle> { new(DoorRef, 0) } }, "Ver.esp", near, tol);
             var (w1, n1) = Pair(linkN: false);
             var past = NavEdit.UseVersion(w1, w1 with { EdgeLinks = new List<NavEdgeLink> { new(NK, 99, 2), new(NK, 5) } }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n1 }, tol);
             var (w2, n2) = Pair();
@@ -801,7 +805,6 @@ static class NavEditSelfTest
                 ("border moved", moved, why => why.Contains("that link cannot be re-pointed") ? "neighbour link into it that cannot be re-pointed" : "border link meeting no edge"),
                 ("two along", two, _ => "border link meeting no edge"),
                 ("lost neighbour", lost, _ => "neighbour the navmesh info map names, dropped"),
-                ("doors", doors, _ => "different door table"),
                 ("ledge past its neighbour", past, _ => "other reason"),
                 ("neighbour's ledge renumbered", ledgeIn, _ => "neighbour link into it that cannot be re-pointed"),
             };
@@ -813,6 +816,10 @@ static class NavEditSelfTest
             }
             if (!moved.Why.Any(x => Kind(x) == "border link meeting no edge") || !moved.Why.Any(x => Kind(x) == "neighbour link into it that cannot be re-pointed"))
                 bad.Add("the border-moved case does not give both an outbound and an inbound reason");
+            // CORRECTED 2026-11-22 (houseCARL's item 2): a different door table is carried, not refused, so its kind is gone; the
+            // info map's own refusal, NavUseVersionPlan.Plan's sentence over NavRepairNavi.ForVersion's reason, has its kind
+            var naviWhy = $"The navmesh info map cannot follow the version (no plugin's NAVI states {K}); keep the winner's version, or give the map an entry the patch can change first.";
+            if (Kind(naviWhy) != "navmesh info map entry that cannot follow") bad.Add($"'{naviWhy}' read as '{Kind(naviWhy)}'");
             return bad.Count == 0 ? null : string.Join(" | ", bad);
         });
 

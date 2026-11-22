@@ -809,14 +809,15 @@ def t2497():
 MOVER_ORDER = ["Skyrim.esm", "Mover.esp", "Revert.esp"]
 GM = sk("000B10")
 _MOVER = None
+_MOVER_DOORS = None
 
 
 class MoverLab:
     """navownprobe --write-mover-fixture laid out as an MO2 instance; one plan run and one R1 write."""
 
-    def __init__(self, tmp: Path):
+    def __init__(self, tmp: Path, doors: bool = False):
         keep = tmp / "fixture"
-        w = run([exe("navownprobe"), "--write-mover-fixture", keep])
+        w = run([exe("navownprobe"), "--write-mover-fixture", keep] + (["doors"] if doors else []))
         if w.returncode != 0 or not all((keep / n).exists() for n in MOVER_ORDER):
             raise RuntimeError(f"the mover fixture was not written (exit {w.returncode}): {(w.stdout + w.stderr)[-600:]}")
         inst, game = tmp / "instance", tmp / "game"
@@ -843,6 +844,13 @@ def mover():
     if _MOVER is None:
         _MOVER = MoverLab(Path(tempfile.mkdtemp(prefix="navmesh-repair-mover-")))
     return _MOVER
+
+
+def mover_doors():
+    global _MOVER_DOORS
+    if _MOVER_DOORS is None:
+        _MOVER_DOORS = MoverLab(Path(tempfile.mkdtemp(prefix="navmesh-repair-mover-doors-")), doors=True)
+    return _MOVER_DOORS
 
 
 def _rows(plan, nav):
@@ -911,6 +919,35 @@ def t2601():
     assert not (M.tmp / "patch2" / "Tampered.esp").exists(), "a patch was written from a tampered use_version row"
     r = run([exe("navownprobe"), "--repair-readback", M.plan_path, M.out, M.tmp / "standalone-readback.json"])
     assert r.returncode == 1 and "only navedit write --repair-plan can hold" in (r.stdout + r.stderr), f"exit {r.returncode}: {(r.stdout + r.stderr)[-600:]}"
+
+
+DA, DB, DC = sk("000D31"), sk("000D32"), sk("000D33")
+
+
+def t2604():
+    """Rejects: a carried version whose door table differs from the winner's refused, or written without the navmesh info map
+    following it (houseCARL's item 2). The mover's re-cut stands before [DB, DC, DA] (reordered, a door more); the winner's
+    entry links [DA, DB]. The row must plan, its NAVI entry change take the version's table in order (nothing of the old
+    kept: DA is not first), and R1's patch read back: the planned entries, and the entry the game takes with the patch last
+    against the version's own door table, door for door (NavRepairReadBack.NaviFollowsVersion)."""
+    M = mover_doors()
+    assert M.plan is not None, f"no plan (exit {M.log.returncode}): {(M.log.stdout + M.log.stderr)[-800:]}"
+    uv = [p for p in _rows(M.plan, GM) if p["class"] == "use_version"]
+    assert len(uv) == 1 and uv[0]["status"] == "planned", f"the use_version row: {[(p['status'], p.get('why')) for p in uv]}"
+    # the written patch first (its read-back holds the entry the game takes to the version's own door table), so a planner that
+    # is wrong but self-consistent is caught here by the version, before the plan row's details
+    allout = (M.write.stdout + M.write.stderr) if M.write else ""
+    said = f"GM lines {[l.strip() for l in allout.splitlines() if '000B10' in l]}; last {[l.strip() for l in allout.splitlines()[-2:]]}"
+    assert M.write is not None and M.write.returncode == 0, f"R1 exit {M.write.returncode if M.write else None}: {said}"
+    assert "holds  000B10:Skyrim.esm" in M.write.stdout, f"GM does not read back: {said}"
+    rb = json.loads(M.out.with_suffix("").with_name("MoverFix.readback.json").read_text(encoding="utf-8"))
+    navi = [c for c in rb["carried"] if c.get("type") == "NavigationMeshInfoMap"]
+    assert rb["holds"] is True and navi and navi[0]["holds"] and navi[0].get("planned"), f"read-back: holds {rb['holds']}, NAVI {navi}"
+    u = uv[0]["useVersion"]
+    assert [d["door"].lower() for d in u["doors"]["added"]] == [DC.lower()] and u["doors"]["dropped"] == [], u["doors"]
+    entries = (u.get("navi") or {}).get("entries") or []
+    assert len(entries) == 1 and entries[0]["navmesh"].lower() == GM.lower() and entries[0]["winnerIndex"] == 0, entries
+    assert [d.lower() for d in entries[0]["doorsAfter"]] == [DB.lower(), DC.lower(), DA.lower()] and entries[0]["keepDoors"] == 0, entries[0]
 
 
 CASES = [
@@ -982,6 +1019,8 @@ CASES = [
     ("2597 self-test: the mover refusal keeps the refusal order", lambda: selftest("2597")),
     ("2598 self-test: a band one-way link yields to an in-tolerance match", lambda: selftest("2598")),
     ("2603 self-test: a use_version row shares a patch only with rows it does not touch", lambda: selftest("2603")),
+    ("2604 R1, mover door case: the navmesh info map's linked doors follow the version's door table", t2604),
+    ("2605 self-test: the navmesh info map change for a carried version", lambda: selftest("2605")),
     ("2599 plan, mover case: ground refused, use_version planned", t2599),
     ("2600 R1, mover case: the mover's version written, read back, its superseded plugin mastered", t2600),
     ("2601 R1, mover case: a tampered use_version row and a stand-alone read-back are refused", t2601),

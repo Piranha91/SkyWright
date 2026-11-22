@@ -43,10 +43,10 @@
     2557  use_version: a border that no longer meets its neighbour is refused, listing its edges both ways
     2558  use_version: two triangles along one edge: the one the link names stands; naming neither is refused
     2559  use_version: a version that no longer links into a neighbour is refused
-    2560  use_version: other doors are refused; a gained neighbour is returned for the navmesh info map
+    2560  use_version: other doors are carried, the door added named; a gained neighbour is returned for the navmesh info map
     2561  use_version: ledge links are carried or kept in place, never matched by geometry; out of range or renumbered, refused
     2562  use_version: the winner itself plans with nothing changed
-    2564  use_version: the door refusal names each door added and lacked, with its triangle, door by door
+    2564  use_version: each door added and lacked is named with its triangle, door by door; the door table carried is the version's
     2565  door: the triangle under the arrival marker, nearest in height; flagged Door; refusals by name
     2580  marker check: a marker in the middle of a square stands inside, 100 u from the open edge
     2581  marker check: a marker 20 u from the square's edge is refused, with a gap beyond

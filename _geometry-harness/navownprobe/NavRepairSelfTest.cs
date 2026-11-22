@@ -154,6 +154,73 @@ static class NavRepairSelfTest
                 ? null : $"duplicate: {dup}; unstated: {none}; interior: {interior}";
         });
 
+        // C2605: the NAVI change for a carried version (NavRepairNavi.ForVersion, houseCARL's item 2). The entry's linked doors
+        // become the version's door table, in order: its own doors are kept while they already stand so (the same door, the base
+        // game's Unknown), the rest removed from the back and the table's rest appended. An entry already standing so is left
+        // alone; one with another Unknown is rewritten from there; an entry only an earlier plugin states is added whole with the
+        // table; a whole interior entry, and a navmesh no NAVI states that has doors, are refused by name; a gained neighbour is
+        // added both ways.
+        Case("2605 navi-for-version", () =>
+        {
+            FormKey nv = K(0xA80), m = K(0xA81), dA = K(0xD81), dB = K(0xD82), dC = K(0xD83);
+            Mutagen.Bethesda.Skyrim.NavigationMapInfo Entry(FormKey nav, bool cell, params (FormKey Door, int Unknown)[] ds)
+            {
+                var e = new Mutagen.Bethesda.Skyrim.NavigationMapInfo { NavigationMesh = new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.INavigationMeshGetter>(nav) };
+                foreach (var (d, u) in ds) e.LinkedDoors.Add(new Mutagen.Bethesda.Skyrim.LinkedDoor { Unknown = u, Door = new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.IPlacedObjectGetter>(d) });
+                if (cell) e.Parent = new Mutagen.Bethesda.Skyrim.NavigationMapInfoCellParent { ParentCell = new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.ICellGetter>(K(0xCE1)) };
+                else e.Parent = new Mutagen.Bethesda.Skyrim.NavigationMapInfoWorldParent { ParentWorldspace = new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.IWorldspaceGetter>(K(0x800)) };
+                return e;
+            }
+            NaviView View(params (string Plugin, Mutagen.Bethesda.Skyrim.NavigationMapInfo[] Infos)[] srcs) => NaviView.Of(srcs.Select(s =>
+            {
+                var map = new Mutagen.Bethesda.Skyrim.NavigationMeshInfoMap(K(0xC00), Mutagen.Bethesda.Skyrim.SkyrimRelease.SkyrimSE);
+                map.MapInfos.AddRange(s.Infos);
+                return new NaviSource(s.Plugin, "", map);
+            }).ToList());
+            const int U = NavRepairNavi.LinkedDoorUnknown;
+            string Ops(NaviPlan p) => string.Join(" ", p.Ops.Select(o => $"{o.FieldPath}:{o.Op}" + (o.Key is { } k ? $"@{k}" : "") + (o.ComposeNode?["fields"]?["Door"] is { } d ? $"={FormKey.Factory((string)d!).ID:X}" : o.Value is { } v ? $"={FormKey.Factory(v).ID:X}" : "")));
+            var bad = new List<string>();
+            // in place: [A, B, C] -> [A, C, B]: A kept, C and B removed from the back (2, then 1), C and B appended. Two removals,
+            // so their order shows (corrected after the first arms run: with one removal the order could not be seen)
+            var (p1, r1) = NavRepairNavi.ForVersion(nv, new[] { dA, dC, dB }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(m, false), Entry(nv, false, (dA, U), (dB, U), (dC, U)) })));
+            if (r1 is not null) bad.Add("in place refused: " + r1);
+            else if (Ops(p1) != "MapInfos[1].LinkedDoors:Remove@2 MapInfos[1].LinkedDoors:Remove@1 MapInfos[1].LinkedDoors:Add=D83 MapInfos[1].LinkedDoors:Add=D82") bad.Add("in place ops " + Ops(p1));
+            else if (p1.Entries.Single() is var e1 && (e1.KeepDoors != 1 || e1.DoorsAfter is null || !e1.DoorsAfter.SequenceEqual(new[] { dA, dC, dB }) || e1.WinnerIndex != 1)) bad.Add($"in place entry keep {p1.Entries[0].KeepDoors}");
+            // a strict prefix ([A, B, C] -> [A]), an empty table on linked doors ([A, B] -> []), a repeated door ([A] -> [A, A])
+            var (q1, _) = NavRepairNavi.ForVersion(nv, new[] { dA }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, U), (dB, U), (dC, U)) })));
+            var (q2, _) = NavRepairNavi.ForVersion(nv, Array.Empty<FormKey>(), Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, U), (dB, U)) })));
+            var (q3, _) = NavRepairNavi.ForVersion(nv, new[] { dA, dA }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, U)) })));
+            if (Ops(q1) != "MapInfos[0].LinkedDoors:Remove@2 MapInfos[0].LinkedDoors:Remove@1") bad.Add("prefix ops " + Ops(q1));
+            if (Ops(q2) != "MapInfos[0].LinkedDoors:Remove@1 MapInfos[0].LinkedDoors:Remove@0") bad.Add("empty table ops " + Ops(q2));
+            if (Ops(q3) != "MapInfos[0].LinkedDoors:Add=D81") bad.Add("repeated door ops " + Ops(q3));
+            // already standing so: nothing
+            var (p2, r2) = NavRepairNavi.ForVersion(nv, new[] { dA, dB }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, U), (dB, U)) })));
+            if (r2 is not null || p2.Entries.Count != 0 || p2.Ops.Count != 0) bad.Add($"already following: refused {r2}, {p2.Entries.Count} entries");
+            // another Unknown on the first door: rewritten from there
+            var (p3, r3) = NavRepairNavi.ForVersion(nv, new[] { dA, dB }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, 7), (dB, U)) })));
+            if (r3 is not null) bad.Add("other Unknown refused: " + r3);
+            if (Ops(p3) != "MapInfos[0].LinkedDoors:Remove@1 MapInfos[0].LinkedDoors:Remove@0 MapInfos[0].LinkedDoors:Add=D81 MapInfos[0].LinkedDoors:Add=D82") bad.Add("other Unknown ops " + Ops(p3));
+            // stated only by an earlier plugin: added whole, its linked doors the table
+            var (p4, r4) = NavRepairNavi.ForVersion(nv, new[] { dB }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, U)) }), ("Later.esp", new[] { Entry(m, false) })));
+            var sets = p4.Ops.SingleOrDefault()?.ComposeNode?["sets"]?.AsArray().Where(x => (string?)x!["path"] == "LinkedDoors").Select(x => (string?)x!["compose"]!["fields"]!["Door"]).ToList();
+            if (r4 is not null || p4.Ops.Count != 1 || p4.Ops[0].FieldPath != "MapInfos" || sets is null || !sets.SequenceEqual(new[] { dB.ToString() })) bad.Add($"whole entry: refused {r4}, ops {Ops(p4)}, doors [{string.Join(",", sets ?? new())}]");
+            // a whole entry keeping its first door: [A, B] -> [A, C]
+            var (p4k, _) = NavRepairNavi.ForVersion(nv, new[] { dA, dC }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, false, (dA, U), (dB, U)) }), ("Later.esp", new[] { Entry(m, false) })));
+            var setsK = p4k.Ops.SingleOrDefault()?.ComposeNode?["sets"]?.AsArray().Where(x => (string?)x!["path"] == "LinkedDoors").Select(x => (string?)x!["compose"]!["fields"]!["Door"]).ToList();
+            if (setsK is null || !setsK.SequenceEqual(new[] { dA.ToString(), dC.ToString() }) || p4k.Entries.Single().KeepDoors != 1) bad.Add($"whole entry keeping one: doors [{string.Join(",", setsK ?? new())}]");
+            // a whole interior entry, and an unstated navmesh with doors: refused; unstated with no doors and nothing gained: nothing
+            var (_, r5) = NavRepairNavi.ForVersion(nv, new[] { dB }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(nv, true, (dA, U)) }), ("Later.esp", new[] { Entry(m, false) })));
+            var (_, r6) = NavRepairNavi.ForVersion(nv, new[] { dB }, Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(m, false) })));
+            var (p7, r7) = NavRepairNavi.ForVersion(nv, Array.Empty<FormKey>(), Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(m, false) })));
+            if (r5?.Contains("cannot yet compose a whole interior entry") != true || r6?.Contains("no plugin's NAVI states") != true || r7 is not null || p7.Entries.Count != 0)
+                bad.Add($"refusals: interior '{r5}', unstated '{r6}', nothing '{r7}' ({p7.Entries.Count} entries)");
+            // a gained neighbour, both ways, with the door table on the carried navmesh
+            var (p8, _) = NavRepairNavi.ForVersion(nv, new[] { dA }, new[] { m }, View(("SelfTest.esm", new[] { Entry(m, false), Entry(nv, false) })));
+            // entries in FormKey order: the carried navmesh (A80, entry 1) first, then its neighbour (A81, entry 0)
+            if (Ops(p8) != "MapInfos[1].MergedTo:Add=A81 MapInfos[1].LinkedDoors:Add=D81 MapInfos[0].MergedTo:Add=A80") bad.Add("gained ops " + Ops(p8));
+            return bad.Count == 0 ? null : string.Join(" | ", bad);
+        });
+
         // ---- the renumbering-proof row key (RowsAt), navownprobe's --base summary for a navedit patch ----
         string A = K(0xA01).ToString(), B = K(0xB01).ToString(), Z = K(0xC01).ToString();
         Conflict Link(string kind, int srcTri, string? srcAt, int tgtTri, string? tgtAt, string src = "", string tgt = "") =>

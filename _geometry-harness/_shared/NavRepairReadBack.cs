@@ -219,7 +219,18 @@ public static class NavRepairReadBack
                 var nav = FormKey.Factory((string)e!["navmesh"]!);
                 var add = e["add"]!.AsArray().Select(x => FormKey.Factory((string)x!)).ToList();
                 var doors = (e["addDoors"] as JsonArray ?? new JsonArray()).Select(x => FormKey.Factory((string)x!)).ToList();
-                void Doors(NavigationMapInfo m) { foreach (var d in doors) m.LinkedDoors.Add(new LinkedDoor { Unknown = NavRepairNavi.LinkedDoorUnknown, Door = new FormLink<IPlacedObjectGetter>(d) }); }
+                // a carried version's door table: the entry's first keepDoors kept, the rest of the table written after them
+                var after = (e["doorsAfter"] as JsonArray)?.Select(x => FormKey.Factory((string)x!)).ToList();
+                int keepD = (int?)e["keepDoors"] ?? 0;
+                void Doors(NavigationMapInfo m)
+                {
+                    if (after is not null)
+                    {
+                        while (m.LinkedDoors.Count > keepD) m.LinkedDoors.RemoveAt(m.LinkedDoors.Count - 1);
+                        foreach (var d in after.Skip(keepD)) m.LinkedDoors.Add(new LinkedDoor { Unknown = NavRepairNavi.LinkedDoorUnknown, Door = new FormLink<IPlacedObjectGetter>(d) });
+                    }
+                    foreach (var d in doors) m.LinkedDoors.Add(new LinkedDoor { Unknown = NavRepairNavi.LinkedDoorUnknown, Door = new FormLink<IPlacedObjectGetter>(d) });
+                }
                 if (e["winnerIndex"] is { } wi)
                 {
                     int i = (int)wi;
@@ -257,6 +268,38 @@ public static class NavRepairReadBack
             return (diff, want.MapInfos.Count);
         }
         finally { foreach (var m in opened.Values) m.Dispose(); }
+    }
+
+    /// <summary>THE NAVI AGAINST THE VERSION, apart from the plan (houseCARL's items 2 and 3; the master's condition of
+    /// 2026-11-22: the written NAVI read back and compared with the version field by field). The entry the game takes for
+    /// <paramref name="key"/> with the patch loaded last (the last plugin of <paramref name="order"/>, then
+    /// <paramref name="patchPath"/>, that states it), read from the written files, against <paramref name="versionPath"/>'s own
+    /// record of the navmesh: its LinkedDoors are the version's door table, door for door and in order, each with
+    /// <see cref="NavRepairNavi.LinkedDoorUnknown"/> (the base game's rule, 15,461 of 15,461 entries). One sentence per
+    /// difference; empty when the entry follows the version.</summary>
+    public static List<string> NaviFollowsVersion(IReadOnlyList<string> order, string patchPath, FormKey key, string versionPath)
+    {
+        var version = File.Exists(versionPath) ? NavUseVersionPlan.Winning(versionPath, key) : null;
+        if (version is null) return new() { $"{Path.GetFileName(versionPath)} has no version of {key} to hold the navmesh info map to" };
+        var full = Path.GetFullPath(patchPath);
+        var (view, open) = NaviView.Read(order.Where(p => !string.Equals(Path.GetFullPath(p), full, StringComparison.OrdinalIgnoreCase)).Append(patchPath).ToList());
+        try
+        {
+            if (view.Problem is { } pr) return new() { $"the navmesh info map cannot be read back ({pr})" };
+            var table = (version.DoorTriangles ?? Array.Empty<NavDoorTriangle>()).Select(d => d.Door).ToList();
+            if (!view.Effective.TryGetValue(key, out var ef))
+                return table.Count == 0 ? new() : new() { $"no plugin's NAVI states {key}, so its linked doors are not the version's door table of {table.Count}" };
+            var e = ef.Src.Map.MapInfos[ef.Index];
+            var diff = new List<string>();
+            if (e.LinkedDoors.Count != table.Count) diff.Add($"{key}'s navmesh info map entry ({ef.Src.Plugin}) links {e.LinkedDoors.Count} door(s), and the version's door table has {table.Count}");
+            for (int i = 0; i < Math.Min(e.LinkedDoors.Count, table.Count); i++)
+            {
+                if (e.LinkedDoors[i].Door.FormKey != table[i]) diff.Add($"{key}'s linked door {i} is {e.LinkedDoors[i].Door.FormKey}, where the version's door table has {table[i]}");
+                if (e.LinkedDoors[i].Unknown != NavRepairNavi.LinkedDoorUnknown) diff.Add($"{key}'s linked door {i} has Unknown {e.LinkedDoors[i].Unknown}, not the base game's {NavRepairNavi.LinkedDoorUnknown}");
+            }
+            return diff;
+        }
+        finally { foreach (var o in open) o.Dispose(); }
     }
 
     /// <summary>A written navmesh against its expected state (navedit's plan, or a use_version row of a repair plan): its
@@ -387,6 +430,9 @@ public static class NavRepairReadBack
                         diff = new() { $"{k} is carried by a use_version row, whose written state only navedit write --repair-plan can hold to the re-planned version; read the patch back with it" };
                     else diff = GeometryDifferences(k, e.Geom, e.OldIndex, e.WinnerPath, e.Rebuilt, geoms.GetValueOrDefault(k), written.GetValueOrDefault(k))
                                 ?? new() { $"{k} is planned but not in the patch" };
+                    // the carried navmesh's NAVI entry, as the game takes it with the patch last, against the version itself
+                    if (expect is not null && k == FormKey.Factory((string)p["source"]!))
+                        diff.AddRange(NaviFollowsVersion(plan["order"]?.AsArray().Select(x => (string)x!).ToList() ?? new List<string>(), patchPath, k, (string?)p["winner"]?["path"] ?? ""));
                     if (diff.Count > 0) failed++;
                     results.Add(new JsonObject { ["navmesh"] = k.ToString(), ["useVersion"] = (string?)p["source"], ["holds"] = diff.Count == 0, ["differences"] = new JsonArray(diff.Select(x => (JsonNode)x).ToArray()) });
                 }
