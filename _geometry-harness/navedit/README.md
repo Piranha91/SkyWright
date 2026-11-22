@@ -207,7 +207,10 @@ its navmesh info map entry's linked doors (houseCARL's R9 and the linked-doors h
 - **Refused, by name:**
   - not a placed object, or not a teleport door;
   - a partner that does not lead back;
-  - disabled at load by the one enable rule (`EnableState`), or whose enable chain cannot be followed;
+  - disabled at load by the one enable rule (`EnableState`), or whose enable chain cannot be followed, unless the edit
+    gives `"atLoad": "any"`. The base game lists such doors too: 166 of its 2,165 door-table entries (84 through an enable
+    parent, Skyrim.esm and the DLC) are doors switched off at load, a quest-gated door among them. The row records the
+    door's state either way;
   - already listed;
   - no triangle under the marker (the nearest is named, with how far off it is: graft the floor first);
   - a marker more than 800 u off its triangle (past every base-game door, 781 u);

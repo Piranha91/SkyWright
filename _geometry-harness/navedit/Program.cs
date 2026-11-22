@@ -149,12 +149,16 @@ static class NavEditCli
                     EnableFacts? Facts(FormKey k) => view.ResolveWinner(k) is { } kw && view.GetRecord(session, kw.WinnerPlugin, k, null) is IPlacedGetter pg && PlacementExtract.RefOf(pg) is { } pr
                         ? new EnableFacts(pr.InitiallyDisabled, pr.EnableParent, pr.EnableParentOpposite) : null;
                     var state = drec is null ? default : EnableState.Resolve(door, Facts);
+                    // "atLoad": "any" lists a door the enable chain switches off at load (a quest-gated door): the base game lists such
+                    // doors too, 166 of its 2,165 door-table entries (84 through an enable parent; Skyrim.esm and the DLC, 2026-11-22)
+                    var atLoad = (string?)e["door"]?["atLoad"];
                     if (dref is null) refuse = $"The door edit of {key} needs \"ref\", the placed door's FormKey.";
+                    else if (atLoad is not (null or "any")) refuse = $"The door edit of {key} has \"atLoad\": \"{atLoad}\"; give \"any\" to list a door switched off at load, or leave it out.";
                     else if (drec is null) refuse = $"{door} is not a placed object of this load order; name the door's placed reference.";
                     else if (partner is null) refuse = $"{door} is not a teleport door (it leads nowhere), so no navmesh triangle stands before it in the game's sense.";
                     else if (prec?.TeleportDestination is not { } back || back.Door.FormKey != door) refuse = $"{door}'s partner {partner} does not lead back to it in this order, so where an actor arrives through {door} is not known.";
-                    else if (!state.Resolved) refuse = $"Whether {door} stands at load cannot be told (its enable chain names a reference this order does not place, or loops); it is not added.";
-                    else if (!state.Enabled) refuse = $"{door} is disabled at load{(state.ViaParent ? " (by its enable parent's chain)" : "")}, so no actor can use it then; it is not added.";
+                    else if (atLoad is null && !state.Resolved) refuse = $"Whether {door} stands at load cannot be told (its enable chain names a reference this order does not place, or loops); it is not added.";
+                    else if (atLoad is null && !state.Enabled) refuse = $"{door} is disabled at load{(state.ViaParent ? " (by its enable parent's chain)" : "")}, so no actor can use it then; give \"atLoad\": \"any\" to list it for when it is enabled.";
                     // a refusal still says which door, who places it and how it is switched, for the caller's judgement
                     if (refuse is not null && drec is not null)
                         row["door"] = new JsonObject
@@ -181,7 +185,7 @@ static class NavEditCli
                             ["arrivalMarker"] = Arr(new[] { marker.X, marker.Y, marker.Z }), ["triangle"] = r.Triangle >= 0 ? r.Triangle : null,
                             ["planDistance"] = double.IsNaN(r.PlanDistance) ? null : Math.Round(r.PlanDistance, 1),
                             ["heightAboveTriangle"] = double.IsNaN(r.Height) ? null : Math.Round(r.Height, 1),
-                            ["enabledAtLoad"] = new JsonObject { ["enabled"] = state.Enabled, ["viaParent"] = state.ViaParent }, ["navi"] = naviRow?.DeepClone(),
+                            ["enabledAtLoad"] = new JsonObject { ["enabled"] = state.Enabled, ["viaParent"] = state.ViaParent }, ["atLoad"] = atLoad ?? "enabled", ["navi"] = naviRow?.DeepClone(),
                         };
                     }
                 }
