@@ -22,7 +22,7 @@ static class NavRepairRun
             {
                 ["source"] = p.Nav.ToString(), ["class"] = p.Class, ["status"] = p.Status, ["why"] = string.Join("; ", p.Why),
                 ["adjacencyChange"] = p.AdjacencyChange,
-                ["winner"] = w is { } x ? new JsonObject { ["plugin"] = x.Plugin, ["path"] = x.Path } : null,
+                ["winner"] = w is { } x ? new JsonObject { ["plugin"] = x.Plugin, ["path"] = x.Path, ["sha256"] = Sha(x.Path) } : null,
                 ["links"] = new JsonArray(p.Links.Select(l => (JsonNode)new JsonObject
                 {
                     ["kind"] = l.Kind, ["row"] = l.RowSource.ToString(), ["tri"] = l.SrcTri, ["edge"] = l.Edge, ["target"] = l.Target.ToString(),
@@ -49,6 +49,14 @@ static class NavRepairRun
         };
         File.WriteAllText(path, doc.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         return doc;
+    }
+
+    /// <summary>The winner plugin's bytes as planned: navedit write --repair-plan refuses a plan whose winner changed since.</summary>
+    static string? Sha(string path)
+    {
+        if (!File.Exists(path)) return null;
+        using var fs = File.OpenRead(path);
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(fs)).ToLowerInvariant();
     }
 
     static JsonArray Ops(IEnumerable<RepairOp> ops) => new(ops.Select(o =>

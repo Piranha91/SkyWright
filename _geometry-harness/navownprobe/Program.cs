@@ -1164,7 +1164,7 @@ if (emitPath is not null)
         // island there (its own copy of the geometry) is never followed to the ground, by the island test navedit uses
         var (naviView, naviOpen) = NaviView.Read(paths);
         var islands = naviView.Effective.Where(kv => kv.Value.Src.Map.MapInfos[kv.Value.Index].Island is not null).Select(kv => kv.Key).ToHashSet();
-        var groundPlan = NavRepair.Ground(winGeom, groundFindings.Select(r => new GroundRow(r.Nav, r.Facts ?? Array.Empty<GroundVertex>())).ToList(), ground.Band, edgeTol, scope, islands);
+        var groundPlan = NavRepair.Ground(winGeom, groundFindings.Select(r => new GroundRow(r.Nav, r.Facts ?? Array.Empty<GroundVertex>())).ToList(), ground.Band, edgeTol, scope, islands, naviView.Problem);
         NaviPlan naviPlan;
         try { naviPlan = NavRepairNavi.Plan(relinkPlan, winGeom, naviView); }
         finally { foreach (var m in naviOpen) m.Dispose(); }

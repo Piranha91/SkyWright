@@ -706,11 +706,7 @@ static class NavEditCli
         var edits = again.SelectMany(p => p.Ops).Select(o => new WritePatchBuilder.PatchEdit
         {
             Target = FormKey.Factory(o.FormId), Path = o.FieldPath.Split('.'), Verb = o.Op, Key = o.Key, Value = o.Value, FromPlugin = o.FromPlugin,
-            Struct = o.ComposeNode is { } c ? new StructSpec
-            {
-                Type = (string)c["type"]!,
-                Fields = c["fields"]!.AsObject().ToDictionary(kv => kv.Key, kv => (string)kv.Value!),
-            } : null,
+            Struct = o.ComposeNode is JsonObject c ? MapCompose(c) : null,   // nested sets too (a NAVI whole-entry add), one mapping
         }).ToList();
         using (var resolver = LoadOrderResolver.Build(order))
         {
@@ -807,6 +803,17 @@ static class NavEditCli
         var plans = (plan["plans"] as JsonArray ?? new JsonArray()).Select(p => p!).ToList();
         var refused = plans.Where(p => (string?)p["status"] == "refused").Select(p => (string)p["source"]!).ToList();
         if (plans.Count == refused.Count) throw new Refusal("navedit write: the repair plan has nothing planned (every navmesh refused or none listed), so there is no patch to write.");
+        // the plan's ops are index-based on each winner as it was when planned: a winner changed since (a mod updated in
+        // place) would take them onto the wrong triangles and the read-back, which applies the same change, would still hold
+        foreach (var p in plans.Where(p => (string?)p["status"] != "refused"))
+        {
+            var wp = (string?)p["winner"]?["path"]; var want = (string?)p["winner"]?["sha256"];
+            if (wp is null) continue;
+            if (want is null) { Console.WriteLine($"WARNING: the repair plan does not record the hash of {Path.GetFileName(wp)} (a plan from before 2026-11-22), so a change to it since planning cannot be told; plan again with a current navownprobe --repair-plan to be sure."); continue; }
+            using var fs = File.OpenRead(wp);
+            if (!string.Equals(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(fs)), want, StringComparison.OrdinalIgnoreCase))
+                throw new Refusal($"navedit write: {Path.GetFileName(wp)} changed since the repair plan was made, so its ops may land on other triangles; plan again.");
+        }
         var ops = (plan["ops"] as JsonArray ?? new JsonArray()).Select(o => o!).ToList();
         if (ops.Count == 0) throw new Refusal("navedit write: the repair plan carries no ops; write it again with navownprobe --repair-plan.");
         var root = CheckoutLayout.FindRoot() ?? throw new Refusal("navedit write: the SkyWright checkout (SkyWright.sln) was not found above this program, so the rulebook cannot be located.");
@@ -836,13 +843,21 @@ static class NavEditCli
         if (masters.Count > 0 && AddMasters(outPath, order, masters) is { } merr) { Console.Error.WriteLine($"navedit write: {merr}"); return 1; }
         foreach (var r in refused) Console.WriteLine($"not written (refused in the plan): {r}");
         Console.WriteLine($"patch written: {outPath} ({ops.Count} ops, {plans.Count - refused.Count} navmesh plan(s)); its read-back:");
-        int rb = NavRepairReadBack.Run(planPath, outPath, Path.ChangeExtension(outPath, null) + ".readback.json");
+        var rbPath = Path.ChangeExtension(outPath, null) + ".readback.json";
+        int rb = NavRepairReadBack.Run(planPath, outPath, rbPath);
         using var written = SkyrimMod.CreateFromBinaryOverlay(outPath, SkyrimRelease.SkyrimSE);
         var declared = written.ModHeader.MasterReferences.Select(m => m.Master.FileName.String).ToList();
         var missing = masters.Where(m => !declared.Contains(m, StringComparer.OrdinalIgnoreCase)).ToList();
         var pos = declared.Select(d => order.FindIndex(o => string.Equals(Path.GetFileName(o), d, StringComparison.OrdinalIgnoreCase))).ToList();
         bool inOrder = pos.All(i => i >= 0) && pos.Zip(pos.Skip(1)).All(z => z.First < z.Second);
-        if (missing.Count > 0 || !inOrder)
+        bool mastersHold = missing.Count == 0 && inOrder;
+        if (File.Exists(rbPath) && JsonNode.Parse(File.ReadAllText(rbPath)) is JsonObject rbDoc)
+        {   // the read-back file says the whole verdict, the masters included
+            rbDoc["masters"] = new JsonObject { ["declared"] = Arr(declared), ["required"] = Arr(masters), ["holds"] = mastersHold };
+            if (!mastersHold) rbDoc["holds"] = false;
+            File.WriteAllText(rbPath, rbDoc.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        }
+        if (!mastersHold)
         {
             Console.WriteLine($"   FAILS  the patch's masters [{string.Join(", ", declared)}] " + (missing.Count > 0 ? $"lack {string.Join(", ", missing)}, whose versions it supersedes" : "are not in load order"));
             return 1;

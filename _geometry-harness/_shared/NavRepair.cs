@@ -340,7 +340,7 @@ public static class NavRepair
     /// <summary>The follow-the-ground plan for <paramref name="rows"/>: every used vertex within <paramref name="band"/> of its
     /// author's ground moves by what the ground moved under it, and the box's z is recomputed.</summary>
     public static NavRepairPlan Ground(IReadOnlyDictionary<FormKey, WinningNav> nav, IReadOnlyList<GroundRow> rows, float band, EdgeTolerance tol,
-                                       ISet<FormKey>? scope = null, ISet<FormKey>? islands = null)
+                                       ISet<FormKey>? scope = null, ISet<FormKey>? islands = null, string? naviProblem = null)
     {
         var plan = new NavRepairPlan();
         var moved = new Dictionary<FormKey, NavmeshGeometry>();
@@ -350,6 +350,12 @@ public static class NavRepair
             if (!nav.TryGetValue(r.Nav, out var w)) continue;
             var p = new NavPlan { Nav = r.Nav, Class = "ground" };
             plan.Plans.Add(p);
+            if (naviProblem is not null)
+            {
+                p.Status = "refused";
+                p.Why.Add($"the navmesh info map cannot be read ({naviProblem}), so whether {r.Nav} is an island is not known; following the ground is refused");
+                continue;
+            }
             if (islands is not null && islands.Contains(r.Nav))
             {
                 // the navmesh info map keeps its own copy of an island's geometry: moving the vertices would leave it stale
