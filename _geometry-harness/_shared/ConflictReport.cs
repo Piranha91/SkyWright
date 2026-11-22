@@ -43,9 +43,14 @@ namespace HarnessShared;
 /// their vertex-alpha facts (<c>NifWind</c>). Null otherwise, and then omitted. Never load-bearing.</param>
 /// <param name="Triangle">On an EDGE-IDX or EDGE-NAV row's other end: the target triangle the broken link names, part of the
 /// row's identity (2026-10-24 for EDGE-IDX, 2026-11-16 for EDGE-NAV: one row per broken link); on an EDGE-NAV row's linking
-/// navmesh, its source triangle. Null on every other record, and then omitted.</param>
+/// navmesh, its source triangle; on an EDGE-NOMATCH or EDGE-ONEWAY row's linking navmesh, its source triangle (2026-11-22,
+/// not part of the row's identity). Null on every other record, and then omitted.</param>
+/// <param name="At">Where that triangle stands: its centroid "x,y,z" to 0.01 u, from this run's winning geometry, or null
+/// when the index names no triangle (a link past the table). An index changes when a patch renumbers the navmesh (a
+/// swap-remove, an add, a cut); the place does not, so a before/after comparison of one navmesh keys on this
+/// (navownprobe's --base summary, 2026-11-22). Not part of <c>ConflictIo.RowIdentity</c>.</param>
 public sealed record ConflictRecord(string FormKey, string Role, string? Label, PhysicalState? Physical = null, string? PhysicalDetail = null,
-                                    string? Wind = null, int? Triangle = null);
+                                    string? Wind = null, int? Triangle = null, string? At = null);
 
 /// <summary>One detected conflict between two plugins, with the records that carry it.</summary>
 /// <param name="Kind">CLOBBERED / DOOR-IDX / EDGE-IDX / SPLIT / OVERLAP / CONTACT — the detector's own class name.</param>

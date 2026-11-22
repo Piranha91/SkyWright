@@ -123,6 +123,48 @@ static class NavRepairSelfTest
             return plan.Plans.All(p => p.Status == "planned") && want.SequenceEqual(got) ? null : "with both entries: " + string.Join(" | ", got);
         });
 
+        // ---- the renumbering-proof row key (RowsAt), navownprobe's --base summary for a navedit patch ----
+        string A = K(0xA01).ToString(), B = K(0xB01).ToString(), Z = K(0xC01).ToString();
+        Conflict Link(string kind, int srcTri, string? srcAt, int tgtTri, string? tgtAt, string src = "", string tgt = "") =>
+            new(kind, "RpA.esp", "Skyrim.esm", "a link", new[] { new ConflictRecord(src.Length > 0 ? src : A, "navmesh", null, Triangle: srcTri, At: srcAt) },
+                new[] { new ConflictRecord(tgt.Length > 0 ? tgt : B, "navmesh", null, Triangle: tgtTri, At: tgtAt) });
+
+        // C2551: one broken link, its two triangles renumbered by a patch (source 5 -> 0, target 7 -> 2) but standing where
+        // they stood: the row is unchanged by place, though its RowIdentity (by target index) changed.
+        Case("2551 rows-at-renumbered", () =>
+        {
+            var before = new[] { Link("EDGE-IDX", 5, "10.00,20.00,0.00", 7, "110.00,20.00,0.00") };
+            var after = new[] { Link("EDGE-IDX", 0, "10.00,20.00,0.00", 2, "110.00,20.00,0.00") };
+            var (gone, fresh, same) = RowsAt.Compare(before, after, A);
+            string Id(Conflict c) => ConflictIo.RowIdentity(c.Kind, c.Necessary[0].FormKey, c.Alternative![0].FormKey, c.A, c.Alternative[0].Triangle);
+            if (Id(before[0]) == Id(after[0])) return "the index identity did not change, so this case shows nothing";
+            return gone.Count == 0 && fresh.Count == 0 && same.Count == 1 ? null : $"gone {gone.Count}, new {fresh.Count}, unchanged {same.Count}";
+        });
+
+        // C2552: a row whose source triangle the patch replaced (a cut: another place) counts gone; a new finding counts new;
+        // a row on another navmesh (Z to B) is not counted for A; a row with no triangles (CLOBBERED A) is matched by its
+        // records.
+        Case("2552 rows-at-gone-new-other", () =>
+        {
+            var clob = new Conflict("CLOBBERED", "RpA.esp", "Skyrim.esm", "re-cut", new[] { new ConflictRecord(A, "navmesh", null) });
+            var before = new[] { Link("EDGE-NOMATCH", 3, "10.00,20.00,0.00", 7, "110.00,20.00,0.00"), Link("EDGE-IDX", 1, "1.00,1.00,0.00", 9, null, Z), clob };
+            var after = new[] { Link("EDGE-NOMATCH", 3, "12.50,20.00,0.00", 7, "110.00,20.00,0.00"), Link("EDGE-ONEWAY", 4, "40.00,0.00,0.00", 1, "140.00,0.00,0.00"),
+                                Link("EDGE-IDX", 1, "1.00,1.00,0.00", 9, null, Z), clob };
+            var (gone, fresh, same) = RowsAt.Compare(before, after, A);
+            var (zg, zn, zs) = RowsAt.Compare(before, after, Z);
+            return gone.Count == 1 && fresh.Count == 2 && same.Count == 1 && same[0].StartsWith("CLOBBERED") && zg.Count == 0 && zn.Count == 0 && zs.Count == 1
+                ? null : $"A: gone {gone.Count}, new {fresh.Count}, unchanged {string.Join(",", same)}; Z: {zg.Count}/{zn.Count}/{zs.Count}";
+        });
+
+        // C2553: a base emit whose link rows carry no place (written before places) is refused in one sentence, not compared
+        // by index; one with places is not.
+        Case("2553 rows-at-unplaced-base", () =>
+        {
+            var old = new[] { Link("EDGE-IDX", 5, null, 7, null) };
+            var placed = new[] { Link("EDGE-IDX", 5, "10.00,20.00,0.00", 7, null) };
+            return RowsAt.Unplaced(old) is { } why && why.Contains("emit it again") && RowsAt.Unplaced(placed) is null ? null : "old base not refused, or a placed one refused";
+        });
+
         Console.WriteLine($"{(fail == 0 ? "all" : $"{fail} failed of")} navrepair self-test cases");
         return fail == 0 ? 0 : 1;
     }

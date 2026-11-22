@@ -950,6 +950,17 @@ if (cli.FloorCensusPath is { } censusPath)
 // Every record carries its PHYSICAL predicate under this arm (ClobberPredicate / DanglePredicate above); with --base,
 // every record of the named emit is re-measured under this arm too, so conflictdiff can credit a vanished row as
 // repaired only when the predicate went away (2026-09-03).
+// Where a navmesh's triangle stands in this run's winning geometry (ConflictRecord.At): its centroid, or null when the
+// index names no triangle.
+string? TriAt(FormKey nav, int? tri)
+{
+    if (tri is not { } t || !winGeom.TryGetValue(nav, out var w) || t < 0 || t >= w.Geom.Triangles.Count) return null;
+    var g = w.Geom; var x = g.Triangles[t];
+    Vec3 a = g.Vertices[x.A], b = g.Vertices[x.B], c = g.Vertices[x.C];
+    string F(double v) => v.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+    return $"{F(((double)a.X + b.X + c.X) / 3)},{F(((double)a.Y + b.Y + c.Y) / 3)},{F(((double)a.Z + b.Z + c.Z) / 3)}";
+}
+
 if (emitPath is not null)
 {
     var conflicts = new List<Conflict>();
@@ -986,12 +997,12 @@ if (emitPath is not null)
         // patch that only re-states the target navmesh has not repaired the pointer into it.
         var (st, why) = DanglePredicate(d.Kind, d.Rec, d.Other, d.Tri);
         // an EDGE-NAV row's linking navmesh names its source triangle (Gate B review finding 5)
-        var necessary = new List<ConflictRecord> { new(d.Rec.ToString(), d.RecRole, Cell(navCell.GetValueOrDefault(d.Rec)), st, why, Triangle: d.SrcTri) };
+        var necessary = new List<ConflictRecord> { new(d.Rec.ToString(), d.RecRole, Cell(navCell.GetValueOrDefault(d.Rec)), st, why, Triangle: d.SrcTri, At: TriAt(d.Rec, d.SrcTri)) };
         // For an unpaired finding this chain IS the deliverable: it names every plugin that already
         // touches the broken record, which is where a fix would have to go.
         var chain = Overriders(d.Rec, d.RecRole);
         // An EDGE-IDX or EDGE-NAV row's other end names the target triangle: the row is that one link (ConflictIo.RowIdentity's part).
-        var other = new List<ConflictRecord> { new(d.Other.ToString(), d.OtherRole, null, Triangle: d.Tri) };
+        var other = new List<ConflictRecord> { new(d.Other.ToString(), d.OtherRole, null, Triangle: d.Tri, At: TriAt(d.Other, d.Tri)) };
         string cand = "";
         NavBorderLinks.CandidateResult? cr = null;
         if (d.Kind is "EDGE-IDX" or "EDGE-NAV") border.Candidates.TryGetValue((d.Rec, d.Other, d.Tri ?? -1), out cr);
@@ -1012,13 +1023,13 @@ if (emitPath is not null)
     foreach (var r in borderFindings)
     {
         var why = r.Kind == "EDGE-NOMATCH" ? $"no edge of the far triangle lies along this one within {edgeTol}" : "the far triangle does not link back";
-        var other = new List<ConflictRecord> { new(r.Target.ToString(), "navmesh", null, Triangle: r.TargetTri) };
+        var other = new List<ConflictRecord> { new(r.Target.ToString(), "navmesh", null, Triangle: r.TargetTri, At: TriAt(r.Target, r.TargetTri)) };
         if (r.Kind == "EDGE-NOMATCH" && border.Candidates.TryGetValue((r.Src, r.Target, r.TargetTri), out var cr) && cr.Unique)
             other.Add(new ConflictRecord(cr.All[0].Nav.ToString(), "candidate", null, Triangle: cr.All[0].Tri));
         int oa = NavOwner(r.Src), ob = NavOwner(r.Target);
         conflicts.Add(new Conflict(r.Kind, oa >= 0 ? pluginKey[oa].FileName.String : "", ob >= 0 ? pluginKey[ob].FileName.String : "",
             $"navmesh {r.Src} in {Cell(navCell.GetValueOrDefault(r.Src))} {r.Why}",
-            new List<ConflictRecord> { new(r.Src.ToString(), "navmesh", Cell(navCell.GetValueOrDefault(r.Src)), PhysicalState.Holds, why) }, other));
+            new List<ConflictRecord> { new(r.Src.ToString(), "navmesh", Cell(navCell.GetValueOrDefault(r.Src)), PhysicalState.Holds, why, Triangle: r.SrcTri, At: TriAt(r.Src, r.SrcTri)) }, other));
     }
     // NAV-GROUND rows: A owns the navmesh, B wins the ground under it.
     foreach (var r in groundFindings)
@@ -1108,6 +1119,27 @@ if (emitPath is not null)
         Console.WriteLine($"\n   --base {Path.GetFileName(basePath)}: {predicates.Count:N0} base-row predicate(s) re-measured under this order — "
                         + string.Join(", ", predicates.GroupBy(p => p.Physical).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}"))
                         + (baseUnreadable > 0 ? $"; {baseUnreadable} wanted extraction(s) unreadable" : ""));
+    }
+
+    // --base with --enable: ONE LINE PER NAVMESH THE ENABLED PLUGINS OVERRIDE (houseCARL's re-check of a navedit patch,
+    // 2026-11-22): its rows in the base emit and in this one, matched by a key that survives renumbering (RowsAt.Key: the
+    // kind, the records and where their triangles stand, never a triangle index), counted gone, new and unchanged.
+    if (basePath is not null && enablePlugins.Count > 0)
+    {
+        var enabledIx = enablePlugins.Select(e => Array.FindIndex(pluginKey, k => string.Equals(k.FileName.String, Path.GetFileName(e), StringComparison.OrdinalIgnoreCase)))
+                                     .Where(i => i >= 0).ToHashSet();
+        var overridden = navProviders.Where(kv => kv.Value.Count > 0 && enabledIx.Contains(kv.Value[^1])).Select(kv => kv.Key).OrderBy(k => k.ToString()).ToList();
+        var baseConflicts = ConflictIo.Read(basePath).Conflicts;
+        Console.WriteLine($"\n==== NAVMESHES THE ENABLED PLUGIN(S) OVERRIDE, against {Path.GetFileName(basePath)} ({overridden.Count:N0}) ====");
+        if (RowsAt.Unplaced(baseConflicts) is { } unplaced)
+            Console.WriteLine($"   {unplaced}");
+        else
+            foreach (var nav in overridden)
+            {
+                var (gone, fresh, same) = RowsAt.Compare(baseConflicts, conflicts, nav.ToString());
+                Console.WriteLine($"OVERRIDDEN {nav} ({pluginKey[navProviders[nav][^1]].FileName}): rows gone {gone.Count}, new {fresh.Count}, unchanged {same.Count}"
+                                + (gone.Count + fresh.Count > 0 ? "  [" + string.Join("; ", gone.Select(k => "gone " + k).Concat(fresh.Select(k => "new " + k)).Take(12)) + "]" : ""));
+            }
     }
 
     // THE REPAIR PLAN (NavRepair.cs) for this run's findings, and the re-check of a plan on the order with its patch added.

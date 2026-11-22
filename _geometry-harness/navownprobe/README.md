@@ -64,6 +64,36 @@ conflictdiff refuses (exit 3) to compare an emit written before 2026-10-24, whos
 one whose rows do; re-run the older arm. `--write-edge-link-fixture DIR` writes the fixture
 `_geometry-harness/tests/test_navown_edge_identity.py` runs the probe on.
 
+## Re-checking a patch: `--base` with `--enable`
+
+To see what a patch changes, emit the order without it, then with it:
+
+```
+navownprobe --emit BEFORE.json
+navownprobe --enable PATH/TO/PATCH.esp --base BEFORE.json --emit AFTER.json
+```
+
+The second run prints one line per navmesh the enabled plugin wins:
+
+```
+OVERRIDDEN 101F28:Skyrim.esm (NavEditTwoCheck.esp): rows gone 0, new 0, unchanged 2
+```
+
+- **Rows are matched by place, not by triangle number.** A patch renumbers what it edits (navedit's swap-remove, an add,
+  a cut), so a row keyed by triangle index would show as one gone and one new. Each link row's records now say where
+  their triangles stand (`"At"`: the centroid, to 0.01 u, from that run's winning geometry), and the summary keys on
+  the kind, the records and those places (`RowsAt.cs`). A row without triangles keeps its records and kind.
+- An EDGE-IDX row has no place at either end: it stands for every link naming the same missing triangle, and the index
+  it names is past the target's table. It keys on that index, which does not change when its source navmesh is
+  renumbered.
+- A base emit written before places existed is refused in one sentence; emit it again with this build.
+- `ConflictIo.RowIdentity`, `conflictdiff` and the order sweep keep their keys; `At` is an extra field they ignore.
+- Known answers: C2551-C2553 (`--navrepair-selftest`) and C2554 (the fixture's emit), in
+  `tests/test_navmesh_repair_rules.py`.
+- Real data, 2026-11-22, lab profile NR2-V: a navedit patch removing `1089E2`'s triangles 0-2 and `1089EE`'s 0-4 moved
+  each one's row triangle (551 and 283) to slot 0 at the same place. Its 12 rows on the two navmeshes came out
+  unchanged: 0 gone, 0 new. Keyed by index the same comparison gives 2 gone and 2 new.
+
 ## Self-test
 
 `navownprobe --moved-ref-selftest` runs the probe's own code on a synthetic load order (`_shared/MovedRefFixture.cs`).

@@ -66,6 +66,12 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
     2497  the re-check, by the same rule on the order with the patch added: relinked links and the ground rows go
           Holds -> Gone (repaired), L7's and SL's cut links are reported as cut, L4's as refused, and no border, link or
           ground row is created.
+    2551  self-test (RowsAt, navownprobe's --base summary): a row whose triangles a patch renumbered but did not move is
+          unchanged, matched by where they stand (ConflictRecord.At), not by index
+    2552  self-test: a row whose triangle moved counts gone, a new one new; a row on another navmesh is not counted
+    2553  self-test: a base emit whose link rows carry no place is refused in one sentence
+    2554  the fixture's emit: an EDGE-NAV, NOMATCH or ONEWAY row's source, and a NOMATCH or ONEWAY row's far end, names its
+          triangle and where it stands; one triangle one place, one place one triangle; an EDGE-IDX row names no place
 
 Probes come from this checkout's Release builds unless HC_NR_HARNESS names another harness folder; the houseCARL server
 and generator from this checkout's src (HC_NR_SRC another). HC_NR_CASES (e.g. "2463,2483") runs those cases only.
@@ -571,6 +577,32 @@ def t2506():
     selftest("2506")
 
 
+def t2554():
+    """Rejects: an emit whose link rows do not say where their triangles stand (ConflictRecord.At), or says it
+    inconsistently."""
+    import re
+    rows = [c for c in lab().rows() if c["Kind"] in ("EDGE-IDX", "EDGE-NAV", "EDGE-NOMATCH", "EDGE-ONEWAY")]
+    assert rows, f"no link rows in the plain arm{lab().why('plain')}"
+    place = re.compile(r"^-?\d+\.\d{2},-?\d+\.\d{2},-?\d+\.\d{2}$")
+    seen = {}
+    for c in rows:
+        if c["Kind"] == "EDGE-IDX":
+            # one row for every link naming the same missing triangle: no single source triangle, and the target index is
+            # past the table, so neither end has a place and the row keys on the dangling index
+            assert c["Necessary"][0].get("At") is None and alt(c).get("At") is None, f"EDGE-IDX {src(c)}: a place where none exists: {c}"
+            continue
+        recs = [c["Necessary"][0]] + ([alt(c)] if c["Kind"] in ("EDGE-NOMATCH", "EDGE-ONEWAY") else [])
+        for r in recs:
+            assert r.get("Triangle") is not None and place.match(r.get("At") or ""), f"{c['Kind']} {src(c)}: record {nm(r['FormKey'])} has no place: {r}"
+            key = (r["FormKey"].lower(), r["Triangle"])
+            assert seen.setdefault(key, r["At"]) == r["At"], f"{nm(r['FormKey'])} triangle {r['Triangle']} stands at two places"
+    by_mesh = {}
+    for (fk, tri), at in seen.items():
+        by_mesh.setdefault((fk, at), set()).add(tri)
+    clash = {k: v for k, v in by_mesh.items() if len(v) > 1}
+    assert not clash, f"two triangles of one navmesh at one place: {clash}"
+
+
 def t2490():
     """Rejects: a cut that leaves its table entry, or leaves a later entry's edge field naming the old index."""
     selftest("2490")
@@ -775,6 +807,10 @@ CASES = [
     ("2505 the read-back's NAVI arm: an unplanned entry change fails it", t2505),
     ("2506 self-test: a relink with no NAVI entry to write is refused", t2506),
     ("2498 the read-back refuses a carried cell that is not the winner's", t2498),
+    ("2551 self-test: a renumbered row is unchanged by place", lambda: selftest("2551")),
+    ("2552 self-test: rows gone, new and on another navmesh", lambda: selftest("2552")),
+    ("2553 self-test: a base emit without places is refused", lambda: selftest("2553")),
+    ("2554 the emit says where each link row's triangles stand", t2554),
     ("2499 the fix forwards that cell from its winner, and it holds", t2499),
 ]
 
