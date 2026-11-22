@@ -157,14 +157,14 @@ internal static class Program
             if (first is null)
             {
                 // a bundle with nothing to open: shown in the window with no scene; the Open control and the tabs still work
-                var w0 = Shell.EnsureWindow("workbench — results");
+                var w0 = Shell.EnsureWindow("SkyWright — results");
                 w0.Show();
                 Shell.FillConflicts(); Shell.FillFindings();
             }
         }
         else
         {
-            var window = Shell.EnsureWindow("workbench — start");
+            var window = Shell.EnsureWindow("SkyWright — start");
             window.Show();
             // free mode remembers the instance, profile and Output Folder between sessions (workbench-settings.json beside the exe)
             window.Dispatcher.BeginInvoke(async () =>

@@ -315,8 +315,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _view = NewView(_opt.Window);
         _view.Message += OnViewMessage;
         bool first = Shell.Window is null;
-        _window = Shell.EnsureWindow($"workbench — {_opt.CellLabel}");
-        _window.Title = $"workbench — {_opt.CellLabel}";
+        _window = Shell.EnsureWindow($"SkyWright — {_opt.CellLabel}");
+        _window.Title = $"SkyWright — {_opt.CellLabel}";
         if (first && Environment.GetEnvironmentVariable("WB_WINDOW") is { Length: > 0 } ws && ws.Split('x') is [var ww, var wh])
         {
             double w = double.Parse(ww, CultureInfo.InvariantCulture), h = double.Parse(wh, CultureInfo.InvariantCulture);
@@ -1570,7 +1570,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var path = Path.Combine(_outDir, name + ".png");
         string pose = FormattableString.Invariant($"eye {_eye.X:0.##},{_eye.Y:0.##},{_eye.Z:0.##} yaw {_yaw:0.#} pitch {_pitch:0.#} fov {_fov:0.#}");
         // a view capture carries its cell and pose in a band on top; a window capture shows the view as the window does, without it
-        TexturedScene.SaveFrame(px, w, h, caption ? new[] { $"{_opt.CellLabel} — workbench — {name} — {pose}" } : Array.Empty<string>(),
+        TexturedScene.SaveFrame(px, w, h, caption ? new[] { $"{_opt.CellLabel} — SkyWright — {name} — {pose}" } : Array.Empty<string>(),
             Array.Empty<(string, Vector3)>(), $"pose: {pose} | cell {_opt.CellLabel}", path);
         Say($"captured {path}");
         return path;

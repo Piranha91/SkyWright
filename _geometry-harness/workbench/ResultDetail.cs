@@ -78,7 +78,7 @@ internal static class ResultDetail
         sp.Children.Add(new TextBlock { Text = Meaning(r), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(19, 2, 0, 10) });
 
         // what clashes, in a sentence
-        var values = r.Values.ToList();
+        var values = OverlapWords.Values(r);
         string clash = r.Lane == "record" && values.FirstOrDefault(v => v.Label == "losing mod's value")?.Plugin is { } loser
                                           && values.FirstOrDefault(v => v.Label == "winning mod's value")?.Plugin is { } winner
             ? $"Both mods set its {RecordWords.Field(r.Field ?? r.Kind)}. {winner} wins; {loser}'s is overridden."
@@ -114,7 +114,7 @@ internal static class ResultDetail
             sp.Children.Add(new TextBlock { Text = "The patch's edits here", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 2) });
             foreach (var j in r.JoinedEdits) sp.Children.Add(new TextBlock { Text = j, TextWrapping = TextWrapping.Wrap, Foreground = dim });
         }
-        if (r.Note is { } n) sp.Children.Add(new TextBlock { Text = char.ToUpperInvariant(n[0]) + n[1..] + (n.EndsWith('.') ? "" : "."), TextWrapping = TextWrapping.Wrap, Foreground = dim, FontStyle = FontStyles.Italic, Margin = new Thickness(0, 6, 0, 0) });
+        if (r.Note is { } n && r.Lane != "overlap") sp.Children.Add(new TextBlock { Text = char.ToUpperInvariant(n[0]) + n[1..] + (n.EndsWith('.') ? "" : "."), TextWrapping = TextWrapping.Wrap, Foreground = dim, FontStyle = FontStyles.Italic, Margin = new Thickness(0, 6, 0, 0) });
 
         var copyButton = new Button { Content = "Copy details", HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 12, 0, 0), ToolTip = "copy this row's full account as text" };
         copyButton.Click += (_, _) => copy();

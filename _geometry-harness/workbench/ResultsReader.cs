@@ -789,7 +789,7 @@ internal sealed class ResultPair
                     rows.Add(new ResultRow(index, ResultGroup.NotScored, _p.Id, "overlap", ResultFiles.S(e, "kind") ?? "OVERLAP", named?.BaseType == "Npc" ? "ACHR" : "REFR",
                         fk, null, null, named?.BaseEditorId, named?.BaseType, null, null, attribution.Length > 0 ? attribution : null,
                         says.Length > 0 ? Regex.Replace(says, @"\s+", " ").Trim() : $"predicted overlap of {fk} and {other}", values, RefPlace(fk, other), "before", Array.Empty<string>(),
-                        attribution == "needs-both" ? null : $"this overlap is not attributed to both mods together (its attribution is '{attribution}')"));
+                        attribution == "needs-both" ? null : OverlapWords.Attribution(attribution, ResultFiles.S(e, "attributionMod"))));
                 }
                 NotScored = count;
             }

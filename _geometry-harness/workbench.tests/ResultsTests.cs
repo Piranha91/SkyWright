@@ -505,7 +505,9 @@ public sealed class ResultsTests
         Assert.Equal(new[] { "needs-both", "with-target" }, overlaps.Select(r => r.Attribution));
         Assert.Equal(("000103:ModA.esp", "000108:ModB.esp", ResultsFixture.Cell), (overlaps[0].Place.RefKey, overlaps[0].Place.OtherKey, overlaps[0].Place.Cell));
         Assert.Null(overlaps[0].Note);
-        Assert.Contains("with-target", overlaps[1].Note);
+        // the note says it in words, not in the check's own term
+        Assert.Contains("No setup without the other mod was checked", overlaps[1].Note);
+        Assert.DoesNotContain("with-target", overlaps[1].Note);
         // its own cell is a persistent cell, so it opens in its partner's
         Assert.Equal(ResultsFixture.Cell, overlaps[1].Place.Cell);
     }

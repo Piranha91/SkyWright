@@ -109,8 +109,11 @@ internal sealed record ResultTableRow(ResultRow Row, string Line, ResultPair? Pa
         ? "patch change nothing predicted: " + (Row.Category switch { 3 => "a new value", 4 => "forwards a value", 5 => "not measured", _ => "category " + Row.Category })
         : ResultRules.Groups[Row.Group].Words;
     /// <summary>The mod (or mods) the pair checks, and the one it is checked against, by plugin name.</summary>
-    public string Mod => Pair is null ? Row.Pair : string.Join(", ", Pair.Subject);
-    public string Against => Pair is null ? "" : string.Join(", ", Pair.Partner);
+    /// <summary>An overlap names the plugins of its own two objects (the selected one's, then the other's), which need not be
+    /// the pair's: a pair's mod can clash with a third plugin's object.</summary>
+    OverlapWords.Parts? Objects => Row.Lane == "overlap" ? OverlapWords.Parse(Row.Summary) : null;
+    public string Mod => Objects is { } o ? o.PluginA : Pair is null ? Row.Pair : string.Join(", ", Pair.Subject);
+    public string Against => Objects is { } o ? o.PluginB : Pair is null ? "" : string.Join(", ", Pair.Partner);
     public string What => Row.Lane == "record" ? $"{RecordWords.Field(Row.Field ?? Row.Kind)} lost" : RecordWords.Change(Row.Kind);
     public string Object => RecordWords.Name(Row.EditorId, Row.BaseEditorId, Row.FormKey);
     public string Where => Row.Where ?? (Row.Place.Cell is { } c ? RecordWords.Form(c) : "");
@@ -135,8 +138,8 @@ internal sealed record ResultTableRow(ResultRow Row, string Line, ResultPair? Pa
         ("FormKey", nameof(FormKey), 150, "the record's FormID and the plugin it comes from"),
         ("Type", nameof(Type), 175, "the kind of record"),
         ("", null, 30, "green: addressed · red: not addressed · amber: a patch change nothing predicted · grey: an overlap the scorecard does not score"),
-        ("Mod", nameof(Mod), 190, "the mod the pair checks"),
-        ("Against", nameof(Against), 170, "the mod it is checked against"),
+        ("Mod", nameof(Mod), 190, "the mod the pair checks; for an overlap, the plugin of the row's own object (cyan in the view)"),
+        ("Against", nameof(Against), 170, "the mod it is checked against; for an overlap, the plugin of the object it passes into (magenta in the view)"),
         ("Change", nameof(What), 130, "what was done to the record"),
         ("Object", nameof(Object), 190, "the record by its editor ID, else its FormID and plugin"),
         ("Where", nameof(Where), 170, "the cell it is in"),

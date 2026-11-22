@@ -28,7 +28,8 @@ internal static class ResultRules
     {
         var g = Groups[r.Group];
         string tag = r.Group == ResultGroup.PatchChange ? $"{g.Shape} patch change ({CategoryWords(r.Category)})" : $"{g.Shape} {g.Words}";
-        string text = r.Summary.Length > 260 ? r.Summary[..260] + "…" : r.Summary;
+        string summary = r.Lane == "overlap" ? OverlapWords.Sentence(r.Summary) : r.Summary;
+        string text = summary.Length > 260 ? summary[..260] + "…" : summary;
         return $"{tag}  ·  {(withPair ? r.Pair + "  ·  " : "")}{text}" + (r.Place.Cell is not null ? "" : PlacedOnOpen(r) ? "   (its cell is found in the load order when the row is opened)" : $"   (no view: {r.Place.WhyNot})");
     }
 
@@ -165,7 +166,13 @@ internal static class ResultsView
         about.Children.Add(cats); about.Children.Add(NotesLine); about.Children.Add(Legend);
         var aboutBox = new Expander { Header = "More filters, notes and the scene's marks", IsExpanded = false, Content = about, Margin = new Thickness(6, 0, 6, 2) };
         var panel = new DockPanel();
-        foreach (var top in new UIElement[] { Header, PairBox, filters, Means, controls, aboutBox, CountLine }) { DockPanel.SetDock(top, Dock.Top); panel.Children.Add(top); }
+        // the pair list with its label, so it reads as a choice and not as a summary line
+        var pairRow = new DockPanel { Margin = new Thickness(6, 2, 0, 2) };
+        var pairLabel = new TextBlock { Text = "Pair", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0), ToolTip = "the mods an evaluation checked against each other; pick one, or all pairs" };
+        DockPanel.SetDock(pairLabel, Dock.Left);
+        PairBox.Margin = new Thickness(0, 0, 6, 0);
+        pairRow.Children.Add(pairLabel); pairRow.Children.Add(PairBox);
+        foreach (var top in new UIElement[] { Header, pairRow, filters, Means, controls, aboutBox, CountLine }) { DockPanel.SetDock(top, Dock.Top); panel.Children.Add(top); }
         // the open row's values fill the tab; the rows themselves are the table the window shows across its full width
         // under the view (Table), while this tab is in front
         // under them, the open row's values and the load order its scene is built on share the pane, the load order the larger
@@ -355,17 +362,17 @@ internal static class ResultsView
         var g = Groups[r.Group];
         var lines = new List<string>
         {
-            r.Summary,
+            r.Lane == "overlap" ? OverlapWords.Sentence(r.Summary) : r.Summary,
             "",
             $"{g.Shape} {(r.Group == ResultGroup.PatchChange ? $"patch change nothing predicted, the scorecard's category {CategoryWords(r.Category)} ({r.Rule})" : g.Words)}"
                 + (r.Group is ResultGroup.Addressed or ResultGroup.NotAddressed ? $"  —  {AddressedMeans}" : r.Group == ResultGroup.NotScored ? $"  —  {NotScoredMeans}" : ""),
             $"pair {r.Pair}; {RecordWords.Named(r.RecordType, r.EditorId, r.BaseEditorId, r.FormKey)}"
                 + (r.EditorId is not null && r.BaseEditorId is { } b ? $"; base object {b}" : "") + (r.BaseType is { } bt ? $" ({bt.ToLowerInvariant()})" : "")
-                + (r.Field is { } f ? $"; {RecordWords.Field(f)}" : "") + (r.Attribution is { } a ? $"; attribution: {a}" : ""),
+                + (r.Field is { } f ? $"; {RecordWords.Field(f)}" : "") + (r.Attribution is { } a ? "; " + OverlapWords.Attribution(a, null).TrimEnd('.') : ""),
         };
-        if (r.Values.Count > 0) { lines.Add(""); foreach (var v in r.Values) lines.Add($"{v.Label}{(v.Plugin is { } p ? $" ({p})" : "")}: {v.Text}"); }
+        if (r.Values.Count > 0) { lines.Add(""); foreach (var v in OverlapWords.Values(r)) lines.Add($"{v.Label}{(v.Plugin is { } p ? $" ({p})" : "")}: {v.Text}"); }
         if (r.JoinedEdits.Count > 0) { lines.Add(""); lines.Add("the patch's edits here:"); foreach (var j in r.JoinedEdits) lines.Add("  " + j); }
-        if (r.Note is { } n) { lines.Add(""); lines.Add("note: " + n); }
+        if (r.Note is { } n && r.Lane != "overlap") { lines.Add(""); lines.Add("note: " + n); }
         lines.Add("");
         lines.Add(r.Place.Cell is { } c ? $"place: cell {c}" + (r.Place.RefKey is { } k ? $", object {k}" : "") + (r.Place.OtherKey is { } o ? $", other object {o}" : "")
                   : ResultRules.PlacedOnOpen(r) ? $"place: {r.Place.WhyNot}; its cell is found in the setup's own load order when the row is opened"
