@@ -80,12 +80,26 @@ not change the same navmesh; plan them separately.
 
 **Cut (NavCut).** `{"navmesh": K, "cut": {"outline": [[x, y], ...], "z": [bottom, top]}}` cuts the walkable surface out
 where a convex obstacle stands.
-- **What it cuts:** each triangle whose heights meet the band and whose plan overlaps the outline.
+- **What it cuts:** each triangle whose heights meet the band and whose plan reaches more than 0.05 u into the outline
+  (a triangle that only shares a line with it stays whole).
   - A triangle wholly inside goes.
   - A triangle partly inside is clipped into the convex pieces outside the outline, triangulated (a larger piece is
     fanned from its centre), with heights on the original triangle's plane.
+- **Several outlines cut in one pass** (`NavEdit.CutMany`, an obstacle cut as convex parts). Each triangle is split
+  outline by outline before anything is triangulated, and uncut neighbours are split once at the end. Cutting part after
+  part instead re-cut each result, rounding new points to float every time; on rock pile `0E6420`'s 40 parts that left
+  pieces that no longer joined.
+- **New points are welded.** A cut point within 0.05 u of an existing point is that point: along an original edge only
+  to that edge's ends and points, inside a triangle to nearby new points on the same level (a fan's centre never). Two
+  outlines' lines crossing near one spot otherwise made points a float step apart, and pieces between them that turned
+  over when written.
+- **Hairlines.** An outline's edges are taken in an order that leaves for last any whose outside piece would be under
+  0.1 u wide, so its line does not run on across the triangle; a piece still under 0.1 u wide is ground too narrow to
+  stand on and goes with the hole. A piece under 0.001 u² is dropped as a sliver; any larger one is kept however thin
+  (the 1 u² floor applies to triangles added by hand).
 - **Nothing is left half-joined.** The cut's lines can meet edges outside the hole, so an uncut neighbour on such an
-  edge is split at the same point, and every point is put into each piece edge it lies on.
+  edge is split at the same points, on all its edges at once (it can get points on two, from two outlines), and every
+  point is put into the one piece edge it lies closest to.
 - **Pieces** keep their triangle's flags except the link bits, and have no cover.
 - **Numbering, links and doors** are the triangle edit's (swap-remove), with its refusals.
 - **Refused:**
@@ -93,45 +107,63 @@ where a convex obstacle stands.
   - an empty band;
   - a cut that touches nothing;
   - a cut reaching an edge that links into another navmesh.
-- **Cut by a placed obstacle.** `{"navmesh": K, "cut": {"ref": "0E6420:Skyrim.esm", "margin": 0}}` takes the outline
-  from the obstacle (`_shared/NavCutFootprint.cs`), each step through its owner:
+- **Cut by a placed obstacle.** `{"navmesh": K, "cut": {"ref": "0E6420:Skyrim.esm", "margin": 0}}` takes the cut from
+  the obstacle (`_shared/NavCutFootprint.cs`), each step through its owner:
   - its winning placement (`PlacementExtract.RefOf`);
   - its base's model (`OverlapIndex.ModelOf`, the rule `BaseMesh` uses);
   - the mesh through this load order's files (`AssetResolver`, from `HarnessOrderCli`'s mods and archives);
   - its collision on the layers an actor meets (`CollisionLayers.RoleSoups`);
   - placed in the world (`SpatialOverlap.TransformSoup`).
-
-  That collision is sliced between step height (48 u) and a scale-1 humanoid's controller top (108.8 u) above the
-  navmesh floor under the obstacle (taken on its own level), and its convex hull in plan, grown by the margin, is the
-  outline. The band runs from step height below the floor to the controller's top above it. The plan row records the
-  mesh, where it was read from, the floor, the band and the outline.
+- **The rule: a spot is cut where an actor standing on it would walk into the obstacle.** That is, where some of the
+  collision lies between step height (48 u) and a scale-1 humanoid's controller top (108.8 u) above that spot, or the spot
+  lies under the inside of a solid across that whole band.
+  - **Each navmesh triangle is measured on its own plane.** Navmesh lying on a rock (vanilla drapes it over low rocks)
+    is not blocked by the rock it lies on; the ground beside the rock is. A bridge and the floor under it are each
+    measured on themselves, and so is sloping ground.
+  - **Inside a solid:** an odd number of the collision's surfaces above the band's top, counted per connected piece
+    (triangles sharing a corner). A buried rock, open at the bottom, counts as solid, and two overlapping rocks do not
+    cancel.
+  - **Parts.** Each triangle's blocked region, in a window round it, comes out as convex parts: the plan is cut into
+    vertical slabs at every end and crossing of the collision's edges there, each gap between edges is classified at its
+    middle, and blocked gaps merge while they stay convex. A gap under 0.1 u, between two edges a float step apart, goes
+    with a blocked gap beside it. Each part is grown by the margin and cut from its own triangle (with a margin, from the
+    triangles sharing its edges too), all in one `CutMany` pass.
+  - The plan row records the mesh, where it was read from, the band, how many triangles were measured, the parts with
+    the triangle each was measured on, and the area removed.
+- **Why not one floor.** Measured from the navmesh under the obstacle's origin, rock pile `0E6420`'s cut (as a hull, or
+  as cross-sections) took 87-100 % of the ground vanilla keeps walkable inside its hull. 674 of vanilla's 728 sample
+  points there lie 48 u or more above that floor, on the rocks, and none has collision in its own band.
 - **Refused:**
   - an obstacle that is deleted, starts disabled, or has an enable parent (whether it stands at load is not settled
     here);
   - a base with no model;
   - a mesh the order's files lack, or one with no collision on an actor's layers (a shrub);
-  - an obstacle nothing of which stands in the actor's band;
-  - no navmesh under it.
-- **Pieces.** The collision is split into connected pieces (triangles sharing a corner); each piece is hulled and cut
-  in turn (`NavEdit.CutMany`). An obstacle of separate parts keeps the ground between them.
-- **Known limit: a connected concave obstacle is still cut as its hull.** Rock pile `0E6420`'s collision is one
-  connected mesh, so it stays one piece. Vanilla left 673 of 2,033 sample points inside that hull walkable between
-  the rocks, and the cut removes them (18,135 u²). Next: cut by the obstacle's own cross-sections in the actor band,
-  split into convex parts.
+  - no navmesh triangle under or beside it;
+  - an obstacle that blocks no actor standing on any triangle by it.
+- **Known limits:**
+  - An actor is treated as a vertical line: a gap narrower than its body is kept. Give a margin to cut round it.
+  - A single connected mesh that overlaps itself counts its overlap as outside, where none of its surfaces is in the
+    band there.
+  - A cut can leave a few thin, valid triangles: on the real rock moved onto open ground, 6 of 293 new triangles were
+    under 0.05 u high (the least 0.003 u). Not yet seen in game.
 
 **Every edit refuses an island navmesh**, whose own copy of the geometry in the navmesh info map would go stale. Fills
 come later (`C:/hc-runs/2026-11-21-navgrid/PLAN.md`, the plan gate).
 
 ## Evidence
 
-- `navedit --selftest`: C2513-C2539, run by `tests/test_navedit.py`. Twenty-one sabotage arms each turn their case red:
+- `navedit --selftest`: C2513-C2549, run by `tests/test_navedit.py`. Sabotage arms (`C:/hc-runs/2026-11-21-navgrid/sabotage_navedit.py`
+  and `sabotage_footprint.py`) each turn their case red on its own assertion:
   - no fold, link, overlap, winding, third-triangle, door, last-link or cell-border check;
   - no coincident move;
   - no inbound re-point;
   - no self-link follow;
   - closing up instead of swap-remove;
-  - for the cut: no neighbour split, no shared-point insertion, band ignored, no convex check, no linked-edge check;
-  - for the obstacle outline: no band slice, margin ignored, floor ignoring the level, one hull instead of pieces.
+  - for the cut: no neighbour split, no shared-point insertion, band ignored, no convex check, no linked-edge check, no
+    weld (C2550: the notched roof's cut leaves a sliver), neighbour split on one edge only, a shallow overlap spared, a thin piece kept, outline edges taken in order,
+    no triangle filter;
+  - for the obstacle: the slope ignored, one floor for every triangle, no inside, inside counted over all bodies, no
+    band top, margin ignored, merging without the convexity check.
 - Real data, 2026-11-21, on the lab's vanilla profile: `0E6430:Skyrim.esm` vertex 517 moved 48 u west.
   - Planned and written; the read-back held.
   - The patch's navmesh data is byte-identical to the patch an actor walked across in game. There the rebuilt-grid arm
@@ -147,9 +179,16 @@ come later (`C:/hc-runs/2026-11-21-navgrid/PLAN.md`, the plan gate).
     half-joined edge. Not yet seen in game.
 - Real data, cut by a placed obstacle, on the same profile:
   - The shrub `0713F2` was refused (no collision on an actor's layers).
-  - The rock pile `0E6420` was planned: its mesh came from USSEP's archive, as this order resolves it. 174 of its 255
-    collision triangles stood in the band over a floor at z 2035.8; the 22-point hull replaced 10 triangles with 47.
-    Written and read back, with no half-joined edge. Not yet seen in game.
+  - The rock pile `0E6420` (one connected mesh; USSEP's archive supplies it on this order): 15 triangles measured. Some
+    of its collision reaches a band in the windows round them, but no blocked part of 1 u² falls on a triangle, so the
+    cut is refused as having nothing to cut. Vanilla
+    already keeps exactly the ground the rule keeps; an independent per-point check finds 0 of its 728 walkable sample
+    points inside the rock's hull blocked. The earlier rules took all of that ground (one hull) or 87 % of it (cross-
+    sections from one floor).
+  - The same rock's collision moved onto open ground of `0E6430` (2,100 u west, on its own floor): 27 parts on 3
+    triangles, planned in 0.3 s, no half-joined edge. An independent per-point check (each column tested directly, with
+    no slabs) agrees at every one of 17,226 grid points 2.5 u apart: all 7,823 it finds blocked are cut, all 9,403 it
+    finds walkable are kept (90 points within 0.3 u of its own edge are left out).
 - The checks caught two real cases on this profile:
   - an edit built from Skyrim.esm's triangle corners when USSEP's version wins (refused: the edges were already
     shared);

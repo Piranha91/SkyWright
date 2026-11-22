@@ -281,10 +281,20 @@ static class NavEditSelfTest
             }
             foreach (var p in holePoints) if (tt.Any(x => In(p, x))) return $"a triangle still covers ({p.X}, {p.Y}) in the hole";
             var used = tt.SelectMany(x => new[] { (int)x.A, x.B, x.C }).Distinct().ToList();
+            // a half-joined edge: an OPEN edge (one triangle on it, by position) with a vertex part-way along it, so the other
+            // side was split and this one not; an edge two triangles share is joined, however thin a triangle on it is
+            var sides = new Dictionary<(Vec3, Vec3), int>();
+            foreach (var x in tt)
+                foreach (var (a, b) in new[] { (x.A, x.B), (x.B, x.C), (x.C, x.A) })
+                {
+                    var key = v[a].X < v[b].X || (v[a].X == v[b].X && v[a].Y <= v[b].Y) ? (v[a], v[b]) : (v[b], v[a]);
+                    sides[key] = sides.GetValueOrDefault(key) + 1;
+                }
             foreach (var x in tt)
                 foreach (var (a, b) in new[] { (x.A, x.B), (x.B, x.C), (x.C, x.A) })
                     foreach (var k in used)
                     {
+                        if (sides[v[a].X < v[b].X || (v[a].X == v[b].X && v[a].Y <= v[b].Y) ? (v[a], v[b]) : (v[b], v[a])] > 1) break;
                         if (v[k] == v[a] || v[k] == v[b]) continue;
                         double ex = v[b].X - v[a].X, ey = v[b].Y - v[a].Y, len2 = ex * ex + ey * ey;
                         double s = ((v[k].X - v[a].X) * ex + (v[k].Y - v[a].Y) * ey) / len2;
@@ -343,7 +353,7 @@ static class NavEditSelfTest
             return RefusedFor2(NavEdit.Cut(Geom(v, t, new List<NavEdgeLink> { new(O, 0) }), Box(40, -10, 60, 10), -50, 50, none), "cutting across a navmesh border");
         });
 
-        // ---- the cut outline of a placed obstacle (NavCutFootprint) ----
+        // ---- the cut of a placed obstacle (NavCutFootprint.OnNavmesh), each triangle measured on its own plane ----
         TriangleSoup BoxSoup(float x0, float y0, float z0, float x1, float y1, float z1)
         {
             var c = new System.Numerics.Vector3[8];
@@ -351,75 +361,245 @@ static class NavEditSelfTest
             int[] f = { 0, 2, 1, 1, 2, 3, 4, 5, 6, 5, 7, 6, 0, 1, 4, 1, 5, 4, 2, 6, 3, 3, 6, 7, 0, 4, 2, 2, 4, 6, 1, 3, 5, 3, 7, 5 };
             return new TriangleSoup(c, f);
         }
-        string Ring(IReadOnlyList<(float X, float Y)> o) => string.Join(" ", o.OrderBy(p => p.X).ThenBy(p => p.Y).Select(p => $"({p.X:0.##},{p.Y:0.##})"));
+        TriangleSoup Join(params TriangleSoup[] s)
+        {
+            var vs = new List<System.Numerics.Vector3>(); var ix = new List<int>();
+            foreach (var x in s) { int o = vs.Count; vs.AddRange(x.Vertices); ix.AddRange(x.Indices.Select(i => i + o)); }
+            return new TriangleSoup(vs.ToArray(), ix.ToArray());
+        }
+        // an upright prism over a plan outline: its walls, and a lid of rectangles at its top; the walls share corners, so
+        // it is one connected mesh, which a hull would cut whole
+        TriangleSoup Prism(IReadOnlyList<(float X, float Y)> ring, float z0, float z1, params (float X0, float Y0, float X1, float Y1)[] lid)
+        {
+            var vs = new List<System.Numerics.Vector3>(); var ix = new List<int>();
+            foreach (var (x, y) in ring) { vs.Add(new(x, y, z0)); vs.Add(new(x, y, z1)); }
+            for (int i = 0; i < ring.Count; i++)
+            {
+                int a = 2 * i, b = 2 * ((i + 1) % ring.Count);
+                ix.AddRange(new[] { a, b, a + 1, b, b + 1, a + 1 });
+            }
+            foreach (var (x0, y0, x1, y1) in lid)
+            {
+                int o = vs.Count;
+                vs.Add(new(x0, y0, z1)); vs.Add(new(x1, y0, z1)); vs.Add(new(x1, y1, z1)); vs.Add(new(x0, y1, z1));
+                ix.AddRange(new[] { o, o + 1, o + 2, o, o + 2, o + 3 });
+            }
+            return new TriangleSoup(vs.ToArray(), ix.ToArray());
+        }
+        TriEditResult CutBy(NavmeshGeometry g, NavCutPlan fp) =>
+            NavEdit.CutMany(g, fp.Parts.Select(f => (f.Outline, float.MinValue, float.MaxValue)).ToList(), none, null, fp.Parts.Select(f => (IReadOnlyCollection<int>?)f.Applies).ToList());
+        bool Covers(NavmeshGeometry g, double px, double py, float? z = null)
+        {
+            var vv = g.Vertices;
+            return g.Triangles.Any(x =>
+            {
+                if (z is { } zz && Math.Abs(vv[x.A].Z - zz) > 1) return false;
+                double d(Vec3 p, Vec3 q) => ((double)q.X - p.X) * (py - p.Y) - ((double)q.Y - p.Y) * (px - p.X);
+                double s1 = d(vv[x.A], vv[x.B]), s2 = d(vv[x.B], vv[x.C]), s3 = d(vv[x.C], vv[x.A]);
+                return (s1 > 0 && s2 > 0 && s3 > 0) || (s1 < 0 && s2 < 0 && s3 < 0);
+            });
+        }
+        double AreaAt(NavmeshGeometry g, float z) => g.Triangles.Where(x => Math.Abs(g.Vertices[x.A].Z - z) <= 1 && Math.Abs(g.Vertices[x.B].Z - z) <= 1 && Math.Abs(g.Vertices[x.C].Z - z) <= 1).Sum(x =>
+        {
+            var v = g.Vertices;
+            return Math.Abs(((double)v[x.B].X - v[x.A].X) * ((double)v[x.C].Y - v[x.A].Y) - ((double)v[x.B].Y - v[x.A].Y) * ((double)v[x.C].X - v[x.A].X)) / 2;
+        });
+        string? CutPlanned(NavCutPlan fp) => fp.Status == "planned" ? null : "refused: " + fp.Why;
 
-        // C2535: a 40 x 20 box standing 200 u tall on a floor at 0: its outline is the box, and the band runs from step
-        // height below the floor (-48) to an actor's top above it (108.8).
+        // C2535: a 40 x 20 box standing 200 u tall on the floor: its walls cross the band, its inside is under its lid, so
+        // exactly its 800 u² go.
         Case("2535 footprint-box", () =>
         {
-            var fp = NavCutFootprint.Of(BoxSoup(80, 90, -10, 120, 110, 190), 0);
-            if (fp.Status != "planned") return "refused: " + fp.Why;
-            if (Ring(fp.Outline) != "(80,90) (80,110) (120,90) (120,110)") return "outline " + Ring(fp.Outline);
-            return fp.ZLo == -48 && Math.Abs(fp.ZHi - 108.8f) < 1e-3 ? null : $"band {fp.ZLo}..{fp.ZHi}";
+            var (v, t) = Linked(); var g = Geom(v, t);
+            var fp = NavCutFootprint.OnNavmesh(BoxSoup(80, 90, -10, 120, 110, 190), g);
+            return CutPlanned(fp) ?? Sound(CutBy(g, fp), 40000 - 800, new[] { (100.0, 100.0), (81.0, 91.0), (119.0, 109.0) });
         });
 
-        // C2536: a margin of 8 grows the outline to 56 x 36.
+        // C2536: a margin of 8 cuts the box grown to 56 x 36, 2,016 u², across the triangles it reaches.
         Case("2536 footprint-margin", () =>
         {
-            var fp = NavCutFootprint.Of(BoxSoup(80, 90, -10, 120, 110, 190), 0, margin: 8);
-            return fp.Status == "planned" && Ring(fp.Outline) == "(72,82) (72,118) (128,82) (128,118)" ? null : $"{fp.Status} {fp.Why} {Ring(fp.Outline)}";
+            var (v, t) = Linked(); var g = Geom(v, t);
+            var fp = NavCutFootprint.OnNavmesh(BoxSoup(80, 90, -10, 120, 110, 190), g, margin: 8);
+            return CutPlanned(fp) ?? Sound(CutBy(g, fp), 40000 - 2016, new[] { (73.0, 83.0), (127.0, 117.0), (100.0, 100.0) });
         });
 
-        // C2537: an obstacle wholly above an actor's top (z 150-300), and one below step height (z 0-30), block nobody:
-        // both refused, naming the band.
+        // C2537: a box wholly above an actor's top (z 150-300) and one below step height (z 0-30) block nobody: refused,
+        // naming the band.
         Case("2537 footprint-out-of-band", () =>
         {
-            var high = NavCutFootprint.Of(BoxSoup(80, 90, 150, 120, 110, 300), 0);
-            var low = NavCutFootprint.Of(BoxSoup(80, 90, 0, 120, 110, 30), 0);
+            var (v, t) = Linked(); var g = Geom(v, t);
+            var high = NavCutFootprint.OnNavmesh(BoxSoup(80, 90, 150, 120, 110, 300), g);
+            var low = NavCutFootprint.OnNavmesh(BoxSoup(80, 90, 0, 120, 110, 30), g);
             return high.Status == "refused" && high.Why!.Contains("step height") && low.Status == "refused" && low.Why!.Contains("step height") ? null : $"high {high.Status}, low {low.Status}";
         });
 
-        // C2538: the floor under an obstacle is taken on the level nearest its height: with a bridge triangle 200 u over the
-        // square, an obstacle at z 190 stands on the bridge, one at z 5 on the square.
-        Case("2538 footprint-floor-level", () =>
+        // C2538: each level is measured on itself: with a bridge triangle 200 u over the square, a box standing on the bridge
+        // cuts the bridge and not the floor; one standing on the floor under it cuts the floor and not the bridge.
+        Case("2538 footprint-levels", () =>
         {
             var (v, t) = Linked();
             v.Add(new Vec3(50, 50, 200)); v.Add(new Vec3(150, 50, 200)); v.Add(new Vec3(100, 150, 200));
             t.Add(new NavTri(9, 10, 11, 0));
             var g = Geom(v, t);
-            var lo = new System.Numerics.Vector2(90, 90); var hi = new System.Numerics.Vector2(110, 110);
-            float? up = NavCutFootprint.FloorUnder(g, 100, 80, 190, lo, hi), down = NavCutFootprint.FloorUnder(g, 100, 80, 5, lo, hi);
-            return up == 200 && down == 0 ? null : $"floor at 190: {up}, at 5: {down}";
+            var up = NavCutFootprint.OnNavmesh(BoxSoup(90, 70, 190, 110, 90, 390), g);
+            var down = NavCutFootprint.OnNavmesh(BoxSoup(90, 70, -10, 110, 90, 100), g);
+            if ((CutPlanned(up) ?? CutPlanned(down)) is { } why) return why;
+            var ru = CutBy(g, up); var rd = CutBy(g, down);
+            if (ru.Status != "planned" || rd.Status != "planned") return $"cut: {string.Join(" ", ru.Why)} {string.Join(" ", rd.Why)}";
+            string Levels(TriEditResult r) => $"bridge {AreaAt(r.After!, 200):0.#}, floor {AreaAt(r.After!, 0):0.#}";
+            if (Levels(ru) != "bridge 4600, floor 40000") return "box on the bridge: " + Levels(ru);
+            if (Levels(rd) != "bridge 5000, floor 39600") return "box on the floor: " + Levels(rd);
+            return !Covers(ru.After!, 101.3, 81.7, 200) && Covers(ru.After!, 101.3, 81.7, 0) && Covers(rd.After!, 101.3, 81.7, 200) && !Covers(rd.After!, 101.3, 81.7, 0) ? null : "the wrong level was cut";
         });
 
-        // C2539: the footprint through the cut: the box's outline and band cut exactly its 800 u² out of the square.
-        Case("2539 footprint-cut", () =>
+        // C2539: two separate rocks (20 x 20 boxes at (40-60, 40-60) and (140-160, 140-160)): two holes of 400 u² each, and
+        // the ground between them ((97.3, 103.1), off every lattice edge), which one hull would take, stays.
+        Case("2539 footprint-pieces", () =>
         {
-            var (v, t) = Linked();
-            var fp = NavCutFootprint.Of(BoxSoup(80, 90, -10, 120, 110, 190), 0);
-            return Sound(NavEdit.Cut(Geom(v, t), fp.Outline, fp.ZLo, fp.ZHi, none), 40000 - 800, new[] { (100.0, 100.0), (81.0, 91.0) });
+            var (v, t) = Linked(); var g = Geom(v, t);
+            var fp = NavCutFootprint.OnNavmesh(Join(BoxSoup(40, 40, -10, 60, 60, 190), BoxSoup(140, 140, -10, 160, 160, 190)), g);
+            if (CutPlanned(fp) is { } w) return w;
+            var r = CutBy(g, fp);
+            return Sound(r, 40000 - 800, new[] { (50.0, 50.0), (150.0, 150.0) }) ?? (Covers(r.After!, 97.3, 103.1) ? null : "the ground between the rocks was cut");
         });
 
-        // C2540: an obstacle of two separate rocks (20 x 20 boxes at (40-60, 40-60) and (140-160, 140-160)) is cut piece by
-        // piece: two holes of 400 u² each, and the ground between them ((97.3, 103.1), off every lattice edge), which one hull
-        // would take, stays.
-        Case("2540 footprint-pieces", () =>
+        // C2540: an L-shaped obstacle (one connected mesh) is cut as the L, 3,900 u², not as its hull: the notch's ground
+        // ((121.3, 117.9)) stays.
+        Case("2540 footprint-L", () =>
+        {
+            var (v, t) = Linked(); var g = Geom(v, t);
+            var L = new (float, float)[] { (60, 60), (140, 60), (140, 90), (90, 90), (90, 140), (60, 140) };
+            var fp = NavCutFootprint.OnNavmesh(Prism(L, -10, 190, (60, 60, 140, 90), (60, 90, 90, 140)), g);
+            if (CutPlanned(fp) is { } w) return w;
+            var r = CutBy(g, fp);
+            return Sound(r, 40000 - 3900, new[] { (70.0, 70.0), (130.0, 75.0), (75.0, 130.0) }) ?? (Covers(r.After!, 121.3, 117.9) ? null : "the ground in the L's notch was cut");
+        });
+
+        // C2541: two rocks joined by a thin bridge of collision (a dumbbell: 20 x 20 ends, a 2 u bar, one mesh): the rocks
+        // and the bar go, 960 u², and the ground either side of the bar stays.
+        Case("2541 footprint-bridge", () =>
+        {
+            var (v, t) = Linked(); var g = Geom(v, t);
+            var D = new (float, float)[] { (40, 90), (60, 90), (60, 99), (140, 99), (140, 90), (160, 90), (160, 110), (140, 110), (140, 101), (60, 101), (60, 110), (40, 110) };
+            var fp = NavCutFootprint.OnNavmesh(Prism(D, -10, 190, (40, 90, 60, 110), (60, 99, 140, 101), (140, 90, 160, 110)), g);
+            if (CutPlanned(fp) is { } w) return w;
+            var r = CutBy(g, fp);
+            return Sound(r, 40000 - 960, new[] { (50.0, 100.0), (150.0, 100.0), (100.3, 100.1) })
+                ?? (Covers(r.After!, 100.3, 95.1) && Covers(r.After!, 99.7, 104.9) ? null : "the ground beside the bar was cut");
+        });
+
+        // C2542: two overlapping boxes as separate bodies: their union, 800 + 1,200 - 200 = 1,800 u², goes, the overlap
+        // included (counted body by body, two lids over it do not cancel).
+        Case("2542 footprint-overlap", () =>
+        {
+            var (v, t) = Linked(); var g = Geom(v, t);
+            var fp = NavCutFootprint.OnNavmesh(Join(BoxSoup(80, 90, -10, 120, 110, 190), BoxSoup(100, 100, -10, 140, 130, 190)), g);
+            if (CutPlanned(fp) is { } w) return w;
+            var r = CutBy(g, fp);
+            return Sound(r, 40000 - 1800, new[] { (110.0, 105.0), (85.0, 95.0), (135.0, 125.0) }) ?? (Covers(r.After!, 131.2, 95.3) && Covers(r.After!, 85.3, 115.7) ? null : "ground outside both boxes was cut");
+        });
+
+        // C2543: an overhang counts: a slab from z 80 to 190 (its underside in the band) over open ground is cut; one from
+        // z 120 up (wholly above an actor's top) is refused, and beside a post it is not cut.
+        Case("2543 footprint-overhang", () =>
+        {
+            var (v, t) = Linked(); var g = Geom(v, t);
+            var over = NavCutFootprint.OnNavmesh(BoxSoup(80, 90, 80, 120, 110, 190), g);
+            var high = NavCutFootprint.OnNavmesh(BoxSoup(80, 90, 120, 120, 110, 190), g);
+            if ((CutPlanned(over) ?? Sound(CutBy(g, over), 40000 - 800, new[] { (100.0, 100.0) })) is { } w) return "overhang: " + w;
+            if (!(high.Status == "refused" && high.Why!.Contains("step height"))) return $"high: {high.Status}";
+            // the high slab beside a post standing on the floor (one obstacle, two bodies): the post's 100 u² go, the ground
+            // under the slab stays
+            var both = NavCutFootprint.OnNavmesh(Join(BoxSoup(20, 20, -10, 30, 30, 190), BoxSoup(80, 90, 120, 120, 110, 190)), g);
+            if (CutPlanned(both) is { } w2) return "post and slab: " + w2;
+            var rb = CutBy(g, both);
+            return Sound(rb, 40000 - 100, new[] { (25.0, 25.0) }) ?? (Covers(rb.After!, 101.3, 101.7) ? null : "the ground under the high slab was cut");
+        });
+
+        // C2544: navmesh lying on a rock stays: a box 60 u tall with navmesh on its top (two triangles at z 60). The floor
+        // round it loses the box's 800 u² (its top is in the floor's band); the navmesh on top keeps all its 800 u².
+        Case("2544 footprint-on-the-rock", () =>
         {
             var (v, t) = Linked();
-            var a = BoxSoup(40, 40, -10, 60, 60, 190); var b = BoxSoup(140, 140, -10, 160, 160, 190);
-            var both = new TriangleSoup(a.Vertices.Concat(b.Vertices).ToArray(), a.Indices.Concat(b.Indices.Select(i => i + 8)).ToArray());
-            var fps = NavCutFootprint.OfPieces(both, 0);
-            if (fps.Count != 2) return $"{fps.Count} pieces, want 2";
-            var r = NavEdit.CutMany(Geom(v, t), fps.Select(f => (f.Outline, f.ZLo, f.ZHi)).ToList(), none);
-            if (Sound(r, 40000 - 800, new[] { (50.0, 50.0), (150.0, 150.0) }) is { } why) return why;
-            var vv = r.After!.Vertices;
-            bool between = r.After.Triangles.Any(x =>
-            {
-                double d(Vec3 p, Vec3 q) => ((double)q.X - p.X) * (103.1 - p.Y) - ((double)q.Y - p.Y) * (97.3 - p.X);
-                double s1 = d(vv[x.A], vv[x.B]), s2 = d(vv[x.B], vv[x.C]), s3 = d(vv[x.C], vv[x.A]);
-                return (s1 > 0 && s2 > 0 && s3 > 0) || (s1 < 0 && s2 < 0 && s3 < 0);
-            });
-            return between ? null : "the ground between the rocks was cut";
+            v.Add(new Vec3(80, 90, 60)); v.Add(new Vec3(120, 90, 60)); v.Add(new Vec3(120, 110, 60)); v.Add(new Vec3(80, 110, 60));
+            t.Add(new NavTri(9, 10, 11, 0)); t.Add(new NavTri(9, 11, 12, 0));
+            var g = Geom(v, t);
+            var fp = NavCutFootprint.OnNavmesh(BoxSoup(80, 90, 0, 120, 110, 60), g);
+            if (CutPlanned(fp) is { } w) return w;
+            var r = CutBy(g, fp);
+            if (r.Status != "planned") return "cut refused: " + string.Join(" ", r.Why);
+            return $"top {AreaAt(r.After!, 60):0.#}, floor {AreaAt(r.After!, 0):0.#}" is var got && got == "top 800, floor 39200" ? null : got;
+        });
+
+        // C2545: on sloping navmesh (z = x / 2) each triangle is measured on its own plane: a box with its top at z 120 over
+        // ground at z 40-60 blocks (its top is 60-80 u up), and one with its top at z 110 over ground at z 75-85 is a step
+        // (25-35 u up): only the first is cut.
+        Case("2545 footprint-slope", () =>
+        {
+            var (v, t) = Linked();
+            for (int i = 0; i < v.Count; i++) v[i] = v[i] with { Z = v[i].X / 2 };
+            var g = Geom(v, t);
+            var fp = NavCutFootprint.OnNavmesh(Join(BoxSoup(80, 90, -10, 120, 110, 120), BoxSoup(150, 90, -10, 170, 110, 110)), g);
+            if (CutPlanned(fp) is { } w) return w;
+            var r = CutBy(g, fp);
+            return Sound(r, 40000 - 800, new[] { (100.0, 100.0) }) ?? (Covers(r.After!, 160.3, 101.7) ? null : "the step was cut");
+        });
+
+        // C2550: a notched roof: an obstacle whose top dips (x 60-140, y 60 up to 100 at its sides and 80 in the middle,
+        // 2,400 u²) is cut as two convex parts, not merged across the dip; the ground over the dip ((100.3, 90.7)) stays.
+        Case("2550 footprint-notched", () =>
+        {
+            var (v, t) = Linked(); var g = Geom(v, t);
+            var N = new (float, float)[] { (60, 60), (140, 60), (140, 100), (100, 80), (60, 100) };
+            var lid = new TriangleSoup(new System.Numerics.Vector3[] { new(60, 60, 190), new(140, 60, 190), new(140, 100, 190), new(100, 80, 190), new(60, 100, 190) },
+                                       new[] { 0, 1, 3, 1, 2, 3, 0, 3, 4 });
+            var fp = NavCutFootprint.OnNavmesh(Join(Prism(N, -10, 190), lid), g);
+            if (CutPlanned(fp) is { } w) return w;
+            var r = CutBy(g, fp);
+            return Sound(r, 40000 - 2400, new[] { (70.0, 90.0), (130.0, 90.0), (100.0, 70.0) }) ?? (Covers(r.After!, 100.3, 90.7) ? null : "the ground over the dip was cut");
+        });
+
+        // C2546: two outlines meeting the square's edge x = 100 (y 0-100) from its two sides, each touching one triangle:
+        // A (x 60-100, y 50-70) on the left, B (x 100-140, y 50.02-70) on the right. Their bottom lines cross the edge 0.02 u
+        // apart, each in its own triangle; no two vertices of the result lie within a weld of each other (the on-line
+        // tolerance settles this layout; the weld's witness is C2550).
+        Case("2546 cut-weld", () =>
+        {
+            var (v, t) = Linked();
+            var r = NavEdit.CutMany(Geom(v, t), new[] { ((IReadOnlyList<(float X, float Y)>)Box(60, 50, 100, 70), -50f, 50f), (Box(100, 50.02f, 140, 70), -50f, 50f) }, none);
+            if (Sound(r, 40000 - 1599.6, new[] { (80.0, 60.0), (120.0, 60.0) }) is { } w) return w;
+            var vv = r.After!.Vertices; var used = r.After.Triangles.SelectMany(x => new[] { (int)x.A, x.B, x.C }).Distinct().ToList();
+            foreach (var i in used) foreach (var j in used)
+                    if (i < j && !(vv[i] == vv[j]) && Math.Abs(vv[i].X - vv[j].X) < NavEdit.OnLine && Math.Abs(vv[i].Y - vv[j].Y) < NavEdit.OnLine && Math.Abs(vv[i].Z - vv[j].Z) < 1)
+                        return $"vertices {i} ({vv[i].X}, {vv[i].Y}) and {j} ({vv[j].X}, {vv[j].Y}) are within a weld of each other";
+            return null;
+        });
+
+        // C2547: an outline reaching 0.3 u past an edge (x 60-100.3, y 20-40) cuts the triangle beyond it too: (100.15, 30)
+        // is left uncovered.
+        Case("2547 cut-shallow-overlap", () =>
+        {
+            var (v, t) = Linked();
+            return Sound(NavEdit.Cut(Geom(v, t), Box(60, 20, 100.3f, 40), -50, 50, none), 40000 - 806, new[] { (100.15, 30.0), (80.0, 30.0) });
+        });
+
+        // C2548: an outline whose bottom edge runs 0.08 u inside the square's edge (y = 0.08) would leave a strip too narrow
+        // to stand on: it goes with the hole, 80 x 40.08 u².
+        Case("2548 cut-thin-strip", () =>
+        {
+            var (v, t) = Linked();
+            return Sound(NavEdit.Cut(Geom(v, t), Box(60, 0.08f, 140, 40.08f), -50, 50, none), 40000 - 80 * 40.08, new[] { (100.0, 0.04), (100.0, 20.0) });
+        });
+
+        // C2549: an outline edge parallel to a triangle's long edge 0.08 u from it (the cell diagonal y = x; the outline's
+        // slanted edge runs y = x - 0.113 over x 70-90) is taken last, so the hairline beside it is cut only along the
+        // outline (400 u² go in all) and the ground along the rest of the diagonal ((20, 19.96)) stays.
+        Case("2549 cut-parallel-edge-last", () =>
+        {
+            var (v, t) = Linked();
+            var q = new (float, float)[] { (70, 69.887f), (70, 60), (90, 60), (90, 89.887f) };
+            var r = NavEdit.Cut(Geom(v, t), q, -50, 50, none);
+            return Sound(r, 40000 - 400, new[] { (80.0, 70.0), (80.0, 79.97) }) ?? (Covers(r.After!, 20, 19.96) ? null : "the hairline along the diagonal, far from the outline, was cut");
         });
 
         // C2528: bad input: a triangle index past the mesh, a corner that does not exist, nothing to do.

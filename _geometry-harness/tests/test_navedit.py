@@ -1,4 +1,4 @@
-"""Known answers for navmesh editing (C2513-C2540), on _shared/NavEdit.cs through `navedit --selftest`.
+"""Known answers for navmesh editing (C2513-C2550), on _shared/NavEdit.cs and _shared/NavCutFootprint.cs through `navedit --selftest`.
 
     2513  an interior vertex moved: planned, the box kept, the grid NavGrid's for the moved mesh, ops for exactly that
           vertex, the box and the grid
@@ -23,12 +23,22 @@
     2532  NavCut: a non-convex, two-corner or flat outline, an empty band, and a cut that misses are refused
     2533  NavCut: the height band picks the level; above the navmesh it cuts nothing
     2534  NavCut: a cut reaching a linked edge is refused, saying so
-    2535  cut outline of an obstacle: a box's outline and the band (step below the floor to an actor's top above it)
-    2536  the outline grown by a margin
-    2537  an obstacle wholly above an actor's top, or below step height, is refused
-    2538  the floor under an obstacle is taken on its own level (a bridge over a floor)
-    2539  an obstacle's outline through the cut removes exactly its area
-    2540  an obstacle of separate pieces is cut piece by piece; the ground between them stays
+    2535  cut of an obstacle: a box standing on the floor cuts exactly its area
+    2536  the cut grown by a margin, across the triangles it reaches
+    2537  an obstacle wholly above an actor's top, or below step height, is refused, naming the band
+    2538  each level is measured on itself: a box on a bridge cuts the bridge, one on the floor under it the floor
+    2539  two separate rocks: two holes, and the ground between them stays
+    2540  an L-shaped obstacle (one mesh) is cut as the L; the notch's ground stays
+    2541  two rocks joined by a thin bar of collision: the rocks and the bar go, the ground beside the bar stays
+    2542  two overlapping bodies: their union goes, the overlap included
+    2543  an overhang whose underside is in the band is cut; one wholly above an actor's top is refused, and not cut beside a post
+    2544  navmesh lying on a rock stays; the floor round the rock is cut
+    2545  sloping navmesh: each triangle measured on its own plane; a box low enough to step onto is not cut
+    2546  NavCut: two outlines meeting an edge from its two sides a hair apart: their points are welded
+    2547  NavCut: an outline reaching 0.3 u past an edge cuts the triangle beyond it
+    2548  NavCut: a strip too narrow to stand on goes with the hole
+    2549  NavCut: an outline edge parallel to a triangle's edge, a hair from it, is taken last; the far hairline stays
+    2550  a notched roof is cut as two convex parts, not merged across the dip; the ground over the dip stays
 
 The real-data check (plan and write on a lab profile, read back, byte-compared with the in-game-tested patch) is in the
 2026-11-21 run folder; it needs a game and an MO2 instance, so it is not a test here.
@@ -81,12 +91,22 @@ CASES = [
     ("2532 NavCut refusals", lambda: selftest("2532")),
     ("2533 NavCut height band", lambda: selftest("2533")),
     ("2534 NavCut linked edge refused", lambda: selftest("2534")),
-    ("2535 obstacle outline and band", lambda: selftest("2535")),
-    ("2536 obstacle outline margin", lambda: selftest("2536")),
+    ("2535 obstacle box cut exactly", lambda: selftest("2535")),
+    ("2536 obstacle margin", lambda: selftest("2536")),
     ("2537 obstacle out of the actor band refused", lambda: selftest("2537")),
-    ("2538 obstacle floor on its own level", lambda: selftest("2538")),
-    ("2539 obstacle outline cuts its area", lambda: selftest("2539")),
-    ("2540 obstacle cut piece by piece", lambda: selftest("2540")),
+    ("2538 obstacle measured on its own level", lambda: selftest("2538")),
+    ("2539 obstacle of separate pieces", lambda: selftest("2539")),
+    ("2540 L-shaped obstacle cut as the L", lambda: selftest("2540")),
+    ("2541 rocks joined by a thin bar", lambda: selftest("2541")),
+    ("2542 overlapping bodies cut as their union", lambda: selftest("2542")),
+    ("2543 overhang in the band", lambda: selftest("2543")),
+    ("2544 navmesh on a rock stays", lambda: selftest("2544")),
+    ("2545 sloping navmesh, own plane", lambda: selftest("2545")),
+    ("2546 NavCut welds near points", lambda: selftest("2546")),
+    ("2547 NavCut shallow overlap is cut", lambda: selftest("2547")),
+    ("2548 NavCut strip too narrow goes", lambda: selftest("2548")),
+    ("2549 NavCut parallel edge taken last", lambda: selftest("2549")),
+    ("2550 notched roof not merged across the dip", lambda: selftest("2550")),
 ]
 
 if __name__ == "__main__":

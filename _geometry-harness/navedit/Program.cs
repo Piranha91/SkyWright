@@ -28,8 +28,8 @@ using Mutagen.Bethesda.Skyrim;
 //   {"navmesh": "0E6430:Skyrim.esm", "remove": [12, 13], "add": {"vertices": [[x, y, z], ...], "triangles": [[a, b, c], ...]}}
 //   {"navmesh": "0E6430:Skyrim.esm", "cut": {"outline": [[x, y], ...], "z": [bottom, top]}}   (NavCut: a convex obstacle)
 //   {"navmesh": "0E6430:Skyrim.esm", "cut": {"ref": "0A1B2C:Skyrim.esm", "margin": 0}}      (NavCut by a placed obstacle: its
-//       outline from its collision on the layers an actor meets, between step height and an actor's top above the navmesh;
-//       _shared/NavCutFootprint.cs)
+//       collision on the layers an actor meets, cut where it stands between step height and an actor's top above each
+//       navmesh triangle's own plane; _shared/NavCutFootprint.cs)
 //   An added triangle's corners index the navmesh's vertices, then the added ones (n, n+1, ...). A removed triangle's
 //   place is taken by the navmesh's last triangle (highest removal first); added triangles are appended after the kept ones.
 // The profile comes from the flags, then the environment and harness.local.json (_shared/HarnessTarget.cs), as for the
@@ -152,9 +152,10 @@ static class NavEditCli
                         if (c["ref"] is not null)
                         {
                             assets ??= target.Assets(order);
-                            var fps = Footprint(view, session, assets, geom!, FormKey.Factory((string)c["ref"]!), (float?)c["margin"] ?? 0f, row);
-                            r = fps[0].Status != "planned" ? TriEditResult.Refused(fps[0].Why!)
-                              : NavEdit.CutMany(geom!, fps.Select(f => (f.Outline, f.ZLo, f.ZHi)).ToList(), inbound, Cover(path!, key));
+                            var fp = Footprint(view, session, assets, geom!, FormKey.Factory((string)c["ref"]!), (float?)c["margin"] ?? 0f, row);
+                            r = fp.Status != "planned" ? TriEditResult.Refused(fp.Why!)
+                              : NavEdit.CutMany(geom!, fp.Parts.Select(f => (f.Outline, float.MinValue, float.MaxValue)).ToList(), inbound, Cover(path!, key),
+                                                fp.Parts.Select(f => (IReadOnlyCollection<int>?)f.Applies).ToList());
                         }
                         else r = outline is null || z is null || z.Count != 2
                             ? TriEditResult.Refused($"The cut of {key} needs \"ref\" (a placed obstacle) or \"outline\" (corners [x, y] in order) with \"z\" [bottom, top].")
@@ -171,6 +172,7 @@ static class NavEditCli
                         foreach (var (fk, og) in r.Others) expect[fk] = (og, Enumerable.Range(0, og.Triangles.Count).ToArray(), inboundIndex[fk].Path, false);
                         int gone = r.Map.Count(m => m < 0), added = r.After.Triangles.Count - (r.Map.Count - gone);
                         row["removed"] = gone; row["addedTriangles"] = added; row["addedVertices"] = r.After.Vertices.Count - geom!.Vertices.Count;
+                        if (isCut) row["areaRemoved"] = Math.Round(PlanArea(geom!) - PlanArea(r.After), 1);
                     }
                 }
                 foreach (var fk in expect.Keys)
@@ -189,11 +191,12 @@ static class NavEditCli
         return outp;
     }
 
-    /// <summary>A placed obstacle's cut outline: its winning placement, its base's model (OverlapIndex.ModelOf), the mesh
-    /// through this order's files, its collision on the layers an actor meets (CollisionLayers.RoleSoups), placed in the
-    /// world (SpatialOverlap.TransformSoup), sliced and hulled by NavCutFootprint over the navmesh floor under it. What
-    /// was read goes into the plan row, so a reader sees which mesh and which floor the outline came from.</summary>
-    static List<CutFootprint> Footprint(LoadOrderResolver.IndexView view, LoadOrderResolver.OverlaySession session, AssetResolver assets,
+    /// <summary>A placed obstacle's cut: its winning placement, its base's model (OverlapIndex.ModelOf), the mesh through
+    /// this order's files, its collision on the layers an actor meets (CollisionLayers.RoleSoups), placed in the world
+    /// (SpatialOverlap.TransformSoup), and measured on each navmesh triangle by it, on that triangle's own plane
+    /// (NavCutFootprint.OnNavmesh). What was read goes into the plan row, so a reader sees which mesh the parts came
+    /// from and which triangles they were measured on.</summary>
+    static NavCutPlan Footprint(LoadOrderResolver.IndexView view, LoadOrderResolver.OverlaySession session, AssetResolver assets,
                                   NavmeshGeometry g, FormKey refKey, float margin, JsonObject row)
     {
         var w = view.ResolveWinner(refKey);
@@ -216,24 +219,30 @@ static class NavEditCli
         var (host, hs, _, _) = CollisionLayers.RoleSoups(m);
         if (hs != 'c') return One($"The mesh {full} has no collision on the layers an actor meets, so the game would not cut navmesh round it; cut it by outline if it should be.");
         var world = SpatialOverlap.TransformSoup(host, pr.Position, pr.Rotation, pr.Scale);
-        var box = SpatialOverlap.SoupBounds(world);
-        var floor = NavCutFootprint.FloorUnder(g, pr.Position.X, pr.Position.Y, pr.Position.Z, new System.Numerics.Vector2(box.Min.X, box.Min.Y), new System.Numerics.Vector2(box.Max.X, box.Max.Y));
-        if (floor is null) return One($"{g.FormKey} has no navmesh under {refKey} or within its outline and 256 u of its height, so there is nothing to cut.");
-        var fps = NavCutFootprint.OfPieces(world, floor.Value, margin);
-        var fp = fps[0];
+        var fp = NavCutFootprint.OnNavmesh(world, g, margin);
         row["footprint"] = new JsonObject
         {
             ["ref"] = refKey.ToString(), ["winner"] = w.Value.WinnerPlugin, ["base"] = bk.ToString(), ["mesh"] = full,
             ["meshFrom"] = res.Sources[0].ArchivePath ?? res.Sources[0].LooseFilePath, ["collisionTriangles"] = host.TriangleCount,
-            ["position"] = Arr(new[] { pr.Position.X, pr.Position.Y, pr.Position.Z }), ["floor"] = floor.Value, ["margin"] = margin,
-            ["sliceTriangles"] = fps.Sum(f => f.SliceTriangles), ["band"] = fp.Status == "planned" ? Arr(new[] { fp.ZLo, fp.ZHi }) : null,
-            ["pieces"] = fps.Count(f => f.Status == "planned"),
-            ["outlines"] = new JsonArray(fps.Select(f => (JsonNode)new JsonArray(f.Outline.Select(p => (JsonNode)Arr(new[] { p.X, p.Y })).ToArray())).ToArray()),
+            ["position"] = Arr(new[] { pr.Position.X, pr.Position.Y, pr.Position.Z }), ["margin"] = margin,
+            ["band"] = Arr(new[] { NavCutFootprint.SliceBottom, NavCutFootprint.SliceTop }), ["trianglesMeasured"] = fp.Measured,
+            ["collisionInBand"] = fp.InBand, ["parts"] = fp.Parts.Count,
+            ["outlines"] = new JsonArray(fp.Parts.Select(f => (JsonNode)new JsonObject
+            {
+                ["triangle"] = f.Triangle, ["cuts"] = Arr(f.Applies), ["outline"] = new JsonArray(f.Outline.Select(p => (JsonNode)Arr(new[] { p.X, p.Y })).ToArray()),
+            }).ToArray()),
         };
-        return fps;
+        return fp;
     }
 
-    static List<CutFootprint> One(string why) => new() { CutFootprint.Refused(why) };
+    static NavCutPlan One(string why) => NavCutPlan.Refused(why);
+
+    /// <summary>A navmesh's walkable area in plan: its triangles' plan areas, summed.</summary>
+    static double PlanArea(NavmeshGeometry g) => g.Triangles.Sum(t =>
+    {
+        Vec3 a = g.Vertices[t.A], b = g.Vertices[t.B], c = g.Vertices[t.C];
+        return Math.Abs(((double)b.X - a.X) * ((double)c.Y - a.Y) - ((double)b.Y - a.Y) * ((double)c.X - a.X)) / 2;
+    });
 
     static JsonNode OpJson(RepairOp o)
     {

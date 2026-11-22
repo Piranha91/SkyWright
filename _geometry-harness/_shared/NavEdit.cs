@@ -156,7 +156,8 @@ public static class NavEdit
     /// its neighbour.</summary>
     public static TriEditResult EditTriangles(NavmeshGeometry g, IReadOnlyCollection<int> remove, IReadOnlyList<Vec3> addVerts,
                                               IReadOnlyList<(int A, int B, int C)> addTris, IReadOnlyDictionary<FormKey, NavmeshGeometry> inbound,
-                                              IReadOnlyList<(bool IsCover, ushort CoverFlags)>? cover = null, IReadOnlyList<int>? addFlags = null)
+                                              IReadOnlyList<(bool IsCover, ushort CoverFlags)>? cover = null, IReadOnlyList<int>? addFlags = null,
+                                              double minArea = 1)
     {
         var why = new List<string>();
         var tris = g.Triangles; int n = tris.Count;
@@ -209,7 +210,7 @@ public static class NavEdit
         {
             var t = after[j];
             double area = Cross(verts, t);
-            if (Math.Abs(area) / 2 < 1) { why.Add($"Added triangle {j} ({t.A}, {t.B}, {t.C}) is flat or under 1 u²; give three corners that enclose an area."); continue; }
+            if (Math.Abs(area) / 2 < minArea) { why.Add($"Added triangle {j} ({t.A}, {t.B}, {t.C}) is flat or under {minArea:0.###} u²; give three corners that enclose an area."); continue; }
             for (int e = 0; e < 3; e++)
             {
                 var (p, q) = NavBorderMatch.EdgeVerts(t, e);
@@ -366,8 +367,23 @@ public static class NavEdit
         return new TriEditResult("planned", Array.Empty<string>(), geom, grid, map, others, gops.Concat(ops).ToList());
     }
 
-    /// <summary>How close, in plan, a point must be to a cut line to count as on it.</summary>
-    public const double OnLine = 0.01;
+    /// <summary>How close, in plan, a point must be to a cut line to count as on it, and how close a new cut point must be
+    /// to an existing one to be that point (welded): a few float steps at world coordinates (0.0156 u past 131,072).
+    /// Without the weld, two outlines' lines crossing near one spot made two points a float step apart and pieces between
+    /// them that turned over when rounded (rock pile 0E6420).</summary>
+    public const double OnLine = 0.05;
+    /// <summary>The smallest piece a cut makes, in u²: a smaller one is dropped as a sliver of nothing, and any larger one is
+    /// kept, however thin. A cut splits each triangle along the full lines of its outline's edges, so the lines of cuts
+    /// side by side (an obstacle cut as convex parts) cross and leave small, valid pieces; the 1 u² floor for a triangle
+    /// added by hand is a check on input, not on these.</summary>
+    public const double Sliver = 1e-3;
+    /// <summary>How deep, in plan, a triangle must reach into a cut outline to be cut: a little over float noise at world
+    /// coordinates. A triangle that only shares a line with the outline stays whole; a thin one left inside it by an
+    /// earlier cut (Touch, 0.5 u, would spare it) goes.</summary>
+    public const double CutDepth = 0.05;
+    /// <summary>A cut piece narrower than this, in u, is ground too narrow to stand on: dropped. It comes from an outline
+    /// edge whose line runs a hair from one of the triangle's edges, which the cut takes last so the line stays short.</summary>
+    public const double Thin = 0.1;
 
     /// <summary>NAVCUT: cut the walkable surface out of navmesh <paramref name="g"/> where an obstacle stands. The obstacle is
     /// a convex outline in plan (<paramref name="outline"/>, either winding) standing from <paramref name="zLo"/> to
@@ -382,36 +398,59 @@ public static class NavEdit
     /// another navmesh.</summary>
     public static TriEditResult Cut(NavmeshGeometry g, IReadOnlyList<(float X, float Y)> outline, float zLo, float zHi,
                                     IReadOnlyDictionary<FormKey, NavmeshGeometry> inbound, IReadOnlyList<(bool IsCover, ushort CoverFlags)>? cover = null)
+        => CutMany(g, new[] { (outline, zLo, zHi) }, inbound, cover);
+
+    /// <summary>SEVERAL CUTS AS ONE EDIT (an obstacle cut as convex parts), in ONE PASS: each triangle in a band is split
+    /// into the convex pieces outside the first outline it meets, each piece in turn into those outside the next, and so
+    /// on, before anything is triangulated; then the pieces are triangulated and uncut neighbours split once, as
+    /// <see cref="Cut"/> does for one outline. A piece that does not reach into an outline passes it whole, so the
+    /// outline's lines do not run on through it. A new point is made once per (original edge, outline edge), so every
+    /// triangle on that edge shares it. Cutting part after part instead (re-cutting the last cut's triangulated result)
+    /// rounds new points to float at every pass and split the rock pile 0E6420 into pieces that no longer joined. An
+    /// outline that touches nothing is passed over; refused when none touches anything, and on any refusal of
+    /// <see cref="Cut"/>'s. <paramref name="mayCut"/>, when given, names for each outline the triangles it may cut (an
+    /// obstacle's part measured on one triangle's own plane is cut from that triangle, not from a floor under it).</summary>
+    public static TriEditResult CutMany(NavmeshGeometry g, IReadOnlyList<(IReadOnlyList<(float X, float Y)> Outline, float ZLo, float ZHi)> cuts,
+                                        IReadOnlyDictionary<FormKey, NavmeshGeometry> inbound, IReadOnlyList<(bool IsCover, ushort CoverFlags)>? cover = null,
+                                        IReadOnlyList<IReadOnlyCollection<int>?>? mayCut = null)
     {
-        var C = outline.Select(p => (X: (double)p.X, Y: (double)p.Y)).ToList();
-        if (C.Count < 3) return TriEditResult.Refused("A cut outline needs at least three corners.");
-        double area2 = 0;
-        for (int i = 0; i < C.Count; i++) { var (a, b) = (C[i], C[(i + 1) % C.Count]); area2 += a.X * b.Y - b.X * a.Y; }
-        if (Math.Abs(area2) / 2 < 1) return TriEditResult.Refused("The cut outline encloses no area; give its corners in order around it.");
-        if (area2 < 0) C.Reverse();                                           // counter-clockwise: inside is on each edge's left
-        for (int i = 0; i < C.Count; i++)
+        if (mayCut is not null && mayCut.Count != cuts.Count) return TriEditResult.Refused("Each cut outline needs its own list of the triangles it may cut, or none at all.");
+        if (cuts.Count == 0) return TriEditResult.Refused("No cut outline was given; give at least one.");
+        var O = new List<List<(double X, double Y)>>();
+        foreach (var (outline, zLo, zHi) in cuts)
         {
-            var (a, b, c) = (C[i], C[(i + 1) % C.Count], C[(i + 2) % C.Count]);
-            if ((b.X - a.X) * (c.Y - b.Y) - (b.Y - a.Y) * (c.X - b.X) < -1e-9) return TriEditResult.Refused("The cut outline is not convex; split a concave obstacle into convex parts and cut each.");
+            var C = outline.Select(p => (X: (double)p.X, Y: (double)p.Y)).ToList();
+            if (C.Count < 3) return TriEditResult.Refused("A cut outline needs at least three corners.");
+            double area2 = 0;
+            for (int i = 0; i < C.Count; i++) { var (a, b) = (C[i], C[(i + 1) % C.Count]); area2 += a.X * b.Y - b.X * a.Y; }
+            if (Math.Abs(area2) / 2 < 1) return TriEditResult.Refused("The cut outline encloses no area; give its corners in order around it.");
+            if (area2 < 0) C.Reverse();                                       // counter-clockwise: inside is on each edge's left
+            for (int i = 0; i < C.Count; i++)
+            {
+                var (a, b, c) = (C[i], C[(i + 1) % C.Count], C[(i + 2) % C.Count]);
+                if ((b.X - a.X) * (c.Y - b.Y) - (b.Y - a.Y) * (c.X - b.X) < -1e-9) return TriEditResult.Refused("The cut outline is not convex; split a concave obstacle into convex parts and cut each.");
+            }
+            if (!(zHi >= zLo)) return TriEditResult.Refused("The cut's height band is empty; give its bottom below its top.");
+            O.Add(C);
         }
-        if (!(zHi >= zLo)) return TriEditResult.Refused("The cut's height band is empty; give its bottom below its top.");
 
         var verts = g.Vertices.ToList(); int nv0 = verts.Count;
         var tris = g.Triangles;
-        // signed distance of a point from outline edge i: positive inside (left of the edge)
-        double Dist(int i, double x, double y)
+        // signed distance of a point from edge i of outline o: positive inside (left of the edge)
+        double Dist(int o, int i, double x, double y)
         {
-            var (a, b) = (C[i], C[(i + 1) % C.Count]);
+            var C = O[o]; var (a, b) = (C[i], C[(i + 1) % C.Count]);
             double ex = b.X - a.X, ey = b.Y - a.Y;
             return (ex * (y - a.Y) - ey * (x - a.X)) / Math.Sqrt(ex * ex + ey * ey);
         }
-        bool InBand(NavTri t) { float lo = Math.Min(verts[t.A].Z, Math.Min(verts[t.B].Z, verts[t.C].Z)), hi = Math.Max(verts[t.A].Z, Math.Max(verts[t.B].Z, verts[t.C].Z)); return lo <= zHi && hi >= zLo; }
-        double PolyDepth(NavTri t)
+        bool InBand(NavTri t, int o) { float lo = Math.Min(verts[t.A].Z, Math.Min(verts[t.B].Z, verts[t.C].Z)), hi = Math.Max(verts[t.A].Z, Math.Max(verts[t.B].Z, verts[t.C].Z)); return lo <= cuts[o].ZHi && hi >= cuts[o].ZLo; }
+        // how deep a plan polygon reaches into outline o (separating axes)
+        double Depth(IReadOnlyList<(double X, double Y)> P, int o)
         {
-            var P = new[] { verts[t.A], verts[t.B], verts[t.C] };
+            var C = O[o];
             double depth = double.MaxValue;
             var axes = new List<(double, double)>();
-            for (int i = 0; i < 3; i++) { var (a, b) = (P[i], P[(i + 1) % 3]); axes.Add((b.Y - (double)a.Y, a.X - (double)b.X)); }
+            for (int i = 0; i < P.Count; i++) { var (a, b) = (P[i], P[(i + 1) % P.Count]); axes.Add((b.Y - a.Y, a.X - b.X)); }
             for (int i = 0; i < C.Count; i++) { var (a, b) = (C[i], C[(i + 1) % C.Count]); axes.Add((b.Y - a.Y, a.X - b.X)); }
             foreach (var (nx0, ny0) in axes)
             {
@@ -423,44 +462,95 @@ public static class NavEdit
             }
             return depth;
         }
-        var cut = Enumerable.Range(0, tris.Count).Where(t => InBand(tris[t]) && PolyDepth(tris[t]) > Touch).ToList();
-        if (cut.Count == 0) return TriEditResult.Refused("The cut touches no triangle of this navmesh in its height band; check the outline and the band.");
+        List<(double X, double Y)> Plan(IEnumerable<int> vs) => vs.Select(v => ((double)verts[v].X, (double)verts[v].Y)).ToList();
+        var hits = new Dictionary<int, List<int>>();
+        for (int t = 0; t < tris.Count; t++)
+        {
+            var P = Plan(new[] { (int)tris[t].A, tris[t].B, tris[t].C });
+            for (int o = 0; o < O.Count; o++)
+                if ((mayCut?[o] is not { } may || may.Contains(t)) && InBand(tris[t], o) && Depth(P, o) > CutDepth) (hits.TryGetValue(t, out var l) ? l : hits[t] = new()).Add(o);
+        }
+        if (hits.Count == 0)
+            return TriEditResult.Refused(O.Count == 1 ? "The cut touches no triangle of this navmesh in its height band; check the outline and the band."
+                                                      : "None of the cut's outlines touches a triangle of this navmesh in its band; that ground is cut already, or the outlines are elsewhere.");
+        var cut = hits.Keys.OrderBy(t => t).ToList();
         foreach (var t in cut)
             for (int e = 0; e < 3; e++)
                 if (Linked(tris[t], e))
                 {
                     var (a, b) = NavBorderMatch.EdgeVerts(tris[t], e);
-                    bool crosses = Enumerable.Range(0, C.Count).Any(i => Math.Sign(Math.Round(Dist(i, verts[a].X, verts[a].Y), 6)) != Math.Sign(Math.Round(Dist(i, verts[b].X, verts[b].Y), 6)))
-                                   || Enumerable.Range(0, C.Count).All(i => Dist(i, verts[a].X, verts[a].Y) > -OnLine);
-                    if (crosses) return TriEditResult.Refused($"The cut reaches triangle {t}'s edge that links into another navmesh; cutting across a navmesh border is not supported yet.");
+                    foreach (var o in hits[t])
+                    {
+                        bool crosses = Enumerable.Range(0, O[o].Count).Any(i => Math.Sign(Math.Round(Dist(o, i, verts[a].X, verts[a].Y), 6)) != Math.Sign(Math.Round(Dist(o, i, verts[b].X, verts[b].Y), 6)))
+                                       || Enumerable.Range(0, O[o].Count).All(i => Dist(o, i, verts[a].X, verts[a].Y) > -OnLine);
+                        if (crosses) return TriEditResult.Refused($"The cut reaches triangle {t}'s edge that links into another navmesh; cutting across a navmesh border is not supported yet.");
+                    }
                 }
 
-        // the new points: one per (original edge, outline edge), shared by both triangles on that edge; one per interior
-        // position (an outline corner inside a triangle)
-        var edgePt = new Dictionary<(int, int, int), int>();
-        var posPt = new Dictionary<(long, long, long), int>();
+        // the new points: one per (original edge, outline, outline edge), shared by both triangles on that edge; one per
+        // interior position (an outline corner, or two outlines' lines crossing, inside a triangle)
+        var edgePt = new Dictionary<(int, int, int, int), int>();
+        var centres = new HashSet<int>();
+        static bool Near(Vec3 a, Vec3 b) => Math.Abs(a.Z - b.Z) < 1 && ((double)a.X - b.X) * ((double)a.X - b.X) + ((double)a.Y - b.Y) * ((double)a.Y - b.Y) <= OnLine * OnLine;
         var splits = new Dictionary<(int, int), List<int>>();                  // original edge (low, high) -> points on it
-        int EdgePoint(int a, int b, int i)
+        int EdgePoint(int a, int b, int o, int i)
         {
             var (lo, hi) = a < b ? (a, b) : (b, a);
-            if (edgePt.TryGetValue((lo, hi, i), out var k)) return k;
+            if (edgePt.TryGetValue((lo, hi, o, i), out var k)) return k;
             Vec3 p = verts[lo], q = verts[hi];
-            double dp = Dist(i, p.X, p.Y), dq = Dist(i, q.X, q.Y), s = dp / (dp - dq);
+            double dp = Dist(o, i, p.X, p.Y), dq = Dist(o, i, q.X, q.Y), s = dp / (dp - dq);
             var v = new Vec3((float)(p.X + (q.X - p.X) * s), (float)(p.Y + (q.Y - p.Y) * s), (float)(p.Z + (q.Z - p.Z) * s));
-            verts.Add(v); k = verts.Count - 1; edgePt[(lo, hi, i)] = k;
-            (splits.TryGetValue((lo, hi), out var l) ? l : splits[(lo, hi)] = new()).Add(k);
+            // welded along the edge only: to its ends, or a point already on it, so a point never leaves its edge
+            splits.TryGetValue((lo, hi), out var on);
+            foreach (var w in new[] { lo, hi }.Concat(on ?? new List<int>()))
+                if (Near(verts[w], v)) { edgePt[(lo, hi, o, i)] = w; return w; }
+            verts.Add(v); k = verts.Count - 1; edgePt[(lo, hi, o, i)] = k;
+            (on ?? (splits[(lo, hi)] = new())).Add(k);
             return k;
         }
-        int PlanePoint(NavTri t, double x, double y)
+        int PlanePoint(NavTri t, double x, double y, bool weld = true)
         {
             Vec3 A = verts[t.A], B = verts[t.B], Cc = verts[t.C];
             double den = (B.Y - Cc.Y) * (A.X - Cc.X) + (Cc.X - B.X) * (A.Y - Cc.Y);
             double l1 = ((B.Y - Cc.Y) * (x - Cc.X) + (Cc.X - B.X) * (y - Cc.Y)) / den, l2 = ((Cc.Y - A.Y) * (x - Cc.X) + (A.X - Cc.X) * (y - Cc.Y)) / den;
             float z = (float)(l1 * A.Z + l2 * B.Z + (1 - l1 - l2) * Cc.Z);
-            var key = ((long)Math.Round(x * 1000), (long)Math.Round(y * 1000), (long)Math.Round(z * 10));
-            if (posPt.TryGetValue(key, out var k)) return k;
-            verts.Add(new Vec3((float)x, (float)y, z)); posPt[key] = verts.Count - 1;
+            var v = new Vec3((float)x, (float)y, z);
+            // welded to the triangle's corners or a new point near it on the same level; a fan's centre never is (it must
+            // stay inside its own piece)
+            if (weld)
+            {
+                foreach (var w in new[] { (int)t.A, t.B, t.C }) if (Near(verts[w], v)) return w;
+                for (int w = nv0; w < verts.Count; w++) if (Near(verts[w], v) && !centres.Contains(w)) return w;
+            }
+            verts.Add(v);
             return verts.Count - 1;
+        }
+
+        // the outside piece of polygon P beyond edge i of outline o, in plan: its least width over its edges' directions
+        // (a convex polygon's width is least across one of its edges), or null when nothing of P lies outside
+        double? OutsideWidth(List<(double X, double Y)> P, int o, int i)
+        {
+            var outP = new List<(double X, double Y)>();
+            for (int k = 0; k < P.Count; k++)
+            {
+                var (p, q) = (P[k], P[(k + 1) % P.Count]);
+                double dp = Dist(o, i, p.X, p.Y), dq = Dist(o, i, q.X, q.Y);
+                if (dp <= OnLine) outP.Add(p);
+                if ((dp > OnLine && dq < -OnLine) || (dp < -OnLine && dq > OnLine)) { double s = dp / (dp - dq); outP.Add((p.X + (q.X - p.X) * s, p.Y + (q.Y - p.Y) * s)); }
+            }
+            if (outP.Count < 3) return null;
+            double area2 = 0;
+            for (int k = 0; k < outP.Count; k++) area2 += outP[k].X * outP[(k + 1) % outP.Count].Y - outP[(k + 1) % outP.Count].X * outP[k].Y;
+            if (Math.Abs(area2) / 2 < Sliver) return null;
+            double width = double.MaxValue;
+            for (int k = 0; k < outP.Count; k++)
+            {
+                var (a, b) = (outP[k], outP[(k + 1) % outP.Count]);
+                double ex = b.X - a.X, ey = b.Y - a.Y, len = Math.Sqrt(ex * ex + ey * ey);
+                if (len < 1e-9) continue;
+                width = Math.Min(width, outP.Max(v => Math.Abs(ex * (v.Y - a.Y) - ey * (v.X - a.X)) / len));
+            }
+            return width;
         }
 
         var remove = new HashSet<int>(cut);
@@ -472,10 +562,10 @@ public static class NavEdit
             if (pts.Count < 3) return;
             double a2 = 0;
             for (int k = 0; k < pts.Count; k++) { var (p, q) = (verts[pts[k]], verts[pts[(k + 1) % pts.Count]]); a2 += (double)p.X * q.Y - (double)q.X * p.Y; }
-            if (Math.Abs(a2) / 2 < 1e-3) return;                               // a sliver of nothing
+            if (Math.Abs(a2) / 2 < Sliver) return;                             // a sliver of nothing
             if (pts.Count == 3) { addT.Add((pts[0], pts[1], pts[2])); addF.Add(t.Flags); return; }
             double cx = pts.Average(k => (double)verts[k].X), cy = pts.Average(k => (double)verts[k].Y);
-            int c = PlanePoint(t, cx, cy);
+            int c = PlanePoint(t, cx, cy, weld: false); centres.Add(c);
             for (int k = 0; k < pts.Count; k++) { addT.Add((c, pts[k], pts[(k + 1) % pts.Count])); addF.Add(t.Flags); }
         }
 
@@ -484,9 +574,7 @@ public static class NavEdit
         {
             var t = tris[ti];
             int[] corner = { t.A, t.B, t.C };
-            // a point of the shrinking polygon: its vertex index and the original edge it lies on ((-1, -1) for none)
-            var rem = new List<(int V, (int, int) E)>();
-            for (int k = 0; k < 3; k++) rem.Add((corner[k], (-1, -1)));
+            // a point of a shrinking polygon: its vertex index and the original edge it lies on ((-1, -1) for none)
             (int, int) EdgeOf((int V, (int, int) E) p, (int V, (int, int) E) q)
             {
                 int pi = Array.IndexOf(corner, p.V), qi = Array.IndexOf(corner, q.V);
@@ -496,32 +584,54 @@ public static class NavEdit
                 if (p.E != (-1, -1) && p.E == q.E) return p.E;
                 return (-1, -1);
             }
-            for (int i = 0; i < C.Count && rem.Count >= 3; i++)
+            var cur = new List<List<(int V, (int, int) E)>> { corner.Select(c => (c, (-1, -1))).ToList() };
+            foreach (var o in hits[ti])
             {
-                var inside = new List<(int V, (int, int) E)>(); var outside = new List<(int V, (int, int) E)>();
-                for (int k = 0; k < rem.Count; k++)
+                var next = new List<List<(int V, (int, int) E)>>();
+                foreach (var piece in cur)
                 {
-                    var (p, q) = (rem[k], rem[(k + 1) % rem.Count]);
-                    double dp = Dist(i, verts[p.V].X, verts[p.V].Y), dq = Dist(i, verts[q.V].X, verts[q.V].Y);
-                    if (dp >= -OnLine) inside.Add(p);
-                    if (dp <= OnLine) outside.Add(p);
-                    if ((dp > OnLine && dq < -OnLine) || (dp < -OnLine && dq > OnLine))
+                    if (Depth(Plan(piece.Select(z => z.V)), o) <= CutDepth) { next.Add(piece); continue; }   // clear of this outline
+                    var rem = piece;
+                    var todo = Enumerable.Range(0, O[o].Count).ToList();
+                    while (todo.Count > 0 && rem.Count >= 3)
                     {
-                        var e = EdgeOf(p, q);
-                        int x;
-                        if (e != (-1, -1)) x = EdgePoint(e.Item1, e.Item2, i);
-                        else
+                        // the next outline edge: the first whose outside piece is empty or not thin, so a line that would run
+                        // on through the triangle a hair from one of its edges is taken last, when the rest is pinned near
+                        // the outline (tried in plan only: no point is made for a split not taken)
+                        var plan = rem.Select(z => ((double)verts[z.V].X, (double)verts[z.V].Y)).ToList();
+                        int pick = todo.FirstOrDefault(j => OutsideWidth(plan, o, j) is not { } w || w >= Thin, todo[0]);
+                        bool thin = OutsideWidth(plan, o, pick) is { } pw && pw < Thin;
+                        todo.Remove(pick);
+                        int i = pick;
+                        var inside = new List<(int V, (int, int) E)>(); var outside = new List<(int V, (int, int) E)>();
+                        for (int k = 0; k < rem.Count; k++)
                         {
-                            double s = dp / (dp - dq);
-                            x = PlanePoint(t, verts[p.V].X + (verts[q.V].X - verts[p.V].X) * s, verts[p.V].Y + (verts[q.V].Y - verts[p.V].Y) * s);
+                            var (p, q) = (rem[k], rem[(k + 1) % rem.Count]);
+                            double dp = Dist(o, i, verts[p.V].X, verts[p.V].Y), dq = Dist(o, i, verts[q.V].X, verts[q.V].Y);
+                            if (dp >= -OnLine) inside.Add(p);
+                            if (dp <= OnLine) outside.Add(p);
+                            if ((dp > OnLine && dq < -OnLine) || (dp < -OnLine && dq > OnLine))
+                            {
+                                var e = EdgeOf(p, q);
+                                int x;
+                                if (e != (-1, -1)) x = EdgePoint(e.Item1, e.Item2, o, i);
+                                else
+                                {
+                                    double s = dp / (dp - dq);
+                                    x = PlanePoint(t, verts[p.V].X + (verts[q.V].X - verts[p.V].X) * s, verts[p.V].Y + (verts[q.V].Y - verts[p.V].Y) * s);
+                                }
+                                inside.Add((x, e)); outside.Add((x, e));
+                            }
                         }
-                        inside.Add((x, e)); outside.Add((x, e));
+                        // a piece still thinner than Thin is ground too narrow to stand on: dropped, not fanned into slivers
+                        if (outside.Count >= 3 && !thin) next.Add(outside);
+                        rem = inside;
                     }
+                    // what is left in rem lies inside the outline: dropped
                 }
-                if (outside.Count >= 3) pieces.Add((t, outside.Select(z => z.V).ToList()));
-                rem = inside;
+                cur = next;
             }
-            // what is left in rem lies inside the outline: dropped with the triangle
+            foreach (var piece in cur) pieces.Add((t, piece.Select(z => z.V).ToList()));
         }
 
         // pieces abut along the cut's lines, and one can end at a point another's edge runs past (a hole corner, a cut
@@ -529,87 +639,66 @@ public static class NavEdit
         var onPieces = pieces.SelectMany(pc => pc.Poly).Distinct().ToList();
         foreach (var (t, poly) in pieces)
         {
-            var full = new List<int>();
+            // each point near the ring goes into the one edge it lies closest to (near a sharp corner it is near both)
+            var best = new Dictionary<int, (int Edge, double S, double D)>();
             for (int k = 0; k < poly.Count; k++)
             {
                 int a = poly[k], b = poly[(k + 1) % poly.Count];
-                full.Add(a);
                 Vec3 A = verts[a], B = verts[b];
                 double ex = B.X - (double)A.X, ey = B.Y - (double)A.Y, len2 = ex * ex + ey * ey;
                 if (len2 == 0) continue;
-                var mids = new List<(double S, int V)>();
                 foreach (var m in onPieces)
                 {
-                    if (m == a || m == b) continue;
+                    if (poly.Contains(m)) continue;
                     Vec3 M = verts[m];
                     double s = ((M.X - A.X) * ex + (M.Y - A.Y) * ey) / len2;
                     if (s <= 1e-9 || s >= 1 - 1e-9) continue;
-                    double dx = A.X + ex * s - M.X, dy = A.Y + ey * s - M.Y;
-                    if (dx * dx + dy * dy < OnLine * OnLine && Math.Abs(A.Z + (B.Z - A.Z) * s - M.Z) < 0.05) mids.Add((s, m));
+                    double dx = A.X + ex * s - M.X, dy = A.Y + ey * s - M.Y, d2 = dx * dx + dy * dy;
+                    if (d2 < OnLine * OnLine && Math.Abs(A.Z + (B.Z - A.Z) * s - M.Z) < 0.05 && (!best.TryGetValue(m, out var o) || d2 < o.D)) best[m] = (k, s, d2);
                 }
-                full.AddRange(mids.OrderBy(x => x.S).Select(x => x.V));
+            }
+            var full = new List<int>();
+            for (int k = 0; k < poly.Count; k++)
+            {
+                full.Add(poly[k]);
+                full.AddRange(best.Where(x => x.Value.Edge == k).OrderBy(x => x.Value.S).Select(x => x.Key));
             }
             Fan(t, full);
         }
 
-        // split each uncut neighbour on an edge that got cut points, at the same points
-        foreach (var ((lo, hi), pts) in splits)
+        // split each uncut neighbour at the cut points on its edges, on every edge at once (a neighbour can get points on
+        // two edges, from two outlines' lines): points on one edge only, a fan from the opposite corner; on more, a fan
+        // from its centre
+        var byPos = new Dictionary<(Vec3, Vec3), List<int>>();
+        foreach (var ((lo, hi), pts) in splits) { byPos[(verts[lo], verts[hi])] = pts; byPos[(verts[hi], verts[lo])] = pts; }
+        for (int ni = 0; ni < tris.Count; ni++)
         {
-            var (P, Q) = (verts[lo], verts[hi]);
-            for (int ni = 0; ni < tris.Count; ni++)
+            if (remove.Contains(ni)) continue;
+            var n = tris[ni];
+            var ring = new List<int>(); int withPts = 0, only = -1;
+            for (int e = 0; e < 3; e++)
             {
-                if (remove.Contains(ni)) continue;
-                var n = tris[ni];
-                for (int e = 0; e < 3; e++)
-                {
-                    var (a, b) = NavBorderMatch.EdgeVerts(n, e);
-                    bool fwd = verts[a] == P && verts[b] == Q, back = verts[a] == Q && verts[b] == P;
-                    if (!fwd && !back) continue;
-                    int x = e switch { 0 => n.C, 1 => n.A, _ => n.B };
-                    var start = verts[a];
-                    var mid = pts.OrderBy(k => Math.Abs(verts[k].X - start.X) + Math.Abs(verts[k].Y - start.Y)).ToList();
-                    var chain = new List<int> { a }; chain.AddRange(mid); chain.Add(b);
-                    for (int k = 0; k + 1 < chain.Count; k++) { addT.Add((chain[k], chain[k + 1], x)); addF.Add(n.Flags); }
-                    remove.Add(ni);
-                }
+                var (a, b) = NavBorderMatch.EdgeVerts(n, e);
+                ring.Add(a);
+                if (!byPos.TryGetValue((verts[a], verts[b]), out var pts)) continue;
+                var start = verts[a];
+                ring.AddRange(pts.OrderBy(k => Math.Abs(verts[k].X - start.X) + Math.Abs(verts[k].Y - start.Y)));
+                withPts++; only = e;
             }
+            if (withPts == 0) continue;
+            remove.Add(ni);
+            if (withPts == 1)
+            {
+                var (a, b) = NavBorderMatch.EdgeVerts(n, only);
+                int x = only switch { 0 => n.C, 1 => n.A, _ => n.B };
+                var start = verts[a];
+                var chain = new List<int> { a }; chain.AddRange(byPos[(verts[a], verts[b])].OrderBy(k => Math.Abs(verts[k].X - start.X) + Math.Abs(verts[k].Y - start.Y))); chain.Add(b);
+                for (int k = 0; k + 1 < chain.Count; k++) { addT.Add((chain[k], chain[k + 1], x)); addF.Add(n.Flags); }
+            }
+            else Fan(n, ring);
         }
 
-        return EditTriangles(g, remove.ToList(), verts.Skip(nv0).ToList(), addT, inbound, cover, addF);
-    }
-
-    /// <summary>SEVERAL CUTS AS ONE EDIT (an obstacle cut piece by piece): each outline cut in turn from the result of the
-    /// last, the ops concatenated (the write engine applies them in order), the numbering composed old-to-final, other
-    /// navmeshes' changed links carried from one cut into the next. An outline that touches nothing (that ground is cut
-    /// already) is passed over; refused when none touches anything, or when any cut is refused.</summary>
-    public static TriEditResult CutMany(NavmeshGeometry g, IReadOnlyList<(IReadOnlyList<(float X, float Y)> Outline, float ZLo, float ZHi)> cuts,
-                                        IReadOnlyDictionary<FormKey, NavmeshGeometry> inbound, IReadOnlyList<(bool IsCover, ushort CoverFlags)>? cover = null)
-    {
-        var cur = g; var curCover = cover?.ToList(); var inb = new Dictionary<FormKey, NavmeshGeometry>(inbound);
-        var map = Enumerable.Range(0, g.Triangles.Count).ToArray();
-        var ops = new List<RepairOp>(); var others = new Dictionary<FormKey, NavmeshGeometry>();
-        TriEditResult? last = null; int applied = 0;
-        foreach (var (outline, lo, hi) in cuts)
-        {
-            var r = Cut(cur, outline, lo, hi, inb, curCover);
-            if (r.Status != "planned")
-            {
-                if (r.Why.Count == 1 && r.Why[0].Contains("touches no triangle")) continue;
-                return r;
-            }
-            applied++; last = r; ops.AddRange(r.Ops);
-            for (int i = 0; i < map.Length; i++) map[i] = map[i] < 0 ? -1 : r.Map[map[i]];
-            foreach (var (k, o) in r.Others) { others[k] = o; inb[k] = o; }
-            if (curCover is not null)
-            {
-                var next = Enumerable.Repeat((false, (ushort)0), r.After!.Triangles.Count).ToList();
-                for (int i = 0; i < r.Map.Count; i++) if (r.Map[i] >= 0) next[r.Map[i]] = curCover[i];
-                curCover = next;
-            }
-            cur = r.After!;
-        }
-        if (applied == 0 || last is null) return TriEditResult.Refused("None of the cut's outlines touches a triangle of this navmesh in its band; that ground is cut already, or the outlines are elsewhere.");
-        return new TriEditResult("planned", Array.Empty<string>(), last.After, last.Grid, map, others, ops);
+        return EditTriangles(g, remove.ToList(), verts.Skip(nv0).ToList(), addT, inbound, cover, addF, minArea: Sliver);
     }
 
     static double Cross(IReadOnlyList<Vec3> v, NavTri t)
