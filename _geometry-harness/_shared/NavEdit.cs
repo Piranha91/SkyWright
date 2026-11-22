@@ -50,6 +50,10 @@ public sealed record UseVersionResult(string Status, IReadOnlyList<string> Why, 
 {
     /// <summary>The version's ledge links carried as it has them, unverified (a ledge link is not made by edge geometry).</summary>
     public int LedgesCarried { get; init; }
+    /// <summary>The version's door entries the winner lacks, and the winner's the version lacks (set on a refusal too, so the
+    /// caller can say which doors and where they lead).</summary>
+    public IReadOnlyList<NavDoorTriangle> DoorsAdded { get; init; } = Array.Empty<NavDoorTriangle>();
+    public IReadOnlyList<NavDoorTriangle> DoorsDropped { get; init; } = Array.Empty<NavDoorTriangle>();
     public static UseVersionResult Refused(params string[] why) =>
         new("refused", why, null, null, new Dictionary<FormKey, NavmeshGeometry>(), Array.Empty<RepairOp>(), 0, 0, 0, Array.Empty<FormKey>(), Array.Empty<FormKey>());
 }
@@ -841,8 +845,23 @@ public static class NavEdit
         if (lost.Count > 0) why.Add($"{fromPlugin}'s version no longer links into {string.Join(" and ", lost)}, which the navmesh info map's entry for {key} names; removing a neighbour there is not supported yet.");
         var doorsWas = (winner.DoorTriangles ?? Array.Empty<NavDoorTriangle>()).Select(d => d.Door).OrderBy(d => d.ToString()).ToList();
         var doorsNow = (V.DoorTriangles ?? Array.Empty<NavDoorTriangle>()).Select(d => d.Door).OrderBy(d => d.ToString()).ToList();
-        if (!doorsWas.SequenceEqual(doorsNow)) why.Add($"{fromPlugin}'s version has other doors than the winner's ({doorsNow.Count} against {doorsWas.Count}), and the navmesh info map's linked doors would not follow; that is not supported yet.");
-        if (why.Count > 0) return UseVersionResult.Refused(why.Distinct().ToArray());
+        // the door entries one side has beyond the other, door by door (a door can stand before several triangles)
+        static List<NavDoorTriangle> Beyond(IReadOnlyList<NavDoorTriangle>? a, IReadOnlyList<NavDoorTriangle>? b)
+        {
+            var left = (b ?? Array.Empty<NavDoorTriangle>()).GroupBy(d => d.Door).ToDictionary(g => g.Key, g => g.Count());
+            var o = new List<NavDoorTriangle>();
+            foreach (var d in a ?? Array.Empty<NavDoorTriangle>())
+                if (left.TryGetValue(d.Door, out var n) && n > 0) left[d.Door] = n - 1; else o.Add(d);
+            return o;
+        }
+        var added = Beyond(V.DoorTriangles, winner.DoorTriangles);
+        var dropped = Beyond(winner.DoorTriangles, V.DoorTriangles);
+        string Doors(List<NavDoorTriangle> ds) => string.Join(", ", ds.Select(d => $"{d.Door} (before triangle {d.TriangleBeforeDoor})"));
+        if (added.Count + dropped.Count > 0)
+            why.Add($"{fromPlugin}'s version has other doors than the winner's ({doorsNow.Count} against {doorsWas.Count}: "
+                    + string.Join("; ", new[] { added.Count > 0 ? $"it adds {Doors(added)}" : null, dropped.Count > 0 ? $"it lacks {Doors(dropped)}" : null }.Where(x => x is not null))
+                    + "), and the navmesh info map's linked doors would not follow; that is not supported yet.");
+        if (why.Count > 0) return UseVersionResult.Refused(why.Distinct().ToArray()) with { DoorsAdded = added, DoorsDropped = dropped };
 
         var grid = NavGrid.Rebuild(after.Vertices, after.Triangles.Select(t => ((int)t.A, (int)t.B, (int)t.C)).ToList());
         after = after with { Min = grid.Min, Max = grid.Max };

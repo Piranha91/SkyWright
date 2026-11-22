@@ -702,6 +702,23 @@ static class NavEditSelfTest
             return UseRefused(doors, "other doors") ?? UsePlanned(gained) ?? (gained.Gained.SequenceEqual(new[] { NK }) ? null : "gained " + string.Join(",", gained.Gained));
         });
 
+        // C2564: the door refusal names each door: one the version adds (D1 before triangle 3), one it lacks (D2 before 5), and
+        // a door standing before two triangles in the version and one in the winner (D3: the extra entry, before 7); the
+        // same lists come back on the result for the plan row.
+        Case("2564 use-version-names-doors", () =>
+        {
+            var (w, n) = Pair();
+            FormKey D(uint id) => new(new ModKey("SelfTest", ModType.Master), id);
+            var win = w with { DoorTriangles = new List<NavDoorTriangle> { new(D(0xD02), 5), new(D(0xD03), 6) } };
+            var ver = w with { DoorTriangles = new List<NavDoorTriangle> { new(D(0xD01), 3), new(D(0xD03), 6), new(D(0xD03), 7) } };
+            var r = NavEdit.UseVersion(win, ver, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol);
+            if (UseRefused(r, "other doors") is { } why) return why;
+            string L(IReadOnlyList<NavDoorTriangle> ds) => string.Join(" ", ds.Select(d => $"{d.Door.ID:X}@{d.TriangleBeforeDoor}"));
+            if (L(r.DoorsAdded) != "D01@3 D03@7" || L(r.DoorsDropped) != "D02@5") return $"added {L(r.DoorsAdded)}, dropped {L(r.DoorsDropped)}";
+            var text = string.Join(" ", r.Why);
+            return text.Contains($"it adds {D(0xD01)} (before triangle 3), {D(0xD03)} (before triangle 7)") && text.Contains($"it lacks {D(0xD02)} (before triangle 5)") ? null : "the sentence does not name the doors: " + text;
+        });
+
         // C2561: ledge links are not matched by edge geometry: the version's own (Type 2) is carried while it names a triangle N
         // has, and refused when it names one N lacks; N's ledge link into this navmesh is kept where the version's triangle of
         // that index stands on the winner's corners, and refused when the version renumbers it.

@@ -180,6 +180,12 @@ a clobber, where a later mod's version replaced an earlier one's).
   - a ledge link out of range, or one into K that the version renumbers;
   - a version that no longer links into a neighbour the winner did (its info map entry would still name it), or whose
     doors differ from the winner's (the info map's linked doors would not follow).
+- **Doors named.** A door refusal names each door the version adds and each it lacks, with the triangle before it, door
+  by door (a door can stand before several triangles). The plan row's `useVersion.doors` lists the same, `added` and
+  `dropped`, each with the door reference, the plugin whose version of it wins (`placedBy`), `triangleBeforeDoor`, and
+  where it leads (`leadsTo`: its teleport's door, that door's cell and the cell's editor ID). On NR2-V this showed that
+  USSEP's versions of `04C081` and `019F24` lack Legacy of the Dragonborn's doors into `DBMJournalDungeon01` and
+  `DBMVQStendarrsRefuge` (C2564).
 - **The plan row** (`useVersion`) gives the source plugin, vertex and triangle counts before and after, links matched,
   changed and cut (always 0), ledge links carried unverified, neighbour links re-pointed and the navmeshes they are in,
   doors checked, neighbours gained, the NAVI change, and the rebuilt grid.

@@ -178,6 +178,11 @@ static class NavEditCli
                             ["triangles"] = new JsonObject { ["before"] = geom.Triangles.Count, ["after"] = version.Triangles.Count },
                             ["linksMatched"] = r.Matched, ["linksChanged"] = r.Changed, ["ledgeLinksCarriedUnverified"] = r.LedgesCarried, ["linksCut"] = 0, ["neighbourLinksRepointed"] = r.Repointed,
                             ["navmeshesRepointed"] = Arr(r.Others.Keys.Select(k => k.ToString())), ["doorsChecked"] = r.Doors.Count,
+                            ["doors"] = new JsonObject
+                            {
+                                ["added"] = new JsonArray(r.DoorsAdded.Select(d => (JsonNode)DoorRow(view, session, d)).ToArray()),
+                                ["dropped"] = new JsonArray(r.DoorsDropped.Select(d => (JsonNode)DoorRow(view, session, d)).ToArray()),
+                            },
                             ["gainedNeighbours"] = Arr(r.Gained.Select(k => k.ToString())), ["navi"] = naviRow, ["grid"] = "rebuilt",
                             // the plugins whose versions of K the patch supersedes (every one after the source, in load order):
                             // the patch masters each, so nothing can sort it above them and let one win K again (houseCARL,
@@ -289,6 +294,28 @@ static class NavEditCli
     }
 
     static NavCutPlan One(string why) => NavCutPlan.Refused(why);
+
+    /// <summary>One door entry of a navmesh for the plan row: the door reference, the plugin whose version of it wins, the
+    /// triangle before it, and where it leads (its teleport's door, that door's cell and the cell's editor ID); a field is
+    /// null when the order does not provide it.</summary>
+    static JsonObject DoorRow(LoadOrderResolver.IndexView view, LoadOrderResolver.OverlaySession session, NavDoorTriangle d)
+    {
+        var w = view.ResolveWinner(d.Door);
+        var rec = w is null ? null : view.GetRecord(session, w.Value.WinnerPlugin, d.Door, typeof(IPlacedObjectGetter)) as IPlacedObjectGetter;
+        JsonObject? to = null;
+        if (rec is { TeleportDestination: { } dest } && !dest.Door.FormKey.IsNull)
+        {
+            var cell = view.ParentOf(dest.Door.FormKey);
+            var cw = cell is { } c ? view.ResolveWinner(c) : null;
+            var crec = cw is null ? null : view.GetRecord(session, cw.Value.WinnerPlugin, cell!.Value, typeof(ICellGetter)) as ICellGetter;
+            to = new JsonObject { ["door"] = dest.Door.FormKey.ToString(), ["cell"] = cell?.ToString(), ["cellEditorId"] = crec?.EditorID };
+        }
+        return new JsonObject
+        {
+            ["door"] = d.Door.ToString(), ["placedBy"] = w?.WinnerPlugin, ["triangleBeforeDoor"] = d.TriangleBeforeDoor,
+            ["leadsTo"] = to,
+        };
+    }
 
     /// <summary>Re-write a written patch IN PLACE with <paramref name="masters"/> added to its master list. The core write
     /// engine derives a patch's masters from what its records reference, and adds no others; a resolution patch must also
