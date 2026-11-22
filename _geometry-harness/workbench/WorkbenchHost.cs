@@ -285,11 +285,11 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         undo.Click += (_, _) => { _session.Undo(); AfterStage(); };
         dry.Click += async (_, _) => await CommitAsync(dryRun: true, "Workbench");
         write.Click += async (_, _) => await CommitAsync(dryRun: false, "Workbench");
-        // a fixed height, so the 3D view keeps its size whatever the edits list, the status line or the buttons hold
-        var bar = new DockPanel { LastChildFill = true, Height = ReadOnly ? 134 : 270 };
+        // an edit scene's bar has a fixed height, so the 3D view keeps its size whatever the edits list holds; a read-only
+        // scene's bar is as tall as its rows, so no empty band sits between the status line and the view tools
+        var bar = new DockPanel { LastChildFill = true };
+        if (!ReadOnly) bar.Height = 270;
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
-        buttons.Children.Add(_fpsText);
-        buttons.Children.Add(FpsToggle());
         if (!ReadOnly) { buttons.Children.Add(undo); buttons.Children.Add(dry); buttons.Children.Add(write); }
         DockPanel.SetDock(buttons, Dock.Right);
         var tools = ToolsRow();
@@ -303,8 +303,17 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         pendingPanel.Children.Add(edits); pendingPanel.Children.Add(context);
         DockPanel.SetDock(pendingPanel, Dock.Bottom);
         _layerBar = new LayerBar(() => _layers, (l, on) => { try { Shell.SetBanner(SetLayer(l, on)); } catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); _layerBar?.Refresh(); } });
-        DockPanel.SetDock(_layerBar.Element, Dock.Top);
-        bar.Children.Add(_layerBar.Element);
+        // the layer toggles, with the frame-rate switch at the row's right end and its readout under the row when shown
+        var topRow = new DockPanel();
+        var fps = FpsToggle();
+        fps.Padding = new Thickness(6, 1, 6, 1); fps.Margin = new Thickness(2, 2, 6, 2); fps.VerticalAlignment = VerticalAlignment.Center;
+        DockPanel.SetDock(fps, Dock.Right);
+        topRow.Children.Add(fps); topRow.Children.Add(_layerBar.Element);
+        DockPanel.SetDock(topRow, Dock.Top);
+        bar.Children.Add(topRow);
+        _fpsText.Width = double.NaN; _fpsText.Margin = new Thickness(8, 0, 8, 2);
+        DockPanel.SetDock(_fpsText, Dock.Top);
+        bar.Children.Add(_fpsText);
         DockPanel.SetDock(_key, Dock.Top);
         bar.Children.Add(_key);
         bar.Children.Add(tools);
@@ -519,7 +528,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     Button FpsToggle()
     {
         // a plain button that names what it will do: the theme draws a checked toggle's text unreadably
-        _fpsButton = new Button { Margin = new Thickness(4), ToolTip = "show or hide the 3D view's frame rate beside these buttons" };
+        _fpsButton = new Button { Margin = new Thickness(4), ToolTip = "show or hide the 3D view's frame rate, under this row" };
         _fpsButton.Click += (_, _) => ShowFps(!_showFps);
         _fpsButton.Content = _showFps ? "Hide frame rate" : "Show frame rate";
         return _fpsButton;
