@@ -503,21 +503,29 @@ internal sealed class MapTileLayer
         }
         // the loading strip: the share of the cells in view that are shown, while any is still being drawn or read
         bool busy = Enabled && _stopped is null && _view is not null && (_running is not null || _queue.Count > 0 || _reading.Count > 0);
+        double? progress = null;
         if (busy && _view is { } vv)
         {
             int have = _shown.Count(k => k.Key.X >= vv.X0 && k.Key.X <= vv.X1 && k.Key.Y >= vv.Y0 && k.Key.Y <= vv.Y1);
+            progress = _inView > 0 ? (double)have / _inView : 0;
             Loading.Set("tiles", $"Drawing the map's textured tiles ({have} of {_inView} cells in view)", _inView > 0 ? (double)have / _inView : null);
         }
         else Loading.Clear("tiles");
-        if (s == Status) return;
+        bool busyChanged = Busy != busy || Progress != progress;
+        Busy = busy; Progress = progress;
+        if (s == Status && !busyChanged) return;
         Status = s;
         Changed?.Invoke();
     }
 
+    /// <summary>True while tiles in view are still being drawn or read; <see cref="Progress"/> is the share of the cells in view shown.</summary>
+    internal bool Busy { get; private set; }
+    internal double? Progress { get; private set; }
+
     /// <summary>What the state tools read.</summary>
     internal object State() => new
     {
-        enabled = Enabled, status = Status, scale = _scale == 0 ? (int?)null : _scale, folder = _orderDir, renderer = MapTileCache.RendererVersion,
+        enabled = Enabled, status = Status, busy = Busy, progress = Progress, scale = _scale == 0 ? (int?)null : _scale, folder = _orderDir, renderer = MapTileCache.RendererVersion,
         view = _view is { } v ? new[] { v.X0, v.Y0, v.X1, v.Y1 } : null, inView = _inView,
         shown = _view is { } w ? _shown.Count(k => k.Key.X >= w.X0 && k.Key.X <= w.X1 && k.Key.Y >= w.Y0 && k.Key.Y <= w.Y1) : 0,
         shownAtScale = _view is { } u ? _shown.Count(k => k.Value.Scale == _scale && k.Key.X >= u.X0 && k.Key.X <= u.X1 && k.Key.Y >= u.Y0 && k.Key.Y <= u.Y1) : 0,

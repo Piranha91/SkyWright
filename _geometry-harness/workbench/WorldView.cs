@@ -30,6 +30,7 @@ internal static class WorldView
     static readonly TextBlock MapSays = new() { VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Dim), TextTrimming = TextTrimming.CharacterEllipsis };
     static readonly CheckBox MapTextured = new() { Content = "Textured", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0),
         ToolTip = "zoomed in, draw the cells as the game draws them from straight above (the renderer's pictures, kept on disk per load order); off shows the shaded shapes" };
+    static readonly System.Windows.Controls.ProgressBar TileBar = new() { Width = 120, Height = 6, Minimum = 0, Maximum = 1, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center, Visibility = Visibility.Collapsed };
     static readonly TextBlock TileSays = new() { VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Dim), TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 1, 0, 0) };
     static string _mapStatus = "";
     static string? _mapWorld;                             // the worldspace the map shows or is reading
@@ -80,12 +81,21 @@ internal static class WorldView
         DockPanel.SetDock(mapLabel, Dock.Left); DockPanel.SetDock(MapWorld, Dock.Left); DockPanel.SetDock(MapTextured, Dock.Left);
         mapBar.Children.Add(mapLabel); mapBar.Children.Add(MapWorld); mapBar.Children.Add(MapTextured); mapBar.Children.Add(MapSays);
         // the tiles' own line under the bar, so the pointer's cell name does not hide it
-        TileSays.Margin = new Thickness(66, 0, 6, 2);
         MapTextured.IsChecked = MapSettings.Textured;
         Map.Tiles.SetEnabled(MapTextured.IsChecked == true);
         MapTextured.Click += (_, _) => { MapSettings.Textured = MapTextured.IsChecked == true; SetTextured(MapTextured.IsChecked == true); };
-        Map.Tiles.Changed += () => { TileSays.Text = Map.Tiles.Status; TileSays.Visibility = Map.Tiles.Status.Length > 0 ? Visibility.Visible : Visibility.Collapsed; };
-        TileSays.Visibility = Visibility.Collapsed;
+        // the tiles' progress bar sits on their own line, next to the map, where the eye is while they arrive
+        var tileLine = new DockPanel { Margin = new Thickness(66, 0, 6, 2), Visibility = Visibility.Collapsed };
+        DockPanel.SetDock(TileBar, Dock.Left);
+        tileLine.Children.Add(TileBar); tileLine.Children.Add(TileSays);
+        TileSays.Margin = new Thickness(0);
+        Map.Tiles.Changed += () =>
+        {
+            TileSays.Text = Map.Tiles.Status;
+            tileLine.Visibility = Map.Tiles.Status.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            TileBar.Visibility = Map.Tiles.Busy ? Visibility.Visible : Visibility.Collapsed;
+            if (Map.Tiles.Progress is { } f) TileBar.Value = f;
+        };
         MapWorld.SelectionChanged += (_, _) => { if (!_mapSetting && MapWorld.SelectedItem is ComboBoxItem { Tag: string key }) ShowMap(key, null); };
         Map.ShapesShown += () =>
         {
@@ -105,8 +115,8 @@ internal static class WorldView
         body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(3, GridUnitType.Star), MinHeight = 80 });
         var bar = new GridSplitter { Height = 5, HorizontalAlignment = HorizontalAlignment.Stretch, Background = Theme.Brush("#2C3036") };
         var mapPanel = new DockPanel();
-        DockPanel.SetDock(mapBar, Dock.Top); DockPanel.SetDock(TileSays, Dock.Top);
-        mapPanel.Children.Add(mapBar); mapPanel.Children.Add(TileSays); mapPanel.Children.Add(Map.View);
+        DockPanel.SetDock(mapBar, Dock.Top); DockPanel.SetDock(tileLine, Dock.Top);
+        mapPanel.Children.Add(mapBar); mapPanel.Children.Add(tileLine); mapPanel.Children.Add(Map.View);
         Grid.SetRow(mapPanel, 0); Grid.SetRow(bar, 1); Grid.SetRow(Tree, 2);
         body.Children.Add(mapPanel); body.Children.Add(bar); body.Children.Add(Tree);
         var panel = new DockPanel();

@@ -401,11 +401,14 @@ internal static class ResultsView
         var order = OrderOf(pair, setup) with { Navmesh = r.Lane == "navmesh" || r.RecordType == "NAVM" };
         int gen = ++_openGeneration;
         var ui = Dispatcher.CurrentDispatcher;
-        var index = LoadOrderIndexes.For(order);
+        var placing = $"Reading the load order of {order.Label} to place {RecordWords.Named(r.RecordType, r.EditorId, r.BaseEditorId, r.FormKey)}";
+        var index = LoadOrderIndexes.For(order, new Progress<string>(s => { if (gen == _openGeneration) Loading.Set("placing", $"{placing}: {s}"); }));
         bool waited = !index.IsCompleted;
+        if (waited) Loading.Set("placing", placing); else Loading.Clear("placing");
         index.ContinueWith(t => ui.BeginInvoke(() =>
         {
             if (gen != _openGeneration) return;
+            Loading.Clear("placing");
             Say(() =>
             {
                 if (t.IsFaulted) throw new InvalidOperationException($"the load order of {order.Label} could not be read, so the row's place is not known: {t.Exception!.GetBaseException().Message}");
