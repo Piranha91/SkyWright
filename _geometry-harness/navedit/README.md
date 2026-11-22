@@ -162,6 +162,15 @@ a clobber, where a later mod's version replaced an earlier one's).
 - **The navmesh info map:** a neighbour the version gains is added to both entries (`NavRepairNavi.ForPairs`, the
   relink's rule).
 - **Door references:** each must resolve in the order.
+- **Masters:** the patch masters every plugin whose version of K it supersedes (each after the source in load order), so a
+  re-sort cannot load it above them and let one win K again (houseCARL's ruling, 2026-11-22; the clobber rule is
+  unchanged). A neighbour whose links are only re-pointed adds none. The core derives masters from what records
+  reference, so `write` re-writes the patch in place with them. The text is kept in its own lane, the FormID floor and
+  the atomic swap are the core's. The read-back checks the master list against the plan, in load order.
+  - **Copied core code:** the Mutagen write call and staging of `WriteEngine.WritePatchStaged` (the core keeps them
+    internal). `tests/test_navedit.py`'s "core write drift" case fingerprints that code, and the public pieces called,
+    in the pinned core. It fails when a pin move changes them, or when the core gains its own extra-masters option (then
+    use that instead).
 - **Refused, by name:**
   - a plugin not in the order, the winner itself, or a plugin without a version of K (or deleting it);
   - an island;
@@ -224,7 +233,8 @@ come later (`C:/hc-runs/2026-11-21-navgrid/PLAN.md`, the plan gate).
   - USSEP's version of `0FC127`, which 3DNPC.esp's replaces without depending on USSEP: 4 border links matched again, 1
     ledge link carried, 5 doors checked. Written by a CopyFrom and read back against USSEP's version, cover included.
     `navownprobe --base` then finds the clobber's predicate Gone: USSEP's geometry wins.
-  - The patch itself shows as a new CLOBBERED row (3DNPC.esp re-cut by the patch, which does not master it).
+  - Written first without masters, the patch showed as a new CLOBBERED row (3DNPC.esp re-cut by a patch that did not
+    master it). It now masters 3DNPC.esp, and the re-check shows the clobber gone with no new row.
   - The other 13 clobbered navmeshes on this profile were refused, each by name: 3 islands, 5 versions with other doors,
     and 5 whose borders no longer meet the winning neighbours (Legacy of the Dragonborn's new navmeshes link into the
     winners; one through a ledge link the version renumbers).

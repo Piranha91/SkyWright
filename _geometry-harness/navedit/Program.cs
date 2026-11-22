@@ -179,6 +179,11 @@ static class NavEditCli
                             ["linksMatched"] = r.Matched, ["linksChanged"] = r.Changed, ["ledgeLinksCarriedUnverified"] = r.LedgesCarried, ["linksCut"] = 0, ["neighbourLinksRepointed"] = r.Repointed,
                             ["navmeshesRepointed"] = Arr(r.Others.Keys.Select(k => k.ToString())), ["doorsChecked"] = r.Doors.Count,
                             ["gainedNeighbours"] = Arr(r.Gained.Select(k => k.ToString())), ["navi"] = naviRow, ["grid"] = "rebuilt",
+                            // the plugins whose versions of K the patch supersedes (every one after the source, in load order):
+                            // the patch masters each, so nothing can sort it above them and let one win K again (houseCARL,
+                            // 2026-11-22). A neighbour whose links are only re-pointed needs none.
+                            ["masters"] = Arr((view.TouchingPlugins(key) ?? Array.Empty<string>())
+                                .SkipWhile(n => !string.Equals(n, Path.GetFileName(fromPath), StringComparison.OrdinalIgnoreCase)).Skip(1)),
                         };
                     }
                 }
@@ -284,6 +289,46 @@ static class NavEditCli
     }
 
     static NavCutPlan One(string why) => NavCutPlan.Refused(why);
+
+    /// <summary>Re-write a written patch IN PLACE with <paramref name="masters"/> added to its master list. The core write
+    /// engine derives a patch's masters from what its records reference, and adds no others; a resolution patch must also
+    /// master what it supersedes. Through the core's public pieces: the plugin read and written back in its own text lane
+    /// (PluginTextEncoding.ReadFor / WriteInPlace, so text it did not change comes back byte-identical), the FormID floor
+    /// (WriteEngine.EnsureFormIdFloor), the atomic swap (AtomicFile.Commit). COPIED from the core, which keeps it internal:
+    /// the Mutagen write call of WriteEngine.WritePatchStaged (load order, extra masters, no FormID re-derivation, embedded
+    /// encodings) and its staging folder. tests/test_navedit.py's drift check fails when the pinned core's copy of that code
+    /// changes, so this copy is reviewed with it.</summary>
+    static string? AddMasters(string patchPath, IReadOnlyList<string> order, IReadOnlyList<string> masters)
+    {
+        SkyrimMod patch;
+        try { patch = SkyrimMod.CreateFromBinary(patchPath, SkyrimRelease.SkyrimSE, PluginTextEncoding.ReadFor(patchPath)); }
+        catch (Exception ex) { return $"the written patch {patchPath} could not be read back to add its masters ({ex.Message}); do not enable it."; }
+        if (patch.UsingLocalization) return $"the written patch {patchPath} is flagged localized, so its masters cannot be added in place; do not enable it.";
+        var known = new List<ISkyrimModDisposableGetter>();
+        var tmpDir = Path.Combine(Path.GetDirectoryName(patchPath)!, ".navedit-tmp");
+        try
+        {
+            foreach (var p in order) known.Add(SkyrimMod.CreateFromBinaryOverlay(p, SkyrimRelease.SkyrimSE));
+            WriteEngine.EnsureFormIdFloor(patch);
+            Directory.CreateDirectory(tmpDir);
+            var tmp = Path.Combine(tmpDir, Path.GetFileName(patchPath));
+            patch.BeginWrite
+                .ToPath(tmp)
+                .WithLoadOrder(known.ToArray())
+                .WithExtraIncludedMasters(masters.Select(m => ModKey.FromFileName(m)).ToArray())
+                .NoNextFormIDProcessing()
+                .WithEmbeddedEncodings(PluginTextEncoding.WriteInPlace(patchPath))
+                .Write();
+            AtomicFile.Commit(tmp, patchPath);
+            return null;
+        }
+        catch (Exception ex) { return $"adding the masters {string.Join(", ", masters)} to {patchPath} failed ({ex.GetType().Name}: {ex.Message}); do not enable it."; }
+        finally
+        {
+            foreach (var k in known) k.Dispose();
+            try { if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true); } catch (IOException) { }
+        }
+    }
 
     /// <summary>A navmesh's walkable area in plan: its triangles' plan areas, summed.</summary>
     static double PlanArea(NavmeshGeometry g) => g.Triangles.Sum(t =>
@@ -410,17 +455,27 @@ static class NavEditCli
                 if (!fw.Success) { Console.Error.WriteLine($"navedit write: forwarding the carried records from {g.Key} failed: {fw.Error}"); return 1; }
             }
         }
-        return ReadBack(outPath, order, again);
+        var masters = again.SelectMany(p => p.Row["useVersion"]?["masters"]?.AsArray().Select(x => (string)x!) ?? Array.Empty<string>())
+                           .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (masters.Count > 0 && AddMasters(outPath, order, masters) is { } merr) { Console.Error.WriteLine($"navedit write: {merr}"); return 1; }
+        return ReadBack(outPath, order, again, masters);
     }
 
     /// <summary>The written patch against the plan: every changed navmesh's vertices, triangles (corners, edge fields, flags),
     /// links, doors, box and grid; each kept triangle's cover fields against its winner's; no other navmesh in the patch;
     /// every carried record equal to its winner. One line per check; 0 when all hold.</summary>
-    static int ReadBack(string patchPath, IReadOnlyList<string> order, List<Planned> planned)
+    static int ReadBack(string patchPath, IReadOnlyList<string> order, List<Planned> planned, IReadOnlyList<string> masters)
     {
         int failed = 0;
         var expect = planned.SelectMany(p => p.Expect).ToDictionary(kv => kv.Key, kv => kv.Value);
         using var patch = SkyrimMod.CreateFromBinaryOverlay(patchPath, SkyrimRelease.SkyrimSE);
+        // every plugin a use_version supersedes is a master, and the masters stand in load order
+        var declared = patch.ModHeader.MasterReferences.Select(m => m.Master.FileName.String).ToList();
+        var missing = masters.Where(m => !declared.Contains(m, StringComparer.OrdinalIgnoreCase)).ToList();
+        var pos = declared.Select(d => order.ToList().FindIndex(o => string.Equals(Path.GetFileName(o), d, StringComparison.OrdinalIgnoreCase))).ToList();
+        bool inOrder = pos.All(i => i >= 0) && pos.Zip(pos.Skip(1)).All(z => z.First < z.Second);
+        if (missing.Count > 0 || !inOrder) { Console.WriteLine($"FAIL the patch's masters [{string.Join(", ", declared)}] " + (missing.Count > 0 ? $"lack {string.Join(", ", missing)}, whose versions it supersedes" : "are not in load order")); failed++; }
+        else if (masters.Count > 0) Console.WriteLine($"ok   the patch masters every plugin it supersedes ({string.Join(", ", masters)}), in load order");
         var raw = patch.EnumerateMajorRecords<INavigationMeshGetter>().ToDictionary(n => n.FormKey);
         var geoms = PlacementExtract.FromMod(patch).SelectMany(cp => cp.Navmeshes).ToDictionary(n => n.FormKey);
         foreach (var (key, (want, oldIndex, winnerPath, rebuilt)) in expect)

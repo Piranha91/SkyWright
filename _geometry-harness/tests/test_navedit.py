@@ -53,6 +53,7 @@ The real-data check (plan and write on a lab profile, read back, byte-compared w
     python tests/test_navedit.py           (HC_NR_CASES=2514,2515 to pick cases)
 """
 import os
+import re
 import subprocess
 import sys
 import traceback
@@ -75,7 +76,46 @@ def selftest(name):
     assert lines and lines[0].startswith("ok "), lines or f"no line for {name} (exit {SELF.returncode}): {SELF.stdout[-400:]} {SELF.stderr[-300:]}"
 
 
+# THE COPIED CORE CODE (navedit/Program.cs AddMasters, 2026-11-22). navedit re-writes a use_version patch in place to add
+# the masters a resolution patch must declare; the pinned core keeps the write step internal, so its Mutagen write call and
+# staging are COPIED from WriteEngine.WritePatchStaged, and the rest goes through the core's public pieces. This fingerprint
+# of that code (and of those pieces' signatures) fails when a pin move changes any of it: then review AddMasters against the
+# new core (or switch to the core's own extra-masters option if it has gained one), and record the new fingerprint here.
+CORE = HARNESS.parent / "external" / "houseCARL" / "src" / "housecarl-core"
+CORE_WRITE_FINGERPRINT = "a736548dc819b8e590a743891aba27d344e1bd07198b8c9e19dcd18110974b0f"   # pin 461681f7
+
+
+def core_write_fingerprint():
+    import hashlib
+    import re
+
+    def block(text, start):
+        i = text.index(start)
+        return text[i:text.index("\n    }\n", i) + 7]
+    we = (CORE / "WriteEngine.cs").read_text(encoding="utf-8").replace("\r\n", "\n")
+    parts = [block(we, "static string WritePatchStaged("), block(we, "static void CommitStagedPatch("),
+             block(we, "public static void EnsureFormIdFloor(")]
+    pte = (CORE / "PluginTextEncoding.cs").read_text(encoding="utf-8")
+    parts += [l.strip() for l in pte.splitlines() if re.search(r"public static .* (ReadFor|WriteInPlace|InPlaceIsUtf8)\(", l)]
+    parts.append(block((CORE / "AtomicFile.cs").read_text(encoding="utf-8").replace("\r\n", "\n"), "public static void Commit("))
+    norm = "\n".join(re.sub(r"\s+", " ", x).strip() for x in parts)
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()
+
+
+def core_write_drift():
+    builder = (CORE / "WritePatchBuilder.cs").read_text(encoding="utf-8")
+    assert not re.search(r"ExtraMasters|extraMasters|AdditionalMasters", builder), (
+        "the pinned core's WritePatchBuilder now names extra masters: navedit's AddMasters may be replaced by the core's "
+        "own option (the one-owner route); review it")
+    got = core_write_fingerprint()
+    assert got == CORE_WRITE_FINGERPRINT, (
+        f"the pinned core's write step changed (fingerprint {got}, recorded {CORE_WRITE_FINGERPRINT}): review "
+        "navedit/Program.cs AddMasters against WriteEngine.WritePatchStaged, CommitStagedPatch, EnsureFormIdFloor, "
+        "PluginTextEncoding.ReadFor/WriteInPlace and AtomicFile.Commit, then record the new fingerprint")
+
+
 CASES = [
+    ("core write drift: the copied core code is unchanged", core_write_drift),
     ("2513 interior move planned with its grid and ops", lambda: selftest("2513")),
     ("2514 a fold is refused", lambda: selftest("2514")),
     ("2515 a linked edge holds sideways, moves in height", lambda: selftest("2515")),

@@ -74,6 +74,8 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
           triangle and where it stands; one triangle one place, one place one triangle; an EDGE-IDX row names no place
     2555  self-test: a row listing several navmeshes (CLOBBERED) keys on the navmesh asked about and its plugin pair; a
           NAV-GROUND row whose owner became the patch is unchanged
+    2563  navedit on the fixture: use_version of G4 from Skyrim.esm masters RpD.esp, whose version it supersedes (read from the
+          written header), the read-back says so, and no staging folder is left
 
 Probes come from this checkout's Release builds unless HC_NR_HARNESS names another harness folder; the houseCARL server
 and generator from this checkout's src (HC_NR_SRC another). HC_NR_CASES (e.g. "2463,2483") runs those cases only.
@@ -605,6 +607,34 @@ def t2554():
     assert not clash, f"two triangles of one navmesh at one place: {clash}"
 
 
+def t2563():
+    """Rejects: a use_version patch that does not master the plugin whose version it supersedes (RpD.esp re-cuts G4 over
+    Skyrim.esm's), or whose read-back does not check it."""
+    import struct
+    L = lab()
+    out = Path(tempfile.mkdtemp(prefix="navedit-masters-"))
+    edits = out / "edits.json"
+    edits.write_text(json.dumps({"edits": [{"navmesh": N["G4"], "use_version": "Skyrim.esm"}]}), encoding="utf-8")
+    navedit = PROBES / "navedit" / "bin" / "Release" / "net9.0" / "navedit.exe"
+    plan = run([navedit, "plan", "--edits", edits, "--out", out / "plan.json", "--instance", L.inst, "--game", L.game, "--profile", "P"])
+    assert plan.returncode == 0, f"plan exit {plan.returncode}: {(plan.stdout + plan.stderr)[-600:]}"
+    row = json.loads((out / "plan.json").read_text(encoding="utf-8"))["edits"][0]
+    assert row["useVersion"]["masters"] == ["RpD.esp"], row["useVersion"]
+    w = run([navedit, "write", "--plan", out / "plan.json", "--out", out / "UseG4.esp"])
+    assert w.returncode == 0 and "masters every plugin it supersedes (RpD.esp)" in w.stdout, f"write exit {w.returncode}: {(w.stdout + w.stderr)[-800:]}"
+    # the master list straight from the TES4 header (MAST subrecords), not through the program under test
+    b = (out / "UseG4.esp").read_bytes()
+    size = struct.unpack_from("<I", b, 4)[0]
+    i, masters = 24, []
+    while i < 24 + size:
+        sig, ln = b[i:i + 4], struct.unpack_from("<H", b, i + 4)[0]
+        if sig == b"MAST":
+            masters.append(b[i + 6:i + 6 + ln].rstrip(b"\0").decode("latin-1"))
+        i += 6 + ln
+    assert "RpD.esp" in masters and masters.index("Skyrim.esm") < masters.index("RpD.esp"), masters
+    assert not (out / ".navedit-tmp").exists(), "the staging folder was left behind"
+
+
 def t2490():
     """Rejects: a cut that leaves its table entry, or leaves a later entry's edge field naming the old index."""
     selftest("2490")
@@ -814,6 +844,7 @@ CASES = [
     ("2553 self-test: a base emit without places is refused", lambda: selftest("2553")),
     ("2554 the emit says where each link row's triangles stand", t2554),
     ("2555 self-test: grouped rows keyed per navmesh", lambda: selftest("2555")),
+    ("2563 a use_version patch masters what it supersedes", t2563),
     ("2499 the fix forwards that cell from its winner, and it holds", t2499),
 ]
 
