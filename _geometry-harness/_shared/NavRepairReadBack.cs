@@ -259,6 +259,25 @@ public static class NavRepairReadBack
         finally { foreach (var m in opened.Values) m.Dispose(); }
     }
 
+    /// <summary>The union of one navmesh's planned changes (a relink's entries, edge fields and flags; a ground plan's vertices
+    /// and box): the later row's value where both set the same thing.</summary>
+    public static NavChange Merge(IEnumerable<NavChange> changes)
+    {
+        var m = new NavChange();
+        foreach (var c in changes)
+        {
+            foreach (var (k, v) in c.Vertices) m.Vertices[k] = v;
+            if (c.Min is { } mn) m.Min = mn;
+            if (c.Max is { } mx) m.Max = mx;
+            foreach (var (k, v) in c.SetEntries) m.SetEntries[k] = v;
+            foreach (var k in c.RemovedEntries) m.RemovedEntries.Add(k);
+            m.AddedEntries.AddRange(c.AddedEntries);
+            foreach (var (k, v) in c.EdgeFields) m.EdgeFields[k] = v;
+            foreach (var (k, v) in c.FlagBits) m.FlagBits[k] = v;
+        }
+        return m;
+    }
+
     /// <summary><c>navownprobe --repair-readback PLAN.json PATCH.esp OUT.json</c>: every planned navmesh in the patch against
     /// its winner with the plan applied, every NAVM in the patch a planned one, and every other record the patch carries (the
     /// CELL and WRLD containers) equal to its winner on the plan's order. Exit 0 when every check holds, 1 when one fails (each
@@ -277,9 +296,12 @@ public static class NavRepairReadBack
         var opened = new Dictionary<string, ISkyrimModDisposableGetter>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            foreach (var p in plan["plans"]!.AsArray())
+            // one navmesh can carry a relink row and a follow-the-ground row: the patch holds both, so the read-back holds it to
+            // their union (the Winterhold ground station, 2026-11-22: each row alone failed against the combined write)
+            var rows = plan["plans"]!.AsArray().Where(p => (string)p!["status"]! != "refused")
+                .GroupBy(p => (string)p!["source"]!).Select(g => (Row: g.First()!, Change: Merge(g.Select(r => NavRepairRunJson.ChangeOf(r!["change"]!))))).ToList();
+            foreach (var (p, change) in rows)
             {
-                if ((string)p!["status"]! == "refused") continue;
                 var key = FormKey.Factory((string)p["source"]!);
                 planned.Add(key);
                 string? path = (string?)p["winner"]?["path"];
@@ -291,7 +313,7 @@ public static class NavRepairReadBack
                     var win = mod.EnumerateMajorRecords<INavigationMeshGetter>().FirstOrDefault(n => n.FormKey == key);
                     diff = win is null ? new() { $"{key} is not in its winner {Path.GetFileName(path)}" }
                          : !written.TryGetValue(key, out var got) ? new() { $"{key} is planned but not in the patch" }
-                         : Differences(win, got, NavRepairRunJson.ChangeOf(p["change"]!));
+                         : Differences(win, got, change);
                 }
                 if (diff.Count > 0) failed++;
                 results.Add(new JsonObject { ["navmesh"] = key.ToString(), ["holds"] = diff.Count == 0, ["differences"] = new JsonArray(diff.Select(x => (JsonNode)x).ToArray()) });
