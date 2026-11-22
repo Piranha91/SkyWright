@@ -578,6 +578,40 @@ public static class NavEdit
         return EditTriangles(g, remove.ToList(), verts.Skip(nv0).ToList(), addT, inbound, cover, addF);
     }
 
+    /// <summary>SEVERAL CUTS AS ONE EDIT (an obstacle cut piece by piece): each outline cut in turn from the result of the
+    /// last, the ops concatenated (the write engine applies them in order), the numbering composed old-to-final, other
+    /// navmeshes' changed links carried from one cut into the next. An outline that touches nothing (that ground is cut
+    /// already) is passed over; refused when none touches anything, or when any cut is refused.</summary>
+    public static TriEditResult CutMany(NavmeshGeometry g, IReadOnlyList<(IReadOnlyList<(float X, float Y)> Outline, float ZLo, float ZHi)> cuts,
+                                        IReadOnlyDictionary<FormKey, NavmeshGeometry> inbound, IReadOnlyList<(bool IsCover, ushort CoverFlags)>? cover = null)
+    {
+        var cur = g; var curCover = cover?.ToList(); var inb = new Dictionary<FormKey, NavmeshGeometry>(inbound);
+        var map = Enumerable.Range(0, g.Triangles.Count).ToArray();
+        var ops = new List<RepairOp>(); var others = new Dictionary<FormKey, NavmeshGeometry>();
+        TriEditResult? last = null; int applied = 0;
+        foreach (var (outline, lo, hi) in cuts)
+        {
+            var r = Cut(cur, outline, lo, hi, inb, curCover);
+            if (r.Status != "planned")
+            {
+                if (r.Why.Count == 1 && r.Why[0].Contains("touches no triangle")) continue;
+                return r;
+            }
+            applied++; last = r; ops.AddRange(r.Ops);
+            for (int i = 0; i < map.Length; i++) map[i] = map[i] < 0 ? -1 : r.Map[map[i]];
+            foreach (var (k, o) in r.Others) { others[k] = o; inb[k] = o; }
+            if (curCover is not null)
+            {
+                var next = Enumerable.Repeat((false, (ushort)0), r.After!.Triangles.Count).ToList();
+                for (int i = 0; i < r.Map.Count; i++) if (r.Map[i] >= 0) next[r.Map[i]] = curCover[i];
+                curCover = next;
+            }
+            cur = r.After!;
+        }
+        if (applied == 0 || last is null) return TriEditResult.Refused("None of the cut's outlines touches a triangle of this navmesh in its band; that ground is cut already, or the outlines are elsewhere.");
+        return new TriEditResult("planned", Array.Empty<string>(), last.After, last.Grid, map, others, ops);
+    }
+
     static double Cross(IReadOnlyList<Vec3> v, NavTri t)
     {
         Vec3 a = v[t.A], b = v[t.B], c = v[t.C];

@@ -1,4 +1,4 @@
-"""Known answers for navmesh editing (C2513-C2539), on _shared/NavEdit.cs through `navedit --selftest`.
+"""Known answers for navmesh editing (C2513-C2540), on _shared/NavEdit.cs through `navedit --selftest`.
 
     2513  an interior vertex moved: planned, the box kept, the grid NavGrid's for the moved mesh, ops for exactly that
           vertex, the box and the grid
@@ -28,6 +28,7 @@
     2537  an obstacle wholly above an actor's top, or below step height, is refused
     2538  the floor under an obstacle is taken on its own level (a bridge over a floor)
     2539  an obstacle's outline through the cut removes exactly its area
+    2540  an obstacle of separate pieces is cut piece by piece; the ground between them stays
 
 The real-data check (plan and write on a lab profile, read back, byte-compared with the in-game-tested patch) is in the
 2026-11-21 run folder; it needs a game and an MO2 instance, so it is not a test here.
@@ -85,6 +86,7 @@ CASES = [
     ("2537 obstacle out of the actor band refused", lambda: selftest("2537")),
     ("2538 obstacle floor on its own level", lambda: selftest("2538")),
     ("2539 obstacle outline cuts its area", lambda: selftest("2539")),
+    ("2540 obstacle cut piece by piece", lambda: selftest("2540")),
 ]
 
 if __name__ == "__main__":

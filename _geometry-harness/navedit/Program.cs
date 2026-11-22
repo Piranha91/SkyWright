@@ -152,8 +152,9 @@ static class NavEditCli
                         if (c["ref"] is not null)
                         {
                             assets ??= target.Assets(order);
-                            var fp = Footprint(view, session, assets, geom!, FormKey.Factory((string)c["ref"]!), (float?)c["margin"] ?? 0f, row);
-                            r = fp.Status != "planned" ? TriEditResult.Refused(fp.Why!) : NavEdit.Cut(geom!, fp.Outline, fp.ZLo, fp.ZHi, inbound, Cover(path!, key));
+                            var fps = Footprint(view, session, assets, geom!, FormKey.Factory((string)c["ref"]!), (float?)c["margin"] ?? 0f, row);
+                            r = fps[0].Status != "planned" ? TriEditResult.Refused(fps[0].Why!)
+                              : NavEdit.CutMany(geom!, fps.Select(f => (f.Outline, f.ZLo, f.ZHi)).ToList(), inbound, Cover(path!, key));
                         }
                         else r = outline is null || z is null || z.Count != 2
                             ? TriEditResult.Refused($"The cut of {key} needs \"ref\" (a placed obstacle) or \"outline\" (corners [x, y] in order) with \"z\" [bottom, top].")
@@ -192,43 +193,47 @@ static class NavEditCli
     /// through this order's files, its collision on the layers an actor meets (CollisionLayers.RoleSoups), placed in the
     /// world (SpatialOverlap.TransformSoup), sliced and hulled by NavCutFootprint over the navmesh floor under it. What
     /// was read goes into the plan row, so a reader sees which mesh and which floor the outline came from.</summary>
-    static CutFootprint Footprint(LoadOrderResolver.IndexView view, LoadOrderResolver.OverlaySession session, AssetResolver assets,
+    static List<CutFootprint> Footprint(LoadOrderResolver.IndexView view, LoadOrderResolver.OverlaySession session, AssetResolver assets,
                                   NavmeshGeometry g, FormKey refKey, float margin, JsonObject row)
     {
         var w = view.ResolveWinner(refKey);
-        if (w is null) return CutFootprint.Refused($"The obstacle {refKey} is in no plugin of this load order; check its FormKey.");
+        if (w is null) return One($"The obstacle {refKey} is in no plugin of this load order; check its FormKey.");
         if (view.GetRecord(session, w.Value.WinnerPlugin, refKey, typeof(IPlacedObjectGetter)) is not IPlacedGetter placed || PlacementExtract.RefOf(placed) is not { } pr)
-            return CutFootprint.Refused($"{refKey} is not a placed object in {w.Value.WinnerPlugin}; name the obstacle's placed reference.");
-        if (pr.Deleted) return CutFootprint.Refused($"{refKey} is deleted in {w.Value.WinnerPlugin}, so it stands nowhere.");
+            return One($"{refKey} is not a placed object in {w.Value.WinnerPlugin}; name the obstacle's placed reference.");
+        if (pr.Deleted) return One($"{refKey} is deleted in {w.Value.WinnerPlugin}, so it stands nowhere.");
         if (pr.InitiallyDisabled || pr.EnableParent is not null)
-            return CutFootprint.Refused($"{refKey} starts disabled or is switched by an enable parent, so whether it stands at load is not settled here; cut it by outline if it does.");
-        if (pr.Base is not { } bk) return CutFootprint.Refused($"{refKey} has no base object.");
+            return One($"{refKey} starts disabled or is switched by an enable parent, so whether it stands at load is not settled here; cut it by outline if it does.");
+        if (pr.Base is not { } bk) return One($"{refKey} has no base object.");
         var bw = view.ResolveWinner(bk);
         var brec = bw is null ? null : view.GetRecord(session, bw.Value.WinnerPlugin, bk, null);
-        if (brec is null || OverlapIndex.ModelOf(brec) is not { } model) return CutFootprint.Refused($"The base {bk} of {refKey} has no model, so it has no collision to cut by.");
+        if (brec is null || OverlapIndex.ModelOf(brec) is not { } model) return One($"The base {bk} of {refKey} has no model, so it has no collision to cut by.");
         string full = (model.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? model : Path.Combine("meshes", model)).Replace('/', '\\');
         var res = assets.ResolveForPlacement(full);
-        if (res.Sources.Count == 0) return CutFootprint.Refused($"The mesh {full} of {refKey} is in none of this load order's files.");
+        if (res.Sources.Count == 0) return One($"The mesh {full} of {refKey} is in none of this load order's files.");
         var (bytes, err) = AssetResolver.ReadPlacementSource(res.Sources[0]);
-        if (bytes is null) return CutFootprint.Refused($"The mesh {full} could not be read ({err}).");
-        if (NifGeometry.Measure(bytes, includeTriangles: true).Model is not { } m) return CutFootprint.Refused($"The mesh {full} could not be measured.");
+        if (bytes is null) return One($"The mesh {full} could not be read ({err}).");
+        if (NifGeometry.Measure(bytes, includeTriangles: true).Model is not { } m) return One($"The mesh {full} could not be measured.");
         var (host, hs, _, _) = CollisionLayers.RoleSoups(m);
-        if (hs != 'c') return CutFootprint.Refused($"The mesh {full} has no collision on the layers an actor meets, so the game would not cut navmesh round it; cut it by outline if it should be.");
+        if (hs != 'c') return One($"The mesh {full} has no collision on the layers an actor meets, so the game would not cut navmesh round it; cut it by outline if it should be.");
         var world = SpatialOverlap.TransformSoup(host, pr.Position, pr.Rotation, pr.Scale);
         var box = SpatialOverlap.SoupBounds(world);
         var floor = NavCutFootprint.FloorUnder(g, pr.Position.X, pr.Position.Y, pr.Position.Z, new System.Numerics.Vector2(box.Min.X, box.Min.Y), new System.Numerics.Vector2(box.Max.X, box.Max.Y));
-        if (floor is null) return CutFootprint.Refused($"{g.FormKey} has no navmesh under {refKey} or within its outline and 256 u of its height, so there is nothing to cut.");
-        var fp = NavCutFootprint.Of(world, floor.Value, margin);
+        if (floor is null) return One($"{g.FormKey} has no navmesh under {refKey} or within its outline and 256 u of its height, so there is nothing to cut.");
+        var fps = NavCutFootprint.OfPieces(world, floor.Value, margin);
+        var fp = fps[0];
         row["footprint"] = new JsonObject
         {
             ["ref"] = refKey.ToString(), ["winner"] = w.Value.WinnerPlugin, ["base"] = bk.ToString(), ["mesh"] = full,
             ["meshFrom"] = res.Sources[0].ArchivePath ?? res.Sources[0].LooseFilePath, ["collisionTriangles"] = host.TriangleCount,
             ["position"] = Arr(new[] { pr.Position.X, pr.Position.Y, pr.Position.Z }), ["floor"] = floor.Value, ["margin"] = margin,
-            ["sliceTriangles"] = fp.SliceTriangles, ["band"] = fp.Status == "planned" ? Arr(new[] { fp.ZLo, fp.ZHi }) : null,
-            ["outline"] = new JsonArray(fp.Outline.Select(p => (JsonNode)Arr(new[] { p.X, p.Y })).ToArray()),
+            ["sliceTriangles"] = fps.Sum(f => f.SliceTriangles), ["band"] = fp.Status == "planned" ? Arr(new[] { fp.ZLo, fp.ZHi }) : null,
+            ["pieces"] = fps.Count(f => f.Status == "planned"),
+            ["outlines"] = new JsonArray(fps.Select(f => (JsonNode)new JsonArray(f.Outline.Select(p => (JsonNode)Arr(new[] { p.X, p.Y })).ToArray())).ToArray()),
         };
-        return fp;
+        return fps;
     }
+
+    static List<CutFootprint> One(string why) => new() { CutFootprint.Refused(why) };
 
     static JsonNode OpJson(RepairOp o)
     {

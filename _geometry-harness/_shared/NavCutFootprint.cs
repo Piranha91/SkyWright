@@ -75,6 +75,34 @@ public static class NavCutFootprint
         return new CutFootprint("planned", null, hull.Select(p => ((float)p.X, (float)p.Y)).ToList(), floor, floor - SliceBottom, hi, sliced);
     }
 
+    /// <summary>The cut outlines of an obstacle PIECE BY PIECE: its collision split into connected pieces (triangles that share
+    /// a corner, by position), each sliced and hulled as <see cref="Of"/> does. A rock pile's rocks are cut each by its
+    /// own hull, so the walkable ground between them stays; a single concave piece is still cut as its hull. Pieces with
+    /// nothing in the actor's band are left out; refused when no piece has anything there.</summary>
+    public static List<CutFootprint> OfPieces(TriangleSoup world, float floor, float margin = 0)
+    {
+        int n = world.TriangleCount;
+        if (n == 0) return new() { CutFootprint.Refused("The obstacle has no collision triangles to cut by.") };
+        var parent = Enumerable.Range(0, n).ToArray();
+        int Find(int x) { while (parent[x] != x) x = parent[x] = parent[parent[x]]; return x; }
+        var firstAt = new Dictionary<Vector3, int>();
+        for (int t = 0; t < n; t++)
+            for (int k = 0; k < 3; k++)
+            {
+                var v = world.Vertices[world.Indices[3 * t + k]];
+                if (firstAt.TryGetValue(v, out var o)) parent[Find(t)] = Find(o); else firstAt[v] = t;
+            }
+        var pieces = Enumerable.Range(0, n).GroupBy(Find).ToList();
+        var outp = new List<CutFootprint>();
+        foreach (var p in pieces)
+        {
+            var idx = p.SelectMany(t => new[] { world.Indices[3 * t], world.Indices[3 * t + 1], world.Indices[3 * t + 2] }).ToArray();
+            var fp = Of(new TriangleSoup(world.Vertices, idx), floor, margin);
+            if (fp.Status == "planned") outp.Add(fp);
+        }
+        return outp.Count > 0 ? outp : new() { Of(world, floor, margin) };   // none in band: Of's refusal names why
+    }
+
     /// <summary>A convex polygon clipped to where <paramref name="side"/> is zero or more (Sutherland-Hodgman, one plane).</summary>
     static List<Vector3> Clip(List<Vector3> poly, Func<Vector3, float> side)
     {

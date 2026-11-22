@@ -400,6 +400,28 @@ static class NavEditSelfTest
             return Sound(NavEdit.Cut(Geom(v, t), fp.Outline, fp.ZLo, fp.ZHi, none), 40000 - 800, new[] { (100.0, 100.0), (81.0, 91.0) });
         });
 
+        // C2540: an obstacle of two separate rocks (20 x 20 boxes at (40-60, 40-60) and (140-160, 140-160)) is cut piece by
+        // piece: two holes of 400 u² each, and the ground between them ((97.3, 103.1), off every lattice edge), which one hull
+        // would take, stays.
+        Case("2540 footprint-pieces", () =>
+        {
+            var (v, t) = Linked();
+            var a = BoxSoup(40, 40, -10, 60, 60, 190); var b = BoxSoup(140, 140, -10, 160, 160, 190);
+            var both = new TriangleSoup(a.Vertices.Concat(b.Vertices).ToArray(), a.Indices.Concat(b.Indices.Select(i => i + 8)).ToArray());
+            var fps = NavCutFootprint.OfPieces(both, 0);
+            if (fps.Count != 2) return $"{fps.Count} pieces, want 2";
+            var r = NavEdit.CutMany(Geom(v, t), fps.Select(f => (f.Outline, f.ZLo, f.ZHi)).ToList(), none);
+            if (Sound(r, 40000 - 800, new[] { (50.0, 50.0), (150.0, 150.0) }) is { } why) return why;
+            var vv = r.After!.Vertices;
+            bool between = r.After.Triangles.Any(x =>
+            {
+                double d(Vec3 p, Vec3 q) => ((double)q.X - p.X) * (103.1 - p.Y) - ((double)q.Y - p.Y) * (97.3 - p.X);
+                double s1 = d(vv[x.A], vv[x.B]), s2 = d(vv[x.B], vv[x.C]), s3 = d(vv[x.C], vv[x.A]);
+                return (s1 > 0 && s2 > 0 && s3 > 0) || (s1 < 0 && s2 < 0 && s3 < 0);
+            });
+            return between ? null : "the ground between the rocks was cut";
+        });
+
         // C2528: bad input: a triangle index past the mesh, a corner that does not exist, nothing to do.
         Case("2528 bad-triangle-input", () =>
         {

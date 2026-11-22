@@ -112,23 +112,26 @@ where a convex obstacle stands.
   - a mesh the order's files lack, or one with no collision on an actor's layers (a shrub);
   - an obstacle nothing of which stands in the actor's band;
   - no navmesh under it.
-- **Known limit: the hull over-cuts a concave obstacle.** On `0E6420`, a rock pile, vanilla left 673 of 2,033 sample
-  points inside the hull walkable between the rocks; the hull cut removes those (18,135 u²). Cutting each collision
-  body by its own hull is the next step.
+- **Pieces.** The collision is split into connected pieces (triangles sharing a corner); each piece is hulled and cut
+  in turn (`NavEdit.CutMany`). An obstacle of separate parts keeps the ground between them.
+- **Known limit: a connected concave obstacle is still cut as its hull.** Rock pile `0E6420`'s collision is one
+  connected mesh, so it stays one piece. Vanilla left 673 of 2,033 sample points inside that hull walkable between
+  the rocks, and the cut removes them (18,135 u²). Next: cut by the obstacle's own cross-sections in the actor band,
+  split into convex parts.
 
 **Every edit refuses an island navmesh**, whose own copy of the geometry in the navmesh info map would go stale. Fills
 come later (`C:/hc-runs/2026-11-21-navgrid/PLAN.md`, the plan gate).
 
 ## Evidence
 
-- `navedit --selftest`: C2513-C2539, run by `tests/test_navedit.py`. Twenty sabotage arms each turn their case red:
+- `navedit --selftest`: C2513-C2539, run by `tests/test_navedit.py`. Twenty-one sabotage arms each turn their case red:
   - no fold, link, overlap, winding, third-triangle, door, last-link or cell-border check;
   - no coincident move;
   - no inbound re-point;
   - no self-link follow;
   - closing up instead of swap-remove;
   - for the cut: no neighbour split, no shared-point insertion, band ignored, no convex check, no linked-edge check;
-  - for the obstacle outline: no band slice, margin ignored, floor ignoring the level.
+  - for the obstacle outline: no band slice, margin ignored, floor ignoring the level, one hull instead of pieces.
 - Real data, 2026-11-21, on the lab's vanilla profile: `0E6430:Skyrim.esm` vertex 517 moved 48 u west.
   - Planned and written; the read-back held.
   - The patch's navmesh data is byte-identical to the patch an actor walked across in game. There the rebuilt-grid arm
