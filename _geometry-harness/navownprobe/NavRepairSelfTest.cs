@@ -317,6 +317,71 @@ static class NavRepairSelfTest
                 ? null : "want a refusal naming its own triangle 1, got: " + string.Join("; ", links.Select(l => l.Status + ": " + l.Why));
         });
 
+        // C2595: a ground row whose mover ships its own version of the navmesh, sitting on the ground it moved, is refused in
+        // favour of that version (use_version), where the same row without it plans (The Great City of Winterhold's 100F4B).
+        Case("2595 ground-prefers-movers-own-version", () =>
+        {
+            var (nav, g, h) = Pair();
+            var row = Moved(g, 4, 200);
+            var plain = NavRepair.Ground(nav, new[] { row, Moved(h, 3, 200) }, 38, Tol).Plans.Single(x => x.Nav == g);
+            var mover = NavRepair.Ground(nav, new[] { row with { Mover = new MoverVersion("City.esp", "Revert.esp", 297, 465, $"{g} (City.esp > Revert.esp)") }, Moved(h, 3, 200) }, 38, Tol)
+                .Plans.Single(x => x.Nav == g);
+            if (plain.Status != "planned") return $"without a mover's version the row should plan, got {plain.Status}: {string.Join("; ", plain.Why)}";
+            return mover.Status == "refused" && mover.Edits.Count == 0 && mover.Change.Vertices.Count == 0
+                   && mover.Why.Any(w => w.Contains("City.esp moved the ground") && w.Contains("297 triangles; Revert.esp's has 465") && w.Contains("Revert.esp's version overrides it") && w.Contains("use_version")
+                                         && w.Contains($"CLOBBERED row {g} (City.esp > Revert.esp)"))
+                ? null : $"with the mover's version: status {mover.Status}, edits {mover.Edits.Count}: {string.Join("; ", mover.Why)}";
+        });
+
+        // C2596: which ground mover's version replaces following the ground (NavGround.ChooseMover, review of 2026-11-22): only a
+        // holder that is not the owner, did not delete it, and ships its own re-cut (triangles, another hash, other vertices);
+        // a hash that differs by flags alone is not one; a minor mover's re-cut is found when the main mover has none.
+        Case("2596 choose-ground-mover", () =>
+        {
+            var (nav, g, _) = Pair();
+            var win = nav[g].Geom;
+            var recut = win with { Vertices = win.Vertices.Select(v => v with { Z = v.Z + 200 }).ToList() };
+            var flagsOnly = win with { Triangles = win.Triangles.Select(t => t with { Flags = t.Flags | 0x800 }).ToList() };
+            const int owner = 9, main = 5, minor = 6;
+            var size = new Dictionary<int, (int V, int T, int H)> { [owner] = (4, 2, 111), [main] = (4, 2, 222), [minor] = (4, 2, 333) };
+            (int, IReadOnlyList<int>)? Pick(IReadOnlyList<(int, int)> movers, int[] holders, Func<int, NavmeshGeometry?> ver,
+                                            Func<int, bool>? deleted = null, Dictionary<int, (int V, int T, int H)>? sz = null)
+                => NavGround.ChooseMover(owner, movers, holders, pi => (sz ?? size).GetValueOrDefault(pi), deleted ?? (_ => false), ver, win, 38);
+            string S((int Mover, IReadOnlyList<int> Others)? p) => p is { } x ? $"{x.Mover} others [{string.Join(",", x.Others)}]" : "none";
+            var one = new[] { (main, 10) };
+            var checks = new (string Name, string Got, string Want)[]
+            {
+                ("re-cut", S(Pick(one, new[] { main, owner }, _ => recut)), "5 others []"),
+                ("same hash", S(Pick(one, new[] { main, owner }, _ => recut, sz: new() { [owner] = (4, 2, 111), [main] = (4, 2, 111) })), "none"),
+                ("deleted", S(Pick(one, new[] { main, owner }, _ => recut, deleted: pi => pi == main)), "none"),
+                ("no triangles", S(Pick(one, new[] { main, owner }, _ => recut, sz: new() { [owner] = (4, 2, 111), [main] = (0, 0, 222) })), "none"),
+                ("flags only", S(Pick(one, new[] { main, owner }, _ => flagsOnly)), "none"),
+                ("not a holder", S(Pick(one, new[] { owner }, _ => recut)), "none"),
+                ("mover is owner", S(NavGround.ChooseMover(owner, new[] { (owner, 10) }, new[] { owner }, pi => size[pi], _ => false, _ => recut, win, 38)), "none"),
+                ("minor re-cut", S(Pick(new[] { (main, 10), (minor, 3) }, new[] { minor, owner }, _ => recut)), "6 others [5]"),
+                ("main re-cut, others named", S(Pick(new[] { (main, 10), (minor, 3) }, new[] { main, minor, owner }, pi => pi == main ? recut : null)), "5 others [6]"),
+            };
+            var bad = checks.Where(c => c.Got != c.Want).Select(c => $"{c.Name}: got {c.Got}, want {c.Want}").ToList();
+            return bad.Count == 0 ? null : string.Join("; ", bad);
+        });
+
+        // C2597: the refusals keep their order (an island is named as an island even with a mover's re-cut); the refusal names
+        // the other movers when there are some, and claims no CLOBBERED row when the detector gave none.
+        Case("2597 ground-mover-refusal-order", () =>
+        {
+            var (nav, g, h) = Pair();
+            var mv = new MoverVersion("City.esp", "Revert.esp", 297, 465, null, new[] { "Walls.esp" });
+            var rows = new[] { Moved(g, 4, 200) with { Mover = mv }, Moved(h, 3, 0.5f) };
+            var island = NavRepair.Ground(nav, rows, 38, Tol, islands: new HashSet<FormKey> { g }).Plans.Single(x => x.Nav == g);
+            if (!(island.Status == "refused" && island.Why.Any(w => w.Contains("is an island")) && !island.Why.Any(w => w.Contains("use_version"))))
+                return $"island with a mover: {island.Status}: {string.Join("; ", island.Why)}";
+            var plan = NavRepair.Ground(nav, rows, 38, Tol);
+            var pg = plan.Plans.Single(x => x.Nav == g);
+            if (!pg.Why.Any(w => w.Contains("Walls.esp also moved ground under it") && !w.Contains("CLOBBERED")))
+                return "the other mover is not named (or a CLOBBERED row was claimed with none): " + string.Join("; ", pg.Why);
+            return null;
+        });
+
         Console.WriteLine($"{(fail == 0 ? "all" : $"{fail} failed of")} navrepair self-test cases");
         return fail == 0 ? 0 : 1;
     }

@@ -32,8 +32,17 @@ public sealed record BrokenLink(string Kind, FormKey Src, FormKey Target, int Ta
 /// <summary>One used vertex of a NAV-GROUND navmesh: the author's and the winning ground under it, or that it cannot be told.</summary>
 public sealed record GroundVertex(int Index, float Authored, float Winning, bool CannotTell);
 
-/// <summary>A NAV-GROUND row: the navmesh and its used vertices' ground facts, as the detector measured them.</summary>
-public sealed record GroundRow(FormKey Nav, IReadOnlyList<GroundVertex> Vertices);
+/// <summary>A NAV-GROUND row: the navmesh and its used vertices' ground facts, as the detector measured them.
+/// <paramref name="Mover"/> is set when a plugin that moved the ground ships its own re-cut of the navmesh (the detector's
+/// NavGround.ChooseMover: its own vertices, not the winner's with new flags), which a later plugin overrides.</summary>
+public sealed record GroundRow(FormKey Nav, IReadOnlyList<GroundVertex> Vertices, MoverVersion? Mover = null);
+
+/// <summary>A ground mover's own re-cut of a navmesh, overridden by <paramref name="Winner"/>; <paramref name="MoverTris"/> and
+/// <paramref name="WinnerTris"/> are the two versions' triangle counts. <paramref name="Clobbered"/> is the detector's emitted
+/// CLOBBERED row for the same pair ("mover &gt; winner"), the same problem seen by that class, or null when it has none.
+/// <paramref name="OtherMovers"/> are the other plugins that moved ground under the navmesh, whose ground the re-cut may not fit.</summary>
+public sealed record MoverVersion(string Mover, string Winner, int MoverTris, int WinnerTris, string? Clobbered = null,
+                                  IReadOnlyList<string>? OtherMovers = null);
 
 /// <summary>One housecarl_apply op. <see cref="Compose"/> is an EdgeLink element for an Add; <see cref="ComposeNode"/> a whole
 /// compose (a NAVI entry with its nested sets); <see cref="FromPlugin"/> the plugin a CopyFrom copies the field from (navedit's
@@ -362,6 +371,18 @@ public static class NavRepair
                 // (houseCARL's sweep, 2026-11-22: 0DEEFB in the Clockwork order); refused until island support (R7)
                 p.Status = "refused";
                 p.Why.Add($"{r.Nav} is an island in the navmesh info map, which keeps its own copy of the geometry; following the ground is refused until island support (R7)");
+                continue;
+            }
+            if (r.Mover is { } mv)
+            {
+                // the mover re-cut this navmesh for the ground it built (The Great City of Winterhold's 100F4B, 2026-11-22: its
+                // own version has holes where its buildings stand; vanilla's, draped over the new ground, runs under them)
+                p.Status = "refused";
+                p.Why.Add($"{mv.Mover} moved the ground under {r.Nav} and ships its own re-cut of it "
+                        + $"({mv.MoverTris} triangles; {mv.Winner}'s has {mv.WinnerTris}), but {mv.Winner}'s version overrides it; following the ground "
+                        + $"would lay {mv.Winner}'s navmesh over what {mv.Mover} built there, so carry {mv.Mover}'s version instead (navedit use_version)"
+                        + (mv.Clobbered is { } cl ? $"; this is the CLOBBERED row {cl}, seen from the ground" : "")
+                        + (mv.OtherMovers is { Count: > 0 } om ? $"; {string.Join(", ", om)} also moved ground under it, which that version may not fit, so check those parts after carrying it" : ""));
                 continue;
             }
             int unclear = r.Vertices.Count(v => v.CannotTell);

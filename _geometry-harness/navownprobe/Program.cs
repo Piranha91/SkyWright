@@ -88,6 +88,10 @@ var cli = NavownArgs.Parse(args);
 if (cli.Error is not null) { Console.Error.WriteLine(cli.Error); return 2; }
 if ((cli.RecheckPlanPath is null) != (cli.RecheckOutPath is null) || (cli.RecheckPlanPath is not null && (cli.BasePath is null || cli.EmitPath is null)))
 { Console.Error.WriteLine("navownprobe: --recheck-plan PLAN and --recheck-out OUT go together, with --base (the unpatched run's emit) and --emit."); return 2; }
+if ((cli.RepairPlanPath is not null || cli.RepairScope is not null) && cli.EmitPath is null)
+{ Console.Error.WriteLine("navownprobe: --repair-plan (and --repair-scope) work on the findings --emit writes, so add --emit OUT.json; without it no plan would be written."); return 2; }
+if (cli.RepairScope is not null && cli.RepairPlanPath is null)
+{ Console.Error.WriteLine("navownprobe: --repair-scope narrows a repair plan, so it needs --repair-plan OUT.json; alone it would do nothing."); return 2; }
 string Instance = cli.Instance ?? HarnessTarget.Instance;
 string GamePath = cli.Game ?? HarnessTarget.Game;
 string profileName = cli.Profile ?? HarnessTarget.Profile;
@@ -1165,7 +1169,30 @@ if (emitPath is not null)
         // island there (its own copy of the geometry) is never followed to the ground, by the island test navedit uses
         var (naviView, naviOpen) = NaviView.Read(paths);
         var islands = naviView.Effective.Where(kv => kv.Value.Src.Map.MapInfos[kv.Value.Index].Island is not null).Select(kv => kv.Key).ToHashSet();
-        var groundPlan = NavRepair.Ground(winGeom, groundFindings.Select(r => new GroundRow(r.Nav, r.Facts ?? Array.Empty<GroundVertex>())).ToList(), ground.Band, edgeTol, scope, islands, naviView.Problem);
+        // the ground mover's own version of a row's navmesh, where it ships one that a later plugin overrides, is the repair's
+        // source instead of the winner's navmesh draped over the new ground (NavGround.ChooseMover says when; The Great City of
+        // Winterhold's 100F4B, 2026-11-22: a first test of its vertices against LAND missed it, because its streets are not LAND)
+        var moverPlan = new Dictionary<int, HashSet<FormKey>>();
+        foreach (var r in groundFindings)
+            foreach (var (m, _) in r.Movers ?? new[] { (r.LandWinner, r.Counted) })
+                if (m != r.Owner && navProviders.TryGetValue(r.Nav, out var hs) && hs.Contains(m)) PlanInto(moverPlan, m, r.Nav);
+        var (moverGeom, moverUnreadable) = LoadNavGeometry(moverPlan);
+        if (moverUnreadable > 0)
+            throw new InvalidOperationException($"{moverUnreadable} ground mover version(s) of a NAV-GROUND navmesh could not be read, so whether following the ground is the right repair is not known; check those plugins open in xEdit and run again.");
+        MoverVersion? MoverOf(NavGround.Row r)
+        {
+            if (!navProviders.TryGetValue(r.Nav, out var holders) || !winGeom.TryGetValue(r.Nav, out var wg)) return null;
+            var pick = NavGround.ChooseMover(r.Owner, r.Movers ?? new[] { (r.LandWinner, r.Counted) }, holders,
+                pi => navSize.GetValueOrDefault((r.Nav, pi)), pi => navVersions.Deleted.GetValueOrDefault((r.Nav, pi)),
+                pi => moverGeom.TryGetValue((r.Nav, pi), out var g) ? g : null, wg.Geom, ground.Band);
+            if (pick is not { } p) return null;
+            string mover = pluginKey[p.Mover].FileName.String, owner = pluginKey[r.Owner].FileName.String;
+            // the same pair as an emitted CLOBBERED row (the mover's re-cut lost to the owner): named, so a reader sees one problem
+            bool clobbered = clobberFindings.Any(c => c.Nav == r.Nav && c.Loser == p.Mover && c.Winner == r.Owner);
+            return new MoverVersion(mover, owner, navSize[(r.Nav, p.Mover)].T, navSize[(r.Nav, r.Owner)].T,
+                                    clobbered ? $"{r.Nav} ({mover} > {owner})" : null, p.Others.Select(o => pluginKey[o].FileName.String).ToList());
+        }
+        var groundPlan = NavRepair.Ground(winGeom, groundFindings.Select(r => new GroundRow(r.Nav, r.Facts ?? Array.Empty<GroundVertex>(), MoverOf(r))).ToList(), ground.Band, edgeTol, scope, islands, naviView.Problem);
         NaviPlan naviPlan;
         try { naviPlan = NavRepairNavi.Plan(relinkPlan, winGeom, naviView); }
         finally { foreach (var m in naviOpen) m.Dispose(); }
