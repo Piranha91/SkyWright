@@ -191,6 +191,42 @@ a clobber, where a later mod's version replaced an earlier one's).
   doors checked, neighbours gained, the NAVI change, and the rebuilt grid.
 - Not yet: later edits in the same plan applying to the carried version.
 
+**Add a door.** `{"navmesh": K, "door": {"ref": "<placed door FormKey>"}}` lists a teleport door in K's door table and in
+its navmesh info map entry's linked doors (houseCARL's R9 and the linked-doors half of R6).
+- **The triangle:** the one under the door's ARRIVAL MARKER (the teleport position its partner door names), nearest in
+  height. In Skyrim.esm (2026-11-22) that rule gives the table's own triangle in 1,703 of 1,703 door entries (119 markers
+  stand over more than one triangle). The door itself stands a median 41 u from its triangle, up to 1,483 u, so it is not
+  the door's position.
+- **What is written:** the table entry, the triangle's Door flag (every base-game door triangle has it, no other does),
+  and the linked door. Both carry the base game's one Unknown value (`NavRepairNavi.LinkedDoorUnknown`, on all 1,703).
+  An entry's linked doors are its navmesh's door table in 1,103 of 1,103 base-game entries. The geometry, grid and box
+  stay the winner's, and the patch masters the door's plugin because it names it.
+- **The read-back** holds the door table, the flag and the patch's NAVI (the winner's plus exactly the planned entries,
+  `NavRepairReadBack.NaviCheck`). Every edit's NAVI change in a plan is checked together; two edits changing one entry
+  are refused.
+- **Refused, by name:**
+  - not a placed object, or not a teleport door;
+  - a partner that does not lead back;
+  - disabled at load by the one enable rule (`EnableState`), or whose enable chain cannot be followed;
+  - already listed;
+  - no triangle under the marker (the nearest is named, with how far off it is: graft the floor first);
+  - a marker more than 800 u off its triangle (past every base-game door, 781 u);
+  - an entry the NAVI winner does not state, which would be added whole, when it is an interior entry. **Known core
+    gap:** the pinned write engine's compose of a whole interior entry leaves a required field null, though the same entry
+    built through Mutagen writes. It is refused until houseCARL's core composes it.
+- A refused door's row still names the door, its placer, where it leads and how it is switched (`enabledAtLoad`, with
+  its enable parent).
+- **Real data, 2026-11-22:**
+  - **EP-helgi, Helgi's doors on COTN's Alva's house** (houseCARL's case): `0008AA` is disabled at load through its enable
+    parent's chain (quest-gated), so it is refused. Trapdoor `000802`'s marker lies 99.9 u from COTN's cellar floor
+    (triangle 52), so it is refused too.
+  - **NR2-V:** 60 teleport doors are listed in no winning navmesh's table, most of them the base game's own (Update,
+    Dawnguard, Dragonborn). Adding one (Dawnguard `011C65` on `011CAB`, or Dragonborn `035A4D` on `035ACB`) plans. Its
+    door-table write, with the navmesh info map left out, was written and read back. With the map, both need a whole
+    interior entry, so they are refused now.
+- Known answers C2565 (navedit) and C2566 (`navownprobe --navrepair-selftest`); sabotage arms red
+  (`C:/hc-runs/2026-11-21-navgrid/sabotage_doors.py`).
+
 **Every edit refuses an island navmesh**, whose own copy of the geometry in the navmesh info map would go stale. Fills
 come later (`C:/hc-runs/2026-11-21-navgrid/PLAN.md`, the plan gate).
 

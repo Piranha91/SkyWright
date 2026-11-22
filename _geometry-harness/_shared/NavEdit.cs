@@ -58,6 +58,14 @@ public sealed record UseVersionResult(string Status, IReadOnlyList<string> Why, 
         new("refused", why, null, null, new Dictionary<FormKey, NavmeshGeometry>(), Array.Empty<RepairOp>(), 0, 0, 0, Array.Empty<FormKey>(), Array.Empty<FormKey>());
 }
 
+/// <summary>A door edit's outcome: "planned" with the navmesh as it will stand, the triangle the door is set on, the marker's
+/// distance from it in plan (0: under it) and its height above it, and the write ops; or "refused" with why (and, when
+/// no triangle lies under the marker, the nearest one and how far off it is).</summary>
+public sealed record DoorAddResult(string Status, IReadOnlyList<string> Why, NavmeshGeometry? After, int Triangle, double PlanDistance, double Height, IReadOnlyList<RepairOp> Ops)
+{
+    public static DoorAddResult Refused(string why, double plan = double.NaN, int tri = -1) => new("refused", new[] { why }, null, tri, plan, double.NaN, Array.Empty<RepairOp>());
+}
+
 public static class NavEdit
 {
     /// <summary>Two triangles whose height ranges come within this of each other are on one level.</summary>
@@ -874,6 +882,67 @@ public static class NavEdit
         ops.AddRange(otherOps);
         return new UseVersionResult("planned", Array.Empty<string>(), after, grid, others, ops, matched, changed, repointed,
                                     now.Where(m => m != key && !was.Contains(m)).OrderBy(m => m.ToString()).ToList(), doorsNow) { LedgesCarried = ledges };
+    }
+
+    /// <summary>A door's arrival marker may stand this far, in u, above or below the triangle it is set on: past the base game's
+    /// furthest (781 u, of 1,703 door-table entries in Skyrim.esm, 2026-11-22).</summary>
+    public const float DoorHeightLimit = 800f;
+
+    /// <summary>ADD A DOOR (houseCARL's R9): navmesh <paramref name="g"/> gains <paramref name="door"/> in its door table, on
+    /// the triangle under the door's ARRIVAL MARKER (<paramref name="marker"/>, where the door puts an actor arriving through
+    /// it: the teleport position its partner door names). In the base game that triangle holds the marker in plan in 1,703
+    /// of 1,703 door-table entries, and of the triangles that do (119 stand over more than one), the one whose plane is
+    /// nearest the marker in height is the table's in all 1,703; the door itself stands a median 41 u off it. The triangle
+    /// is flagged Door (every base-game door triangle is, and no other), and the table entry carries the base game's one
+    /// Unknown value (NavRepairNavi.LinkedDoorUnknown). The geometry is untouched, so the grid and box stay the winner's.
+    /// Refused by name: a door the table already has; no triangle under the marker (saying how far the nearest is, in
+    /// plan); a marker further than <see cref="DoorHeightLimit"/> from the triangle under it.</summary>
+    public static DoorAddResult AddDoor(NavmeshGeometry g, FormKey door, Vec3 marker)
+    {
+        if ((g.DoorTriangles ?? Array.Empty<NavDoorTriangle>()).Any(d => d.Door == door))
+            return DoorAddResult.Refused($"{g.FormKey}'s door table already has {door}; there is nothing to add.");
+        var V = g.Vertices; var T = g.Triangles;
+        double? PlaneAt(NavTri t)
+        {
+            Vec3 a = V[t.A], b = V[t.B], c = V[t.C];
+            double den = ((double)b.Y - c.Y) * (a.X - c.X) + ((double)c.X - b.X) * (a.Y - c.Y);
+            if (den == 0) return null;
+            double l1 = ((b.Y - (double)c.Y) * (marker.X - c.X) + (c.X - (double)b.X) * (marker.Y - c.Y)) / den, l2 = ((c.Y - (double)a.Y) * (marker.X - c.X) + (a.X - (double)c.X) * (marker.Y - c.Y)) / den;
+            return l1 >= -1e-9 && l2 >= -1e-9 && 1 - l1 - l2 >= -1e-9 ? l1 * a.Z + l2 * b.Z + (1 - l1 - l2) * c.Z : null;
+        }
+        double PlanOff(NavTri t)
+        {
+            double Seg(Vec3 p, Vec3 q) { double ex = q.X - p.X, ey = q.Y - p.Y, L = ex * ex + ey * ey; double s = L == 0 ? 0 : Math.Clamp(((marker.X - p.X) * ex + (marker.Y - p.Y) * ey) / L, 0, 1); double dx = p.X + ex * s - marker.X, dy = p.Y + ey * s - marker.Y; return Math.Sqrt(dx * dx + dy * dy); }
+            return Math.Min(Seg(V[t.A], V[t.B]), Math.Min(Seg(V[t.B], V[t.C]), Seg(V[t.C], V[t.A])));
+        }
+        string At = FormattableString.Invariant($"({marker.X:0.#}, {marker.Y:0.#}, {marker.Z:0.#})");
+        var under = Enumerable.Range(0, T.Count).Where(i => PlaneAt(T[i]) is not null).ToList();
+        if (under.Count == 0)
+        {
+            int near = Enumerable.Range(0, T.Count).MinBy(i => PlanOff(T[i]));
+            double off = T.Count == 0 ? double.NaN : PlanOff(T[near]);
+            return DoorAddResult.Refused($"No triangle of {g.FormKey} lies under {door}'s arrival marker at {At}; the nearest, triangle {near}, is {off:0.#} u off in plan. Extend the navmesh there first.", off, near);
+        }
+        int tri = under.MinBy(i => Math.Abs(PlaneAt(T[i])!.Value - marker.Z));
+        double dz = marker.Z - PlaneAt(T[tri])!.Value;
+        if (Math.Abs(dz) > DoorHeightLimit)
+            return DoorAddResult.Refused($"{door}'s arrival marker at {At} stands {dz:0.#} u off the nearest triangle under it ({tri}), past any base-game door ({DoorHeightLimit:0} u); it is not on this navmesh's floor.", 0, tri) with { Height = dz };
+        var t2 = T.ToList(); t2[tri] = t2[tri] with { Flags = t2[tri].Flags | 0x400 };
+        var doors = (g.DoorTriangles ?? Array.Empty<NavDoorTriangle>()).ToList(); doors.Add(new NavDoorTriangle(door, (short)tri));
+        string id = g.FormKey.ToString();
+        var ops = new List<RepairOp>
+        {
+            new(id, "Data.DoorTriangles", "Add", ComposeNode: new System.Text.Json.Nodes.JsonObject
+            {
+                ["type"] = "DoorTriangle",
+                ["fields"] = new System.Text.Json.Nodes.JsonObject
+                {
+                    ["TriangleBeforeDoor"] = tri.ToString(CultureInfo.InvariantCulture), ["Unknown"] = NavRepairNavi.LinkedDoorUnknown.ToString(CultureInfo.InvariantCulture), ["Door"] = door.ToString(),
+                },
+            }),
+        };
+        if ((T[tri].Flags & 0x400) == 0) ops.Add(new RepairOp(id, $"Data.Triangles[{tri}].Flags", "Add", Value: "Door"));
+        return new DoorAddResult("planned", Array.Empty<string>(), g with { Triangles = t2, DoorTriangles = doors }, tri, 0, dz, ops);
     }
 
     static double Cross(IReadOnlyList<Vec3> v, NavTri t)

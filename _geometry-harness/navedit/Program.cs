@@ -97,6 +97,7 @@ static class NavEditCli
         var (navi, naviOpen) = NaviView.Read(order);
         var outp = new List<Planned>();
         var claimed = new Dictionary<FormKey, string>();
+        var naviClaimed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         Dictionary<FormKey, (string Path, List<NavEdgeLink> Links)>? inboundIndex = null;
         try
         {
@@ -109,10 +110,10 @@ static class NavEditCli
                 var w = view.ResolveWinner(key);
                 var path = w is null ? null : order.FirstOrDefault(p => string.Equals(Path.GetFileName(p), w.Value.WinnerPlugin, StringComparison.OrdinalIgnoreCase));
                 var geom = path is null ? null : Winning(path, key);
-                bool isMove = e["move"] is not null, isTri = e["remove"] is not null || e["add"] is not null, isCut = e["cut"] is not null, isUse = e["use_version"] is not null;
+                bool isMove = e["move"] is not null, isTri = e["remove"] is not null || e["add"] is not null, isCut = e["cut"] is not null, isUse = e["use_version"] is not null, isDoor = e["door"] is not null;
                 if (w is null || path is null) refuse = $"{key} is in no plugin of this load order; check the FormKey and the profile.";
                 else if (geom is null) refuse = $"{key} has no geometry in its winner {w.Value.WinnerPlugin} (deleted or empty), so there is nothing to edit.";
-                else if ((isMove ? 1 : 0) + (isTri ? 1 : 0) + (isCut ? 1 : 0) + (isUse ? 1 : 0) != 1) refuse = $"The edit of {key} must do one kind of thing: move vertices, remove and add triangles, cut, or use a version; split it into separate plans.";
+                else if ((isMove ? 1 : 0) + (isTri ? 1 : 0) + (isCut ? 1 : 0) + (isUse ? 1 : 0) + (isDoor ? 1 : 0) != 1) refuse = $"The edit of {key} must do one kind of thing: move vertices, remove and add triangles, cut, use a version, or add a door; split it into separate plans.";
                 else if (navi.Problem is { } np) refuse = $"The navmesh info map cannot be read ({np}), so whether {key} is an island is not known.";
                 else if (navi.Effective.TryGetValue(key, out var ent) && ent.Src.Map.MapInfos[ent.Index].Island is not null)
                     refuse = $"{key} is an island in the navmesh info map, which keeps its own copy of the geometry; editing islands is not supported yet.";
@@ -132,6 +133,56 @@ static class NavEditCli
                         var r = NavEdit.MoveVertices(geom!, moves);
                         why = r.Why; ops = r.Ops.ToList();
                         if (r.Status == "planned") { expect[key] = (r.After!, Enumerable.Range(0, r.After!.Triangles.Count).ToArray(), path!, true); row["moved"] = Arr(r.Moved); }
+                    }
+                }
+                else if (refuse is null && isDoor)
+                {
+                    var dref = (string?)e["door"]?["ref"];
+                    var door = dref is null ? FormKey.Null : FormKey.Factory(dref);
+                    var dw = door.IsNull ? null : view.ResolveWinner(door);
+                    var drec = dw is null ? null : view.GetRecord(session, dw.Value.WinnerPlugin, door, typeof(IPlacedObjectGetter)) as IPlacedObjectGetter;
+                    // where the door puts an actor arriving through it: the teleport position its partner door names
+                    var partner = drec?.TeleportDestination is { } td && !td.Door.FormKey.IsNull ? td.Door.FormKey : (FormKey?)null;
+                    var pw = partner is { } pk ? view.ResolveWinner(pk) : null;
+                    var prec = pw is null ? null : view.GetRecord(session, pw.Value.WinnerPlugin, partner!.Value, typeof(IPlacedObjectGetter)) as IPlacedObjectGetter;
+                    // its state at load, by the one enable rule (EnableState: the enable parent's chain)
+                    EnableFacts? Facts(FormKey k) => view.ResolveWinner(k) is { } kw && view.GetRecord(session, kw.WinnerPlugin, k, null) is IPlacedGetter pg && PlacementExtract.RefOf(pg) is { } pr
+                        ? new EnableFacts(pr.InitiallyDisabled, pr.EnableParent, pr.EnableParentOpposite) : null;
+                    var state = drec is null ? default : EnableState.Resolve(door, Facts);
+                    if (dref is null) refuse = $"The door edit of {key} needs \"ref\", the placed door's FormKey.";
+                    else if (drec is null) refuse = $"{door} is not a placed object of this load order; name the door's placed reference.";
+                    else if (partner is null) refuse = $"{door} is not a teleport door (it leads nowhere), so no navmesh triangle stands before it in the game's sense.";
+                    else if (prec?.TeleportDestination is not { } back || back.Door.FormKey != door) refuse = $"{door}'s partner {partner} does not lead back to it in this order, so where an actor arrives through {door} is not known.";
+                    else if (!state.Resolved) refuse = $"Whether {door} stands at load cannot be told (its enable chain names a reference this order does not place, or loops); it is not added.";
+                    else if (!state.Enabled) refuse = $"{door} is disabled at load{(state.ViaParent ? " (by its enable parent's chain)" : "")}, so no actor can use it then; it is not added.";
+                    // a refusal still says which door, who places it and how it is switched, for the caller's judgement
+                    if (refuse is not null && drec is not null)
+                        row["door"] = new JsonObject
+                        {
+                            ["door"] = DoorRow(view, session, new NavDoorTriangle(door, -1)),
+                            ["enabledAtLoad"] = new JsonObject { ["enabled"] = state.Enabled, ["viaParent"] = state.ViaParent, ["resolved"] = state.Resolved,
+                                                                 ["enableParent"] = (PlacementExtract.RefOf(drec) is { EnableParent: { } ep }) ? ep.ToString() : null },
+                        };
+                    if (refuse is null && prec?.TeleportDestination is { } arrival)
+                    {
+                        var marker = new Vec3(arrival.Position.X, arrival.Position.Y, arrival.Position.Z);
+                        var r = NavEdit.AddDoor(geom!, door, marker);
+                        why = r.Why; ops = r.Ops.ToList();
+                        JsonObject? naviRow = null;
+                        if (r.Status == "planned")
+                        {
+                            var (np, nr) = NavRepairNavi.ForDoors(key, new[] { door }, navi);
+                            if (nr is not null) { why = new[] { $"The navmesh info map cannot gain the door: {nr}." }; ops = new(); }
+                            else { ops.AddRange(np.Ops); naviRow = NavRepairNavi.NaviJson(np); row["navi"] = naviRow; expect[key] = (r.After!, Enumerable.Range(0, r.After!.Triangles.Count).ToArray(), path!, false); }
+                        }
+                        row["door"] = new JsonObject
+                        {
+                            ["door"] = DoorRow(view, session, new NavDoorTriangle(door, (short)r.Triangle)),
+                            ["arrivalMarker"] = Arr(new[] { marker.X, marker.Y, marker.Z }), ["triangle"] = r.Triangle >= 0 ? r.Triangle : null,
+                            ["planDistance"] = double.IsNaN(r.PlanDistance) ? null : Math.Round(r.PlanDistance, 1),
+                            ["heightAboveTriangle"] = double.IsNaN(r.Height) ? null : Math.Round(r.Height, 1),
+                            ["enabledAtLoad"] = new JsonObject { ["enabled"] = state.Enabled, ["viaParent"] = state.ViaParent }, ["navi"] = naviRow?.DeepClone(),
+                        };
                     }
                 }
                 else if (refuse is null && isUse)
@@ -164,10 +215,11 @@ static class NavEditCli
                             foreach (var m in r.Gained) need[m] = new[] { key };
                             var (np, refusedNavi) = NavRepairNavi.ForPairs(need, navi);
                             if (refusedNavi.Count > 0) { why = refusedNavi.Select(kv => $"The navmesh info map cannot gain the version's new neighbours: {kv.Value}.").ToArray(); ops = new(); }
-                            else { ops.AddRange(np.Ops); naviRow = new JsonObject { ["record"] = np.Record?.ToString(), ["winner"] = np.WinnerPlugin, ["why"] = Arr(np.Why) }; }
+                            else { ops.AddRange(np.Ops); naviRow = NavRepairNavi.NaviJson(np); }
                         }
                         if (why.Count == 0)
                         {
+                            if (naviRow is not null) row["navi"] = naviRow;
                             expect[key] = (r.After!, Enumerable.Range(0, r.After!.Triangles.Count).ToArray(), fromPath, true);
                             foreach (var (fk, og) in r.Others) expect[fk] = (og, Enumerable.Range(0, og.Triangles.Count).ToArray(), inboundIndex[fk].Path, false);   // a re-pointed neighbour keeps its own winner's grid
                         }
@@ -183,7 +235,7 @@ static class NavEditCli
                                 ["added"] = new JsonArray(r.DoorsAdded.Select(d => (JsonNode)DoorRow(view, session, d)).ToArray()),
                                 ["dropped"] = new JsonArray(r.DoorsDropped.Select(d => (JsonNode)DoorRow(view, session, d)).ToArray()),
                             },
-                            ["gainedNeighbours"] = Arr(r.Gained.Select(k => k.ToString())), ["navi"] = naviRow, ["grid"] = "rebuilt",
+                            ["gainedNeighbours"] = Arr(r.Gained.Select(k => k.ToString())), ["navi"] = naviRow?.DeepClone(), ["grid"] = "rebuilt",
                             // the plugins whose versions of K the patch supersedes (every one after the source, in load order):
                             // the patch masters each, so nothing can sort it above them and let one win K again (houseCARL,
                             // 2026-11-22). A neighbour whose links are only re-pointed needs none.
@@ -235,8 +287,11 @@ static class NavEditCli
                 }
                 foreach (var fk in expect.Keys)
                     if (claimed.TryGetValue(fk, out var by)) { refuse = $"This edit changes {fk}, which the edit of {by} earlier in this plan changes too; plan them separately."; break; }
+                foreach (var ne in (row["navi"]?["entries"] as JsonArray ?? new JsonArray()).Select(x => (string)x!["navmesh"]!))
+                    if (refuse is null && naviClaimed.TryGetValue(ne, out var nby)) refuse = $"This edit changes {ne}'s navmesh info map entry, which the edit of {nby} earlier in this plan changes too; plan them separately.";
                 if (refuse is not null) { why = new[] { refuse }; ops = new(); expect.Clear(); }
                 foreach (var fk in expect.Keys) claimed[fk] = key.ToString();
+                if (refuse is null) foreach (var ne in (row["navi"]?["entries"] as JsonArray ?? new JsonArray()).Select(x => (string)x!["navmesh"]!)) naviClaimed[ne] = key.ToString();
                 bool ok = refuse is null && why.Count == 0;
                 row["status"] = ok ? "planned" : "refused";
                 row["why"] = Arr(why);
@@ -485,13 +540,21 @@ static class NavEditCli
         var masters = again.SelectMany(p => p.Row["useVersion"]?["masters"]?.AsArray().Select(x => (string)x!) ?? Array.Empty<string>())
                            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (masters.Count > 0 && AddMasters(outPath, order, masters) is { } merr) { Console.Error.WriteLine($"navedit write: {merr}"); return 1; }
-        return ReadBack(outPath, order, again, masters);
+        // every edit's NAVI change, as one: the read-back holds the patch's NAVI to the winner's plus all of them
+        var naviEntries = again.Where(p => p.Row["navi"]?["entries"] is JsonArray a && a.Count > 0).ToList();
+        JsonObject? naviAll = null;
+        if (naviEntries.Count > 0)
+        {
+            naviAll = (JsonObject)naviEntries[0].Row["navi"]!.DeepClone();
+            naviAll["entries"] = new JsonArray(naviEntries.SelectMany(p => p.Row["navi"]!["entries"]!.AsArray()).Select(x => x!.DeepClone()).ToArray());
+        }
+        return ReadBack(outPath, order, again, masters, naviAll);
     }
 
     /// <summary>The written patch against the plan: every changed navmesh's vertices, triangles (corners, edge fields, flags),
     /// links, doors, box and grid; each kept triangle's cover fields against its winner's; no other navmesh in the patch;
     /// every carried record equal to its winner. One line per check; 0 when all hold.</summary>
-    static int ReadBack(string patchPath, IReadOnlyList<string> order, List<Planned> planned, IReadOnlyList<string> masters)
+    static int ReadBack(string patchPath, IReadOnlyList<string> order, List<Planned> planned, IReadOnlyList<string> masters, JsonObject? navi)
     {
         int failed = 0;
         var expect = planned.SelectMany(p => p.Expect).ToDictionary(kv => kv.Key, kv => kv.Value);
@@ -542,7 +605,13 @@ static class NavEditCli
         }
         var extra = raw.Keys.Where(k => !expect.ContainsKey(k)).ToList();
         if (extra.Count > 0) { Console.WriteLine($"FAIL the patch carries navmeshes the plan does not: {string.Join(", ", extra)}"); failed++; }
-        var (recs, _, bad) = NavRepairReadBack.Carried(patch, order);
+        var (recs, _, bad) = NavRepairReadBack.Carried(patch, order, naviPlanned: navi is not null);
+        if (navi is not null)
+        {
+            var (ndiff, ncompared) = NavRepairReadBack.NaviCheck(navi, patch);
+            Console.WriteLine(ndiff.Count == 0 ? $"ok   NAVI {navi["record"]} is its winner's with exactly the planned entries changed ({ncompared} entries compared)" : $"FAIL NAVI {navi["record"]}: {string.Join("; ", ndiff)}");
+            if (ndiff.Count > 0) failed++;
+        }
         foreach (var c in recs) Console.WriteLine($"{((bool)c!["holds"]! ? "ok  " : "FAIL")} carried {c["type"]} {c["record"]} equals its winner {c["winner"]}" + ((bool)c["holds"]! ? "" : ": " + string.Join("; ", c["differences"]!.AsArray().Select(x => (string)x!))));
         failed += bad;
         Console.WriteLine(failed == 0 ? $"patch written and read back: {patchPath}" : $"navedit write: {failed} check(s) failed on {patchPath}; do not enable it.");

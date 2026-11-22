@@ -719,6 +719,33 @@ static class NavEditSelfTest
             return text.Contains($"it adds {D(0xD01)} (before triangle 3), {D(0xD03)} (before triangle 7)") && text.Contains($"it lacks {D(0xD02)} (before triangle 5)") ? null : "the sentence does not name the doors: " + text;
         });
 
+        // C2565: a door goes on the triangle under its arrival marker, nearest in height (a bridge 200 u over the square: a marker
+        // at z 190 takes the bridge, one at z 5 the floor); the triangle is flagged Door and the table entry carries the base
+        // game's Unknown. Refused: a door already listed, a marker over no triangle (naming the nearest and how far), and one
+        // past the height limit.
+        Case("2565 add-door", () =>
+        {
+            var (v, t) = Linked();
+            v.Add(new Vec3(50, 50, 200)); v.Add(new Vec3(150, 50, 200)); v.Add(new Vec3(100, 150, 200));
+            t.Add(new NavTri(9, 10, 11, 0));
+            var g = Geom(v, t);
+            FormKey D = new(new ModKey("SelfTest", ModType.Master), 0xD10);
+            var up = NavEdit.AddDoor(g, D, new Vec3(101.3f, 81.7f, 190));
+            var down = NavEdit.AddDoor(g, D, new Vec3(101.3f, 81.7f, 5));
+            if (up.Status != "planned" || down.Status != "planned") return $"{string.Join(" ", up.Why)} {string.Join(" ", down.Why)}";
+            if (up.Triangle != 8 || down.Triangle == 8) return $"bridge marker on {up.Triangle}, floor marker on {down.Triangle}";
+            if ((up.After!.Triangles[8].Flags & 0x400) == 0 || !up.After.DoorTriangles!.Contains(new NavDoorTriangle(D, 8))) return "the triangle is not flagged Door, or the table lacks the entry";
+            var add = up.Ops.First(o => o.FieldPath == "Data.DoorTriangles");
+            if ((string?)add.ComposeNode!["fields"]!["Unknown"] != NavRepairNavi.LinkedDoorUnknown.ToString() || (string?)add.ComposeNode["fields"]!["TriangleBeforeDoor"] != "8") return "the table entry's fields " + add.ComposeNode.ToJsonString();
+            if (!up.Ops.Any(o => o.FieldPath == "Data.Triangles[8].Flags" && o.Op == "Add" && o.Value == "Door")) return "no Door flag op";
+            var listed = NavEdit.AddDoor(up.After, D, new Vec3(101.3f, 81.7f, 190));
+            var off = NavEdit.AddDoor(g, D, new Vec3(260, 100, 0));
+            var high = NavEdit.AddDoor(Geom(Linked().V, Linked().T), D, new Vec3(101.3f, 81.7f, 900));
+            if (listed.Status != "refused" || !listed.Why[0].Contains("already has")) return "a listed door was not refused";
+            if (off.Status != "refused" || !off.Why[0].Contains("60 u off in plan")) return "off the floor: " + string.Join(" ", off.Why);
+            return high.Status == "refused" && high.Why[0].Contains("past any base-game door") ? null : "past the height limit: " + string.Join(" ", high.Why);
+        });
+
         // C2561: ledge links are not matched by edge geometry: the version's own (Type 2) is carried while it names a triangle N
         // has, and refused when it names one N lacks; N's ledge link into this navmesh is kept where the version's triangle of
         // that index stands on the winner's corners, and refused when the version renumbers it.

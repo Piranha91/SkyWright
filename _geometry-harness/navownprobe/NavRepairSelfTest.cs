@@ -123,6 +123,37 @@ static class NavRepairSelfTest
             return plan.Plans.All(p => p.Status == "planned") && want.SequenceEqual(got) ? null : "with both entries: " + string.Join(" | ", got);
         });
 
+        // C2566: NAVI linked doors (NavRepairNavi.ForDoors, navedit's door edit). On the NAVI winner's entry the door is added in
+        // place, with the base game's Unknown; a door the entry already links, and a navmesh no NAVI states, are refused; an
+        // entry only an earlier plugin states, an interior one, is refused naming the write engine's gap.
+        Case("2566 navi-linked-doors", () =>
+        {
+            FormKey nv = K(0xA70), other = K(0xA71), door = K(0xD70);
+            Mutagen.Bethesda.Skyrim.NavigationMeshInfoMap MapWith(bool linked, bool cellParent, params FormKey[] navs)
+            {
+                var m = new Mutagen.Bethesda.Skyrim.NavigationMeshInfoMap(K(0xC00), Mutagen.Bethesda.Skyrim.SkyrimRelease.SkyrimSE);
+                foreach (var n in navs)
+                {
+                    var e = new Mutagen.Bethesda.Skyrim.NavigationMapInfo { NavigationMesh = new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.INavigationMeshGetter>(n) };
+                    if (linked) e.LinkedDoors.Add(new Mutagen.Bethesda.Skyrim.LinkedDoor { Unknown = NavRepairNavi.LinkedDoorUnknown, Door = new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.IPlacedObjectGetter>(door) });
+                    if (cellParent) e.Parent = new Mutagen.Bethesda.Skyrim.NavigationMapInfoCellParent { ParentCell = new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.ICellGetter>(K(0xCE1)) };
+                    m.MapInfos.Add(e);
+                }
+                return m;
+            }
+            var (inPlace, r1) = NavRepairNavi.ForDoors(nv, new[] { door }, NaviView.Of(new[] { new NaviSource("SelfTest.esm", "", MapWith(false, false, other, nv)) }));
+            if (r1 is not null) return "in place refused: " + r1;
+            var op = inPlace.Ops.Single();
+            if (op.FieldPath != "MapInfos[1].LinkedDoors" || op.Op != "Add" || (string?)op.ComposeNode!["fields"]!["Door"] != door.ToString() || (string?)op.ComposeNode["fields"]!["Unknown"] != NavRepairNavi.LinkedDoorUnknown.ToString())
+                return $"op {op.FieldPath} {op.Op} {op.ComposeNode?.ToJsonString()}";
+            if (!inPlace.Entries.Single().AddDoors.SequenceEqual(new[] { door }) || inPlace.Entries.Single().WinnerIndex != 1) return "the entry change does not name the door at winner index 1";
+            var (_, dup) = NavRepairNavi.ForDoors(nv, new[] { door }, NaviView.Of(new[] { new NaviSource("SelfTest.esm", "", MapWith(true, false, nv)) }));
+            var (_, none) = NavRepairNavi.ForDoors(nv, new[] { door }, NaviView.Of(new[] { new NaviSource("SelfTest.esm", "", MapWith(false, false, other)) }));
+            var (_, interior) = NavRepairNavi.ForDoors(nv, new[] { door }, NaviView.Of(new[] { new NaviSource("SelfTest.esm", "", MapWith(false, true, nv)), new NaviSource("Later.esp", "", MapWith(false, false, other)) }));
+            return dup?.Contains("already links") == true && none?.Contains("no plugin's NAVI states") == true && interior?.Contains("cannot yet compose a whole interior entry") == true
+                ? null : $"duplicate: {dup}; unstated: {none}; interior: {interior}";
+        });
+
         // ---- the renumbering-proof row key (RowsAt), navownprobe's --base summary for a navedit patch ----
         string A = K(0xA01).ToString(), B = K(0xB01).ToString(), Z = K(0xC01).ToString();
         Conflict Link(string kind, int srcTri, string? srcAt, int tgtTri, string? tgtAt, string src = "", string tgt = "") =>

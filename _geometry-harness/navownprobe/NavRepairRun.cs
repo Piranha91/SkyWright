@@ -62,20 +62,8 @@ static class NavRepairRun
         return (JsonNode)j;
     }).ToArray());
 
-    /// <summary>The plan's NAVI change: the record, its winner, and each entry changed (what the read-back holds the patch's NAVI to).</summary>
-    public static JsonObject NaviJson(NaviPlan n) => new()
-    {
-        ["record"] = n.Record?.ToString(),
-        ["winner"] = n.WinnerPlugin is null ? null : new JsonObject { ["plugin"] = n.WinnerPlugin, ["path"] = n.WinnerPath },
-        ["why"] = new JsonArray(n.Why.Select(w => (JsonNode)w).ToArray()),
-        ["entries"] = new JsonArray(n.Entries.Select(e => (JsonNode)new JsonObject
-        {
-            ["navmesh"] = e.Nav.ToString(), ["from"] = new JsonObject { ["plugin"] = e.FromPlugin, ["path"] = e.FromPath, ["index"] = e.FromIndex },
-            ["winnerIndex"] = e.WinnerIndex, ["add"] = new JsonArray(e.Add.Select(m => (JsonNode)m.ToString()).ToArray()),
-            ["mergedToBefore"] = new JsonArray(e.MergedToBefore.Select(m => (JsonNode)m.ToString()).ToArray()),
-            ["preferredMerges"] = new JsonArray(e.PreferredMerges.Select(m => (JsonNode)m.ToString()).ToArray()),
-        }).ToArray()),
-    };
+    /// <summary>The plan's NAVI change (its one owner is NavRepairNavi.NaviJson).</summary>
+    public static JsonObject NaviJson(NaviPlan n) => NavRepairNavi.NaviJson(n);
 
     static JsonObject V(Vec3 v) => new() { ["x"] = v.X, ["y"] = v.Y, ["z"] = v.Z };
 

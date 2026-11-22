@@ -1,4 +1,4 @@
-"""Known answers for navmesh editing (C2513-C2550, C2556-C2562, C2564), on _shared/NavEdit.cs and _shared/NavCutFootprint.cs through `navedit --selftest`.
+"""Known answers for navmesh editing (C2513-C2550, C2556-C2562, C2564-C2565), on _shared/NavEdit.cs and _shared/NavCutFootprint.cs through `navedit --selftest`.
 
     2513  an interior vertex moved: planned, the box kept, the grid NavGrid's for the moved mesh, ops for exactly that
           vertex, the box and the grid
@@ -47,6 +47,7 @@
     2561  use_version: ledge links are carried or kept in place, never matched by geometry; out of range or renumbered, refused
     2562  use_version: the winner itself plans with nothing changed
     2564  use_version: the door refusal names each door added and lacked, with its triangle, door by door
+    2565  door: the triangle under the arrival marker, nearest in height; flagged Door; refusals by name
 
 The real-data check (plan and write on a lab profile, read back, byte-compared with the in-game-tested patch) is in the
 2026-11-21 run folder; it needs a game and an MO2 instance, so it is not a test here.
@@ -163,6 +164,7 @@ CASES = [
     ("2561 use_version ledge links", lambda: selftest("2561")),
     ("2562 use_version the winner itself", lambda: selftest("2562")),
     ("2564 use_version names the doors", lambda: selftest("2564")),
+    ("2565 door added on the marker's triangle", lambda: selftest("2565")),
 ]
 
 if __name__ == "__main__":

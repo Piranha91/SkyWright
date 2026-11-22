@@ -218,11 +218,14 @@ public static class NavRepairReadBack
             {
                 var nav = FormKey.Factory((string)e!["navmesh"]!);
                 var add = e["add"]!.AsArray().Select(x => FormKey.Factory((string)x!)).ToList();
+                var doors = (e["addDoors"] as JsonArray ?? new JsonArray()).Select(x => FormKey.Factory((string)x!)).ToList();
+                void Doors(NavigationMapInfo m) { foreach (var d in doors) m.LinkedDoors.Add(new LinkedDoor { Unknown = NavRepairNavi.LinkedDoorUnknown, Door = new FormLink<IPlacedObjectGetter>(d) }); }
                 if (e["winnerIndex"] is { } wi)
                 {
                     int i = (int)wi;
                     if (i >= want.MapInfos.Count || want.MapInfos[i].NavigationMesh.FormKey != nav) { diff.Add($"the winner's entry {i} is not {nav}'s; the plan is stale"); continue; }
                     foreach (var m in add) want.MapInfos[i].MergedTo.Add(new FormLink<INavigationMeshGetter>(m));
+                    Doors(want.MapInfos[i]);
                 }
                 else
                 {
@@ -231,6 +234,7 @@ public static class NavRepairReadBack
                     if (src is null || fi >= src.MapInfos.Count || src.MapInfos[fi].NavigationMesh.FormKey != nav) { diff.Add($"{nav}'s entry is not at {Path.GetFileName(fpath)}'s index {fi}; the plan is stale"); continue; }
                     var copy = src.MapInfos[fi].DeepCopy();
                     foreach (var m in add) copy.MergedTo.Add(new FormLink<INavigationMeshGetter>(m));
+                    Doors(copy);
                     want.MapInfos.Add(copy);
                 }
             }
@@ -247,7 +251,8 @@ public static class NavRepairReadBack
             for (int i = 0; i < Math.Min(want.MapInfos.Count, got.MapInfos.Count); i++)
                 if (!want.MapInfos[i].Equals(got.MapInfos[i]))
                     diff.Add($"NAVI entry {i} ({got.MapInfos[i].NavigationMesh.FormKey}) differs from the planned {want.MapInfos[i].NavigationMesh.FormKey}'s: MergedTo written "
-                             + $"[{string.Join(",", got.MapInfos[i].MergedTo.Select(x => x.FormKey))}], planned [{string.Join(",", want.MapInfos[i].MergedTo.Select(x => x.FormKey))}]");
+                             + $"[{string.Join(",", got.MapInfos[i].MergedTo.Select(x => x.FormKey))}], planned [{string.Join(",", want.MapInfos[i].MergedTo.Select(x => x.FormKey))}]; LinkedDoors written "
+                             + $"[{string.Join(",", got.MapInfos[i].LinkedDoors.Select(x => x.Door.FormKey))}], planned [{string.Join(",", want.MapInfos[i].LinkedDoors.Select(x => x.Door.FormKey))}]");
             if (diff.Count == 0 && !want.Equals(got)) diff.Add("the NAVI records differ in a field outside the named set (Mutagen's whole-record equality)");
             return (diff, want.MapInfos.Count);
         }
