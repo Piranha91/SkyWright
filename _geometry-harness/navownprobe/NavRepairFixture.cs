@@ -193,6 +193,60 @@ static class NavRepairFixture
         return n;
     }
 
+    /// <summary>The NAVI-winner master case (houseCARL, 2026-11-22): a minimal Skyrim.esm (two navmeshes in one grid cell and
+    /// their NAVI) and NmNavi.esp, which only re-saves that NAVI, its entries naming Skyrim.esm records alone; and PLAN.json, a
+    /// repair plan in navownprobe's format that moves one vertex of L1 (Skyrim.esm wins it) and adds L2 to L1's NAVI entry (NmNavi
+    /// wins NAVI). Written by navedit write --repair-plan, the patch masters NmNavi.esp only through the NAVI-winner step: no
+    /// record of NmNavi's is referenced. Returns the plan's path.</summary>
+    public static string WriteNaviMasterCase(string dir)
+    {
+        Directory.CreateDirectory(dir);
+        string skyPath = Path.Combine(dir, "Skyrim.esm"), nPath = Path.Combine(dir, "NmNavi.esp");
+        var nKey = new ModKey("NmNavi", ModType.Plugin);
+        var sky = new SkyrimMod(SkyKey, Rel);
+        var c0 = GridCell(0, Flat(LandK(0), 0));
+        c0.NavigationMeshes.Add(Nav(L(1), InGrid(0), new[] { (100f, 100f, 0f), (400f, 100f, 5f), (400f, 400f, 10f), (100f, 400f, 0f) }, new T3(0, 1, 2), new T3(0, 2, 3)));
+        c0.NavigationMeshes.Add(Nav(L(2), InGrid(0), new[] { (1100f, 100f, 0f), (1400f, 100f, 5f), (1400f, 400f, 10f), (1100f, 400f, 0f) }, new T3(0, 1, 2), new T3(0, 2, 3)));
+        sky.Worldspaces.Add(World(c0));
+        NavigationMeshInfoMap Map() => Navi(Info(L(1), 0, 100, 100), Info(L(2), 0, 1100, 100));
+        sky.NavigationMeshInfoMaps.Add(Map());
+        sky.BeginWrite.ToPath(skyPath).WithLoadOrder(Array.Empty<ISkyrimModGetter>()).Write();
+        using var skyRead = SkyrimMod.CreateFromBinaryOverlay(skyPath, Rel);
+        var n = new SkyrimMod(nKey, Rel);
+        n.NavigationMeshInfoMaps.Add(Map());
+        n.BeginWrite.ToPath(nPath).WithLoadOrder(skyRead).Write();
+        string Sha(string pth) { using var fs = System.IO.File.OpenRead(pth); return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(fs)).ToLowerInvariant(); }
+        var moved = new HarnessShared.NavChange(); moved.Vertices[1] = new HousecarlCore.Vec3(400, 100, 6);
+        var plan = new System.Text.Json.Nodes.JsonObject
+        {
+            ["order"] = new System.Text.Json.Nodes.JsonArray(skyPath, nPath),
+            ["plans"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject
+            {
+                ["source"] = L(1).ToString(), ["class"] = "ground", ["status"] = "planned", ["why"] = "fixture: one vertex moves 1 u up",
+                ["winner"] = new System.Text.Json.Nodes.JsonObject { ["plugin"] = "Skyrim.esm", ["path"] = skyPath, ["sha256"] = Sha(skyPath) },
+                ["links"] = new System.Text.Json.Nodes.JsonArray(), ["invariants"] = new System.Text.Json.Nodes.JsonArray(),
+                ["change"] = NavRepairRun.ChangeJson(moved),
+            }),
+            ["navi"] = new System.Text.Json.Nodes.JsonObject
+            {
+                ["record"] = NV.ToString(), ["winner"] = new System.Text.Json.Nodes.JsonObject { ["plugin"] = "NmNavi.esp", ["path"] = nPath },
+                ["why"] = new System.Text.Json.Nodes.JsonArray("fixture: L1's entry gains L2"),
+                ["entries"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject
+                {
+                    ["navmesh"] = L(1).ToString(), ["from"] = new System.Text.Json.Nodes.JsonObject { ["plugin"] = "NmNavi.esp", ["path"] = nPath, ["index"] = 0 },
+                    ["winnerIndex"] = 0, ["add"] = new System.Text.Json.Nodes.JsonArray(L(2).ToString()),
+                    ["mergedToBefore"] = new System.Text.Json.Nodes.JsonArray(), ["preferredMerges"] = new System.Text.Json.Nodes.JsonArray(),
+                }),
+            },
+            ["ops"] = new System.Text.Json.Nodes.JsonArray(
+                new System.Text.Json.Nodes.JsonObject { ["formid"] = L(1).ToString(), ["field_path"] = "Data.Vertices", ["op"] = "SetAtIndex", ["key"] = "1", ["value"] = "400,100,6" },
+                new System.Text.Json.Nodes.JsonObject { ["formid"] = NV.ToString(), ["field_path"] = "MapInfos[0].MergedTo", ["op"] = "Add", ["value"] = L(2).ToString() }),
+        };
+        var planPath = Path.Combine(dir, "PLAN.json");
+        System.IO.File.WriteAllText(planPath, plan.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        return planPath;
+    }
+
     /// <summary>Write the five plugins into <paramref name="dir"/> (created) and return their paths in <see cref="Order"/>.</summary>
     public static IReadOnlyList<string> Write(string dir)
     {
