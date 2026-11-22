@@ -19,6 +19,7 @@
     <Compile Include="..\_shared\NavRepairReadBack.cs" Link="NavRepairReadBack.cs" />
     <Compile Include="..\_shared\NavRepairNavi.cs" Link="NavRepairNavi.cs" />
     <Compile Include="..\_shared\NavCutFootprint.cs" Link="NavCutFootprint.cs" />
+    <Compile Include="..\navownprobe\NavRuleDefaults.cs" Link="NavRuleDefaults.cs" />
     <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
     <Compile Include="..\_shared\ActorBand.cs" Link="ActorBand.cs" />
     <Compile Include="..\_shared\CollisionLayers.cs" Link="CollisionLayers.cs" />

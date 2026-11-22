@@ -147,12 +147,41 @@ where a convex obstacle stands.
   - A cut can leave a few thin, valid triangles: on the real rock moved onto open ground, 6 of 293 new triangles were
     under 0.05 u high (the least 0.003 u). Not yet seen in game.
 
+**Use a version.** `{"navmesh": K, "use_version": "Plugin.esp"}` carries K as that plugin has it (houseCARL's R2: the fix for
+a clobber, where a later mod's version replaced an earlier one's).
+- **Carried whole:** the plugin's Data is copied onto the patch's override (a CopyFrom): vertices, triangles, flags, cover
+  and doors. The grid is rebuilt.
+- **Its border links are matched again** against this order's winning neighbours, by edge position, as the relink
+  matches (`NavBorderMatch`, the fitted tolerance in `navownprobe/NavRuleDefaults.cs`): the one neighbour triangle with an
+  open edge along each linked edge; of several, the one the link already names.
+- **Every neighbour's link into K is re-pointed** to the version's triangle along that edge, in the same patch, so no
+  index names the old winner's numbering (an EDGE-IDX finding).
+- **Ledge links** (Ledge Up and Down) are not made by edge geometry, so they are not matched. The version's own are carried
+  as they are while they name a triangle the neighbour has, and counted as unverified. A neighbour's ledge link into K is
+  kept where the version's triangle of that index stands on the winner's corners.
+- **The navmesh info map:** a neighbour the version gains is added to both entries (`NavRepairNavi.ForPairs`, the
+  relink's rule).
+- **Door references:** each must resolve in the order.
+- **Refused, by name:**
+  - a plugin not in the order, the winner itself, or a plugin without a version of K (or deleting it);
+  - an island;
+  - a linked edge that meets no neighbour triangle, or several none of which it names (the edges are listed; a link is
+    never cut silently);
+  - a neighbour's link into K that meets no edge of the version;
+  - a ledge link out of range, or one into K that the version renumbers;
+  - a version that no longer links into a neighbour the winner did (its info map entry would still name it), or whose
+    doors differ from the winner's (the info map's linked doors would not follow).
+- **The plan row** (`useVersion`) gives the source plugin, vertex and triangle counts before and after, links matched,
+  changed and cut (always 0), ledge links carried unverified, neighbour links re-pointed and the navmeshes they are in,
+  doors checked, neighbours gained, the NAVI change, and the rebuilt grid.
+- Not yet: later edits in the same plan applying to the carried version.
+
 **Every edit refuses an island navmesh**, whose own copy of the geometry in the navmesh info map would go stale. Fills
 come later (`C:/hc-runs/2026-11-21-navgrid/PLAN.md`, the plan gate).
 
 ## Evidence
 
-- `navedit --selftest`: C2513-C2549, run by `tests/test_navedit.py`. Sabotage arms (`C:/hc-runs/2026-11-21-navgrid/sabotage_navedit.py`
+- `navedit --selftest`: C2513-C2550 and C2556-C2562, run by `tests/test_navedit.py`. Sabotage arms (`C:/hc-runs/2026-11-21-navgrid/sabotage_navedit.py`
   and `sabotage_footprint.py`) each turn their case red on its own assertion:
   - no fold, link, overlap, winding, third-triangle, door, last-link or cell-border check;
   - no coincident move;
@@ -162,6 +191,8 @@ come later (`C:/hc-runs/2026-11-21-navgrid/PLAN.md`, the plan gate).
   - for the cut: no neighbour split, no shared-point insertion, band ignored, no convex check, no linked-edge check, no
     weld (C2550: the notched roof's cut leaves a sliver), neighbour split on one edge only, a shallow overlap spared, a thin piece kept, outline edges taken in order,
     no triangle filter;
+  - for use_version (`sabotage_useversion.py`): no keeping of the named triangle, ambiguity taken by the nearest, no
+    inbound re-point, no lost-neighbour refusal, no door check, either ledge link matched by geometry, no CopyFrom;
   - for the obstacle: the slope ignored, one floor for every triangle, no inside, inside counted over all bodies, no
     band top, margin ignored, merging without the convexity check.
 - Real data, 2026-11-21, on the lab's vanilla profile: `0E6430:Skyrim.esm` vertex 517 moved 48 u west.
@@ -170,7 +201,7 @@ come later (`C:/hc-runs/2026-11-21-navgrid/PLAN.md`, the plan gate).
     arrived 4 of 6, the same as vanilla (`C:/hc-runs/2026-11-21-navgrid/LAB-RESULT.md`).
 - Real data, triangles, on the same profile; each read-back held, and not yet seen in game:
   - `0E6430` triangle 3 removed and added back: 15 write steps, cover kept on the moved triangle.
-  - `101F28` (USSEP's version) triangle 0 removed and added back. Triangle 241 moved into slot 0, and `101F29`'s link
+  - `101F28` (Skyrim.esm's version wins on this profile) triangle 0 removed and added back. Triangle 241 moved into slot 0, and `101F29`'s link
     to it was re-pointed in the same patch, with `101F29`'s own grid kept. Two navmeshes written in-process, 24 s.
 - Real data, NavCut, on the same profile: a 60 x 60 u hole cut from `0E6430` round the station's player start (band
   z 1700-1950).
@@ -189,6 +220,16 @@ come later (`C:/hc-runs/2026-11-21-navgrid/PLAN.md`, the plan gate).
     triangles, planned in 0.3 s, no half-joined edge. An independent per-point check (each column tested directly, with
     no slabs) agrees at every one of 17,226 grid points 2.5 u apart: all 7,823 it finds blocked are cut, all 9,403 it
     finds walkable are kept (90 points within 0.3 u of its own edge are left out).
+- Real data, use a version, on the same profile (2026-11-22):
+  - USSEP's version of `0FC127`, which 3DNPC.esp's replaces without depending on USSEP: 4 border links matched again, 1
+    ledge link carried, 5 doors checked. Written by a CopyFrom and read back against USSEP's version, cover included.
+    `navownprobe --base` then finds the clobber's predicate Gone: USSEP's geometry wins.
+  - The patch itself shows as a new CLOBBERED row (3DNPC.esp re-cut by the patch, which does not master it).
+  - The other 13 clobbered navmeshes on this profile were refused, each by name: 3 islands, 5 versions with other doors,
+    and 5 whose borders no longer meet the winning neighbours (Legacy of the Dragonborn's new navmeshes link into the
+    winners; one through a ledge link the version renumbers).
+  - **The matcher against the border rule:** each navmesh's own winning version, carried, plans in 13 of 15. The 2
+    refused are exactly the 2 the base emit reports as EDGE-NOMATCH.
 - The checks caught two real cases on this profile:
   - an edit built from Skyrim.esm's triangle corners when USSEP's version wins (refused: the edges were already
     shared);

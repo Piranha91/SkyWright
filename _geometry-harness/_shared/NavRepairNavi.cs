@@ -111,46 +111,58 @@ public static class NavRepairNavi
                 foreach (var m in Neighbours(NavRepair.Apply(nav[p.Nav].Geom, p.Change)).Where(m => m != p.Nav && !before.Contains(m)))
                 { Need(p.Nav).Add(m); Need(m).Add(p.Nav); }
             }
+            var (np, refused) = ForPairs(need.ToDictionary(kv => kv.Key, kv => (IReadOnlyCollection<FormKey>)kv.Value), view);
+            if (refused.Count == 0) return np;
             var refuse = new Dictionary<FormKey, string>();
-            foreach (var (a, adds) in need)
-            {
-                string? why = view.Problem is { } pr ? pr
-                            : view.Record is null ? "no plugin of the order carries a NAVI record, so the coarse map cannot be told of the new neighbour"
-                            : !view.Effective.ContainsKey(a) ? $"no plugin's NAVI states {a}, so its entry cannot gain {string.Join(" and ", adds)}"
-                            : null;
-                if (why is null) continue;
-                foreach (var p in plan.Plans.Where(p => p.Status != "refused" && p.Class == "relink" && (p.Nav == a || adds.Contains(p.Nav))))
+            foreach (var (a, why) in refused)
+                foreach (var p in plan.Plans.Where(p => p.Status != "refused" && p.Class == "relink" && (p.Nav == a || need[a].Contains(p.Nav))))
                     refuse.TryAdd(p.Nav, why);
-            }
-            if (refuse.Count > 0) { NavRepair.Refuse(plan, refuse); continue; }
-
-            var np = new NaviPlan { Record = view.Record, WinnerPlugin = view.Winner?.Plugin, WinnerPath = view.Winner?.Path };
-            if (need.Count == 0) { np.Why.Add("no relink joins a new pair of navmeshes, so NAVI is not written"); return np; }
-            var winnerIndex = new Dictionary<FormKey, int>();
-            for (int i = 0; i < view.Winner!.Map.MapInfos.Count; i++) winnerIndex[view.Winner.Map.MapInfos[i].NavigationMesh.FormKey] = i;
-            string id = view.Record!.Value.ToString();
-            foreach (var (a, adds) in need)
-            {
-                var (src, idx) = view.Effective[a];
-                var e = src.Map.MapInfos[idx];
-                var merged = e.MergedTo.Select(x => x.FormKey).ToList(); var pref = e.PreferredMerges.Select(x => x.FormKey).ToList();
-                var add = adds.Where(m => !merged.Contains(m) && !pref.Contains(m)).ToList();
-                if (add.Count == 0) { np.Why.Add($"{a}'s entry ({src.Plugin}) already names {string.Join(" and ", adds)}"); continue; }
-                int? wi = src == view.Winner ? idx : null;
-                np.Entries.Add(new NaviEntryChange(a, src.Plugin, src.Path, idx, wi, add, merged, pref));
-                if (wi is { } w)
-                {
-                    foreach (var m in add) np.Ops.Add(new RepairOp(id, $"MapInfos[{w}].MergedTo", "Add", Value: m.ToString()));
-                    np.Why.Add($"{a}'s entry in {src.Plugin}, the NAVI winner, gains {string.Join(" and ", add)}");
-                }
-                else
-                {
-                    np.Ops.Add(new RepairOp(id, "MapInfos", "Add", ComposeNode: Compose(e, add)));
-                    np.Why.Add($"{a}'s entry, from {src.Plugin} (the winner {view.Winner.Plugin} does not state it), is added whole with {string.Join(" and ", add)}");
-                }
-            }
-            return np;
+            NavRepair.Refuse(plan, refuse);
         }
+    }
+
+    /// <summary>The NAVI change that joins each navmesh in <paramref name="need"/> to the navmeshes it lists: each is added to
+    /// the navmesh's effective entry's MergedTo, unless the entry already names it (in place on the NAVI winner's entry, else
+    /// the entry added whole from the plugin that states it). The caller lists both directions of a pair. Each navmesh whose
+    /// entry cannot be written is returned with the one sentence why, and then nothing is planned.</summary>
+    public static (NaviPlan Plan, Dictionary<FormKey, string> Refused) ForPairs(IReadOnlyDictionary<FormKey, IReadOnlyCollection<FormKey>> need, NaviView view)
+    {
+        var refused = new Dictionary<FormKey, string>();
+        foreach (var (a, adds) in need.OrderBy(kv => kv.Key.ToString(), StringComparer.Ordinal))
+        {
+            string? why = view.Problem is { } pr ? pr
+                        : view.Record is null ? "no plugin of the order carries a NAVI record, so the coarse map cannot be told of the new neighbour"
+                        : !view.Effective.ContainsKey(a) ? $"no plugin's NAVI states {a}, so its entry cannot gain {string.Join(" and ", adds)}"
+                        : null;
+            if (why is not null) refused[a] = why;
+        }
+        var np = new NaviPlan { Record = view.Record, WinnerPlugin = view.Winner?.Plugin, WinnerPath = view.Winner?.Path };
+        if (refused.Count > 0) return (np, refused);
+        if (need.Count == 0) { np.Why.Add("no relink joins a new pair of navmeshes, so NAVI is not written"); return (np, refused); }
+        var winnerIndex = new Dictionary<FormKey, int>();
+        for (int i = 0; i < view.Winner!.Map.MapInfos.Count; i++) winnerIndex[view.Winner.Map.MapInfos[i].NavigationMesh.FormKey] = i;
+        string id = view.Record!.Value.ToString();
+        foreach (var (a, adds) in need.OrderBy(kv => kv.Key.ToString(), StringComparer.Ordinal))
+        {
+            var (src, idx) = view.Effective[a];
+            var e = src.Map.MapInfos[idx];
+            var merged = e.MergedTo.Select(x => x.FormKey).ToList(); var pref = e.PreferredMerges.Select(x => x.FormKey).ToList();
+            var add = adds.Where(m => !merged.Contains(m) && !pref.Contains(m)).ToList();
+            if (add.Count == 0) { np.Why.Add($"{a}'s entry ({src.Plugin}) already names {string.Join(" and ", adds)}"); continue; }
+            int? wi = src == view.Winner ? idx : null;
+            np.Entries.Add(new NaviEntryChange(a, src.Plugin, src.Path, idx, wi, add, merged, pref));
+            if (wi is { } w)
+            {
+                foreach (var m in add) np.Ops.Add(new RepairOp(id, $"MapInfos[{w}].MergedTo", "Add", Value: m.ToString()));
+                np.Why.Add($"{a}'s entry in {src.Plugin}, the NAVI winner, gains {string.Join(" and ", add)}");
+            }
+            else
+            {
+                np.Ops.Add(new RepairOp(id, "MapInfos", "Add", ComposeNode: Compose(e, add)));
+                np.Why.Add($"{a}'s entry, from {src.Plugin} (the winner {view.Winner.Plugin} does not state it), is added whole with {string.Join(" and ", add)}");
+            }
+        }
+        return (np, refused);
     }
 
     static JsonObject Set(string path, string verb, string? value = null, JsonObject? compose = null)

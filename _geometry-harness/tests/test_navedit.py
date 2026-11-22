@@ -1,4 +1,4 @@
-"""Known answers for navmesh editing (C2513-C2550), on _shared/NavEdit.cs and _shared/NavCutFootprint.cs through `navedit --selftest`.
+"""Known answers for navmesh editing (C2513-C2550, C2556-C2562), on _shared/NavEdit.cs and _shared/NavCutFootprint.cs through `navedit --selftest`.
 
     2513  an interior vertex moved: planned, the box kept, the grid NavGrid's for the moved mesh, ops for exactly that
           vertex, the box and the grid
@@ -39,6 +39,13 @@
     2548  NavCut: a strip too narrow to stand on goes with the hole
     2549  NavCut: an outline edge parallel to a triangle's edge, a hair from it, is taken last; the far hairline stays
     2550  a notched roof is cut as two convex parts, not merged across the dip; the ground over the dip stays
+    2556  use_version: another numbering of the same places: links match again, the neighbour's links are re-pointed, CopyFrom first
+    2557  use_version: a border that no longer meets its neighbour is refused, listing its edges both ways
+    2558  use_version: two triangles along one edge: the one the link names stands; naming neither is refused
+    2559  use_version: a version that no longer links into a neighbour is refused
+    2560  use_version: other doors are refused; a gained neighbour is returned for the navmesh info map
+    2561  use_version: ledge links are carried or kept in place, never matched by geometry; out of range or renumbered, refused
+    2562  use_version: the winner itself plans with nothing changed
 
 The real-data check (plan and write on a lab profile, read back, byte-compared with the in-game-tested patch) is in the
 2026-11-21 run folder; it needs a game and an MO2 instance, so it is not a test here.
@@ -107,6 +114,13 @@ CASES = [
     ("2548 NavCut strip too narrow goes", lambda: selftest("2548")),
     ("2549 NavCut parallel edge taken last", lambda: selftest("2549")),
     ("2550 notched roof not merged across the dip", lambda: selftest("2550")),
+    ("2556 use_version re-points a renumbered version", lambda: selftest("2556")),
+    ("2557 use_version moved border refused", lambda: selftest("2557")),
+    ("2558 use_version keeps the named of two", lambda: selftest("2558")),
+    ("2559 use_version lost neighbour refused", lambda: selftest("2559")),
+    ("2560 use_version doors refused, neighbour gained", lambda: selftest("2560")),
+    ("2561 use_version ledge links", lambda: selftest("2561")),
+    ("2562 use_version the winner itself", lambda: selftest("2562")),
 ]
 
 if __name__ == "__main__":

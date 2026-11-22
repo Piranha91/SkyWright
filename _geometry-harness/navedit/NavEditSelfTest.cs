@@ -602,6 +602,132 @@ static class NavEditSelfTest
             return Sound(r, 40000 - 400, new[] { (80.0, 70.0), (80.0, 79.97) }) ?? (Covers(r.After!, 20, 19.96) ? null : "the hairline along the diagonal, far from the outline, was cut");
         });
 
+        // ---- use a version (NavEdit.UseVersion, houseCARL's R2) ----
+        // W, the winner: the linked square, its right border (x = 200: triangle 2's edge 1-2, triangle 6's edge 1-2) linking into
+        // N, the same square 200 u east, whose left border (triangle 1's and 5's edge 2-0) links back.
+        FormKey NK = new(new ModKey("SelfTest", ModType.Master), 0xE02), DoorRef = new(new ModKey("SelfTest", ModType.Master), 0xD01);
+        (NavmeshGeometry W, NavmeshGeometry N) Pair(bool linkW = true, bool linkN = true)
+        {
+            var (v, t) = Linked();
+            var wl = new List<NavEdgeLink>();
+            if (linkW)
+            {
+                t[2] = t[2] with { Flags = t[2].Flags | 2, EdgeLink12 = 0 }; t[6] = t[6] with { Flags = t[6].Flags | 2, EdgeLink12 = 1 };
+                wl.Add(new NavEdgeLink(NK, 1)); wl.Add(new NavEdgeLink(NK, 5));
+            }
+            var (nv, nt) = Linked();
+            for (int i = 0; i < nv.Count; i++) nv[i] = nv[i] with { X = nv[i].X + 200 };
+            var nl = new List<NavEdgeLink>();
+            if (linkN)
+            {
+                nt[1] = nt[1] with { Flags = nt[1].Flags | 4, EdgeLink20 = 0 }; nt[5] = nt[5] with { Flags = nt[5].Flags | 4, EdgeLink20 = 1 };
+                nl.Add(new NavEdgeLink(K, 2)); nl.Add(new NavEdgeLink(K, 6));
+            }
+            return (Geom(v, t, wl), Geom(nv, nt, nl) with { FormKey = NK });
+        }
+        // the same navmesh with its triangles in reverse order (every in-mesh field following): another numbering, same places
+        NavmeshGeometry Reversed(NavmeshGeometry g)
+        {
+            int n = g.Triangles.Count;
+            short M(NavTri x, int e, short f) => (x.Flags & (1 << e)) != 0 || f < 0 ? f : (short)(n - 1 - f);
+            var t = g.Triangles.Reverse().Select(x => x with { EdgeLink01 = M(x, 0, x.EdgeLink01), EdgeLink12 = M(x, 1, x.EdgeLink12), EdgeLink20 = M(x, 2, x.EdgeLink20) }).ToList();
+            return g with { Triangles = t };
+        }
+        var tol = NavRuleDefaults.Edge;
+        string? UsePlanned(UseVersionResult r) => r.Status == "planned" ? null : "refused: " + string.Join(" ", r.Why);
+        string? UseRefused(UseVersionResult r, string word) => r.Status == "refused" && r.Why.Any(w => w.Contains(word)) ? null : $"want a refusal naming '{word}', got {r.Status}: {string.Join(" ", r.Why)}";
+
+        // C2556: a version with the winner's places in another numbering: its two border links match N again unchanged; N's two
+        // links into it are re-pointed (2 -> 5, 6 -> 1) in the same patch; the ops copy the version's Data first, then rebuild
+        // the grid, then set N's entries.
+        Case("2556 use-version-renumbered", () =>
+        {
+            var (w, n) = Pair();
+            var r = NavEdit.UseVersion(w, Reversed(w), "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol);
+            if (UsePlanned(r) is { } why) return why;
+            if (r.Matched != 2 || r.Changed != 0 || r.Repointed != 2) return $"matched {r.Matched}, changed {r.Changed}, re-pointed {r.Repointed}";
+            var nl = r.Others[NK].EdgeLinks!;
+            if (nl[0].TriangleIndex != 5 || nl[1].TriangleIndex != 1) return $"N's entries name {nl[0].TriangleIndex} and {nl[1].TriangleIndex}, want 5 and 1";
+            var first = r.Ops[0];
+            if (first.FieldPath != "Data" || first.Op != "CopyFrom" || first.FromPlugin != "Ver.esp") return $"first op {first.FieldPath} {first.Op} {first.FromPlugin}";
+            var nOps = r.Ops.Where(o => o.FormId == NK.ToString()).Select(o => $"{o.FieldPath}={o.Value}").ToList();
+            if (string.Join(" ", nOps) != "Data.EdgeLinks[0].TriangleIndex=5 Data.EdgeLinks[1].TriangleIndex=1") return "N's ops " + string.Join(" ", nOps);
+            var g = NavGrid.Rebuild(r.After!.Vertices, r.After.Triangles.Select(x => ((int)x.A, (int)x.B, (int)x.C)).ToList());
+            return r.Grid!.CellBytes.SequenceEqual(g.CellBytes) && r.Ops.Any(o => o.FieldPath == "Data.NavmeshGrid") ? null : "the grid is not NavGrid's for the version";
+        });
+
+        // C2557: a version whose border moved 10 u west no longer meets N: refused, listing its edges both ways, never cut.
+        Case("2557 use-version-border-moved", () =>
+        {
+            var (w, n) = Pair();
+            var v = w.Vertices.ToList();
+            foreach (var i in new[] { 2, 5, 8 }) v[i] = v[i] with { X = 190 };
+            var r = NavEdit.UseVersion(w, w with { Vertices = v }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol);
+            return UseRefused(r, "no edge of its winning version lies along it") ?? UseRefused(r, "no edge of Ver.esp's version lies along it")
+                ?? (r.Why.Count(x => x.Contains("triangle 2 edge") || x.Contains("triangle 6 edge")) == 2 ? null : "the refusal does not list both border edges: " + string.Join(" | ", r.Why));
+        });
+
+        // C2558: N's triangle 1 split at (200, 50) into two along W's edge: two candidates. The link naming one of them keeps
+        // it; a link naming neither is refused as ambiguous.
+        Case("2558 use-version-two-along", () =>
+        {
+            var (w, n) = Pair(linkN: false);
+            var nv = n.Vertices.ToList(); nv.Add(new Vec3(200, 50, 0));
+            var nt = n.Triangles.ToList();
+            nt[1] = new NavTri(0, 4, 9, 0) with { EdgeLink01 = nt[1].EdgeLink01, EdgeLink12 = -1, EdgeLink20 = -1 };
+            nt.Add(new NavTri(9, 4, 3, 0) with { EdgeLink01 = -1, EdgeLink12 = nt[1].EdgeLink12, EdgeLink20 = -1 });
+            var n2 = n with { Vertices = nv, Triangles = nt };
+            var near = new Dictionary<FormKey, NavmeshGeometry> { [NK] = n2 };
+            var keep = NavEdit.UseVersion(w, w, "Ver.esp", near, tol);
+            var bad = NavEdit.UseVersion(w, w with { EdgeLinks = new List<NavEdgeLink> { new(NK, 3), new(NK, 5) } }, "Ver.esp", near, tol);
+            return (UsePlanned(keep) is { } k ? "naming one: " + k : null) ?? UseRefused(bad, "2 of its triangles lie along it");
+        });
+
+        // C2559: a version that no longer links into N (whose entry in the navmesh info map names it) is refused by name.
+        Case("2559 use-version-lost-neighbour", () =>
+        {
+            var (w, n) = Pair();
+            var (bare, _) = Pair(linkW: false);
+            return UseRefused(NavEdit.UseVersion(w, bare, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol), "no longer links into");
+        });
+
+        // C2560: a version standing before a door the winner has no door at is refused (the info map's linked doors would not
+        // follow); a version that gains N as a neighbour is planned, N returned for the info map.
+        Case("2560 use-version-doors-and-gained", () =>
+        {
+            var (w, n) = Pair();
+            var doors = NavEdit.UseVersion(w, w with { DoorTriangles = new List<NavDoorTriangle> { new(DoorRef, 0) } }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol);
+            var (bare, nn) = Pair(linkW: false, linkN: false);
+            var gained = NavEdit.UseVersion(bare, w, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = nn }, tol);
+            return UseRefused(doors, "other doors") ?? UsePlanned(gained) ?? (gained.Gained.SequenceEqual(new[] { NK }) ? null : "gained " + string.Join(",", gained.Gained));
+        });
+
+        // C2561: ledge links are not matched by edge geometry: the version's own (Type 2) is carried while it names a triangle N
+        // has, and refused when it names one N lacks; N's ledge link into this navmesh is kept where the version's triangle of
+        // that index stands on the winner's corners, and refused when the version renumbers it.
+        Case("2561 use-version-ledges", () =>
+        {
+            var (w, n) = Pair(linkN: false);
+            var ledge = w with { EdgeLinks = new List<NavEdgeLink> { new(NK, 1, 2), new(NK, 5) } };
+            var ok = NavEdit.UseVersion(w with { EdgeLinks = new List<NavEdgeLink> { new(NK, 1, 2), new(NK, 5) } }, ledge, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol);
+            var past = NavEdit.UseVersion(w, w with { EdgeLinks = new List<NavEdgeLink> { new(NK, 99, 2), new(NK, 5) } }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol);
+            var (w2, n2) = Pair();
+            var nLedge = n2 with { EdgeLinks = new List<NavEdgeLink> { new(K, 2, 1), new(K, 6) } };
+            var kept = NavEdit.UseVersion(w2, w2, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = nLedge }, tol);
+            var moved = NavEdit.UseVersion(w2, Reversed(w2), "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = nLedge }, tol);
+            if (UsePlanned(ok) is { } a) return "own ledge in range: " + a;
+            if (ok.LedgesCarried != 1) return $"ledges carried {ok.LedgesCarried}, want 1";
+            return UseRefused(past, "ledge link into") ?? (UsePlanned(kept) is { } k ? "N's ledge kept in place: " + k : null) ?? UseRefused(moved, "cannot be re-pointed by edge position");
+        });
+
+        // C2562: a version that already matches this order (the winner itself) plans with nothing re-pointed and no index changed.
+        Case("2562 use-version-same", () =>
+        {
+            var (w, n) = Pair();
+            var r = NavEdit.UseVersion(w, w, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol);
+            return UsePlanned(r) ?? (r.Matched == 2 && r.Changed == 0 && r.Repointed == 0 && r.Others.Count == 0 ? null : $"matched {r.Matched}, changed {r.Changed}, re-pointed {r.Repointed}, others {r.Others.Count}");
+        });
+
         // C2528: bad input: a triangle index past the mesh, a corner that does not exist, nothing to do.
         Case("2528 bad-triangle-input", () =>
         {

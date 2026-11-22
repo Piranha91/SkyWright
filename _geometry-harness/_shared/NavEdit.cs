@@ -40,6 +40,20 @@ public sealed record TriEditResult(string Status, IReadOnlyList<string> Why, Nav
         new("refused", why, null, null, Array.Empty<int>(), new Dictionary<FormKey, NavmeshGeometry>(), Array.Empty<RepairOp>());
 }
 
+/// <summary>A use-version edit's outcome: "planned" with the carried navmesh as it will stand, its grid, every neighbour whose
+/// links into it were re-pointed, the write ops, how many of its border links were matched (and how many of them changed
+/// index), how many neighbour links were re-pointed, the neighbours it gains (for the navmesh info map) and its doors; or
+/// "refused" with why.</summary>
+public sealed record UseVersionResult(string Status, IReadOnlyList<string> Why, NavmeshGeometry? After, NavGridData? Grid,
+                                      IReadOnlyDictionary<FormKey, NavmeshGeometry> Others, IReadOnlyList<RepairOp> Ops,
+                                      int Matched, int Changed, int Repointed, IReadOnlyList<FormKey> Gained, IReadOnlyList<FormKey> Doors)
+{
+    /// <summary>The version's ledge links carried as it has them, unverified (a ledge link is not made by edge geometry).</summary>
+    public int LedgesCarried { get; init; }
+    public static UseVersionResult Refused(params string[] why) =>
+        new("refused", why, null, null, new Dictionary<FormKey, NavmeshGeometry>(), Array.Empty<RepairOp>(), 0, 0, 0, Array.Empty<FormKey>(), Array.Empty<FormKey>());
+}
+
 public static class NavEdit
 {
     /// <summary>Two triangles whose height ranges come within this of each other are on one level.</summary>
@@ -699,6 +713,148 @@ public static class NavEdit
         }
 
         return EditTriangles(g, remove.ToList(), verts.Skip(nv0).ToList(), addT, inbound, cover, addF, minArea: Sliver);
+    }
+
+    /// <summary>USE A VERSION (houseCARL's R2): carry navmesh <paramref name="winner"/>'s key as <paramref name="fromPlugin"/>
+    /// has it (<paramref name="version"/>: vertices, triangles, flags, cover and doors, by a CopyFrom of its Data), its links
+    /// made true for this order. <paramref name="near"/> holds this order's winning version of every navmesh the version links
+    /// into and of every navmesh that links into the winner.
+    /// <list type="bullet">
+    /// <item>Each of the version's border links is matched again, by edge position, against its neighbour's winning version:
+    /// the one triangle of the neighbour with an open edge along it, within <paramref name="tol"/> (the relink's rule,
+    /// NavBorderMatch); of several, the one the link already names. None, or several none of which it names, is refused,
+    /// listing the edges: a link is never cut silently.</item>
+    /// <item>Every neighbour's link into this navmesh is re-pointed to the version's triangle along that edge, in the same
+    /// patch, the same way; otherwise its index names the old winner's numbering (an EDGE-IDX finding).</item>
+    /// <item>The grid is rebuilt. A neighbour the version links into and the winner did not is returned for the navmesh info
+    /// map; one the winner linked into and the version does not is refused (its NAVI entry would still name it).</item>
+    /// <item>A LEDGE link (Type 1 or 2) is not made by edge geometry, so it is not matched: the version's own is carried while
+    /// it names a triangle its neighbour has (counted, unverified); a neighbour's into this navmesh is kept while the version's
+    /// triangle of that index stands on the winner's corners, else refused.</item>
+    /// <item>Refused too: a version whose doors differ from the winner's (the navmesh info map's linked doors), and a link
+    /// field past the table.</item>
+    /// </list></summary>
+    public static UseVersionResult UseVersion(NavmeshGeometry winner, NavmeshGeometry version, string fromPlugin,
+                                              IReadOnlyDictionary<FormKey, NavmeshGeometry> near, EdgeTolerance tol)
+    {
+        var key = winner.FormKey; var why = new List<string>();
+        var V = version; var links = (V.EdgeLinks ?? Array.Empty<NavEdgeLink>()).ToList();
+        static bool Open(NavTri t, int e) => Linked(t, e) || Field(t, e) < 0;
+        // the triangles of g with an open edge along a-b within tol (one per triangle)
+        List<int> Along(NavmeshGeometry g, Vec3 a, Vec3 b)
+        {
+            var hit = new List<int>();
+            for (int u = 0; u < g.Triangles.Count; u++)
+                for (int f = 0; f < 3; f++)
+                {
+                    if (!Open(g.Triangles[u], f)) continue;
+                    var (i, j) = NavBorderMatch.EdgeVerts(g.Triangles[u], f);
+                    if (NavBorderMatch.Gap(a, b, g.Vertices[i], g.Vertices[j]).Within(tol)) { hit.Add(u); break; }
+                }
+            return hit;
+        }
+        // of several triangles along an edge (a long edge facing two short ones), the one the link already names stands: that
+        // is no guess; naming none of them, the link stays ambiguous
+        static bool SameCorners(NavmeshGeometry a, NavmeshGeometry b, int x)
+        {
+            var ta = a.Triangles[x]; var tb = b.Triangles[x];
+            var pa = new[] { a.Vertices[ta.A], a.Vertices[ta.B], a.Vertices[ta.C] }.OrderBy(v => v.X).ThenBy(v => v.Y).ThenBy(v => v.Z);
+            var pb = new[] { b.Vertices[tb.A], b.Vertices[tb.B], b.Vertices[tb.C] }.OrderBy(v => v.X).ThenBy(v => v.Y).ThenBy(v => v.Z);
+            return pa.SequenceEqual(pb);
+        }
+        static List<int> Keep(List<int> hit, int named) => hit.Count > 1 && hit.Contains(named) ? new List<int> { named } : hit;
+        string Where(Vec3 a, Vec3 b) => FormattableString.Invariant($"({a.X:0.#}, {a.Y:0.#}, {a.Z:0.#})-({b.X:0.#}, {b.Y:0.#}, {b.Z:0.#})");
+
+        // the version's own links, matched again on this order's neighbours
+        var assigned = new Dictionary<int, short>();
+        int matched = 0, ledges = 0;
+        for (int t = 0; t < V.Triangles.Count; t++)
+            for (int e = 0; e < 3; e++)
+            {
+                if (!Linked(V.Triangles[t], e)) continue;
+                int k = Field(V.Triangles[t], e);
+                if (k < 0 || k >= links.Count) { why.Add($"{fromPlugin}'s triangle {t} edge {e} names link entry {k}, past its table of {links.Count}; that version is broken as it stands."); continue; }
+                var m = links[k].Mesh;
+                if (m == key) continue;                                            // a link into itself keeps its own numbering
+                if (!near.TryGetValue(m, out var n)) { why.Add($"{fromPlugin}'s triangle {t} links into {m}, which no plugin of this order provides; that link cannot be made true."); continue; }
+                if (links[k].Type is 1 or 2)
+                {
+                    // a LEDGE link (Ledge Up / Down) is not made by edge geometry (navownprobe's border rules count it, never
+                    // judge it): carried as the version has it, unverified, while it names a triangle the neighbour has
+                    if (links[k].TriangleIndex < 0 || links[k].TriangleIndex >= n.Triangles.Count) why.Add($"{fromPlugin}'s triangle {t} has a ledge link into {m} triangle {links[k].TriangleIndex}, which {m}'s winning version does not have ({n.Triangles.Count}); that link cannot be made true.");
+                    else ledges++;
+                    continue;
+                }
+                var (pa, pb) = NavBorderMatch.EdgeVerts(V.Triangles[t], e);
+                var hit = Keep(Along(n, V.Vertices[pa], V.Vertices[pb]), links[k].TriangleIndex);
+                if (hit.Count != 1) { why.Add($"{fromPlugin}'s triangle {t} edge {Where(V.Vertices[pa], V.Vertices[pb])} links into {m}, but {(hit.Count == 0 ? "no edge of its winning version lies along it" : $"{hit.Count} of its triangles lie along it ({string.Join(", ", hit.Take(4))})")}; relink it by hand or use another version."); continue; }
+                if (assigned.TryGetValue(k, out var prev) && prev != hit[0]) { why.Add($"{fromPlugin}'s link entry {k} serves two edges that now meet different triangles of {m} ({prev} and {hit[0]}); that table cannot be kept as it is."); continue; }
+                assigned[k] = (short)hit[0]; matched++;
+            }
+        int changed = 0;
+        foreach (var (k, to) in assigned) if (links[k].TriangleIndex != to) { links[k] = links[k] with { TriangleIndex = to }; changed++; }
+
+        // every neighbour's links into this navmesh, re-pointed to the version's triangles
+        var others = new Dictionary<FormKey, NavmeshGeometry>();
+        var otherOps = new List<RepairOp>();
+        int repointed = 0;
+        foreach (var (ok, o) in near)
+        {
+            if (ok == key) continue;
+            var olinks = (o.EdgeLinks ?? Array.Empty<NavEdgeLink>()).ToList();
+            if (!olinks.Any(l => l.Mesh == key)) continue;
+            var oassigned = new Dictionary<int, short>();
+            for (int u = 0; u < o.Triangles.Count; u++)
+                for (int f = 0; f < 3; f++)
+                {
+                    if (!Linked(o.Triangles[u], f)) continue;
+                    int j = Field(o.Triangles[u], f);
+                    if (j < 0 || j >= olinks.Count || olinks[j].Mesh != key) continue;
+                    if (olinks[j].Type is 1 or 2)
+                    {
+                        // a neighbour's ledge link into this navmesh: kept where the version's triangle of that index stands on
+                        // the winner's corners; otherwise it cannot be re-pointed by position
+                        int x = olinks[j].TriangleIndex;
+                        if (!(x >= 0 && x < V.Triangles.Count && x < winner.Triangles.Count && SameCorners(V, winner, x)))
+                            why.Add($"{ok}'s triangle {u} has a ledge link into {key} triangle {x}, which {fromPlugin}'s version does not keep in place; a ledge link cannot be re-pointed by edge position.");
+                        continue;
+                    }
+                    var (pa, pb) = NavBorderMatch.EdgeVerts(o.Triangles[u], f);
+                    var hit = Keep(Along(V, o.Vertices[pa], o.Vertices[pb]), olinks[j].TriangleIndex);
+                    if (hit.Count != 1) { why.Add($"{ok}'s triangle {u} edge {Where(o.Vertices[pa], o.Vertices[pb])} links into {key}, but {(hit.Count == 0 ? $"no edge of {fromPlugin}'s version lies along it" : $"{hit.Count} triangles of {fromPlugin}'s version lie along it")}; that link cannot be re-pointed."); continue; }
+                    if (oassigned.TryGetValue(j, out var prev) && prev != hit[0]) { why.Add($"{ok}'s link entry {j} serves two edges that meet different triangles of {fromPlugin}'s version; that table cannot be kept as it is."); continue; }
+                    oassigned[j] = (short)hit[0];
+                }
+            var before = olinks.ToList();
+            foreach (var (j, to) in oassigned) olinks[j] = olinks[j] with { TriangleIndex = to };
+            var diff = Enumerable.Range(0, olinks.Count).Where(j => olinks[j].TriangleIndex != before[j].TriangleIndex).ToList();
+            if (diff.Count == 0) continue;
+            repointed += diff.Count;
+            others[ok] = o with { EdgeLinks = olinks };
+            foreach (var j in diff) otherOps.Add(new RepairOp(ok.ToString(), $"Data.EdgeLinks[{j}].TriangleIndex", "Set", Value: olinks[j].TriangleIndex.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        // neighbours and doors, which the navmesh info map records
+        var after = V with { EdgeLinks = links };
+        var was = NavRepairNavi.Neighbours(winner); var now = NavRepairNavi.Neighbours(after);
+        var lost = was.Where(m => m != key && !now.Contains(m)).OrderBy(m => m.ToString()).ToList();
+        if (lost.Count > 0) why.Add($"{fromPlugin}'s version no longer links into {string.Join(" and ", lost)}, which the navmesh info map's entry for {key} names; removing a neighbour there is not supported yet.");
+        var doorsWas = (winner.DoorTriangles ?? Array.Empty<NavDoorTriangle>()).Select(d => d.Door).OrderBy(d => d.ToString()).ToList();
+        var doorsNow = (V.DoorTriangles ?? Array.Empty<NavDoorTriangle>()).Select(d => d.Door).OrderBy(d => d.ToString()).ToList();
+        if (!doorsWas.SequenceEqual(doorsNow)) why.Add($"{fromPlugin}'s version has other doors than the winner's ({doorsNow.Count} against {doorsWas.Count}), and the navmesh info map's linked doors would not follow; that is not supported yet.");
+        if (why.Count > 0) return UseVersionResult.Refused(why.Distinct().ToArray());
+
+        var grid = NavGrid.Rebuild(after.Vertices, after.Triangles.Select(t => ((int)t.A, (int)t.B, (int)t.C)).ToList());
+        after = after with { Min = grid.Min, Max = grid.Max };
+        string id = key.ToString();
+        var ops = new List<RepairOp> { new(id, "Data", "CopyFrom", FromPlugin: fromPlugin) };
+        for (int k = 0; k < links.Count; k++)
+            if (links[k].TriangleIndex != (V.EdgeLinks ?? Array.Empty<NavEdgeLink>())[k].TriangleIndex)
+                ops.Add(new RepairOp(id, $"Data.EdgeLinks[{k}].TriangleIndex", "Set", Value: links[k].TriangleIndex.ToString(CultureInfo.InvariantCulture)));
+        ops.AddRange(Ops(id, Array.Empty<int>(), after.Vertices, grid));
+        ops.AddRange(otherOps);
+        return new UseVersionResult("planned", Array.Empty<string>(), after, grid, others, ops, matched, changed, repointed,
+                                    now.Where(m => m != key && !was.Contains(m)).OrderBy(m => m.ToString()).ToList(), doorsNow) { LedgesCarried = ledges };
     }
 
     static double Cross(IReadOnlyList<Vec3> v, NavTri t)

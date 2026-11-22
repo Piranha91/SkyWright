@@ -34,9 +34,11 @@ public sealed record GroundVertex(int Index, float Authored, float Winning, bool
 public sealed record GroundRow(FormKey Nav, IReadOnlyList<GroundVertex> Vertices);
 
 /// <summary>One housecarl_apply op. <see cref="Compose"/> is an EdgeLink element for an Add; <see cref="ComposeNode"/> a whole
-/// compose (a NAVI entry with its nested sets).</summary>
+/// compose (a NAVI entry with its nested sets); <see cref="FromPlugin"/> the plugin a CopyFrom copies the field from (navedit's
+/// use_version carries a navmesh's Data from the plugin named).</summary>
 public sealed record RepairOp(string FormId, string FieldPath, string Op, string? Key = null, string? Value = null,
-                              IReadOnlyDictionary<string, string>? Compose = null, System.Text.Json.Nodes.JsonNode? ComposeNode = null);
+                              IReadOnlyDictionary<string, string>? Compose = null, System.Text.Json.Nodes.JsonNode? ComposeNode = null,
+                              string? FromPlugin = null);
 
 /// <summary>What happened to one link. Status: relinked, cut, refused, linked-back, resolved. <paramref name="Src"/>,
 /// <paramref name="SrcTri"/> and <paramref name="Edge"/> are the edge the plan edits (or would); the detector row it answers is
