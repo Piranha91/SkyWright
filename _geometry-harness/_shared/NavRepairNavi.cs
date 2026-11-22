@@ -200,7 +200,7 @@ public static class NavRepairNavi
             {
                 add.Count > 0 ? $"gains {string.Join(" and ", add)}" : null,
                 dropM.Count + dropP.Count > 0 ? $"drops {string.Join(" and ", dropM.Concat(dropP).Distinct())}, which the version no longer links into" : null,
-                doorsChange ? $"its linked doors become the version's door table [{string.Join(", ", doors!)}] (were [{string.Join(", ", e.LinkedDoors.Select(d => d.Door.FormKey))}])" : null,
+                doorsChange ? $"takes the version's door table [{string.Join(", ", doors!)}] as its linked doors (were [{string.Join(", ", e.LinkedDoors.Select(d => d.Door.FormKey))}])" : null,
             }.Where(x => x is not null));
             if (wi is { } w)
             {
