@@ -25,15 +25,18 @@ internal sealed class ResultMarks : IRenderOverlay
     internal bool Enabled = true;
     readonly List<OverlayLineSegment> _lines = new();
     internal int Marked { get; private set; }
+    readonly HashSet<MarkStyle> _shown = new();
+    /// <summary>The box styles drawn now, for the view's key.</summary>
+    internal IReadOnlyCollection<MarkStyle> StylesShown => _shown;
 
     /// <summary>Replace the marks: each object's box (Skyrim space) and its style.</summary>
     internal void Set(IEnumerable<(Vector3 Min, Vector3 Max, MarkStyle Style)> boxes)
     {
-        _lines.Clear(); Marked = 0;
+        _lines.Clear(); Marked = 0; _shown.Clear();
         foreach (var (min, max, style) in boxes)
         {
             if (min.X > max.X) continue;                     // an object the scene gave no box
-            Marked++;
+            Marked++; _shown.Add(style);
             var col = Styles[style].Colour;
             foreach (var (a, b) in BoxLines(min, max, style))
             {

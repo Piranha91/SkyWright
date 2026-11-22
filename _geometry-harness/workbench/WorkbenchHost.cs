@@ -44,6 +44,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     {
         _resultMarks.Set(refs.Where(r => _session.IsDrawn(r.Key)).Select(r => { var ro = _session.RefOf(r.Key); return (ro.Min, ro.Max, r.Style); }));
         Invalidate("marks");
+        UpdateKey();
         return _resultMarks.Marked;
     }
     internal int ResultsMarked => _resultMarks.Marked;
@@ -87,6 +88,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         Directory.CreateDirectory(_outDir);
         renderer.Overlays.Add(_resultMarks);
         renderer.Overlays.Add(_marks);
+        var ui = Dispatcher.CurrentDispatcher;          // the crossing is measured off the window's thread
+        _marks.Changed = () => ui.BeginInvoke(() => { UpdateKey(); Invalidate("marks"); });
         if (!ReadOnly) renderer.Overlays.Add(_gizmo);     // a read-only scene has no move handles
         renderer.Overlays.Insert(0, _tints);
         BuildLayers(renderer);
@@ -183,7 +186,42 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 PartnerNote = $"the conflict's other reference {o} is not drawn in this scene ({why}), so it cannot be marked";
             }
         }
+        _marks.Set(_marks.Selected, _marks.Partner);
+        UpdateKey();
         LoadOrderPanel.Selection(_session.Selected?.ToString(), other);
+    }
+
+    // ---- the view's key: what each colour and box in the view is (walkthrough problem 5) ----------------------------------
+    readonly WrapPanel _key = new() { Margin = new Thickness(6, 2, 6, 0) };
+
+    static string NameOf(RefOcclusion ro) => (ro.Ref.BaseEditorId is { Length: > 0 } b ? b + " " : "") + ro.Ref.RefKey;
+
+    /// <summary>The key under the view: a swatch and words for each mark drawn now, nothing when the marks are off.</summary>
+    void UpdateKey()
+    {
+        _key.Children.Clear();
+        if (!_marks.Enabled) return;
+        UIElement Item(System.Windows.Media.Color c, bool box, string words, string? tip = null)
+        {
+            var sp = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 14, 2), ToolTip = tip };
+            var brush = new System.Windows.Media.SolidColorBrush(c);
+            sp.Children.Add(new Border { Width = 14, Height = 14, Margin = new Thickness(0, 0, 5, 0), VerticalAlignment = VerticalAlignment.Center,
+                                         Background = box ? null : brush, BorderBrush = brush, BorderThickness = new Thickness(box ? 2 : 0) });
+            sp.Children.Add(new TextBlock { Text = words, VerticalAlignment = VerticalAlignment.Center });
+            return sp;
+        }
+        static System.Windows.Media.Color C(OpenTK.Mathematics.Vector3 v) => System.Windows.Media.Color.FromRgb((byte)(v.X * 255), (byte)(v.Y * 255), (byte)(v.Z * 255));
+        if (_marks.Selected is { } sel) _key.Children.Add(Item(C(ConflictMarks.SelectedColour), false, $"{NameOf(sel)}, selected", "tinted cyan; its outline shows through anything in front"));
+        if (_marks.Partner is { } par) _key.Children.Add(Item(C(ConflictMarks.PartnerColour), false, $"{NameOf(par)}, the other object of the clash", "tinted magenta; its outline shows through anything in front"));
+        if (_marks.Selected is not null && _marks.Partner is not null)
+            _key.Children.Add(Item(C(ConflictMarks.OverlapColour), false, _marks.CrossingSegments > 0 ? "where they pass into each other" : _marks.Overlap ?? "measuring where they cross",
+                                   "measured from the two objects' own surfaces; the yellow line shows through anything in front"));
+        var words = ResultRules.Groups.ToDictionary(g => g.Value.Mark, g => g.Value.Words);
+        foreach (var style in _resultMarks.StylesShown.OrderBy(x => x))
+        {
+            var (colour, shape, colourName) = ResultMarks.Styles[style];
+            _key.Children.Add(Item(C(colour), true, $"{shape}: a listed row, {words[style]}", $"the Results tab marks each listed row of the open pair that this scene draws, {colourName}"));
+        }
     }
 
     /// <summary>Why the open row's other reference is not marked, when it is not; null otherwise.</summary>
@@ -196,8 +234,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         string sel = _session.Selected is { } k ? $"selected {k} {EditSession.Describe(_session.Current(k))}" : "nothing selected (click a reference)";
         string target = _writer?.Target.ToString() ?? (TargetFromEnv()?.ToString() ?? "no write target set");
         string marks = !_marks.Enabled ? "marks off" : _marks.Selected is null ? "" :
-            $"cyan: selected {_marks.Selected.Ref.RefKey}" + (_marks.Partner is { } p ? $"; magenta: the conflict's other reference {p.Ref.RefKey}" : "") + " (drawn through anything in front)"
-            + (PartnerNote is { } pn ? "; " + pn : "");
+            PartnerNote ?? "";
         string written = _session.Selected is { } wk && _session.Written.TryGetValue(wk, out var wv) ? "\n" + EditSession.WrittenLabel(wk, wv.Patch)
                        : _session.Selected is { } bk ? "\nthe view shows " + bk + " where the load order places it" : "";
         string recheck = Rechecking ? "re-checking" : LastRecheck is { } lr ? $"last re-check: {lr.Row.Word}, {lr.New.Count} new" : RecheckRefusal is { } rr ? "re-check refused: " + rr : "";
@@ -266,6 +303,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _layerBar = new LayerBar(() => _layers, (l, on) => { try { Shell.SetBanner(SetLayer(l, on)); } catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); _layerBar?.Refresh(); } });
         DockPanel.SetDock(_layerBar.Element, Dock.Top);
         bar.Children.Add(_layerBar.Element);
+        DockPanel.SetDock(_key, Dock.Top);
+        bar.Children.Add(_key);
         bar.Children.Add(tools);
         if (!ReadOnly) bar.Children.Add(pendingPanel);
         bar.Children.Add(buttons); bar.Children.Add(_status);
@@ -816,7 +855,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             Planes: on => _opt.ShowPlanes = on,
             Borders: on => { _opt.ShowCellOutline = on; if (_borders is not null) _borders.Enabled = on; },
             Markers: on => _markerGizmos.Enabled = on,
-            Marks: on => { _marks.Enabled = on; _resultMarks.Enabled = on; },
+            Marks: on => { _marks.Enabled = on; _resultMarks.Enabled = on; UpdateKey(); },
             Hide: (meshes, hidden) => _viewState.SetLayerHidden(meshes, hidden)));
         _layers.ApplyAll();
     }

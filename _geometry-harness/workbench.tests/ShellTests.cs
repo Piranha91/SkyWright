@@ -147,6 +147,8 @@ public class ShellTests
         int[] tris = { 0,1,2, 0,2,3, 4,5,6, 4,6,7, 0,1,5, 0,5,4, 1,2,6, 1,6,5, 2,3,7, 2,7,6, 3,0,4, 3,4,7 };
         ro.Shapes.Add(new ViewProbe.PickShape { Kind = ViewProbe.PickKind.Ref, Verts = box, Tris = tris });
         Assert.Equal(18, ConflictMarks.Edges(ro).Count());     // 12 box edges + 6 face diagonals
+        // the outline keeps the shape's creases and drops the diagonals across its flat faces
+        Assert.Equal(12, ConflictMarks.Outline(ro).Count());
     }
 
     [Fact]

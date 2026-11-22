@@ -30,7 +30,7 @@ internal static class ViewLayers
         new(Layer.Trees, "trees", "Trees", "trees and plants (tree and flora objects)", true),
         new(Layer.Clutter, "clutter", "Clutter", "items, containers, furniture and light fittings", true),
         new(Layer.Statics, "statics", "Statics", "buildings, rocks, doors and every other drawn object that is not a tree, a plant or clutter", true),
-        new(Layer.Marks, "marks", "Marks", ConflictMarks.Legend + "; and the Results tab's boxes", Environment.GetEnvironmentVariable("WB_MARKS") != "off"),
+        new(Layer.Marks, "marks", "Marks", ConflictMarks.Legend + "; and the Results tab's boxes; the key under the view names each one shown", Environment.GetEnvironmentVariable("WB_MARKS") != "off"),
     };
 
     static readonly Dictionary<Layer, bool> On = All.ToDictionary(i => i.Layer, i => i.Default);
