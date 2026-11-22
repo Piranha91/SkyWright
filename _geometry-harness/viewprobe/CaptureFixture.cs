@@ -62,7 +62,7 @@ namespace ViewProbe;
 //               (-1050,0,0); Walls[1] the ice sheet (one lit shape) at (-350,0,100); Walls[2] the blue fire (its only lit
 //               shape a refraction plane) at (350,0,0); Walls[3] the crater FX (effect shapes and hidden emitter geometry
 //               only) at (1050,0,0); Walls[4] the thin waterfall (effect shapes and a shader-less plane), hung
-//               above the floor at (0,700,2100); Walls[5] the ice sheet again under an FX editor id (the editor-id rule still drops it) at
+//               above the floor at (0,700,2100); Walls[5] the ice sheet again under an FX editor id (solid like Walls[1]: no name rule drops it) at
 //               (0,-700,100)
 //   CfFxMissing no pair: one ref (Walls[0]) at the origin whose base names an effects\ mesh that does not exist: a physical
 //               ref whose mesh cannot be read, so the inside and clear queries must count it (C1727)
@@ -107,6 +107,9 @@ public static class CaptureFixture
         LedgeGap = Ids("CfLedgeGap", 0x960);
     /// <summary>CfLedge's upper and side navmeshes (its lower one is <c>Ledge.Nav</c>): LedgeLinkFixture.cs.</summary>
     public static readonly FormKey LedgeUpper = K(0x958), LedgeSide = K(0x959);
+    /// <summary>CfFxMissing's second base: an FX-named activator whose vanilla mesh reads but holds no triangles (C1728).</summary>
+    public static readonly FormKey EmptyFxBase = K(0x944);
+    public const string EmptyFxMesh = @"Effects\FXEmptyObject.nif";
     /// <summary>CfLedgeGap's upper and portal navmeshes (its lower one is <c>LedgeGap.Nav</c>): LedgeLinkFixture.GapMeshes.</summary>
     public static readonly FormKey LedgeGapUpper = K(0x968), LedgeGapPortal = K(0x969);
     /// <summary>The second plugin (master CfFixture.esp): it places CfCutMod's B, so a setup without it has no B.</summary>
@@ -229,6 +232,8 @@ public static class CaptureFixture
                 ObjectBounds = new ObjectBounds { First = new P3Int16(-600, -600, -600), Second = new P3Int16(600, 600, 2400) } });
         m.Statics.Add(new Static(MissingFxBase, Rel) { EditorID = "CfMissingFx", Model = new Model { File = @"Effects\CfNoSuchMesh.nif" },
             ObjectBounds = new ObjectBounds { First = new P3Int16(-100, -100, 0), Second = new P3Int16(100, 100, 200) } });
+        m.Statics.Add(new Static(EmptyFxBase, Rel) { EditorID = "FXCfEmptyObject", Model = new Model { File = EmptyFxMesh },
+            ObjectBounds = new ObjectBounds { First = new P3Int16(-100, -100, 0), Second = new P3Int16(100, 100, 200) } });
         m.Statics.Add(new Static(GlowBase, Rel) { EditorID = "CfGlow", Model = new Model { File = GlowMesh },
             ObjectBounds = new ObjectBounds { First = new P3Int16(-258, -258, -258), Second = new P3Int16(258, 258, 258) } });
 
@@ -292,6 +297,7 @@ public static class CaptureFixture
         fxLit.Temporary.Add(Ref(FxLit.Walls[5], IceFxBase, 0, -700, 100));
         var fxMissing = NewCell(FxMissing, true);
         fxMissing.Temporary.Add(Ref(FxMissing.Walls[0], MissingFxBase, 0, 0, 0));
+        fxMissing.Temporary.Add(Ref(FxMissing.Walls[1], EmptyFxBase, 0, 0, 0));
         // CfLedge: no floor, three navmeshes joined only by typed links (LedgeLinkFixture.cs)
         var ledge = NewCell(Ledge, false, floor: false);
         foreach (var nav in LedgeLinkFixture.Meshes(Ledge.Nav, LedgeUpper, LedgeSide,

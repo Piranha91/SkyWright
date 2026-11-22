@@ -12,11 +12,14 @@ effects\\ folder; CfCloud holds the vanilla burning campfire. Without game data 
     C1722  the blue fire, whose only lit shape is a refraction plane: listed "no solid shape, not solid", no row, eye clear
     C1723  the crater FX (effect shapes and hidden emitter geometry only): listed "no solid shape, not solid", eye clear
     C1724  the thin waterfall's shader-less plane stays solid: the ray up from under it stops on it
-    C1725  the ice sheet under an FX editor id: the editor-id rule still drops it (the ray down reaches the floor)
+    C1725  the ice sheet under an FX editor id is solid like C1721's: no name rule drops it (the ray down stops on the ice
+           at z 100; corrected 2026-11-22 when the FX editor-id rule went, task 2026-11-11-viewprobe-fx-editor-id-rule)
     C1726  the campfire's refraction heat plane is not solid: the ray down at (650,0) passes it (base: stops about
            z 56) and stops on the campfire's ground ring near z 0; its logs still hold the ray at (600,0) (C1712's point)
     C1727  cell CfFxMissing: a ref whose effects\\ mesh does not exist is a physical ref the queries could not read: the
            inside-at header counts it (1 by record OBND alone, 1 unreadable) and the clear-at header counts it (1 unreadable)
+    C1728  the same cell's FX-named ref whose vanilla mesh (Effects\\FXEmptyObject.nif) reads but holds no triangles is no
+           solid shape, not unreadable: C1727's counts stay 1 with it standing there, and the queries list it "no solid shape"
 
 Exit 0: every case passed; 1: a case failed; 3: not run.
 """
@@ -39,7 +42,7 @@ os.environ["PYTHONUTF8"] = "1"
 import capture_fixture_lab as LAB  # noqa: E402
 
 PROD_VP = HARNESS / "viewprobe" / "bin" / "Release" / "net9.0-windows10.0.19041.0" / "viewprobe.exe"
-CASES = ("C1720", "C1721", "C1722", "C1723", "C1724", "C1725", "C1726", "C1727")
+CASES = ("C1720", "C1721", "C1722", "C1723", "C1724", "C1725", "C1726", "C1727", "C1728")
 FAILS: list[str] = []
 RESULTS: list[tuple[str, str, str]] = []
 
@@ -149,8 +152,8 @@ def run_all(rig):
     # C1725
     d, e = down(clear, ABOVE_ICE_FX)
     if check("C1725", e is not None, "viewprobe gave no clear-at answer", str(ABOVE_ICE_FX)):
-        check("C1725", d.get("formkey") in FX_FLOOR, "the FX-named ice sheet was tested (the editor-id rule changed)",
-              f"down {d}")
+        check("C1725", d.get("formkey") == ICE_FX and abs((d.get("dist") or 0) - (ABOVE_ICE_FX[2] - 100)) <= 10,
+              "the first surface below is not the FX-named ice sheet at z 100 (a name rule dropped it)", f"down {d}")
 
     # C1726
     _, clear2, _ = probe(rig, "CfCloud", [], [PAST_HEAT, ON_LOGS])
@@ -175,6 +178,8 @@ def run_all(rig):
     if check("C1727", e is not None, "viewprobe gave no clear-at answer", str(AT_MISSING)):
         check("C1727", e["unread"] == 1 and e["obnd_only"] == 1,
               "the clear-at header does not count the unreadable effects\\ mesh", f"unread {e['unread']} obnd_only {e['obnd_only']}")
+    # C1728
+    check("C1728", "no solid shape" in out3, "the empty FX mesh (no triangles) is not listed as no solid shape", out3[:400])
 
 
 class Rig:

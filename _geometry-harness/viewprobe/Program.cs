@@ -1548,12 +1548,15 @@ string? DisabledWhy(PlacedRef r) =>
 // hosts plus the solid dependents, minus items and lights — a light's OBND is its radius, and
 // a camera is "inside" every light in the room. A literal set rather than DetectorModel's
 // classifiers: viewprobe compiles without them, and "can a camera be in this" is a narrower
-// question than "can this hold something". Control objects (markers, triggers, FX) are the
-// same exclusions the rule makes.
+// question than "can this hold something". Control objects (markers, triggers) are the
+// same exclusions the rule makes. An "FX" editor id is NOT one any more (2026-11-22, task
+// 2026-11-11-viewprobe-fx-editor-id-rule): it was a name rule like the effects\ path rule, and it
+// hid lit solids the base game names FX (snow drifts, creek and rapids rocks, Sky Haven's
+// temple). What is not solid in such a mesh is decided per shape, as for every mesh (InsideMeshFor:
+// effect, hidden and refraction shapes), so an effect-only FX base is still never solid.
 var insidePhysical = new HashSet<string> { "Static", "MoveableStatic", "Furniture", "Container", "Door", "Activator", "Tree", "Flora" };
 bool IsControlEditorId(string ed) =>
-    ed.Contains("marker", StringComparison.OrdinalIgnoreCase) || ed.Contains("trigger", StringComparison.OrdinalIgnoreCase)
-    || ed.StartsWith("FX", StringComparison.Ordinal);
+    ed.Contains("marker", StringComparison.OrdinalIgnoreCase) || ed.Contains("trigger", StringComparison.OrdinalIgnoreCase);
 // An OBND box cannot tell a bookcase from a room: a tower-kit wall piece's box (966x966x384 u,
 // measured 2026-09-03) encloses every camera in the room it walls, exactly as a bookcase's box
 // encloses a camera on its shelf. So the box only NOMINATES; the ref's own render mesh decides.
@@ -1580,6 +1583,10 @@ bool IsControlEditorId(string ed) =>
             var b = o.Model?.Bounds;
             got = (b is { IsEmpty: false } ? b : null,
                    o.Model?.Soup is { TriangleCount: > 0 and <= 300_000 } sp ? sp : null);
+            // A mesh that READ but holds no triangles at all (FXEmptyObject.nif, the dragon dust emitters) has nothing a
+            // ray can meet: no solid shape, not "could not be read" (2026-11-22, when the FX editor-id rule went).
+            if (o.Model is { } m0 && (m0.Soup is null || m0.Soup.TriangleCount == 0) && got.Bounds is null)
+                insideNoSolidShape.Add(rel);
             if (got.Soup is { } gs && o.Model is { SoupShapeOfTriangle: { } map, Shapes: { } shapes } && map.Count == gs.TriangleCount)
             {
                 // A shape is solid by its own data. Not solid: an effect-shader shape (cloud, glow card, flame, editor
@@ -2877,7 +2884,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     // nobody checked it against the geometry. Nominating on it is still better than
                     // dropping the ref, but the fact that it happened is reported.
                     if (!obndSays) continue;
-                    if (insideBounds != "obnd") obndOnlyNom++;
+                    if (insideBounds != "obnd" && !(baseMesh.TryGetValue(bk, out var nm0) && InsideNoSolidShape(nm0))) obndOnlyNom++;
                     hits.Add((r, bt, ed, obndWorld, false, true));
                 }
             }
@@ -2894,7 +2901,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 if (baseEditorId.TryGetValue(bk, out var ed2) && IsControlEditorId(ed2)) continue;
                 if (!baseMesh.TryGetValue(bk, out var bmU)) continue;
                 if (Path.GetFileName(bmU).StartsWith("MarkerX", StringComparison.OrdinalIgnoreCase)) continue;
-                if (InsideMeshFor(bmU).Bounds is null) unreadable++;
+                if (InsideMeshFor(bmU).Bounds is null && !InsideNoSolidShape(bmU)) unreadable++;
             }
             string nomination = insideBounds == "obnd"
                 ? "nominated by RECORD OBND (the legacy arm, kept for comparison: a box that understates its mesh nominates nothing)"
@@ -3600,7 +3607,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 // Only a FALLBACK counts: in the `obnd` arm every ref is selected that way by
                 // design, and labelling 555 refs "their mesh could not be read" would be a false
                 // coverage caveat in the arm that exists for comparison.
-                else if (haveObnd) { box = obndWorld; if (clearBounds != "obnd") obndOnly++; }
+                else if (haveObnd) { box = obndWorld; if (clearBounds != "obnd" && !InsideNoSolidShape(bm)) obndOnly++; }
                 else { noBox++; continue; }
                 if (box.IsEmpty) { noBox++; continue; }
                 if (SpatialOverlap.BoxDistance(box, sweep) > 0f) continue;
