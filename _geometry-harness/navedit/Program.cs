@@ -189,7 +189,7 @@ static class NavEditCli
                     if (refuse is not null && drec is not null)
                         row["door"] = new JsonObject
                         {
-                            ["door"] = DoorRow(view, session, new NavDoorTriangle(door, -1)),
+                            ["door"] = NavUseVersionPlan.DoorRow(view, session, new NavDoorTriangle(door, -1)),
                             ["enabledAtLoad"] = new JsonObject { ["enabled"] = state.Enabled, ["viaParent"] = state.ViaParent, ["resolved"] = state.Resolved,
                                                                  ["enableParent"] = (PlacementExtract.RefOf(drec) is { EnableParent: { } ep }) ? ep.ToString() : null },
                         };
@@ -207,7 +207,7 @@ static class NavEditCli
                         }
                         row["door"] = new JsonObject
                         {
-                            ["door"] = DoorRow(view, session, new NavDoorTriangle(door, (short)r.Triangle)),
+                            ["door"] = NavUseVersionPlan.DoorRow(view, session, new NavDoorTriangle(door, (short)r.Triangle)),
                             ["arrivalMarker"] = Arr(new[] { marker.X, marker.Y, marker.Z }), ["triangle"] = r.Triangle >= 0 ? r.Triangle : null,
                             ["planDistance"] = double.IsNaN(r.PlanDistance) ? null : Math.Round(r.PlanDistance, 1),
                             ["heightAboveTriangle"] = double.IsNaN(r.Height) ? null : Math.Round(r.Height, 1),
@@ -217,62 +217,12 @@ static class NavEditCli
                 }
                 else if (refuse is null && isUse)
                 {
-                    var from = (string?)e["use_version"] ?? "";
-                    var fromPath = order.FirstOrDefault(p => string.Equals(Path.GetFileName(p), from, StringComparison.OrdinalIgnoreCase));
-                    var version = fromPath is null ? null : Winning(fromPath, key);
-                    if (fromPath is null) refuse = $"{from} is not in this load order, so its version of {key} (and its masters) cannot be read; enable it, or name a plugin of the order.";
-                    else if (string.Equals(from, w!.Value.WinnerPlugin, StringComparison.OrdinalIgnoreCase)) refuse = $"{from} already wins {key}, so there is no other version to use.";
-                    else if (version is null) refuse = $"{from} has no version of {key}, or deletes it, so there is nothing to carry.";
-                    else
-                    {
-                        // this order's winners of every navmesh the version links into and every navmesh linking into the winner
-                        inboundIndex ??= InboundIndex(order);
-                        var near = new Dictionary<FormKey, NavmeshGeometry>();
-                        foreach (var m in (version.EdgeLinks ?? Array.Empty<NavEdgeLink>()).Select(l => l.Mesh).Distinct())
-                            if (m != key && view.ResolveWinner(m) is { } mw && order.FirstOrDefault(p => string.Equals(Path.GetFileName(p), mw.WinnerPlugin, StringComparison.OrdinalIgnoreCase)) is { } mp && Winning(mp, m) is { } mg) near[m] = mg;
-                        foreach (var (fk, (p, links)) in inboundIndex)
-                            if (fk != key && !near.ContainsKey(fk) && links.Any(l => l.Mesh == key) && Winning(p, fk) is { } og) near[fk] = og;
-                        var r = NavEdit.UseVersion(geom!, version, Path.GetFileName(fromPath), near, NavRuleDefaults.Edge);
-                        why = r.Why; ops = r.Ops.ToList();
-                        // each door's reference must resolve in this order
-                        var badDoors = r.Doors.Where(d => view.ResolveWinner(d) is null).ToList();
-                        if (r.Status == "planned" && badDoors.Count > 0) { why = new[] { $"{from}'s version stands before door(s) {string.Join(", ", badDoors)}, which no plugin of this order provides." }; ops = new(); }
-                        // the navmesh info map: each neighbour the version gains, both ways
-                        JsonObject? naviRow = null;
-                        if (why.Count == 0 && r.Gained.Count > 0)
-                        {
-                            var need = new Dictionary<FormKey, IReadOnlyCollection<FormKey>> { [key] = r.Gained };
-                            foreach (var m in r.Gained) need[m] = new[] { key };
-                            var (np, refusedNavi) = NavRepairNavi.ForPairs(need, navi);
-                            if (refusedNavi.Count > 0) { why = refusedNavi.Select(kv => $"The navmesh info map cannot gain the version's new neighbours: {kv.Value}.").ToArray(); ops = new(); }
-                            else { ops.AddRange(np.Ops); naviRow = NavRepairNavi.NaviJson(np); }
-                        }
-                        if (why.Count == 0)
-                        {
-                            if (naviRow is not null) row["navi"] = naviRow;
-                            expect[key] = (r.After!, Enumerable.Range(0, r.After!.Triangles.Count).ToArray(), fromPath, true);
-                            foreach (var (fk, og) in r.Others) expect[fk] = (og, Enumerable.Range(0, og.Triangles.Count).ToArray(), inboundIndex[fk].Path, false);   // a re-pointed neighbour keeps its own winner's grid
-                        }
-                        row["useVersion"] = new JsonObject
-                        {
-                            ["from"] = from, ["fromPath"] = fromPath,
-                            ["vertices"] = new JsonObject { ["before"] = geom!.Vertices.Count, ["after"] = version.Vertices.Count },
-                            ["triangles"] = new JsonObject { ["before"] = geom.Triangles.Count, ["after"] = version.Triangles.Count },
-                            ["linksMatched"] = r.Matched, ["linksChanged"] = r.Changed, ["ledgeLinksCarriedUnverified"] = r.LedgesCarried, ["linksCut"] = 0, ["neighbourLinksRepointed"] = r.Repointed,
-                            ["navmeshesRepointed"] = Arr(r.Others.Keys.Select(k => k.ToString())), ["doorsChecked"] = r.Doors.Count,
-                            ["doors"] = new JsonObject
-                            {
-                                ["added"] = new JsonArray(r.DoorsAdded.Select(d => (JsonNode)DoorRow(view, session, d)).ToArray()),
-                                ["dropped"] = new JsonArray(r.DoorsDropped.Select(d => (JsonNode)DoorRow(view, session, d)).ToArray()),
-                            },
-                            ["gainedNeighbours"] = Arr(r.Gained.Select(k => k.ToString())), ["navi"] = naviRow?.DeepClone(), ["grid"] = "rebuilt",
-                            // the plugins whose versions of K the patch supersedes (every one after the source, in load order):
-                            // the patch masters each, so nothing can sort it above them and let one win K again (houseCARL,
-                            // 2026-11-22). A neighbour whose links are only re-pointed needs none.
-                            ["masters"] = Arr((view.TouchingPlugins(key) ?? Array.Empty<string>())
-                                .SkipWhile(n => !string.Equals(n, Path.GetFileName(fromPath), StringComparison.OrdinalIgnoreCase)).Skip(1)),
-                        };
-                    }
+                    // the use_version glue's one owner (_shared/NavEdit.cs NavUseVersionPlan), navownprobe's repair plan calls it too
+                    var u = NavUseVersionPlan.Plan(view, navi, order, key, geom!, w!.Value.WinnerPlugin, (string?)e["use_version"] ?? "", () => inboundIndex ??= InboundIndex(order));
+                    refuse = u.Refuse; why = u.Why; ops = u.Ops;
+                    foreach (var (fk, x) in u.Expect) expect[fk] = x;
+                    if (u.Row is not null) row["useVersion"] = u.Row;
+                    if (u.Why.Count == 0 && u.Row?["navi"] is JsonObject nv) row["navi"] = nv.DeepClone();   // main's place for a row's NAVI change
                 }
                 else if (refuse is null)
                 {
@@ -383,25 +333,6 @@ static class NavEditCli
     /// <summary>One door entry of a navmesh for the plan row: the door reference, the plugin whose version of it wins, the
     /// triangle before it, and where it leads (its teleport's door, that door's cell and the cell's editor ID); a field is
     /// null when the order does not provide it.</summary>
-    static JsonObject DoorRow(LoadOrderResolver.IndexView view, LoadOrderResolver.OverlaySession session, NavDoorTriangle d)
-    {
-        var w = view.ResolveWinner(d.Door);
-        var rec = w is null ? null : view.GetRecord(session, w.Value.WinnerPlugin, d.Door, typeof(IPlacedObjectGetter)) as IPlacedObjectGetter;
-        JsonObject? to = null;
-        if (rec is { TeleportDestination: { } dest } && !dest.Door.FormKey.IsNull)
-        {
-            var cell = view.ParentOf(dest.Door.FormKey);
-            var cw = cell is { } c ? view.ResolveWinner(c) : null;
-            var crec = cw is null ? null : view.GetRecord(session, cw.Value.WinnerPlugin, cell!.Value, typeof(ICellGetter)) as ICellGetter;
-            to = new JsonObject { ["door"] = dest.Door.FormKey.ToString(), ["cell"] = cell?.ToString(), ["cellEditorId"] = crec?.EditorID };
-        }
-        return new JsonObject
-        {
-            ["door"] = d.Door.ToString(), ["placedBy"] = w?.WinnerPlugin, ["triangleBeforeDoor"] = d.TriangleBeforeDoor,
-            ["leadsTo"] = to,
-        };
-    }
-
     /// <summary>Re-write a written patch IN PLACE with <paramref name="masters"/> added to its master list. The core write
     /// engine derives a patch's masters from what its records reference, and adds no others; a resolution patch must also
     /// master what it supersedes. Through the core's public pieces: the plugin read and written back in its own text lane
@@ -459,20 +390,7 @@ static class NavEditCli
 
     /// <summary>Every navmesh's winning link table on the order: FormKey to (winning plugin path, its links). Read once per
     /// plan, so a triangle edit finds every navmesh whose links name the one it renumbers.</summary>
-    static Dictionary<FormKey, (string Path, List<NavEdgeLink> Links)> InboundIndex(IReadOnlyList<string> order)
-    {
-        var win = new Dictionary<FormKey, (string, List<NavEdgeLink>)>();
-        foreach (var p in order)
-        {
-            using var mod = SkyrimMod.CreateFromBinaryOverlay(p, SkyrimRelease.SkyrimSE);
-            foreach (var nm in mod.EnumerateMajorRecords<INavigationMeshGetter>())
-            {
-                if (nm.IsDeleted || nm.Data is not { } d) { win.Remove(nm.FormKey); continue; }
-                win[nm.FormKey] = (p, d.EdgeLinks.Select(l => new NavEdgeLink(l.Mesh.FormKey, l.TriangleIndex, l.Unknown)).ToList());
-            }
-        }
-        return win;
-    }
+    static Dictionary<FormKey, (string Path, List<NavEdgeLink> Links)> InboundIndex(IReadOnlyList<string> order) => NavUseVersionPlan.InboundIndex(order);
 
     /// <summary>Each triangle's cover fields as one plugin has them (the geometry model does not carry them).</summary>
     static List<(bool, ushort)> Cover(string pluginPath, FormKey key)
@@ -482,14 +400,7 @@ static class NavEditCli
     }
 
     /// <summary>The navmesh as one plugin has it, through the one NAVM reader (PlacementExtract); null when absent or deleted.</summary>
-    static NavmeshGeometry? Winning(string pluginPath, FormKey key)
-    {
-        using var mod = SkyrimMod.CreateFromBinaryOverlay(pluginPath, SkyrimRelease.SkyrimSE);
-        foreach (var cp in PlacementExtract.FromMod(mod))
-            foreach (var n in cp.Navmeshes)
-                if (n.FormKey == key) return n.Deleted ? null : n;
-        return null;
-    }
+    static NavmeshGeometry? Winning(string pluginPath, FormKey key) => NavUseVersionPlan.Winning(pluginPath, key);
 
     public static int Plan(Dictionary<string, string> f)
     {
@@ -890,36 +801,9 @@ static class NavEditCli
         var geoms = PlacementExtract.FromMod(patch).SelectMany(cp => cp.Navmeshes).ToDictionary(n => n.FormKey);
         foreach (var (key, (want, oldIndex, winnerPath, rebuilt)) in expect)
         {
-            var why = new List<string>();
-            if (!geoms.TryGetValue(key, out var got) || !raw.TryGetValue(key, out var rec) || rec.Data is not { } d) { Console.WriteLine($"FAIL {key}: not in the patch"); failed++; continue; }
-            if (!got.Vertices.SequenceEqual(want.Vertices)) why.Add($"vertices differ ({got.Vertices.Count} written, {want.Vertices.Count} planned)");
-            if (!got.Triangles.SequenceEqual(want.Triangles))
-            {
-                int i = Enumerable.Range(0, Math.Min(got.Triangles.Count, want.Triangles.Count)).FirstOrDefault(k => got.Triangles[k] != want.Triangles[k], -1);
-                why.Add(i < 0 ? $"{got.Triangles.Count} triangles written, {want.Triangles.Count} planned" : $"triangle {i} is {got.Triangles[i]}, planned {want.Triangles[i]}");
-            }
-            if (!(got.EdgeLinks ?? []).SequenceEqual(want.EdgeLinks ?? [])) why.Add("the edge-link table differs from the plan");
-            if (!(got.DoorTriangles ?? []).SequenceEqual(want.DoorTriangles ?? [])) why.Add("the door table differs from the plan");
-            using (var wmod = SkyrimMod.CreateFromBinaryOverlay(winnerPath, SkyrimRelease.SkyrimSE))
-            {
-                var wd = wmod.EnumerateMajorRecords<INavigationMeshGetter>().First(n => n.FormKey == key).Data!;
-                if (rebuilt)
-                {
-                    var g = NavGrid.Rebuild(got.Vertices, got.Triangles.Select(x => ((int)x.A, (int)x.B, (int)x.C)).ToList());
-                    if (d.NavmeshGridDivisor != g.Divisor || d.MaxDistanceX != g.SectionX || d.MaxDistanceY != g.SectionY || !d.NavmeshGrid.Span.SequenceEqual(g.CellBytes))
-                        why.Add("the grid is not the one NavGrid rebuilds from the written navmesh");
-                    if (got.Min != g.Min || got.Max != g.Max) why.Add("the box is not the used vertices' extent");
-                }
-                else if (d.NavmeshGridDivisor != wd.NavmeshGridDivisor || d.MaxDistanceX != wd.MaxDistanceX || d.MaxDistanceY != wd.MaxDistanceY
-                         || !d.NavmeshGrid.Span.SequenceEqual(wd.NavmeshGrid.Span) || d.Min != wd.Min || d.Max != wd.Max)
-                    why.Add("its geometry is unchanged, so its grid and box must be its winner's, and they are not");
-                for (int i = 0; i < d.Triangles.Count && i < oldIndex.Length; i++)
-                {
-                    var (now, was) = (d.Triangles[i], oldIndex[i] >= 0 ? wd.Triangles[oldIndex[i]] : null);
-                    bool coverOk = was is null ? !now.IsCover && now.CoverFlags == 0 : now.IsCover == was.IsCover && now.CoverFlags == was.CoverFlags;
-                    if (!coverOk) { why.Add($"triangle {i}'s cover fields are not {(was is null ? "clear on an added triangle" : $"its winner's (triangle {oldIndex[i]})")}"); break; }
-                }
-            }
+            // the per-navmesh check's one owner (NavRepairReadBack.GeometryDifferences): R1 holds use_version rows to it too
+            var why = NavRepairReadBack.GeometryDifferences(key, want, oldIndex, winnerPath, rebuilt, geoms.GetValueOrDefault(key), raw.GetValueOrDefault(key));
+            if (why is null) { Console.WriteLine($"FAIL {key}: not in the patch"); failed++; continue; }
             Console.WriteLine(why.Count == 0 ? $"ok   {key}: vertices, triangles, links, doors, cover, box and grid as planned{(rebuilt ? " (grid rebuilt)" : " (links only; grid kept as its winner's)")}" : $"FAIL {key}: {string.Join("; ", why)}");
             if (why.Count > 0) failed++;
         }

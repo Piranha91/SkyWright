@@ -259,6 +259,47 @@ public static class NavRepairReadBack
         finally { foreach (var m in opened.Values) m.Dispose(); }
     }
 
+    /// <summary>A written navmesh against its expected state (navedit's plan, or a use_version row of a repair plan): its
+    /// vertices, triangles (corners, edge fields, flags), links, doors, box and grid (rebuilt by NavGrid, or kept as its
+    /// winner's when <paramref name="rebuilt"/> is false), and each kept triangle's cover fields against
+    /// <paramref name="winnerPath"/>'s triangle <paramref name="oldIndex"/> names. Null when the navmesh is not in the patch;
+    /// else one sentence per difference, empty when it holds.</summary>
+    public static List<string>? GeometryDifferences(FormKey key, NavmeshGeometry want, int[] oldIndex, string winnerPath, bool rebuilt,
+                                                    NavmeshGeometry? got, INavigationMeshGetter? rec)
+    {
+        var why = new List<string>();
+        if (got is null || rec is null || rec.Data is not { } d) return null;
+        if (!got.Vertices.SequenceEqual(want.Vertices)) why.Add($"vertices differ ({got.Vertices.Count} written, {want.Vertices.Count} planned)");
+        if (!got.Triangles.SequenceEqual(want.Triangles))
+        {
+            int i = Enumerable.Range(0, Math.Min(got.Triangles.Count, want.Triangles.Count)).FirstOrDefault(k => got.Triangles[k] != want.Triangles[k], -1);
+            why.Add(i < 0 ? $"{got.Triangles.Count} triangles written, {want.Triangles.Count} planned" : $"triangle {i} is {got.Triangles[i]}, planned {want.Triangles[i]}");
+        }
+        if (!(got.EdgeLinks ?? []).SequenceEqual(want.EdgeLinks ?? [])) why.Add("the edge-link table differs from the plan");
+        if (!(got.DoorTriangles ?? []).SequenceEqual(want.DoorTriangles ?? [])) why.Add("the door table differs from the plan");
+        using (var wmod = SkyrimMod.CreateFromBinaryOverlay(winnerPath, SkyrimRelease.SkyrimSE))
+        {
+            var wd = wmod.EnumerateMajorRecords<INavigationMeshGetter>().First(n => n.FormKey == key).Data!;
+            if (rebuilt)
+            {
+                var g = NavGrid.Rebuild(got.Vertices, got.Triangles.Select(x => ((int)x.A, (int)x.B, (int)x.C)).ToList());
+                if (d.NavmeshGridDivisor != g.Divisor || d.MaxDistanceX != g.SectionX || d.MaxDistanceY != g.SectionY || !d.NavmeshGrid.Span.SequenceEqual(g.CellBytes))
+                    why.Add("the grid is not the one NavGrid rebuilds from the written navmesh");
+                if (got.Min != g.Min || got.Max != g.Max) why.Add("the box is not the used vertices' extent");
+            }
+            else if (d.NavmeshGridDivisor != wd.NavmeshGridDivisor || d.MaxDistanceX != wd.MaxDistanceX || d.MaxDistanceY != wd.MaxDistanceY
+                     || !d.NavmeshGrid.Span.SequenceEqual(wd.NavmeshGrid.Span) || d.Min != wd.Min || d.Max != wd.Max)
+                why.Add("its geometry is unchanged, so its grid and box must be its winner's, and they are not");
+            for (int i = 0; i < d.Triangles.Count && i < oldIndex.Length; i++)
+            {
+                var (now, was) = (d.Triangles[i], oldIndex[i] >= 0 ? wd.Triangles[oldIndex[i]] : null);
+                bool coverOk = was is null ? !now.IsCover && now.CoverFlags == 0 : now.IsCover == was.IsCover && now.CoverFlags == was.CoverFlags;
+                if (!coverOk) { why.Add($"triangle {i}'s cover fields are not {(was is null ? "clear on an added triangle" : $"its winner's (triangle {oldIndex[i]})")}"); break; }
+            }
+        }
+        return why;
+    }
+
     /// <summary>The union of one navmesh's planned changes (a relink's entries, edge fields and flags; a ground plan's vertices
     /// and box): the later row's value where both set the same thing.</summary>
     public static NavChange Merge(IEnumerable<NavChange> changes)

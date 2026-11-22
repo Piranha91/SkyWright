@@ -985,3 +985,135 @@ public static class NavEdit
         return depth;
     }
 }
+
+/// <summary>A use-version edit planned on a load order: the refusal (one sentence) before UseVersion runs, or UseVersion's
+/// own why; the ops (the navmesh info map's for any neighbour the version gains included); the expected state of every
+/// navmesh it changes (the read-back's input: the carried navmesh, grid rebuilt, and each neighbour whose links into it
+/// were re-pointed, grid kept); and the plan row's "useVersion" object (null when refused before UseVersion ran).</summary>
+public sealed record UseVersionPlan(string? Refuse, IReadOnlyList<string> Why, List<RepairOp> Ops,
+                                    Dictionary<FormKey, (NavmeshGeometry Geom, int[] OldIndex, string WinnerPath, bool Rebuilt)> Expect,
+                                    System.Text.Json.Nodes.JsonObject? Row)
+{
+    public bool Planned => Refuse is null && Why.Count == 0;
+}
+
+/// <summary>THE LOAD-ORDER GLUE AROUND <see cref="NavEdit.UseVersion"/>: its one owner, for navedit's plan and write and for
+/// navownprobe's repair plan (houseCARL 2026-11-22: "only by calling navedit's own UseVersion code, never a second
+/// implementation"). Unlike NavEdit it reads plugins: the version, this order's winners of every navmesh the version links
+/// into and of every navmesh linking into the winner, each door's reference, and the navmesh info map.</summary>
+public static class NavUseVersionPlan
+{
+    /// <summary>Plan carrying <paramref name="from"/>'s version of <paramref name="key"/> over its winner
+    /// <paramref name="geom"/> (from <paramref name="winnerPlugin"/>). <paramref name="inbound"/> gives every navmesh's
+    /// winning link table on the order (read once per run, by the caller's cache).</summary>
+    public static UseVersionPlan Plan(LoadOrderResolver.IndexView view, NaviView navi, IReadOnlyList<string> order, FormKey key,
+                                      NavmeshGeometry geom, string winnerPlugin, string from,
+                                      Func<Dictionary<FormKey, (string Path, List<NavEdgeLink> Links)>> inbound)
+    {
+        var expect = new Dictionary<FormKey, (NavmeshGeometry, int[], string, bool)>();
+        static UseVersionPlan Refused(string why) => new(why, Array.Empty<string>(), new List<RepairOp>(), new(), null);
+        var fromPath = order.FirstOrDefault(p => string.Equals(Path.GetFileName(p), from, StringComparison.OrdinalIgnoreCase));
+        var version = fromPath is null ? null : Winning(fromPath, key);
+        if (fromPath is null) return Refused($"{from} is not in this load order, so its version of {key} (and its masters) cannot be read; enable it, or name a plugin of the order.");
+        if (string.Equals(from, winnerPlugin, StringComparison.OrdinalIgnoreCase)) return Refused($"{from} already wins {key}, so there is no other version to use.");
+        if (version is null) return Refused($"{from} has no version of {key}, or deletes it, so there is nothing to carry.");
+        // this order's winners of every navmesh the version links into and every navmesh linking into the winner
+        var inboundIndex = inbound();
+        var near = new Dictionary<FormKey, NavmeshGeometry>();
+        foreach (var m in (version.EdgeLinks ?? Array.Empty<NavEdgeLink>()).Select(l => l.Mesh).Distinct())
+            if (m != key && view.ResolveWinner(m) is { } mw && order.FirstOrDefault(p => string.Equals(Path.GetFileName(p), mw.WinnerPlugin, StringComparison.OrdinalIgnoreCase)) is { } mp && Winning(mp, m) is { } mg) near[m] = mg;
+        foreach (var (fk, (p, links)) in inboundIndex)
+            if (fk != key && !near.ContainsKey(fk) && links.Any(l => l.Mesh == key) && Winning(p, fk) is { } og) near[fk] = og;
+        var r = NavEdit.UseVersion(geom, version, Path.GetFileName(fromPath), near, NavRuleDefaults.Edge);
+        IReadOnlyList<string> why = r.Why; var ops = r.Ops.ToList();
+        // each door's reference must resolve in this order
+        var badDoors = r.Doors.Where(d => view.ResolveWinner(d) is null).ToList();
+        if (r.Status == "planned" && badDoors.Count > 0) { why = new[] { $"{from}'s version stands before door(s) {string.Join(", ", badDoors)}, which no plugin of this order provides." }; ops = new(); }
+        // the navmesh info map: each neighbour the version gains, both ways
+        System.Text.Json.Nodes.JsonObject? naviRow = null;
+        if (why.Count == 0 && r.Gained.Count > 0)
+        {
+            var need = new Dictionary<FormKey, IReadOnlyCollection<FormKey>> { [key] = r.Gained };
+            foreach (var m in r.Gained) need[m] = new[] { key };
+            var (np, refusedNavi) = NavRepairNavi.ForPairs(need, navi);
+            if (refusedNavi.Count > 0) { why = refusedNavi.Select(kv => $"The navmesh info map cannot gain the version's new neighbours: {kv.Value}.").ToArray(); ops = new(); }
+            else { ops.AddRange(np.Ops); naviRow = NavRepairNavi.NaviJson(np); }   // its entries: what the read-back holds NAVI to
+        }
+        if (why.Count == 0)
+        {
+            expect[key] = (r.After!, Enumerable.Range(0, r.After!.Triangles.Count).ToArray(), fromPath, true);
+            foreach (var (fk, og) in r.Others) expect[fk] = (og, Enumerable.Range(0, og.Triangles.Count).ToArray(), inboundIndex[fk].Path, false);   // a re-pointed neighbour keeps its own winner's grid
+        }
+        using var session = view.OpenSession();
+        static System.Text.Json.Nodes.JsonArray Arr<T>(IEnumerable<T> xs) => new(xs.Select(x => (System.Text.Json.Nodes.JsonNode?)System.Text.Json.Nodes.JsonValue.Create(x)).ToArray());
+        var row = new System.Text.Json.Nodes.JsonObject
+        {
+            ["from"] = from, ["fromPath"] = fromPath,
+            ["vertices"] = new System.Text.Json.Nodes.JsonObject { ["before"] = geom.Vertices.Count, ["after"] = version.Vertices.Count },
+            ["triangles"] = new System.Text.Json.Nodes.JsonObject { ["before"] = geom.Triangles.Count, ["after"] = version.Triangles.Count },
+            ["linksMatched"] = r.Matched, ["linksChanged"] = r.Changed, ["ledgeLinksCarriedUnverified"] = r.LedgesCarried, ["linksCut"] = 0, ["neighbourLinksRepointed"] = r.Repointed,
+            ["navmeshesRepointed"] = Arr(r.Others.Keys.Select(k => k.ToString())), ["doorsChecked"] = r.Doors.Count,
+            // ff83e12: each door the version adds or drops, by name, with who places it and where it leads
+            ["doors"] = new System.Text.Json.Nodes.JsonObject
+            {
+                ["added"] = new System.Text.Json.Nodes.JsonArray(r.DoorsAdded.Select(d => (System.Text.Json.Nodes.JsonNode)DoorRow(view, session, d)).ToArray()),
+                ["dropped"] = new System.Text.Json.Nodes.JsonArray(r.DoorsDropped.Select(d => (System.Text.Json.Nodes.JsonNode)DoorRow(view, session, d)).ToArray()),
+            },
+            ["gainedNeighbours"] = Arr(r.Gained.Select(k => k.ToString())), ["navi"] = naviRow?.DeepClone(), ["grid"] = "rebuilt",
+            // the plugins whose versions of K the patch supersedes (every one after the source, in load order): the patch
+            // masters each, so nothing can sort it above them and let one win K again (houseCARL, 2026-11-22). A neighbour
+            // whose links are only re-pointed needs none.
+            ["masters"] = Arr((view.TouchingPlugins(key) ?? Array.Empty<string>())
+                .SkipWhile(n => !string.Equals(n, Path.GetFileName(fromPath), StringComparison.OrdinalIgnoreCase)).Skip(1)),
+        };
+        return new UseVersionPlan(null, why, ops, expect, row);
+    }
+
+    /// <summary>A door as a plan row names it: the door, who places it, its triangle, and where it leads (the partner door
+    /// and its cell). One owner for navedit's door edit and the use_version rows (ff83e12).</summary>
+    public static System.Text.Json.Nodes.JsonObject DoorRow(LoadOrderResolver.IndexView view, LoadOrderResolver.OverlaySession session, NavDoorTriangle d)
+    {
+        var w = view.ResolveWinner(d.Door);
+        var rec = w is null ? null : view.GetRecord(session, w.Value.WinnerPlugin, d.Door, typeof(Mutagen.Bethesda.Skyrim.IPlacedObjectGetter)) as Mutagen.Bethesda.Skyrim.IPlacedObjectGetter;
+        System.Text.Json.Nodes.JsonObject? to = null;
+        if (rec is { TeleportDestination: { } dest } && !dest.Door.FormKey.IsNull)
+        {
+            var cell = view.ParentOf(dest.Door.FormKey);
+            var cw = cell is { } c ? view.ResolveWinner(c) : null;
+            var crec = cw is null ? null : view.GetRecord(session, cw.Value.WinnerPlugin, cell!.Value, typeof(Mutagen.Bethesda.Skyrim.ICellGetter)) as Mutagen.Bethesda.Skyrim.ICellGetter;
+            to = new System.Text.Json.Nodes.JsonObject { ["door"] = dest.Door.FormKey.ToString(), ["cell"] = cell?.ToString(), ["cellEditorId"] = crec?.EditorID };
+        }
+        return new System.Text.Json.Nodes.JsonObject
+        {
+            ["door"] = d.Door.ToString(), ["placedBy"] = w?.WinnerPlugin, ["triangleBeforeDoor"] = d.TriangleBeforeDoor,
+            ["leadsTo"] = to,
+        };
+    }
+
+    /// <summary>Every navmesh's winning link table on the order: FormKey to (winning plugin path, its links). Read once per
+    /// plan, so a triangle edit finds every navmesh whose links name the one it renumbers.</summary>
+    public static Dictionary<FormKey, (string Path, List<NavEdgeLink> Links)> InboundIndex(IReadOnlyList<string> order)
+    {
+        var win = new Dictionary<FormKey, (string, List<NavEdgeLink>)>();
+        foreach (var p in order)
+        {
+            using var mod = Mutagen.Bethesda.Skyrim.SkyrimMod.CreateFromBinaryOverlay(p, Mutagen.Bethesda.Skyrim.SkyrimRelease.SkyrimSE);
+            foreach (var nm in mod.EnumerateMajorRecords<Mutagen.Bethesda.Skyrim.INavigationMeshGetter>())
+            {
+                if (nm.IsDeleted || nm.Data is not { } d) { win.Remove(nm.FormKey); continue; }
+                win[nm.FormKey] = (p, d.EdgeLinks.Select(l => new NavEdgeLink(l.Mesh.FormKey, l.TriangleIndex, l.Unknown)).ToList());
+            }
+        }
+        return win;
+    }
+
+    /// <summary>The navmesh as one plugin has it, through the one NAVM reader (PlacementExtract); null when absent or deleted.</summary>
+    public static NavmeshGeometry? Winning(string pluginPath, FormKey key)
+    {
+        using var mod = Mutagen.Bethesda.Skyrim.SkyrimMod.CreateFromBinaryOverlay(pluginPath, Mutagen.Bethesda.Skyrim.SkyrimRelease.SkyrimSE);
+        foreach (var cp in PlacementExtract.FromMod(mod))
+            foreach (var n in cp.Navmeshes)
+                if (n.FormKey == key) return n.Deleted ? null : n;
+        return null;
+    }
+}
