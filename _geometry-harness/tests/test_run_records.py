@@ -15,9 +15,10 @@ tool. Three things are checked, and each is a way the record can lie about the w
              manifest says `counted`; a record that says `single-stage` makes the manifest false,
              and nothing else in the guard checks that claim.
   structure  a render is not one phase. The named cuts must each appear, as DISTINCT stages, in
-             order, and a multi-shot run must show them once per shot with distinct indices. One
-             stage repeated per shot is the shape this test exists to reject: it files a whole
-             shot under the name of its first step.
+             order, and a multi-shot run must show the per-shot ones once per shot (the load-order
+             walk once per cell under cell reuse) with distinct indices. One stage repeated per shot
+             is the shape this test exists to reject: it files a whole shot under the name of its
+             first step.
   counters   a stage that claims a total must end at that total, or say why not. §5 allows
              `total: null` for an unknown total and allows a REVISED total with a stated reason;
              it does not allow a stage to finish at 1 of 5 in silence.
@@ -42,12 +43,16 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 HARNESS = os.path.dirname(HERE)
 REPO = os.path.dirname(HARNESS)
-MANIFEST = os.path.join(REPO, "standards", "housecarl-run-coverage.json")
+# houseCARL owns the coverage manifest; SkyWright reads it from the pinned submodule (never a copy)
+MANIFEST = os.path.join(REPO, "external", "houseCARL", "standards", "housecarl-run-coverage.json")
 
-# The cuts the cost model already uses. All of them are PER SHOT, because the tool re-walks the
-# load order per shot; `report` exists only when a report was asked for, which the record's own
-# argument shape says, so it is required exactly when it was.
-PER_SHOT = ["find-cell", "record-walk", "scene-build", "encode"]
+# The cuts the cost model already uses. Since cell reuse (viewprobe --reuse-cell, ON by default for a static worklist;
+# CellScene.cs) the load-order walk is done ONCE PER CELL and its scene serves every shot there: `find-cell` and
+# `record-walk` appear once per cell, at most once per shot; `--no-reuse-cell` restores one walk per shot. The rest are
+# PER SHOT. `report` exists only when a report was asked for, which the record's own argument shape says, so it is
+# required exactly when it was, per shot. (2026-11-22: a 36-shot one-cell worklist records 74 stages = 2 + 36 x 2.)
+PER_CELL = ["find-cell", "record-walk"]
+PER_SHOT = ["scene-build", "encode"]
 WHEN_ASKED = {"report": "--planes-report"}
 
 FAILS = []
@@ -99,13 +104,23 @@ def check_structure(run, shots, label):
     stages = run.get("stages") or []
     ids = [s.get("id") for s in stages]
     argshape = str((run.get("resources") or {}).get("args") or "")
-    want_ids = list(PER_SHOT) + [k for k, flag in WHEN_ASKED.items() if flag in argshape]
+    per_shot = list(PER_SHOT) + [k for k, flag in WHEN_ASKED.items() if flag in argshape]
+    want_ids = list(PER_CELL) + per_shot
     check("%s: every named phase is a stage of its own" % label,
           set(want_ids).issubset(set(ids)),
           "have %r, want %r" % (sorted(set(ids)), sorted(want_ids)))
-    check("%s: %d shot(s) means the per-shot phases repeat" % (label, shots),
-          len(ids) >= len(want_ids) * shots,
-          "have %d stages, want at least %d: %r" % (len(ids), len(want_ids) * shots, ids))
+    short = {p: ids.count(p) for p in per_shot if ids.count(p) < shots}
+    check("%s: %d shot(s) means each per-shot phase repeats per shot" % (label, shots), not short,
+          "per-shot phases seen fewer than %d times: %r in %r" % (shots, short, ids))
+    reuse = "--no-reuse-cell" not in argshape
+    for p in PER_CELL:
+        n = ids.count(p)
+        if reuse:
+            check("%s: %s runs once per cell, at most once per shot" % (label, p), 1 <= n <= shots,
+                  "%d %r stage(s) for %d shot(s)" % (n, p, shots))
+        else:
+            check("%s: --no-reuse-cell, so %s runs once per shot" % (label, p), n == shots,
+                  "%d %r stage(s) for %d shot(s)" % (n, p, shots))
     for phase, flag in WHEN_ASKED.items():
         if flag in argshape:
             check("%s: %s was asked for, so there is a %r stage" % (label, flag, phase),
