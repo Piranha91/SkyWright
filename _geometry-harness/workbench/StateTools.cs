@@ -25,7 +25,7 @@ internal sealed class StateTools
         "runs again on the patch's cell and says whether the open conflict is resolved and whether a new one appeared. " +
         "Positions are Skyrim units (about 70 units to a metre); +X is east, +Y is north, +Z is up.";
 
-    static readonly string[] Parts = { "bundle", "conflicts", "findings", "selection", "pending", "recheck", "repair", "launcher", "view", "decisions", "scenes", "context", "placements", "scene", "results", "world", "layers" };
+    static readonly string[] Parts = { "bundle", "conflicts", "findings", "selection", "pending", "recheck", "repair", "launcher", "view", "decisions", "scenes", "context", "placements", "scene", "results", "world", "layers", "load_order" };
     static readonly string[] DefaultParts = { "selection", "pending", "recheck" };
     /// <summary>The verbs that stage or write an edit: refused on a read-only scene.</summary>
     static readonly string[] EditVerbs = { "stage", "undo", "commit", "recheck", "revert", "drop", "move_with", "find_clear", "choose" };
@@ -100,6 +100,7 @@ internal sealed class StateTools
             if (parts.Contains("placements")) d["placements"] = PlacementsJson(hub.Surface);
             if (parts.Contains("scene")) d["scene"] = SceneDirector.State();
             if (parts.Contains("results")) d["results"] = ResultsView.State(limit, offset);
+            if (parts.Contains("load_order")) d["load_order"] = LoadOrderPanel.State();
             if (parts.Contains("world")) d["world"] = WorldView.State(cell, limit, offset);
             if (parts.Contains("layers")) d["layers"] = Shell.Current is { } lh ? lh.Layers.State() : new { available = false, why = "no scene is open" };
             return Answer(d);
@@ -164,7 +165,7 @@ internal sealed class StateTools
         [Description("view: show_original, show_edited, ghost_on, ghost_off, hide, hide_part, hide_in_front, see_through, isolate or restore.")] string? op = null,
         [Description("view hide_part: which part of the reference, counting its drawn shapes from 0.")] int? part = null,
         [Description("view see_through: a mod folder, as the launcher lists it; the references its plugins win are drawn see-through.")] string? mod = null,
-        [Description("view see_through: a plugin file name; the references it wins are drawn see-through.")] string? plugin = null,
+        [Description("view see_through: a plugin file name; the references it wins are drawn see-through. load_order: the plugin to switch off (show false) or on (show true), or all with show true.")] string? plugin = null,
         [Description("decide: real problem, intentional or unsure.")] string? verdict = null,
         [Description("decide: a few words saying why.")] string? reason = null,
         [Description("select: a scene by its number, as workbench_state's scenes list them; it opens the scene's best row.")] int? scene = null,
@@ -187,6 +188,11 @@ internal sealed class StateTools
         {
             var v = (verb ?? "").Trim().ToLowerInvariant();
             if (v is "results" or "world") return OpenInputsTools.Act(v, pair, groups, categories, setup, search, row, cell, @ref);
+            if (v == "load_order")
+            {
+                try { return Answer(new { said = LoadOrderPanel.Switch(plugin, show), loadOrder = LoadOrderPanel.State() }); }
+                catch (InvalidOperationException ex) { return Refuse(ex.Message); }
+            }
             if (v == "map") return OpenInputsTools.Map(worldspace, map_centre, pixels_per_cell, textured);
             if (hub.Surface.Scene is { ReadOnly: true } && EditVerbs.Contains(v)) return Refuse(WorkbenchHost.ReadOnlyWhy);
             if (v == "layer") return LayerOnUi(layer, show);

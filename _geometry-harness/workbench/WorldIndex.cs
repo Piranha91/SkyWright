@@ -599,6 +599,14 @@ internal sealed class WorldIndex : IDisposable
         return new Located(FormIdToken.Of(fk), TypeOf(body), cell, world, false, PositionOf(body));
     }
 
+    /// <summary>The plugins that hold a version of the record, in load order (the winner last), or null when the load order
+    /// has no such record.</summary>
+    public IReadOnlyList<string>? TouchingPlugins(string formKeyText)
+    {
+        var view = Live().Resolver.Capture(null);
+        return ParseKey(formKeyText) is { } fk ? view.TouchingPlugins(fk) : null;
+    }
+
     /// <summary>The cell a scene loads to show this reference: its own cell, or for one filed in a worldspace's persistent
     /// cell the grid cell its winning position falls in. Null when neither is known. May read one record body.</summary>
     public string? OpenableCellOf(string refKey)

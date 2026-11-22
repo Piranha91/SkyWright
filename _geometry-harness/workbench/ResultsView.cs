@@ -168,7 +168,16 @@ internal static class ResultsView
         foreach (var top in new UIElement[] { Header, PairBox, filters, Means, controls, aboutBox, CountLine }) { DockPanel.SetDock(top, Dock.Top); panel.Children.Add(top); }
         // the open row's values fill the tab; the rows themselves are the table the window shows across its full width
         // under the view (Table), while this tab is in front
-        panel.Children.Add(Detail);
+        // under them, the open row's values and the load order its scene is built on share the pane, the load order the larger
+        var split = new Grid();
+        split.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 80 });
+        split.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        split.RowDefinitions.Add(new RowDefinition { Height = new GridLength(3, GridUnitType.Star), MinHeight = 120 });
+        var between = new GridSplitter { Height = 5, HorizontalAlignment = HorizontalAlignment.Stretch, Background = Theme.Brush(Theme.Line), ToolTip = "drag to give the values or the load order more room" };
+        var order = LoadOrderPanel.Build();
+        Grid.SetRow(Detail, 0); Grid.SetRow(between, 1); Grid.SetRow(order, 2);
+        split.Children.Add(Detail); split.Children.Add(between); split.Children.Add(order);
+        panel.Children.Add(split);
         return panel;
     }
 

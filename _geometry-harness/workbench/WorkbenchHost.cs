@@ -183,6 +183,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 PartnerNote = $"the conflict's other reference {o} is not drawn in this scene ({why}), so it cannot be marked";
             }
         }
+        LoadOrderPanel.Selection(_session.Selected?.ToString(), other);
     }
 
     /// <summary>Why the open row's other reference is not marked, when it is not; null otherwise.</summary>

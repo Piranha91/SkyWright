@@ -81,6 +81,7 @@ internal static class SceneDirector
     /// <summary>Ask for a scene. Returns one sentence saying what happens; a refusal is an <see cref="InvalidOperationException"/>.</summary>
     internal static string Request(SceneRequest req)
     {
+        Requested?.Invoke(req);
         if (Shell.Current is { } h)
         {
             if (h.Session.Pending.Count > 0)
@@ -131,6 +132,8 @@ internal static class SceneDirector
         Wake();
         return s;
     }
+    /// <summary>Raised for every request before it is acted on (the load-order panel follows the scene's load order).</summary>
+    internal static event Action<SceneRequest>? Requested;
     static SceneRequest? _next;      // the request the running viewprobe continues with (same load order)
 
     /// <summary>End the idle wait in <see cref="Program"/> (a request or a finished launcher run is ready).</summary>
