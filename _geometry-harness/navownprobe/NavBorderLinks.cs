@@ -101,7 +101,11 @@ sealed class NavBorderLinks
                             var bl = far.Geom.EdgeLinks ?? Array.Empty<NavEdgeLink>();
                             int bk = NavBorderMatch.EdgeLink(bt, fe);
                             bool linksBack = NavBorderMatch.EdgeIsLink(bt, fe) && bk >= 0 && bk < bl.Count && bl[bk].Mesh == s && bl[bk].TriangleIndex == t;
-                            if (!linksBack)
+                            // an open edge within the tolerance elsewhere is the link's true neighbour (the far side was re-cut):
+                            // the link is stale, an EDGE-NOMATCH finding the relink re-points, not one way (review 3, item 8).
+                            // While the far triangle links back the band row stays unproven: re-pointing would strand that link.
+                            if (!linksBack && c.All.Count > 0) band = false;
+                            else if (!linksBack)
                             {
                                 string back = NavBorderMatch.EdgeIsLink(bt, fe) && bk >= 0 && bk < bl.Count
                                     ? $"links {bl[bk].Mesh} triangle {bl[bk].TriangleIndex} instead" : "links nothing back";

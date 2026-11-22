@@ -243,6 +243,28 @@ static class NavRepairSelfTest
             return fo.Count == 1 && fo[0].Kind == "EDGE-NOMATCH" && fo[0].Tier == "finding" ? null : $"130 u apart: want one EDGE-NOMATCH finding, got [{Show(farOff)}]";
         });
 
+        // C2598: a band link with no link back, where another navmesh's open edge lies along it within the tolerance, is a stale
+        // link (EDGE-NOMATCH finding naming that edge), not EDGE-ONEWAY (review 3, item 8); without that edge it stays one way.
+        Case("2598 band-oneway-yields-to-in-tolerance-match", () =>
+        {
+            var a = K(0xC41); var b = K(0xC42); var c = K(0xC43);
+            var A = Nav(a, new[] { new Vec3(0, 500, 0), new Vec3(50, 500, 0), new Vec3(0, 550, 0), new Vec3(0, 0, 0), new Vec3(100, 0, 0), new Vec3(100, 100, 0) },
+                        new[] { new NavTri(0, 1, 2, 0), new NavTri(3, 4, 5, 2, -1, 0, -1) }, new[] { new NavEdgeLink(b, 1) });
+            // B's triangle 1 lies 75 u up along A's edge (the band) and links nothing back
+            var B = Nav(b, new[] { new Vec3(300, 500, 75), new Vec3(350, 500, 75), new Vec3(300, 550, 75), new Vec3(100, 0, 75), new Vec3(200, 0, 75), new Vec3(100, 100, 75) },
+                        new[] { new NavTri(0, 1, 2, 0), new NavTri(3, 4, 5, 0, -1, -1, -1) }, Array.Empty<NavEdgeLink>());
+            // C's triangle 0 has an open edge (100,100)-(100,0) at A's height: the re-cut far side
+            var C = Nav(c, new[] { new Vec3(100, 0, 0), new Vec3(200, 0, 0), new Vec3(100, 100, 0) }, new[] { new NavTri(0, 1, 2, 0, -1, -1, -1) }, Array.Empty<NavEdgeLink>());
+            string Show(NavBorderLinks r) => string.Join("; ", r.Rows.Select(x => $"{x.Kind}/{x.Tier} {x.Src}#{x.SrcTri}->{x.Target}#{x.TargetTri}: {x.Why}"));
+            var with = NavBorderLinks.Find(new Dictionary<FormKey, WinningNav> { [a] = A, [b] = B, [c] = C }, Tol, Wide);
+            var w = with.Rows.Where(x => x.Src == a).ToList();
+            if (!(w.Count == 1 && w[0].Kind == "EDGE-NOMATCH" && w[0].Tier == "finding" && w[0].Why.Contains($"a matching edge: {c} triangle 0")))
+                return $"with C's matching edge: want one EDGE-NOMATCH finding naming {c} triangle 0, got [{Show(with)}]";
+            var without = NavBorderLinks.Find(new Dictionary<FormKey, WinningNav> { [a] = A, [b] = B }, Tol, Wide);
+            var o = without.Rows.Where(x => x.Src == a).ToList();
+            return o.Count == 1 && o[0].Kind == "EDGE-ONEWAY" ? null : $"without C: want EDGE-ONEWAY, got [{Show(without)}]";
+        });
+
         // C2591: the plan for a band one-way row writes no link back across the band: refused by name.
         Case("2591 band-oneway-repair-refused", () =>
         {
