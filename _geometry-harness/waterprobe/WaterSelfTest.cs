@@ -60,7 +60,65 @@ static class WaterSelfTest
 
         HeightlessWinner(t);
         GridlessCell(t);
+        PartialWorldspace(t);
     });
+
+    /// <summary>A worldspace override flagged partial form (record flag 0x4000) states only the fields it carries: the
+    /// rest are the earlier version's. SR Exterior Cities' Tamriel override is EDID only with that flag; in game the sea
+    /// stays (2026-11-21, `C:/hc-runs/2026-11-21-sw-overnight/ingame/PLAN.md`: the body swims at the same depth with and
+    /// without it, the engine's water level -14,000), while waterprobe read "no water" and reported 20,748 seams. A
+    /// whole-record override (no flag) still states what it carries, absent fields included.</summary>
+    static void PartialWorldspace(ProbeSelfTest t)
+    {
+        var dir = Path.Combine(t.Root, "pd2-partial"); Directory.CreateDirectory(dir);
+        var rel = SkyrimRelease.SkyrimSE;
+        var sky = new ModKey("Skyrim", ModType.Master);
+        FormKey W = new(sky, 0x800), Top = new(sky, 0x801), C = new(sky, 0x900), Wtr = new(sky, 0x802);
+        Worldspace World(FormKey k) => new(k, rel) { EditorID = "PartWorld" };
+        var skyPath = Path.Combine(dir, "Skyrim.esm");
+        {
+            var m = new SkyrimMod(sky, rel);
+            m.Waters.Add(new Water(Wtr, rel) { EditorID = "DefaultWater" });
+            var ws = World(W);
+            ws.Water = new FormLinkNullable<IWaterGetter>(Wtr);
+            ws.LodWater = new FormLinkNullable<IWaterGetter>(Wtr);
+            ws.LodWaterHeight = -14000f;
+            ws.LandDefaults = new WorldspaceLandDefaults { DefaultLandHeight = -27000f, DefaultWaterHeight = -14000f };
+            ws.TopCell = new Cell(Top, rel) { Flags = default };
+            // a sea cell that defers to the worldspace default (no height of its own)
+            var cell = new Cell(C, rel) { EditorID = "P00", Flags = Cell.Flag.HasWater, Grid = new CellGrid { Point = new P2Int(0, 0) } };
+            var blk = new WorldspaceBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellBlock };
+            var sub = new WorldspaceSubBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellSubBlock };
+            sub.Items.Add(cell); blk.Items.Add(sub); ws.SubCells.Add(blk); m.Worldspaces.Add(ws);
+            m.BeginWrite.ToPath(skyPath).WithLoadOrder(Array.Empty<ISkyrimModGetter>()).Write();
+        }
+        string Over(string name, int flags)
+        {
+            var path = Path.Combine(dir, name + ".esp");
+            var m = new SkyrimMod(new ModKey(name, ModType.Plugin), rel);
+            var ws = World(W);
+            ws.MajorRecordFlagsRaw = flags;
+            m.Worldspaces.Add(ws);
+            using var skyOv = SkyrimMod.CreateFromBinaryOverlay(skyPath, rel);
+            m.BeginWrite.ToPath(path).WithLoadOrder(new[] { skyOv }).Write();
+            return path;
+        }
+        var partial = Over("Partial", 0x4000);
+        var full = Over("Full", 0);
+        string Read(string over)
+        {
+            var (idx, _, byKey) = Judge(new List<string> { skyPath, over });
+            var w = idx.WorldWinner(W);
+            var r = byKey.TryGetValue(C, out var row) ? CellBoundaryIndex.Resolve(row.J.Winner, w) : default;
+            return $"water {w?.Water ?? "none"}, default {w?.DefaultWaterHeight?.ToString() ?? "unset"}, lod {w?.LodWaterHeight?.ToString() ?? "unset"}; cell P00 z {r.Z?.ToString() ?? "?"}";
+        }
+        var gotPartial = Read(partial);
+        t.Check("PD2-P3 a partial-form worldspace override (EDID only, flag 0x4000) keeps the earlier water: DefaultWater at -14000, and a deferring cell's surface at -14000",
+                gotPartial == $"water {Wtr}, default -14000, lod -14000; cell P00 z -14000", gotPartial);
+        var gotFull = Read(full);
+        t.Check("PD2-P4 a whole-record worldspace override (no flag) states what it carries: no water, no default height",
+                gotFull == "water none, default unset, lod unset; cell P00 z ?", gotFull);
+    }
 
     /// <summary>The held-out UME x SR Exterior Cities baseline: waterprobe died (exit 0xE0434352, OverflowException in Rank)
     /// when a worldspace's persistent cell, whose grid is the int.MinValue sentinel, reached the ranked lists. A gridless

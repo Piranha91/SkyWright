@@ -54,6 +54,25 @@ public readonly record struct WorldWaterSnap(int Plugin, string? Water, string? 
         && string.Equals(LodWater ?? "", o.LodWater ?? "", StringComparison.OrdinalIgnoreCase)
         && DetectorModel.HeightsEqual(LodWaterHeight, o.LodWaterHeight) && DetectorModel.HeightsEqual(DefaultWaterHeight, o.DefaultWaterHeight)
         && NoLodWater == o.NoLodWater;
+
+    /// <summary>The record flag a worldspace override carries when it is a partial form: it states only the fields it
+    /// carries, and the engine keeps the earlier version's value for every other (measured 2026-11-21: SR Exterior
+    /// Cities' EDID-only Tamriel override leaves the sea at Skyrim.esm's -14,000).</summary>
+    public const int PartialFormFlag = 0x4000;
+
+    /// <summary>One plugin's statement as the engine reads it: a whole-record override states every field (an absent
+    /// one is absent); a partial form (<see cref="PartialFormFlag"/>) over an earlier statement keeps that statement's
+    /// value for each field it does not carry. NoLodWater lives in DATA, which the reader gives without presence: a
+    /// partial form is read as carrying it only when it sets the flag (one whose DATA clears it reads as not carrying
+    /// DATA, a limit of the reader, not of the rule).</summary>
+    public static WorldWaterSnap Stated(int plugin, string? water, string? lodWater, float? lodWaterHeight, float? defaultWaterHeight,
+                                        bool noLodWater, bool partialForm, WorldWaterSnap? earlier)
+    {
+        if (!partialForm || earlier is not { } e)
+            return new(plugin, water, lodWater, lodWaterHeight, defaultWaterHeight, noLodWater);
+        return new(plugin, water ?? e.Water, lodWater ?? e.LodWater, lodWaterHeight ?? e.LodWaterHeight,
+                   defaultWaterHeight ?? e.DefaultWaterHeight, noLodWater || e.NoLodWater);
+    }
 }
 
 /// <summary>One plugin's statement of a cell's LAND: the VHGT offset and gradients, the base texture of each quadrant
@@ -204,11 +223,12 @@ public sealed class CellBoundaryIndex
         {
             if (!string.IsNullOrEmpty(ws.EditorID)) _worldEdid[ws.FormKey] = ws.EditorID;
             else _worldEdid.TryAdd(ws.FormKey, null);
-            var snap = new WorldWaterSnap(p,
+            if (!_worlds.TryGetValue(ws.FormKey, out var wh)) _worlds[ws.FormKey] = wh = new List<WorldWaterSnap>(1);
+            var snap = WorldWaterSnap.Stated(p,
                 Key(ws.Water.FormKeyNullable), Key(ws.LodWater.FormKeyNullable),
                 ws.LodWaterHeight, ws.LandDefaults?.DefaultWaterHeight,
-                ws.Flags.HasFlag(Worldspace.Flag.NoLodWater));
-            if (!_worlds.TryGetValue(ws.FormKey, out var wh)) _worlds[ws.FormKey] = wh = new List<WorldWaterSnap>(1);
+                ws.Flags.HasFlag(Worldspace.Flag.NoLodWater),
+                (ws.MajorRecordFlagsRaw & WorldWaterSnap.PartialFormFlag) != 0, wh.Count > 0 ? wh[^1] : null);
             if (wh.Count == 0 || !wh[^1].SameAs(snap)) wh.Add(snap);
 
             // The persistent cell: gridless whatever its XCLC says (small worldspaces stamp it (0,0), which
