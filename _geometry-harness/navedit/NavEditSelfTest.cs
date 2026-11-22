@@ -41,6 +41,7 @@ static class NavEditSelfTest
             if (why is not null) fail++;
         }
         string? Planned(NavEditResult r) => r.Status == "planned" ? null : "refused: " + string.Join(" ", r.Why);
+        string? RefusedFor2(TriEditResult r, string word) => r.Status == "refused" && r.Why.Any(w => w.Contains(word)) ? null : $"want a refusal naming '{word}', got {r.Status}: {string.Join(" ", r.Why)}";
         string? RefusedFor(NavEditResult r, string word) => r.Status == "refused" && r.Why.Any(w => w.Contains(word)) ? null : $"want a refusal naming '{word}', got {r.Status}: {string.Join(" ", r.Why)}";
 
         // C2513: the interior vertex moves 20 u east and 10 u north; the box keeps, the grid is NavGrid's for the moved mesh,
@@ -120,6 +121,156 @@ static class NavEditSelfTest
             var (v, t) = Square();
             return RefusedFor(NavEdit.MoveVertices(Geom(v, t), new[] { new VertexMove(99, new Vec3(0, 0, 0)) }), "is not in")
                 ?? RefusedFor(NavEdit.MoveVertices(Geom(v, t), Array.Empty<VertexMove>()), "No vertex move");
+        });
+
+        // ---- triangles: the square with its neighbour fields filled, as a real navmesh has them ----
+        // Triangle 2(2r + c) is (a, b, e) and 2(2r + c) + 1 is (a, e, d) for the square at row r, column c (a its low corner).
+        // So triangle 0 is (0, 1, 4), 1 is (0, 4, 3), 2 is (1, 2, 5), 3 is (1, 5, 4), 6 is (4, 5, 8), 7 is (4, 8, 7).
+        (List<Vec3> V, List<NavTri> T) Linked()
+        {
+            var (v, t) = Square();
+            for (int i = 0; i < t.Count; i++)
+                for (int e = 0; e < 3; e++)
+                {
+                    var (p, q) = NavBorderMatch.EdgeVerts(t[i], e);
+                    int o = Enumerable.Range(0, t.Count).FirstOrDefault(j => j != i && Enumerable.Range(0, 3).Any(f => NavBorderMatch.EdgeVerts(t[j], f) == (q, p)), -1);
+                    t[i] = e == 0 ? t[i] with { EdgeLink01 = (short)o } : e == 1 ? t[i] with { EdgeLink12 = (short)o } : t[i] with { EdgeLink20 = (short)o };
+                }
+            return (v, t);
+        }
+        var none = new Dictionary<FormKey, NavmeshGeometry>();
+        FormKey O = new(new ModKey("SelfTest", ModType.Master), 0xE03), Door = new(new ModKey("SelfTest", ModType.Master), 0xD00);
+        string Fields(NavTri t) => $"({t.A},{t.B},{t.C}) {t.EdgeLink01},{t.EdgeLink12},{t.EdgeLink20} f{t.Flags}";
+
+        // C2520: removing triangle 0 moves the last triangle (7: (4,8,7)) into slot 0: 7 triangles; the removed one's
+        // neighbours' fields toward it open (-1), the moved one's neighbours point at 0; the ops write the moved triangle
+        // whole into slot 0, then remove slot 7; the grid is NavGrid's for what is left.
+        Case("2520 remove-renumbers", () =>
+        {
+            var (v, t) = Linked();
+            var r = NavEdit.EditTriangles(Geom(v, t), new[] { 0 }, Array.Empty<Vec3>(), Array.Empty<(int, int, int)>(), none);
+            if (r.Status != "planned") return "refused: " + string.Join(" ", r.Why);
+            var a = r.After!.Triangles;
+            // slot 0 = old 7 (4,8,7): edge 4-8 faces old 6 (4,5,8) -> 6; edge 8-7 the square's; edge 7-4 faces old 4 (3,4,7) -> 4.
+            // old 1 (0,4,3): edge 0-4 faced old 0 -> -1; edge 4-3 faces old 4 -> 4. old 3 (1,5,4): 1-5 old 2, 5-4 old 6, 4-1 -> -1.
+            // old 6 (4,5,8): edge 8-4 faced old 7 -> 0. old 4 (3,4,7): edge 4-7 faced old 7 -> 0.
+            if (a.Count != 7 || Fields(a[0]) != "(4,8,7) 6,-1,4 f0" || Fields(a[1]) != "(0,4,3) -1,4,-1 f0" || Fields(a[3]) != "(1,5,4) 2,6,-1 f0"
+                || a[6].EdgeLink20 != 0 || a[4].EdgeLink12 != 0) return $"after: {string.Join(" | ", a.Select(Fields))}";
+            if (r.Ops[0] is not { FieldPath: "Data.Triangles", Op: "SetAtIndex", Key: "0" } || r.Ops[1] is not { FieldPath: "Data.Triangles", Op: "Remove", Key: "7" })
+                return $"first ops {r.Ops[0]} / {r.Ops[1]}";
+            var g = NavGrid.Rebuild(v, a.Select(x => ((int)x.A, (int)x.B, (int)x.C)).ToList());
+            return r.Grid!.CellBytes.SequenceEqual(g.CellBytes) ? null : "the grid is not NavGrid's for the remaining triangles";
+        });
+
+        // C2521: removing triangle 0 and adding it back appends it as 7 and joins it to both neighbours, both ways.
+        Case("2521 add-joins-neighbours", () =>
+        {
+            var (v, t) = Linked();
+            var r = NavEdit.EditTriangles(Geom(v, t), new[] { 0 }, Array.Empty<Vec3>(), new[] { (0, 1, 4) }, none);
+            if (r.Status != "planned") return "refused: " + string.Join(" ", r.Why);
+            var a = r.After!.Triangles;
+            // new 7 (0,1,4): edge 1-4 meets old 3 (slot 3); edge 4-0 meets old 1 (slot 1)
+            if (Fields(a[7]) != "(0,1,4) -1,3,1 f0") return $"added {Fields(a[7])}";
+            if (a[1].EdgeLink01 != 7 || a[3].EdgeLink20 != 7) return $"neighbours not joined back: {Fields(a[1])} | {Fields(a[3])}";
+            var add = r.Ops.FirstOrDefault(o => o.FieldPath == "Data.Triangles" && o.Op == "Add");
+            return add?.ComposeNode?["type"]?.ToString() == "NavmeshTriangle" && add.ComposeNode["fields"]!["Vertices"]!.ToString() == "0,1,4" ? null : "no NavmeshTriangle Add op with corners 0,1,4";
+        });
+
+        // C2522: an added triangle wound against its neighbour is refused; so is one flat or under 1 u².
+        Case("2522 winding-and-area", () =>
+        {
+            var (v, t) = Linked();
+            var wound = NavEdit.EditTriangles(Geom(v, t), new[] { 0 }, Array.Empty<Vec3>(), new[] { (0, 4, 1) }, none);
+            var flat = NavEdit.EditTriangles(Geom(v, t), Array.Empty<int>(), new[] { new Vec3(300, 0, 0), new Vec3(400, 0, 0) }, new[] { (2, 9, 10) }, none);
+            return RefusedFor2(wound, "wound") ?? RefusedFor2(flat, "flat");
+        });
+
+        // C2523: an added triangle on an edge two triangles already share (1-4: triangles 0 and 3) is refused.
+        Case("2523 third-triangle-on-edge", () =>
+        {
+            var (v, t) = Linked();
+            var r = NavEdit.EditTriangles(Geom(v, t), Array.Empty<int>(), new[] { new Vec3(150, 20, 0) }, new[] { (4, 1, 9) }, none);
+            return RefusedFor2(r, "already share");
+        });
+
+        // C2524: a triangle whose edge links into another navmesh, and one before a door, are not removed.
+        Case("2524 linked-and-door-stay", () =>
+        {
+            var (v, t) = Linked();
+            t[0] = t[0] with { Flags = 1, EdgeLink01 = 0 };
+            var g = Geom(v, t, new List<NavEdgeLink> { new(O, 0) }) with { DoorTriangles = new List<NavDoorTriangle> { new(Door, 5) } };
+            return RefusedFor2(NavEdit.EditTriangles(g, new[] { 0 }, Array.Empty<Vec3>(), Array.Empty<(int, int, int)>(), none), "links into another navmesh")
+                ?? RefusedFor2(NavEdit.EditTriangles(g, new[] { 5 }, Array.Empty<Vec3>(), Array.Empty<(int, int, int)>(), none), "door");
+        });
+
+        // C2525: another navmesh O links to this one's triangles 0 and 7 (its table entries 0 and 1, from its triangle 0's
+        // edges 0 and 1). Removing triangle 0 cuts O's entry 0 (edge field -1, flag off) and re-points entry 1 to triangle 0,
+        // where the last triangle 7 moved, which is now entry 0; the door before triangle 7 now stands before 0.
+        Case("2525 inbound-relinked-and-cut", () =>
+        {
+            var (v, t) = Linked();
+            var g = Geom(v, t) with { DoorTriangles = new List<NavDoorTriangle> { new(Door, 7) } };
+            var ov = new List<Vec3> { new(0, -100, 0), new(100, -100, 0), new(0, 0, 0) };
+            var o = new NavmeshGeometry(O, ov, new List<NavTri> { new(0, 1, 2, 0b011, 0, 1, -1) }, new Vec3(0, -100, 0), new Vec3(100, 0, 0),
+                                        new List<NavEdgeLink> { new(K, 0), new(K, 7) });
+            var r = NavEdit.EditTriangles(g, new[] { 0 }, Array.Empty<Vec3>(), Array.Empty<(int, int, int)>(), new Dictionary<FormKey, NavmeshGeometry> { [O] = o });
+            if (r.Status != "planned") return "refused: " + string.Join(" ", r.Why);
+            if (!r.Others.TryGetValue(O, out var oa)) return "O not changed";
+            if (!oa.EdgeLinks!.SequenceEqual(new[] { new NavEdgeLink(K, 0) })) return "O's table " + string.Join(",", oa.EdgeLinks!);
+            if (Fields(oa.Triangles[0]) != "(0,1,2) -1,0,-1 f2") return "O's triangle " + Fields(oa.Triangles[0]);
+            if (r.After!.DoorTriangles![0].TriangleBeforeDoor != 0) return "the door still stands before " + r.After.DoorTriangles[0].TriangleBeforeDoor;
+            var oops = r.Ops.Where(x => x.FormId == O.ToString()).Select(x => $"{x.FieldPath} {x.Op} {x.Key} {x.Value}").ToList();
+            string[] want = { "Data.EdgeLinks Remove 0 ", "Data.EdgeLinks[0].TriangleIndex Set  0", "Data.Triangles[0].EdgeLink_0_1 Set  -1", "Data.Triangles[0].Flags Remove  EdgeLink_0_1", "Data.Triangles[0].EdgeLink_1_2 Set  0" };
+            return oops.SequenceEqual(want) ? null : "O's ops " + string.Join(" | ", oops);
+        });
+
+        // C2526: a cut that leaves two navmeshes with no link between them is refused (their info map entries would go stale).
+        Case("2526 last-link-refused", () =>
+        {
+            var (v, t) = Linked();
+            var o = new NavmeshGeometry(O, new List<Vec3> { new(0, -100, 0), new(100, -100, 0), new(0, 0, 0) },
+                                        new List<NavTri> { new(0, 1, 2, 0b001, 0, -1, -1) }, new Vec3(0, -100, 0), new Vec3(100, 0, 0), new List<NavEdgeLink> { new(K, 0) });
+            return RefusedFor2(NavEdit.EditTriangles(Geom(v, t), new[] { 0 }, Array.Empty<Vec3>(), Array.Empty<(int, int, int)>(), new Dictionary<FormKey, NavmeshGeometry> { [O] = o }), "last link");
+        });
+
+        // C2527: an added triangle overlapping an existing one on the same level is refused; 200 u up it is a bridge.
+        Case("2527 added-overlap", () =>
+        {
+            TriEditResult With(float z)
+            {
+                var (v, t) = Linked();
+                return NavEdit.EditTriangles(Geom(v, t), Array.Empty<int>(), new[] { new Vec3(40, 40, z), new Vec3(160, 40, z), new Vec3(100, 160, z) }, new[] { (9, 10, 11) }, none);
+            }
+            var up = With(200);
+            return RefusedFor2(With(0), "overlaps") ?? (up.Status == "planned" ? null : "the bridge was refused: " + string.Join(" ", up.Why));
+        });
+
+        // C2529: a navmesh's own table can name itself (vanilla 0F3349 does). Triangle 2's square edge 2-5 links into this
+        // navmesh's triangle 7: removing triangle 0 moves 7 to slot 0, so the entry follows it. Linked into triangle 0
+        // instead, the entry is cut: removed, triangle 2's field open and its flag off.
+        Case("2529 self-link", () =>
+        {
+            var (v, t) = Linked();
+            t[2] = t[2] with { Flags = 1 << 1, EdgeLink12 = 0 };
+            var follow = NavEdit.EditTriangles(Geom(v, t, new List<NavEdgeLink> { new(K, 7) }), new[] { 0 }, Array.Empty<Vec3>(), Array.Empty<(int, int, int)>(), none);
+            if (follow.Status != "planned") return "follow refused: " + string.Join(" ", follow.Why);
+            if (!follow.After!.EdgeLinks!.SequenceEqual(new[] { new NavEdgeLink(K, 0) }) || !follow.Ops.Any(o => o.FieldPath == "Data.EdgeLinks[0].TriangleIndex" && o.Value == "0"))
+                return "the entry did not follow triangle 7 to slot 0: " + string.Join(",", follow.After.EdgeLinks!);
+            var cut = NavEdit.EditTriangles(Geom(v, t, new List<NavEdgeLink> { new(K, 0) }), new[] { 0 }, Array.Empty<Vec3>(), Array.Empty<(int, int, int)>(), none);
+            if (cut.Status != "planned") return "cut refused: " + string.Join(" ", cut.Why);
+            var ops = cut.Ops.Select(o => $"{o.FieldPath} {o.Op} {o.Key} {o.Value}").ToList();
+            return cut.After!.EdgeLinks!.Count == 0 && Fields(cut.After.Triangles[2]) == "(1,2,5) -1,-1,3 f0"
+                && ops.Contains("Data.EdgeLinks Remove 0 ") && ops.Contains("Data.Triangles[2].Flags Remove  EdgeLink_1_2") && ops.Contains("Data.Triangles[2].EdgeLink_1_2 Set  -1")
+                ? null : $"cut: {Fields(cut.After.Triangles[2])}; ops {string.Join(" | ", ops)}";
+        });
+
+        // C2528: bad input: a triangle index past the mesh, a corner that does not exist, nothing to do.
+        Case("2528 bad-triangle-input", () =>
+        {
+            var (v, t) = Linked();
+            return RefusedFor2(NavEdit.EditTriangles(Geom(v, t), new[] { 99 }, Array.Empty<Vec3>(), Array.Empty<(int, int, int)>(), none), "is not in")
+                ?? RefusedFor2(NavEdit.EditTriangles(Geom(v, t), Array.Empty<int>(), Array.Empty<Vec3>(), new[] { (0, 1, 42) }, none), "does not exist")
+                ?? RefusedFor2(NavEdit.EditTriangles(Geom(v, t), Array.Empty<int>(), Array.Empty<Vec3>(), Array.Empty<(int, int, int)>(), none), "No triangle");
         });
 
         Console.WriteLine(fail == 0 ? "navedit self-test: all cases ok" : $"navedit self-test: {fail} failed");

@@ -1,5 +1,6 @@
 using System.Globalization;
 using HousecarlCore;
+using Mutagen.Bethesda.Plugins;
 
 namespace HarnessShared;
 
@@ -27,6 +28,16 @@ public sealed record NavEditResult(string Status, IReadOnlyList<string> Why, Nav
                                    IReadOnlyList<int> Moved, IReadOnlyList<RepairOp> Ops)
 {
     public static NavEditResult Refused(params string[] why) => new("refused", why, null, null, Array.Empty<int>(), Array.Empty<RepairOp>());
+}
+
+/// <summary>A triangle edit's outcome: "planned" with this navmesh's edited geometry and grid, the old-to-new triangle
+/// numbering (-1 for a removed triangle), every other navmesh whose links changed, and the write ops for all of them; or
+/// "refused" with why.</summary>
+public sealed record TriEditResult(string Status, IReadOnlyList<string> Why, NavmeshGeometry? After, NavGridData? Grid,
+                                   IReadOnlyList<int> Map, IReadOnlyDictionary<FormKey, NavmeshGeometry> Others, IReadOnlyList<RepairOp> Ops)
+{
+    public static TriEditResult Refused(params string[] why) =>
+        new("refused", why, null, null, Array.Empty<int>(), new Dictionary<FormKey, NavmeshGeometry>(), Array.Empty<RepairOp>());
 }
 
 public static class NavEdit
@@ -119,6 +130,237 @@ public static class NavEdit
         ops.Add(new RepairOp(id, "Data.MaxDistanceY", "Set", Value: F(grid.SectionY)));
         ops.Add(new RepairOp(id, "Data.NavmeshGrid", "Set", Value: Convert.ToHexString(grid.CellBytes)));
         return ops;
+    }
+
+    static readonly string[] EdgeName = { "EdgeLink_0_1", "EdgeLink_1_2", "EdgeLink_2_0" };
+    static short Field(NavTri t, int e) => e switch { 0 => t.EdgeLink01, 1 => t.EdgeLink12, _ => t.EdgeLink20 };
+    static NavTri WithField(NavTri t, int e, short f) => e switch { 0 => t with { EdgeLink01 = f }, 1 => t with { EdgeLink12 = f }, _ => t with { EdgeLink20 = f } };
+    static bool Linked(NavTri t, int e) => (t.Flags & (1 << e)) != 0;
+    /// <summary>A corner as an edge is matched by: its full position, so an edge directly above or below another (a
+    /// stair, a bridge) is a different edge.</summary>
+    static Vec3 P(IReadOnlyList<Vec3> v, int i) => v[i];
+
+    /// <summary>REMOVE AND ADD TRIANGLES on navmesh <paramref name="g"/>. A removed triangle's place is taken by the last
+    /// triangle (swap-remove, highest removal first), so only moved triangles change index; added vertices and triangles are
+    /// appended. <paramref name="cover"/> is each triangle's cover fields as the winner has them (the geometry model does not
+    /// carry them), written with a moved triangle; an added triangle has none. Every reference to a
+    /// triangle index follows: this navmesh's neighbour fields (one naming a removed triangle becomes an open edge), its
+    /// door table, and the link tables of <paramref name="inbound"/> — every other navmesh whose table names this one. A
+    /// link into a removed triangle is cut on the other side (its table entry, edge field and flag go, later entries close
+    /// up). An added triangle joins each open edge it shares by position, both ways.
+    /// Refused by name: removing a triangle whose edge links into another navmesh or that stands before a door; a cut that
+    /// leaves two navmeshes with no link between them (their navmesh info map entries would still name each other); an
+    /// added triangle that is flat or under 1 u², wound against its neighbours (or, alone, against most of the mesh), names
+    /// a vertex that does not exist, lands on an edge that already has two triangles or a link, or overlaps a triangle on
+    /// the same level. Edges are matched by their corners' full positions, so a triangle directly above another is not
+    /// its neighbour.</summary>
+    public static TriEditResult EditTriangles(NavmeshGeometry g, IReadOnlyCollection<int> remove, IReadOnlyList<Vec3> addVerts,
+                                              IReadOnlyList<(int A, int B, int C)> addTris, IReadOnlyDictionary<FormKey, NavmeshGeometry> inbound,
+                                              IReadOnlyList<(bool IsCover, ushort CoverFlags)>? cover = null)
+    {
+        var why = new List<string>();
+        var tris = g.Triangles; int n = tris.Count;
+        if (remove.Count == 0 && addTris.Count == 0) return TriEditResult.Refused("No triangle is removed or added; name at least one.");
+        if (addVerts.Count > 0 && addTris.Count == 0) return TriEditResult.Refused("New vertices are given but no triangle uses them; add the triangles that use them.");
+        foreach (var r in remove)
+        {
+            if (r < 0 || r >= n) { why.Add($"Triangle {r} is not in {g.FormKey}, which has {n}; name a triangle from 0 to {n - 1}."); continue; }
+            for (int e = 0; e < 3; e++)
+                if (Linked(tris[r], e)) { why.Add($"Triangle {r} links into another navmesh on one edge, so removing it would break that link; cut the link first (the relink repair)."); break; }
+            if (g.DoorTriangles?.Any(d => d.TriangleBeforeDoor == r) == true) why.Add($"Triangle {r} stands before a door, which joins this navmesh to another cell; it stays.");
+        }
+        if (why.Count > 0) return TriEditResult.Refused(why.ToArray());
+
+        // SWAP-REMOVE, highest first: the last triangle takes the removed one's place, so only the moved triangles change
+        // index and the write touches their few neighbours, not every later triangle
+        var gone = remove.ToHashSet();
+        var slot = Enumerable.Range(0, n).ToList();               // slot -> old index
+        foreach (var r in gone.OrderByDescending(x => x)) { int last = slot.Count - 1; if (r != last) slot[r] = slot[last]; slot.RemoveAt(last); }
+        var map = new int[n]; Array.Fill(map, -1);
+        for (int i = 0; i < slot.Count; i++) map[slot[i]] = i;
+        var verts = g.Vertices.Concat(addVerts).ToList();
+        int kept = slot.Count;
+
+        // the kept triangles in their slots, their in-mesh neighbour fields following the new numbering
+        var after = new List<NavTri>(kept + addTris.Count);
+        foreach (var i in slot)
+        {
+            var t = tris[i];
+            for (int e = 0; e < 3; e++)
+                if (!Linked(t, e) && Field(t, e) >= 0) t = WithField(t, e, (short)(Field(t, e) < n ? map[Field(t, e)] : -1));
+            after.Add(t);
+        }
+
+        // the added triangles: valid corners, area, then their edges joined to open edges
+        int majority = Math.Sign(tris.Select(t => Math.Sign(Cross(g.Vertices, t))).Sum());
+        foreach (var (a, b, c) in addTris)
+        {
+            if (new[] { a, b, c }.Any(i => i < 0 || i >= verts.Count)) { why.Add($"An added triangle ({a}, {b}, {c}) names a vertex that does not exist; there are {verts.Count} with the added ones."); continue; }
+            if (a == b || b == c || a == c) { why.Add($"An added triangle ({a}, {b}, {c}) repeats a corner; give three different vertices."); continue; }
+            after.Add(new NavTri((short)a, (short)b, (short)c, 0));
+        }
+        if (why.Count > 0) return TriEditResult.Refused(why.ToArray());
+        if (verts.Count > short.MaxValue + 1 || after.Count > short.MaxValue + 1) return TriEditResult.Refused("The navmesh would pass 32,768 vertices or triangles, which its 16-bit indices cannot name; split it.");
+
+        for (int j = kept; j < after.Count; j++)
+        {
+            var t = after[j];
+            double area = Cross(verts, t);
+            if (Math.Abs(area) / 2 < 1) { why.Add($"Added triangle {j} ({t.A}, {t.B}, {t.C}) is flat or under 1 u²; give three corners that enclose an area."); continue; }
+            for (int e = 0; e < 3; e++)
+            {
+                var (p, q) = NavBorderMatch.EdgeVerts(t, e);
+                var (pp, qq) = (P(verts, p), P(verts, q));
+                for (int o = 0; o < after.Count; o++)
+                {
+                    if (o == j) continue;
+                    for (int f = 0; f < 3; f++)
+                    {
+                        var (r, s) = NavBorderMatch.EdgeVerts(after[o], f);
+                        var (rr, ss) = (P(verts, r), P(verts, s));
+                        bool same = rr == qq && ss == pp, flipped = rr == pp && ss == qq;
+                        if (!same && !flipped) continue;
+                        if (flipped) why.Add($"Added triangle {j} is wound against triangle {o}, which shares its edge; list its corners in the other order.");
+                        else if (Linked(after[o], f)) why.Add($"Added triangle {j} lands on an edge of triangle {o} that links into another navmesh; it cannot take a third side.");
+                        else if (Field(after[o], f) >= 0 && Field(after[o], f) != j) why.Add($"Added triangle {j} lands on an edge that triangles {o} and {Field(after[o], f)} already share.");
+                        else if (Field(after[j], e) >= 0 && Field(after[j], e) != o) why.Add($"Added triangle {j} would share one edge with two triangles.");
+                        else { after[o] = WithField(after[o], f, (short)j); after[j] = WithField(after[j], e, (short)o); }
+                    }
+                }
+            }
+            bool hasNeighbour = Enumerable.Range(0, 3).Any(e => Field(after[j], e) >= 0);
+            if (!hasNeighbour && majority != 0 && Math.Sign(area) != majority) why.Add($"Added triangle {j} is wound against most of the navmesh; list its corners in the other order.");
+        }
+        if (why.Count > 0) return TriEditResult.Refused(why.Distinct().ToArray());
+
+        for (int j = kept; j < after.Count; j++)
+            for (int o = 0; o < after.Count; o++)
+            {
+                if (o == j || (o >= kept && o < j)) continue;
+                if (SharesCorner(verts, after[j], after[o]) || !SameLevel(verts, after[j], after[o])) continue;
+                if (OverlapDepth(verts, after[j], after[o]) > Touch) why.Add($"Added triangle {j} overlaps triangle {o} on the same level; move it off, or remove triangle {o} first.");
+            }
+        if (why.Count > 0) return TriEditResult.Refused(why.Distinct().ToArray());
+
+        // this navmesh's own table entries that name itself (a vanilla navmesh can link into its own triangles): follow the
+        // numbering; one into a removed triangle is cut here, as on another navmesh
+        var ownLinks = (g.EdgeLinks ?? Array.Empty<NavEdgeLink>()).ToList();
+        var ownCut = new List<int>();
+        for (int k = 0; k < ownLinks.Count; k++)
+            if (ownLinks[k].Mesh == g.FormKey && ownLinks[k].TriangleIndex >= 0 && ownLinks[k].TriangleIndex < n)
+            {
+                int to = map[ownLinks[k].TriangleIndex];
+                if (to < 0) ownCut.Add(k); else ownLinks[k] = ownLinks[k] with { TriangleIndex = (short)to };
+            }
+        if (ownCut.Count > 0)
+        {
+            var cs = ownCut.ToHashSet();
+            for (int t = 0; t < after.Count; t++)
+                for (int e = 0; e < 3; e++)
+                    if (Linked(after[t], e))
+                    {
+                        int k = Field(after[t], e);
+                        after[t] = cs.Contains(k) ? WithField(after[t], e, -1) with { Flags = after[t].Flags & ~(1 << e) } : WithField(after[t], e, (short)(k - ownCut.Count(c => c < k)));
+                    }
+            ownLinks = ownLinks.Where((_, k) => !cs.Contains(k)).ToList();
+        }
+
+        // the door table, and every other navmesh's links into this one
+        var doors = (g.DoorTriangles ?? Array.Empty<NavDoorTriangle>()).Select(d => d with { TriangleBeforeDoor = (short)map[d.TriangleBeforeDoor] }).ToList();
+        var others = new Dictionary<FormKey, NavmeshGeometry>();
+        var ops = new List<RepairOp>();
+        foreach (var (key, o) in inbound)
+        {
+            var links = (o.EdgeLinks ?? Array.Empty<NavEdgeLink>()).ToList();
+            var otris = o.Triangles.ToArray();
+            var cut = new List<int>();
+            var oops = new List<RepairOp>();
+            for (int k = 0; k < links.Count; k++)
+                if (links[k].Mesh == g.FormKey && links[k].TriangleIndex >= 0 && links[k].TriangleIndex < n)
+                {
+                    int to = map[links[k].TriangleIndex];
+                    if (to < 0) cut.Add(k);
+                    else if (to != links[k].TriangleIndex) links[k] = links[k] with { TriangleIndex = (short)to };
+                }
+            if (cut.Count == 0 && links.SequenceEqual(o.EdgeLinks ?? Array.Empty<NavEdgeLink>())) continue;
+            var cutSet = cut.ToHashSet();
+            for (int t = 0; t < otris.Length; t++)
+                for (int e = 0; e < 3; e++)
+                    if (Linked(otris[t], e))
+                    {
+                        int k = Field(otris[t], e);
+                        if (cutSet.Contains(k)) otris[t] = WithField(otris[t], e, -1) with { Flags = otris[t].Flags & ~(1 << e) };
+                        else otris[t] = WithField(otris[t], e, (short)(k - cut.Count(c => c < k)));
+                    }
+            var newLinks = links.Where((_, k) => !cutSet.Contains(k)).ToList();
+            bool stillLinked = newLinks.Any(l => l.Mesh == g.FormKey) || (g.EdgeLinks?.Any(l => l.Mesh == key) ?? false);
+            if (!stillLinked) { why.Add($"Removing it would cut the last link between {key} and {g.FormKey}, and their navmesh info map entries would still name each other; that update is not supported yet."); continue; }
+            others[key] = o with { Triangles = otris, EdgeLinks = newLinks };
+            string id = key.ToString();
+            foreach (var k in cut.OrderByDescending(x => x)) oops.Add(new RepairOp(id, "Data.EdgeLinks", "Remove", Key: k.ToString(CultureInfo.InvariantCulture)));
+            var before = o.EdgeLinks ?? Array.Empty<NavEdgeLink>();
+            var survivors = Enumerable.Range(0, before.Count).Where(k => !cutSet.Contains(k)).ToList();
+            for (int k = 0; k < survivors.Count; k++)
+                if (newLinks[k].TriangleIndex != before[survivors[k]].TriangleIndex)
+                    oops.Add(new RepairOp(id, $"Data.EdgeLinks[{k}].TriangleIndex", "Set", Value: newLinks[k].TriangleIndex.ToString(CultureInfo.InvariantCulture)));
+            for (int t = 0; t < otris.Length; t++)
+                for (int e = 0; e < 3; e++)
+                {
+                    if (Field(otris[t], e) != Field(o.Triangles[t], e)) oops.Add(new RepairOp(id, $"Data.Triangles[{t}].{EdgeName[e]}", "Set", Value: Field(otris[t], e).ToString(CultureInfo.InvariantCulture)));
+                    if (Linked(o.Triangles[t], e) && !Linked(otris[t], e)) oops.Add(new RepairOp(id, $"Data.Triangles[{t}].Flags", "Remove", Value: EdgeName[e]));
+                }
+            ops.AddRange(oops);
+        }
+        if (why.Count > 0) return TriEditResult.Refused(why.Distinct().ToArray());
+
+        // this navmesh's ops: each moved triangle written whole into its new slot (corners, fields, flags, cover), the tail
+        // removed from the end, the added vertices and triangles appended, then every field that changed on a triangle that
+        // kept its slot
+        string gid = g.FormKey.ToString();
+        var gops = new List<RepairOp>();
+        RepairOp Whole(string verb, string? key, NavTri t, (bool IsCover, ushort CoverFlags) c) => new(gid, "Data.Triangles", verb, Key: key, ComposeNode: new System.Text.Json.Nodes.JsonObject
+        {
+            ["type"] = "NavmeshTriangle",
+            ["fields"] = new System.Text.Json.Nodes.JsonObject
+            {
+                ["Vertices"] = $"{t.A},{t.B},{t.C}", ["EdgeLink_0_1"] = t.EdgeLink01.ToString(CultureInfo.InvariantCulture),
+                ["EdgeLink_1_2"] = t.EdgeLink12.ToString(CultureInfo.InvariantCulture), ["EdgeLink_2_0"] = t.EdgeLink20.ToString(CultureInfo.InvariantCulture),
+                ["Flags"] = t.Flags.ToString(CultureInfo.InvariantCulture), ["IsCover"] = c.IsCover ? "true" : "false",
+                ["CoverFlags"] = c.CoverFlags.ToString(CultureInfo.InvariantCulture),
+            },
+        });
+        (bool, ushort) CoverOf(int old) => cover is not null && old < cover.Count ? cover[old] : (false, (ushort)0);
+        for (int i = 0; i < kept; i++)
+            if (slot[i] != i) gops.Add(Whole("SetAtIndex", i.ToString(CultureInfo.InvariantCulture), after[i], CoverOf(slot[i])));
+        for (int i = n - 1; i >= kept; i--) gops.Add(new RepairOp(gid, "Data.Triangles", "Remove", Key: i.ToString(CultureInfo.InvariantCulture)));
+        foreach (var v in addVerts) gops.Add(new RepairOp(gid, "Data.Vertices", "Add", Value: V(v)));
+        for (int j = kept; j < after.Count; j++) gops.Add(Whole("Add", null, after[j], (false, 0)));
+        for (int i = 0; i < kept; i++)
+            if (slot[i] == i)
+                for (int e = 0; e < 3; e++)
+                {
+                    if (Field(after[i], e) != Field(tris[i], e)) gops.Add(new RepairOp(gid, $"Data.Triangles[{i}].{EdgeName[e]}", "Set", Value: Field(after[i], e).ToString(CultureInfo.InvariantCulture)));
+                    if (Linked(tris[i], e) && !Linked(after[i], e)) gops.Add(new RepairOp(gid, $"Data.Triangles[{i}].Flags", "Remove", Value: EdgeName[e]));
+                }
+        var ownBefore = g.EdgeLinks ?? Array.Empty<NavEdgeLink>();
+        foreach (var k in ownCut.OrderByDescending(x => x)) gops.Add(new RepairOp(gid, "Data.EdgeLinks", "Remove", Key: k.ToString(CultureInfo.InvariantCulture)));
+        var ownSurvivors = Enumerable.Range(0, ownBefore.Count).Where(k => !ownCut.Contains(k)).ToList();
+        for (int k = 0; k < ownSurvivors.Count; k++)
+            if (ownLinks[k].TriangleIndex != ownBefore[ownSurvivors[k]].TriangleIndex)
+                gops.Add(new RepairOp(gid, $"Data.EdgeLinks[{k}].TriangleIndex", "Set", Value: ownLinks[k].TriangleIndex.ToString(CultureInfo.InvariantCulture)));
+        for (int k = 0; k < doors.Count; k++)
+            if (doors[k].TriangleBeforeDoor != g.DoorTriangles![k].TriangleBeforeDoor)
+                gops.Add(new RepairOp(gid, $"Data.DoorTriangles[{k}].TriangleBeforeDoor", "Set", Value: doors[k].TriangleBeforeDoor.ToString(CultureInfo.InvariantCulture)));
+        var triples = after.Select(t => ((int)t.A, (int)t.B, (int)t.C)).ToList();
+        var grid = NavGrid.Rebuild(verts, triples);
+        gops.Add(new RepairOp(gid, "Data.Min", "Set", Value: V(grid.Min)));
+        gops.Add(new RepairOp(gid, "Data.Max", "Set", Value: V(grid.Max)));
+        gops.Add(new RepairOp(gid, "Data.NavmeshGridDivisor", "Set", Value: grid.Divisor.ToString(CultureInfo.InvariantCulture)));
+        gops.Add(new RepairOp(gid, "Data.MaxDistanceX", "Set", Value: F(grid.SectionX)));
+        gops.Add(new RepairOp(gid, "Data.MaxDistanceY", "Set", Value: F(grid.SectionY)));
+        gops.Add(new RepairOp(gid, "Data.NavmeshGrid", "Set", Value: Convert.ToHexString(grid.CellBytes)));
+        var geom = g with { Vertices = verts, Triangles = after, EdgeLinks = ownLinks, DoorTriangles = doors, Min = grid.Min, Max = grid.Max };
+        return new TriEditResult("planned", Array.Empty<string>(), geom, grid, map, others, gops.Concat(ops).ToList());
     }
 
     static double Cross(IReadOnlyList<Vec3> v, NavTri t)
