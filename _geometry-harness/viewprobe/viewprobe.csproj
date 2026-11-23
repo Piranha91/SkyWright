@@ -8,9 +8,7 @@
     <AssemblyName>viewprobe</AssemblyName>
     <NoWarn>CA1416</NoWarn>
     <UseWPF>true</UseWPF>
-    <!-- SkyRender.Character package version. A build can override it (for example
-         -p:SkyRenderVersion=3.0.2-beta.1 to test a prerelease from a local feed). -->
-    <SkyRenderVersion Condition="'$(SkyRenderVersion)' == ''">4.0.0</SkyRenderVersion>
+    <!-- SkyRender.Character package version: SkyRenderVersion, set in Directory.Build.props. -->
     <!-- The top-down map camera (MapTiles.cs) exists from SkyRender 4.0; an older pin builds without it and says so. -->
     <DefineConstants Condition="!$(SkyRenderVersion.StartsWith('3.'))">$(DefineConstants);SKYRENDER_MAP_TILES</DefineConstants>
   </PropertyGroup>

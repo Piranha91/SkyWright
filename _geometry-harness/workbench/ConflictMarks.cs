@@ -100,6 +100,9 @@ internal sealed class ConflictMarks : IRenderOverlay
         }
     }
 
+    /// <summary>Whether every shape of the reference is hidden by the view (then its outline is not drawn either).</summary>
+    static bool AllHidden(RefOcclusion ro) => ro.Shapes.Count > 0 && ro.Shapes.All(s => s.Mesh is { IsHiddenByHost: true });
+
     internal static void AddTriangle(List<float> into, Vector3 a, Vector3 b, Vector3 c)
     {
         var n = Vector3.Cross(b - a, c - a);
@@ -175,6 +178,15 @@ internal sealed class ConflictMarks : IRenderOverlay
         }, TaskScheduler.Default);
     }
 
+#if SKYRENDER_CUTOUT_TINT
+    static void CutOutTint(GlRenderer renderer, RefOcclusion? ro, GlVec3 colour, in OverlayContext context)
+    {
+        if (ro is null) return;
+        foreach (var sh in ro.Shapes)
+            if (CutOut(sh) && sh.Mesh is { IsHiddenByHost: false } m) renderer.DrawOverlayCutoutTint(m, colour, TintAlpha, context);
+    }
+#endif
+
     /// <summary>How wide the band where two objects meet is drawn: 3% of the smaller object's size, 3 to 16 units.</summary>
     internal static float BandWidth(TriangleSoup a, TriangleSoup b)
     {
@@ -239,23 +251,37 @@ internal sealed class ConflictMarks : IRenderOverlay
             {
                 // a plane is one flat sheet: unlit, so it reads as the same cyan from either side and at any angle to the light
                 renderer.SetOverlayShaded(StandInShaded);
+#if SKYRENDER_CUTOUT_TINT
+                // filled through anything in front, as its outline is: a plane often stands behind a hill or in a wall
+                renderer.DrawOverlayTranslucentTint(StandInTris, SelectedColour, StandInAlpha, none, depthTested: false);
+#else
                 renderer.DrawOverlayTranslucentTint(StandInTris, SelectedColour, StandInAlpha, none);
+#endif
                 renderer.SetOverlayShaded(true);
             }
+#if SKYRENDER_CUTOUT_TINT
+            // leaf, grass and moss cards: tinted through their own texture's cut-out, so only the leaves take the colour
+            CutOutTint(renderer, Partner, PartnerColour, context);
+            CutOutTint(renderer, Selected, SelectedColour, context);
+#endif
             var overlap = _overlapTris;
             if (overlap.Count >= 18) renderer.DrawOverlayTranslucentTint(overlap, OverlapColour, OverlapAlpha, none);
             renderer.EndOverlaySurfacePass(st);
         }
         // the outlines, dimmed, and where they cross, bright: both through anything in front
         _lines.Clear();
-        void Add(RefOcclusion? ro, GlVec3 col)
+        void Add(RefOcclusion? ro, GlVec3 col, bool cutOnly)
         {
-            if (ro is null) return;
-            // a cut-out card has no tint, so its outline is its mark and is drawn bright; a tinted solid's outline is dimmed
+            if (ro is null || AllHidden(ro)) return;
+            // a cut-out card's outline is drawn bright; a tinted solid's outline is dimmed
             foreach (var (a, b, cut) in Outline(ro))
-                _lines.Add(new OverlayLineSegment { A = new GlVec3(a.X, a.Y, a.Z), B = new GlVec3(b.X, b.Y, b.Z), Color = cut ? col : col * OutlineDim });
+                if (cut || !cutOnly) _lines.Add(new OverlayLineSegment { A = new GlVec3(a.X, a.Y, a.Z), B = new GlVec3(b.X, b.Y, b.Z), Color = cut ? col : col * OutlineDim });
         }
-        if (Outlines) { Add(Partner, PartnerColour); Add(Selected, SelectedColour); }
+        if (Outlines) { Add(Partner, PartnerColour, false); Add(Selected, SelectedColour, false); }
+#if !SKYRENDER_CUTOUT_TINT
+        // without SkyRender's cut-out tint a leaf card cannot be tinted, so its outline stays its only mark
+        else { Add(Partner, PartnerColour, true); Add(Selected, SelectedColour, true); }
+#endif
         if (renderer.BeginOverlayLinePass(context, out var ls))
         {
             if (_lines.Count > 0) renderer.DrawOverlayLines(_lines, 1.2f, context);

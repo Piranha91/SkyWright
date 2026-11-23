@@ -3,6 +3,11 @@
   <PropertyGroup>
     <HousecarlRoot>$(MSBuildThisFileDirectory)external\houseCARL\</HousecarlRoot>
     <HousecarlSrc>$(HousecarlRoot)src\</HousecarlSrc>
+    <!-- The SkyRender package version every program builds on. A build can override it (for example
+         -p:SkyRenderVersion=4.1.0-cutouttint.2 to test a prerelease from a local feed). -->
+    <SkyRenderVersion Condition="'$(SkyRenderVersion)' == ''">4.0.0</SkyRenderVersion>
+    <!-- The see-through fill and the tint that follows a leaf card's cut-out exist from SkyRender 4.1. -->
+    <DefineConstants Condition="$([MSBuild]::VersionGreaterThanOrEquals('$(SkyRenderVersion.Split(`-`)[0])', '4.1'))">$(DefineConstants);SKYRENDER_CUTOUT_TINT</DefineConstants>
   </PropertyGroup>
 
   <!-- The build layout, one folder per configuration: bin\<Configuration>\<the app's .NET version>\ holds SkyWright.exe,
