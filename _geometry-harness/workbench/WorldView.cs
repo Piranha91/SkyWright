@@ -27,11 +27,11 @@ internal static class WorldView
 
     static readonly WorldMap Map = new();
     static readonly ComboBox MapWorld = new() { MinWidth = 220, Margin = new Thickness(0, 0, 8, 0), ToolTip = "the worldspace the map shows" };
-    static readonly TextBlock MapSays = new() { VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Dim), TextTrimming = TextTrimming.CharacterEllipsis };
+    static readonly TextBlock MapSays = new() { VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Dim), TextWrapping = TextWrapping.Wrap };
     static readonly CheckBox MapTextured = new() { Content = "Textured", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0),
         ToolTip = "zoomed in, draw the cells as the game draws them from straight above (the renderer's pictures, kept on disk per load order); off shows the shaded shapes" };
     static readonly System.Windows.Controls.ProgressBar TileBar = new() { Width = 120, Height = 6, Minimum = 0, Maximum = 1, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center, Visibility = Visibility.Collapsed };
-    static readonly TextBlock TileSays = new() { VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Dim), TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 1, 0, 0) };
+    static readonly TextBlock TileSays = new() { VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Dim), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 1, 0, 0) };
     static string _mapStatus = "";
     static string? _mapWorld;                             // the worldspace the map shows or is reading
     static bool _mapSetting;                              // the worldspace list is being set from code

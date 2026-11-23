@@ -495,9 +495,9 @@ internal sealed class MapTileLayer
         {
             var v = _view.Value;
             int shown = _shown.Count(k => k.Key.X >= v.X0 && k.Key.X <= v.X1 && k.Key.Y >= v.Y0 && k.Key.Y <= v.Y1);
-            s = $"textured: {shown} of {_inView} cell(s) in view shown";
-            if (_running is { } r) s += $"; drawing the cells around ({r.X}, {r.Y}), {_runTiles} tile(s) so far";
-            if (_queue.Count > 0) s += $"; {_queue.Count} more block(s) of {MapTileGrid.BlockCells} by {MapTileGrid.BlockCells} cells to draw";
+            s = $"textured: {shown} of {_inView} cells";
+            if (_running is { } r) s += $"; drawing around ({r.X}, {r.Y})";
+            if (_queue.Count > 0) s += $"; {_queue.Count} more block(s) to draw";
             if (_failed.Count > 0) s += $"; {_failed.Count} block(s) not drawn, the first: {_failed.Values.First()}";
             s += ".";
         }

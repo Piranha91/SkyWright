@@ -23,7 +23,7 @@ internal static class Loading
     internal static UIElement Strip()
     {
         if (_strip is not null) return _strip;
-        What = new TextBlock { VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(8, 0, 8, 0) };
+        What = new TextBlock { VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(8, 0, 8, 0) };
         Percent = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0), MinWidth = 36, TextAlignment = TextAlignment.Right };
         Bar = new ProgressBar { Height = 6, Minimum = 0, Maximum = 1, Width = 220, VerticalAlignment = VerticalAlignment.Center };
         Percent.Foreground = What.Foreground = Theme.Brush(Theme.Dim);

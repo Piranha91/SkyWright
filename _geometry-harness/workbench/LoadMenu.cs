@@ -115,7 +115,7 @@ internal static class LoadMenu
     internal static Button RecentButton(string path, double width, Action? after = null)
     {
         var name = Path.GetFileName(path.TrimEnd('\\', '/'));
-        var b = new Button { Content = new TextBlock { Text = name.Length > 0 ? name : path, TextTrimming = TextTrimming.CharacterEllipsis }, ToolTip = path, Width = width,
+        var b = new Button { Content = new TextBlock { Text = name.Length > 0 ? name : path, TextWrapping = TextWrapping.Wrap }, ToolTip = path, Width = width,
                              HorizontalAlignment = HorizontalAlignment.Left, HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(0, 0, 0, 4) };
         b.Click += (_, _) => { after?.Invoke(); _ = OpenAsync(path); };
         return b;
