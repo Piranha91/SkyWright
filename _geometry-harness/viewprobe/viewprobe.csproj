@@ -16,7 +16,7 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- The conflict review workbench hosts the built scene through InteractiveViewer.Host. -->
-    <InternalsVisibleTo Include="workbench" />
+    <InternalsVisibleTo Include="SkyWright" />
     <InternalsVisibleTo Include="workbench.tests" />
   </ItemGroup>
   <ItemGroup>

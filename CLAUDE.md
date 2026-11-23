@@ -26,11 +26,11 @@ Every program finds its pieces through one owner, `_geometry-harness/_shared/Che
 Evaluations run from an install, never from the checkout's `bin`. Publish one (it refuses uncommitted changes) and check it:
 
 ```
-dotnet run --project _geometry-harness/publish -c Release -- --commit HEAD --to C:/hc-runs/skywright-install
-dotnet run --project _geometry-harness/publish -c Release -- --verify C:/hc-runs/skywright-install/<commit>
+dotnet run --project _geometry-harness/publish -c Release -- --commit HEAD
+dotnet run --project _geometry-harness/publish -c Release -- --verify artifacts/install/<commit>
 ```
 
-The install is `C:/hc-runs/skywright-install/<commit>/`, with each program in its own folder and `skywright-install.json` at its root. README.md, "Install a commit", has the layout.
+The install is `artifacts/install/<commit>/` in the checkout (ignored by git; `--to` picks another folder), with the app at `SkyWright/SkyWright.exe`, each program in its own folder and `skywright-install.json` at its root. README.md, "Install a commit", has the layout.
 
 ## Commits
 

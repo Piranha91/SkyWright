@@ -532,8 +532,8 @@ public sealed class LauncherProcessTests
 {
     static string WorkbenchExe()
     {
-        var here = Path.Combine(AppContext.BaseDirectory, "workbench.exe");
-        return File.Exists(here) ? here : Path.Combine(R3Bundle.Checkout(), "_geometry-harness", "workbench", "bin", "Release", "net9.0-windows10.0.19041.0", "workbench.exe");
+        var here = Path.Combine(AppContext.BaseDirectory, "SkyWright.exe");
+        return File.Exists(here) ? here : Path.Combine(R3Bundle.Checkout(), "_geometry-harness", "workbench", "bin", "Release", "net9.0-windows10.0.19041.0", "SkyWright.exe");
     }
 
     [Fact]
@@ -841,7 +841,7 @@ public sealed class InPlaceRunTests
         var minutes = int.TryParse(Environment.GetEnvironmentVariable("WB_TEST_RUN_MINUTES"), out var m) ? m : 20;
         var gh = Path.Combine(R3Bundle.Checkout(), "_geometry-harness");
         var exe = Environment.GetEnvironmentVariable("WB_TEST_WORKBENCH") is { Length: > 0 } we ? we
-            : Directory.GetFiles(Path.Combine(gh, "workbench", "bin", "Release"), "workbench.exe", SearchOption.AllDirectories).Single();
+            : Directory.GetFiles(Path.Combine(gh, "workbench", "bin", "Release"), "SkyWright.exe", SearchOption.AllDirectories).Single();
         var engine = Environment.GetEnvironmentVariable("WB_RUNCONTROL") is { Length: > 0 } rc ? rc
             : Path.Combine(gh, "runcontrol", "bin", "Release", "net9.0", "runcontrol.exe");
         Assert.True(File.Exists(engine), $"the built-in run engine is not built at {engine}");

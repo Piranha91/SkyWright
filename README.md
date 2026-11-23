@@ -17,7 +17,7 @@ dotnet run --project external/houseCARL/src/housecarl-generator -c Release --no-
 The last line makes the record rulebook (`corpus.json`) that houseCARL's server and the run controller read. Then start the app:
 
 ```
-_geometry-harness/workbench/bin/Release/net9.0-windows10.0.19041.0/workbench.exe
+_geometry-harness/workbench/bin/Release/net9.0-windows10.0.19041.0/SkyWright.exe
 ```
 
 Set `WB_MCP_PORT` to a port number to serve the app's state tools (`workbench_state`, `workbench_act`) on `http://127.0.0.1:<port>/`.
@@ -30,12 +30,12 @@ The checkout is for development: a build there replaces the programs in its own 
 dotnet run --project _geometry-harness/publish -c Release -- [--commit REV] [--to DIR]
 ```
 
-It refuses a checkout with uncommitted changes. It exports the commit and its pinned houseCARL with `git archive`, builds them off the checkout (`C:/hc-runs/skywright-install-src/`, deleted afterwards), and publishes into `DIR/<commit>/` (default `C:/hc-runs/skywright-install/<commit>/`):
+It refuses a checkout with uncommitted changes. It exports the commit and its pinned houseCARL with `git archive`, builds that copy in `artifacts/install-src/` (deleted afterwards), and publishes into `DIR/<commit>/`, by default `artifacts/install/<commit>/` in the checkout. `artifacts/` is ignored by git, and a build of the solution never writes there. `git clean -x` deletes it, installs included.
 
 | Path in the install | What |
 |---|---|
 | `skywright-install.json` | The manifest: the commit, the houseCARL pin, the named pieces and every file's sha256 |
-| `workbench/workbench.exe` | The app, with the same `viewprobe.exe` the install's `viewprobe/` holds |
+| `SkyWright/SkyWright.exe` | The app, with the same `viewprobe.exe` the install's `viewprobe/` holds |
 | `runcontrol/`, `<probe>/` | The run controller and every probe, each in its own folder |
 | `housecarl-mcp/` | houseCARL's server, built from the pin, with the rulebook `corpus.json` beside it |
 | `housecarl/` | houseCARL's other data the app reads (the reporting skill's scene policy) |
@@ -51,7 +51,7 @@ The install needs the .NET 9 runtime (Desktop Runtime for the app). It needs no 
 
 | Path | What |
 |---|---|
-| `_geometry-harness/workbench/` | The app |
+| `_geometry-harness/workbench/` | The app (`SkyWright.exe`) |
 | `_geometry-harness/runcontrol/` | The run controller: census through bundle |
 | `_geometry-harness/*probe/`, `_shared/` | The probes and the code they share |
 | `_geometry-harness/viewprobe/` | The renderer host the 3D view uses (on SkyRender) |

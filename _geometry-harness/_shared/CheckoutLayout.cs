@@ -190,7 +190,7 @@ internal static class CheckoutLayout
         if (m is not null)
         {
             // a program's folder: the folder of a listed program (the app, runcontrol, a probe, the server), not a data folder
-            why = !m.Pieces.Where(kv => kv.Key.StartsWith("program:", StringComparison.Ordinal) || kv.Key is "workbench" or "runcontrol" or "server")
+            why = !m.Pieces.Where(kv => kv.Key.StartsWith("program:", StringComparison.Ordinal) || kv.Key is "app" or "runcontrol" or "server")
                     .Any(kv => string.Equals(Path.GetDirectoryName(Native(kv.Value)), programFolder, StringComparison.OrdinalIgnoreCase))
                 ? $"the folder {Fwd(Path.Combine(root, programFolder))} sits in the SkyWright install at {Fwd(root)} but is not one of its programs; run the install's own copy, or publish again"
                 : Complete(root, m);

@@ -28,6 +28,7 @@ __pycache__/
 .pytest_cache/
 
 ## Generated and local
+/artifacts/
 /generated/
 /_claude/
 CLAUDE.local.md

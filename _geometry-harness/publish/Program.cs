@@ -13,8 +13,12 @@ namespace SkyWrightPublish;
 /// The layout and the manifest are <see cref="CheckoutLayout"/>'s; this program only fills them.</summary>
 internal static class Program
 {
-    const string DefaultTo = "C:/hc-runs/skywright-install";
-    const string DefaultSrc = "C:/hc-runs/skywright-install-src";
+    /// <summary>The installs, and the build folder each is made in, relative to the checkout the publisher runs from
+    /// (.NET's artifacts/ convention; ignored by git, never touched by a build of the solution).</summary>
+    static readonly string DefaultTo = Path.Combine("artifacts", "install"), DefaultSrc = Path.Combine("artifacts", "install-src");
+
+    /// <summary>The app's project folder; its exe (and so its install folder) is named by its AssemblyName.</summary>
+    const string AppProject = "workbench";
 
     /// <summary>The projects under _geometry-harness that are not programs of the install.</summary>
     static readonly HashSet<string> NotInstalled = new(StringComparer.OrdinalIgnoreCase) { "workbench.tests", "publish" };
@@ -26,7 +30,7 @@ internal static class Program
         try
         {
             if (args is ["--verify", var dir]) return VerifyCommand(dir);
-            string rev = "HEAD", to = DefaultTo, src = DefaultSrc; bool keep = false;
+            string rev = "HEAD"; string? to = null, src = null; bool keep = false;
             for (int i = 0; i < args.Length; i++)
             {
                 string Value() => i + 1 < args.Length ? args[++i] : throw new Refused($"{args[i]} needs a value.");
@@ -39,7 +43,7 @@ internal static class Program
                     default: throw new Refused($"'{args[i]}' is not an option; use --commit REV, --to DIR, --src DIR, --keep-src, or --verify DIR.");
                 }
             }
-            return Publish(rev, Path.GetFullPath(to), Path.GetFullPath(src), keep);
+            return Publish(rev, to, src, keep);
         }
         catch (Refused r) { Console.Error.WriteLine("skywright-publish: " + r.Message); return 2; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidDataException)
@@ -67,10 +71,11 @@ internal static class Program
         return 0;
     }
 
-    static int Publish(string rev, string to, string srcRoot, bool keepSrc)
+    static int Publish(string rev, string? toArg, string? srcArg, bool keepSrc)
     {
         var checkout = CheckoutLayout.FindRoot()
             ?? throw new Refused($"this publisher is not inside a SkyWright checkout (no {CheckoutLayout.Marker} above {Fwd(AppContext.BaseDirectory)}); run it with dotnet run --project _geometry-harness/publish from the checkout to publish.");
+        string to = Path.GetFullPath(toArg ?? Path.Combine(checkout, DefaultTo)), srcRoot = Path.GetFullPath(srcArg ?? Path.Combine(checkout, DefaultSrc));
         var sub = CheckoutLayout.Housecarl(checkout);
         if (!Directory.Exists(Path.Combine(sub, "src")))
             throw new Refused($"the pinned houseCARL {Fwd(sub)} is not checked out; run git submodule update --init, then publish.");
@@ -124,7 +129,7 @@ internal static class Program
             { Say($"note: the build folder {Fwd(src)} could not be deleted ({ex.Message}); the install is complete, delete it by hand."); }
         long bytes = Directory.EnumerateFiles(dest, "*", SearchOption.AllDirectories).Sum(f => new FileInfo(f).Length);
         var m = CheckoutLayout.Manifest.Read(Path.Combine(dest, CheckoutLayout.ManifestName));
-        Say($"published {commit} to {Fwd(dest)}: {m.Pieces.Count(kv => kv.Key.StartsWith("program:") || kv.Key is "workbench" or "runcontrol")} programs, "
+        Say($"published {commit} to {Fwd(dest)}: {m.Pieces.Count(kv => kv.Key.StartsWith("program:") || kv.Key is "app" or "runcontrol")} programs, "
             + $"{m.Files.Count} files, {bytes / 1048576.0:0} MiB, in {sw.Elapsed.TotalMinutes:0.0} min");
         return 0;
     }
@@ -133,12 +138,16 @@ internal static class Program
     static void Fill(string src, string srcSub, string temp, string dest, string commit, string pin)
     {
         var pieces = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var (name, csproj) in Programs(src))
+        string? app = null;
+        foreach (var (project, exe, csproj) in Programs(src))
         {
-            Run(src, "dotnet", "publish", csproj, "-c", "Release", "--no-build", "-nologo", "-v", "q", "-o", Path.Combine(temp, name));
-            var key = name is "workbench" or "runcontrol" ? name : "program:" + name;
-            pieces[key] = $"{name}/{name}.exe";
+            // each program in a folder named as its exe, which is how the install finds a program
+            Run(src, "dotnet", "publish", csproj, "-c", "Release", "--no-build", "-nologo", "-v", "q", "-o", Path.Combine(temp, exe));
+            var key = project == AppProject ? "app" : exe == "runcontrol" ? "runcontrol" : "program:" + exe;
+            pieces[key] = $"{exe}/{exe}.exe";
+            if (project == AppProject) app = exe;
         }
+        if (app is null) throw new Refused($"the solution has no {AppProject} project, so the publish has no app; nothing was installed.");
         Run(src, "dotnet", "publish", Path.Combine(srcSub, "src", "housecarl-mcp", "housecarl-mcp.csproj"), "-c", "Release", "--no-build", "-nologo", "-v", "q",
             "-o", Path.Combine(temp, "housecarl-mcp"));
         var installed = new CheckoutLayout.Layout(CheckoutLayout.Kind.Installed, temp, null);
@@ -156,9 +165,9 @@ internal static class Program
                 throw new Refused($"the publish of {commit[..12]} is missing {key} ({rel}); the build of that commit did not make it, so nothing was installed.");
         foreach (var f in new[] { "viewprobe.exe", "viewprobe.dll" })
         {
-            string a = Path.Combine(temp, "workbench", f), b = Path.Combine(temp, "viewprobe", f);
+            string a = Path.Combine(temp, app, f), b = Path.Combine(temp, "viewprobe", f);
             if (!File.Exists(a) || !File.Exists(b) || CheckoutLayout.Hash(a) != CheckoutLayout.Hash(b))
-                throw new Refused($"the workbench's {f} is not the same file as the install's viewprobe/{f}, so the app would draw with another viewprobe than the probes run; nothing was installed.");
+                throw new Refused($"the app's {f} is not the same file as the install's viewprobe/{f}, so the app would draw with another viewprobe than the probes run; nothing was installed.");
         }
 
         // 6. the manifest, checked, then the folder renamed into place
@@ -173,10 +182,10 @@ internal static class Program
     }
 
     /// <summary>The install's programs: every project under _geometry-harness in the solution whose OutputType is Exe
-    /// or WinExe, except the tests and this publisher. (folder name, project path); the folder name is the exe's name.</summary>
-    static List<(string Name, string Csproj)> Programs(string src)
+    /// or WinExe, except the tests and this publisher. (project folder, exe name: its AssemblyName or else the folder's, project path).</summary>
+    static List<(string Project, string Exe, string Csproj)> Programs(string src)
     {
-        var list = new List<(string, string)>();
+        var list = new List<(string, string, string)>();
         foreach (Match m in Regex.Matches(File.ReadAllText(Path.Combine(src, CheckoutLayout.Marker)), @"""(_geometry-harness\\([^\\""]+)\\[^\\""]+\.csproj)"""))
         {
             string name = m.Groups[2].Value, csproj = Path.Combine(src, m.Groups[1].Value.Replace('\\', Path.DirectorySeparatorChar));
@@ -184,12 +193,12 @@ internal static class Program
             var text = File.ReadAllText(csproj);
             if (!Regex.IsMatch(text, @"<OutputType>\s*(Win)?Exe\s*</OutputType>")) continue;
             var asm = Regex.Match(text, @"<AssemblyName>\s*([^<\s]+)\s*</AssemblyName>");
-            if (asm.Success && asm.Groups[1].Value != name)
-                throw new Refused($"{name}'s exe is named {asm.Groups[1].Value}, but the install finds a program by its folder's name; name them the same.");
-            list.Add((name, csproj));
+            list.Add((name, asm.Success ? asm.Groups[1].Value : name, csproj));
         }
         if (list.Count == 0) throw new Refused($"no program projects were found in {CheckoutLayout.Marker} of the export.");
-        return list.OrderBy(t => t.Item1, StringComparer.Ordinal).ToList();
+        var twice = list.GroupBy(t => t.Item2, StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1);
+        if (twice is not null) throw new Refused($"two projects ({string.Join(", ", twice.Select(t => t.Item1))}) make an exe named {twice.Key}, and an install holds one folder per exe name.");
+        return list.OrderBy(t => t.Item2, StringComparer.Ordinal).ToList();
     }
 
     static void Export(string repo, string commit, string into)

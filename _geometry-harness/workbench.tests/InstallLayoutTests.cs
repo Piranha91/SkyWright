@@ -16,7 +16,7 @@ public sealed class InstallLayoutTests : IDisposable
     /// <summary>What a fake install lists: manifest key and relative path.</summary>
     static readonly (string Key, string Rel)[] Pieces =
     [
-        ("workbench", "workbench/workbench.exe"), ("runcontrol", "runcontrol/runcontrol.exe"),
+        ("app", "SkyWright/SkyWright.exe"), ("runcontrol", "runcontrol/runcontrol.exe"),
         ("program:viewprobe", "viewprobe/viewprobe.exe"), ("program:navownprobe", "navownprobe/navownprobe.exe"),
         ("server", "housecarl-mcp/housecarl-mcp.exe"), ("corpus", "housecarl-mcp/corpus.json"),
         ("registry", "data/check-registry.json"), ("severity", "data/workbench-severity.json"),
@@ -76,7 +76,7 @@ public sealed class InstallLayoutTests : IDisposable
         Assert.Equal(N(root), N(layout.Harness));
         Assert.Equal(N(Path.Combine(root, "viewprobe", "viewprobe.exe")), N(layout.Program("viewprobe")));
         // the workbench, in its own folder, finds the same install
-        Assert.Equal(N(root), N(L.Locate(Path.Combine(root, "workbench"), out _)!.Root));
+        Assert.Equal(N(root), N(L.Locate(Path.Combine(root, "SkyWright"), out _)!.Root));
     }
 
     [Fact]
@@ -110,7 +110,7 @@ public sealed class InstallLayoutTests : IDisposable
     public void OverrideWins()
     {
         var root = FakeInstall();
-        var layout = L.Locate(Path.Combine(root, "workbench"), out var why) ?? throw new Xunit.Sdk.XunitException("no layout: " + why);
+        var layout = L.Locate(Path.Combine(root, "SkyWright"), out var why) ?? throw new Xunit.Sdk.XunitException("no layout: " + why);
         var over = Path.Combine(_tmp, "elsewhere", "check-registry.json");
         Environment.SetEnvironmentVariable("WB_REGISTRY", over);
         Environment.SetEnvironmentVariable("WB_SERVER", Path.Combine(_tmp, "elsewhere", "housecarl-mcp.exe"));
@@ -174,13 +174,13 @@ public sealed class InstallLayoutTests : IDisposable
         File.WriteAllBytes(sev, bytes);
         // one listed file gone, and one file nobody listed
         File.Delete(Path.Combine(root, "viewprobe", "viewprobe.dll"));
-        File.WriteAllText(Path.Combine(root, "workbench", "launcher-settings.json"), "{}");
+        File.WriteAllText(Path.Combine(root, "SkyWright", "launcher-settings.json"), "{}");
 
         var (problems, unlisted) = L.Verify(root);
         Assert.Equal(2, problems.Count);
         Assert.Contains(problems, p => p.StartsWith("data/workbench-severity.json has hash ", StringComparison.Ordinal));
         Assert.Contains("viewprobe/viewprobe.dll is missing.", problems);
-        Assert.Equal(["workbench/launcher-settings.json"], unlisted);
+        Assert.Equal(["SkyWright/launcher-settings.json"], unlisted);
     }
 
     [Fact]

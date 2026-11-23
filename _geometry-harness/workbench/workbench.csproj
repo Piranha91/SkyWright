@@ -9,7 +9,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <AssemblyName>workbench</AssemblyName>
+    <AssemblyName>SkyWright</AssemblyName>
     <RootNamespace>Workbench</RootNamespace>
     <UseWPF>true</UseWPF>
     <NoWarn>CA1416</NoWarn>
