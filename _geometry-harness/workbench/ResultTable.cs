@@ -73,6 +73,16 @@ internal static class RecordWords
         _ => field,
     };
 
+    /// <summary>What a field is, for a modder who has not met it; null for the plain ones.</summary>
+    internal static string? FieldMeaning(string field) => field switch
+    {
+        "SkyrimMajorRecordFlags" or "MajorRecordFlagsRaw" => "Record flags are the record's switches, such as Persistent, Initially Disabled, Visible When Distant and Has Distant LOD.",
+        "EnableParent" => "The enable parent is the object whose enabled state this one follows.",
+        "LocationReference" => "The location reference ties the object to a location's reference type.",
+        "Primitive" => "Bounds are the size of a box, trigger or occlusion primitive.",
+        _ => null,
+    };
+
     /// <summary>A change kind in words, as done to the record ("moved", "changed Grid").</summary>
     internal static string Change(string kind) => kind switch
     {
@@ -114,8 +124,32 @@ internal sealed record ResultTableRow(ResultRow Row, string Line, ResultPair? Pa
     OverlapWords.Parts? Objects => Row.Lane == "overlap" ? OverlapWords.Parse(Row.Summary) : null;
     public string Mod => Objects is { } o ? o.PluginA : Pair is null ? Row.Pair : string.Join(", ", Pair.Subject);
     public string Against => Objects is { } o ? o.PluginB : Pair is null ? "" : string.Join(", ", Pair.Partner);
-    public string What => Row.Lane == "record" ? $"{RecordWords.Field(Row.Field ?? Row.Kind)} lost" : RecordWords.Change(Row.Kind);
+    /// <summary>A record row is two mods setting the same field, where only the winner's value is used in game: "record
+    /// flags overridden" (the losing mod's value is overridden), not "lost", which read as damage.</summary>
+    public string What => Row.Lane == "record" ? $"{RecordWords.Field(Row.Field ?? Row.Kind)} overridden" : RecordWords.Change(Row.Kind);
+    /// <summary>The Change cell's tooltip: for a record row, who wins and what the field is.</summary>
+    public string WhatTip
+    {
+        get
+        {
+            if (Row.Lane != "record") return What;
+            var fieldWords = RecordWords.Field(Row.Field ?? Row.Kind);
+            var loser = Row.Values.FirstOrDefault(v => v.Label == "losing mod's value")?.Plugin;
+            var winner = Row.Values.FirstOrDefault(v => v.Label == "winning mod's value")?.Plugin;
+            string who = loser is not null && winner is not null
+                ? $"Both {loser} and {winner} set this object's {fieldWords}. {winner} loads later and wins, so {loser}'s {fieldWords} is not used in game."
+                : $"Both mods set this object's {fieldWords}; only the later one's is used in game.";
+            return who + (RecordWords.FieldMeaning(Row.Field ?? Row.Kind) is { } m ? " " + m : "");
+        }
+    }
     public string Object => RecordWords.Name(Row.EditorId, Row.BaseEditorId, Row.FormKey);
+    /// <summary>The object's FormKey, for its name's tooltip.</summary>
+    public string ObjectTip => Row.Place.RefKey ?? Row.FormKey;
+    /// <summary>An overlap's other object, after an arrow: " ↔ TreeFallForestShrub01"; empty for other rows.</summary>
+    public string OtherObject => Row.Lane == "overlap" && Row.Place.OtherKey is { } o ? " ↔ " + (Row.OtherName is { Length: > 0 } n ? n : RecordWords.Form(o)) : "";
+    public string? OtherTip => Row.Lane == "overlap" ? Row.Place.OtherKey : null;
+    /// <summary>Both objects, for sorting and the state tools.</summary>
+    public string BothObjects => Object + OtherObject;
     public string Where => Row.Where ?? (Row.Place.Cell is { } c ? RecordWords.Form(c) : "");
     /// <summary>Before → after, when both are short enough to read in a cell; else empty (the values pane has them).</summary>
     public string Change
@@ -140,8 +174,8 @@ internal sealed record ResultTableRow(ResultRow Row, string Line, ResultPair? Pa
         ("", null, 30, "green: addressed · red: not addressed · amber: a patch change nothing predicted · grey: an overlap, not counted as addressed or not addressed"),
         ("Mod", nameof(Mod), 190, "the mod the pair checks; for an overlap, the plugin of the row's own object (cyan in the view)"),
         ("Against", nameof(Against), 170, "the mod it is checked against; for an overlap, the plugin of the object it passes into (magenta in the view)"),
-        ("Change", nameof(What), 130, "what was done to the record"),
-        ("Object", nameof(Object), 190, "the record by its editor ID, else its FormID and plugin"),
+        ("Change", nameof(What), 150, "what was done to the record; for two mods setting the same value, which one's is overridden (point at it for which mod wins)"),
+        ("Object", nameof(BothObjects), 260, "the record by its editor ID, else its FormID and plugin; an overlap names both objects (point at a name for its FormKey)"),
         ("Where", nameof(Where), 170, "the cell it is in"),
         ("Before → after", nameof(Change), 200, "the value before the patch and the one the patch sets, when short"),
         ("View", nameof(View), 70, "'no view' when the row has no place to show; its tooltip says why"),
@@ -153,8 +187,18 @@ internal sealed record ResultTableRow(ResultRow Row, string Line, ResultPair? Pa
         var g = new GridView { AllowsColumnReorder = true };
         foreach (var (h, path, w, tip) in Columns)
         {
-            var col = new GridViewColumn { Header = new TextBlock { Text = h, ToolTip = tip, MinWidth = 14, Background = Brushes.Transparent }, Width = w };
-            if (path is not null) col.DisplayMemberBinding = new Binding(path);
+            var col = new GridViewColumn { Header = new TextBlock { Text = h, ToolTip = tip, MinWidth = 14, Background = Brushes.Transparent, Tag = path }, Width = w };
+            if (path == nameof(What)) col.CellTemplate = TextCell(nameof(What), nameof(WhatTip));
+            else if (path == nameof(BothObjects))
+            {
+                // each object's name with its own FormKey as the tooltip
+                var sp = new FrameworkElementFactory(typeof(StackPanel));
+                sp.SetValue(StackPanel.OrientationProperty, Orientation.Horizontal);
+                sp.AppendChild(TextPart(nameof(Object), nameof(ObjectTip)));
+                sp.AppendChild(TextPart(nameof(OtherObject), nameof(OtherTip)));
+                col.CellTemplate = new DataTemplate { VisualTree = sp };
+            }
+            else if (path is not null) col.DisplayMemberBinding = new Binding(path);
             else
             {
                 var sq = new FrameworkElementFactory(typeof(Border));
@@ -169,4 +213,14 @@ internal sealed record ResultTableRow(ResultRow Row, string Line, ResultPair? Pa
         }
         return g;
     }
+
+    static FrameworkElementFactory TextPart(string text, string tip)
+    {
+        var tb = new FrameworkElementFactory(typeof(TextBlock));
+        tb.SetBinding(TextBlock.TextProperty, new Binding(text));
+        tb.SetBinding(FrameworkElement.ToolTipProperty, new Binding(tip));
+        return tb;
+    }
+
+    static DataTemplate TextCell(string text, string tip) => new() { VisualTree = TextPart(text, tip) };
 }

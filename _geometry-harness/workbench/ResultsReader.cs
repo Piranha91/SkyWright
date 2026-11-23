@@ -31,7 +31,8 @@ internal sealed record ResultRow(
     string DefaultSetup,
     IReadOnlyList<string> JoinedEdits,
     string? Note,
-    string? Where = null)
+    string? Where = null,
+    string? OtherName = null)
 {
     /// <summary>Unique within the evaluation: the pair, the source list (f findings, e edits, o overlaps) and the position in it.</summary>
     internal string Key => $"{Pair}|{(Lane == "edit" ? "e" : Lane == "overlap" ? "o" : "f")}{Index}";
@@ -789,7 +790,8 @@ internal sealed class ResultPair
                     rows.Add(new ResultRow(index, ResultGroup.NotScored, _p.Id, "overlap", ResultFiles.S(e, "kind") ?? "OVERLAP", named?.BaseType == "Npc" ? "ACHR" : "REFR",
                         fk, null, null, named?.BaseEditorId, named?.BaseType, null, null, attribution.Length > 0 ? attribution : null,
                         says.Length > 0 ? Regex.Replace(says, @"\s+", " ").Trim() : $"predicted overlap of {fk} and {other}", values, RefPlace(fk, other), "before", Array.Empty<string>(),
-                        attribution == "needs-both" ? null : OverlapWords.Attribution(attribution, ResultFiles.S(e, "attributionMod"))));
+                        attribution == "needs-both" ? null : OverlapWords.Attribution(attribution, ResultFiles.S(e, "attributionMod")),
+                        OtherName: other is null ? null : _names?.Ref(other)?.BaseEditorId));
                 }
                 NotScored = count;
             }

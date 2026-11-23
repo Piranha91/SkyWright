@@ -150,7 +150,8 @@ internal static class ResultsView
         {
             if (e.OriginalSource is not GridViewColumnHeader { Column: { } col }) return;
             // the result square's column sorts by the result's words
-            var path = col.DisplayMemberBinding is System.Windows.Data.Binding { Path.Path: { } p } ? p : nameof(ResultTableRow.Result);
+            var path = col.DisplayMemberBinding is System.Windows.Data.Binding { Path.Path: { } p } ? p
+                     : col.Header is TextBlock { Tag: string tagged } ? tagged : nameof(ResultTableRow.Result);
             var view = System.Windows.Data.CollectionViewSource.GetDefaultView(Rows.ItemsSource);
             if (view is null) return;
             var dir = view.SortDescriptions.FirstOrDefault() is { } d && d.PropertyName == path && d.Direction == System.ComponentModel.ListSortDirection.Ascending
