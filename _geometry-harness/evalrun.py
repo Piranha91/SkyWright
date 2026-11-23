@@ -8,8 +8,8 @@ rules, and `runcontrol verify-bundle`, which recomputes every hash from the bund
 until it is ported: `enrich`, which adds evidence derived after measurement to a bundle (record rows, names, the reversed
 order's record view, an order sweep's geometry); it checks the bundle with `runcontrol verify-bundle` before and after it
 writes (HOUSECARL_RUNCONTROL, else this checkout's build).
-`configuration_fingerprint` is the one Python spelling of the configuration identity (the text of
-`_shared/Configuration.cs`'s ConfigurationIdentity.Compute) for the Python tools that need it.
+`configuration_fingerprint` gives the Python tools that need the configuration identity its owner's answer: it asks
+`runcontrol fingerprint` (`_shared/Configuration.cs`'s ConfigurationIdentity.Compute); no Python spells the rule.
 `standards/HOUSECARL_EVALUATION_BUNDLE.md` is the contract.
 
 Exit codes: 0 ok; 2 usage or a refused input; 3 the bundle no longer verifies after enrich wrote.
@@ -50,29 +50,42 @@ def sha256_file(p: Path) -> str | None:
         return None
 
 
-#: The configuration schema the fingerprint text is keyed on (`ConfigurationIdentity.CurrentSchema`).
-CONFIG_SCHEMA = 1
+def configuration_fingerprints(configs: list[dict]) -> list[str]:
+    """The fingerprint of each configuration ({plugins, providers, overlays, population, state, schemaVersion}), from
+    the rule's one owner, `runcontrol fingerprint` (ConfigurationIdentity.Compute), in one child for the whole list.
+    Raises RuntimeError with one sentence when the controller cannot be started or refuses a configuration."""
+    import evalpipeline
+    try:
+        exe = evalpipeline.runcontrol_exe(None)
+    except evalpipeline.Refusal as ex:
+        raise RuntimeError(f"the configuration fingerprint could not be computed: {ex}") from None
+    try:
+        r = subprocess.run([str(exe), "fingerprint"], input=json.dumps(configs), capture_output=True, text=True,
+                           encoding="utf-8", timeout=120)
+    except (OSError, subprocess.SubprocessError) as ex:
+        raise RuntimeError(f"the configuration fingerprint could not be computed: runcontrol fingerprint could not run "
+                           f"({ex}); rebuild runcontrol and try again.") from None
+    try:
+        got = json.loads(r.stdout) if r.returncode == EXIT_OK else None
+    except ValueError:
+        got = None
+    if not (isinstance(got, list) and len(got) == len(configs) and all(isinstance(g, str) for g in got)):
+        why = (r.stderr or r.stdout or "").strip().splitlines()
+        raise RuntimeError("the configuration fingerprint could not be computed: "
+                           + (why[-1].removeprefix("REFUSED: ") if why else f"runcontrol fingerprint exited {r.returncode} with no answer"))
+    return got
 
 
 def configuration_fingerprint(plugins, providers, overlays, population, state, schema=None) -> str:
-    """`ConfigurationIdentity.Compute`'s canonical text, line for line.
-
-    The one fingerprint rule lives in `_geometry-harness/_shared/Configuration.cs`
-    (`ConfigurationIdentity.Compute`); this function is its only Python spelling in this controller, so
-    a second convention cannot be invented here. The text is: `schema:<n>`, `population:<p>`,
-    `state:<s>`, then one `plugin:<lowercase name>:<sha256>` per plugin IN ORDER, one
-    `provider:<kind>:<lowercase name>` per provider, one `overlay:<kind>:<sha256>` per overlay; every
-    line newline-terminated; the digest is sha256 hex, lower case. Paths are NOT in the text — names
-    and content hashes are."""
-    sb = [f"schema:{CONFIG_SCHEMA if schema is None else schema}\n",
-          f"population:{population}\n", f"state:{state}\n"]
-    for p in plugins or []:
-        sb.append(f"plugin:{str(p.get('name') or '').lower()}:{p.get('sha256') or ''}\n")
-    for v in providers or []:
-        sb.append(f"provider:{v.get('kind') or ''}:{str(v.get('name') or '').lower()}\n")
-    for o in overlays or []:
-        sb.append(f"overlay:{o.get('kind') or ''}:{o.get('sha256') or ''}\n")
-    return hashlib.sha256("".join(sb).encode("utf-8")).hexdigest()
+    """One configuration's fingerprint, from its owner (`configuration_fingerprints`). `schema` None is the owner's
+    current schema; another schema is refused by the owner, never hashed under a rule it does not have."""
+    cfg = {"plugins": [{"name": p.get("name"), "sha256": p.get("sha256")} for p in plugins or []],
+           "providers": [{"kind": v.get("kind"), "name": v.get("name")} for v in providers or []],
+           "overlays": [{"kind": o.get("kind"), "sha256": o.get("sha256")} for o in overlays or []],
+           "population": population, "state": state}
+    if schema is not None:
+        cfg["schemaVersion"] = schema
+    return configuration_fingerprints([cfg])[0]
 
 
 def load_json(p: Path):

@@ -39,6 +39,27 @@ public static class BundleMedia
         return ConfigurationIdentity.Compute("", plugins, providers, overlays, population, state).Fingerprint;
     }
 
+    /// <summary>`runcontrol fingerprint`: the fingerprint of each configuration in a JSON list, by the owner's rule, for
+    /// the Python that stays and must not hold its own copy of it. A configuration names its population and state as
+    /// text; a schemaVersion other than the owner's, or none of these shapes, is refused in one sentence.</summary>
+    public static List<object?> Fingerprints(object? doc)
+    {
+        if (doc is not List<object?> list)
+            throw new Refusal("fingerprint reads a JSON list of configurations on standard input; give it a list, even of one.");
+        var found = new List<object?>();
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (list[i] is not PyDict cfg)
+                throw new Refusal($"fingerprint: configuration {i} is not a JSON object; give plugins, providers, overlays, population and state.");
+            if (cfg.Get("population") is not string population || cfg.Get("state") is not string state)
+                throw new Refusal($"fingerprint: configuration {i} names no population or state as text; give both, as the run recorded them.");
+            found.Add(Fingerprint(cfg, population, state) ?? throw new Refusal(
+                $"fingerprint: configuration {i} has schemaVersion {PyText.Repr(cfg.Get("schemaVersion"))}, and the owner computes only "
+                + $"schema {ConfigurationIdentity.CurrentSchema}; it was written by another build, so measure it again with this one."));
+        }
+        return found;
+    }
+
     /// <summary>The configurations a picture rendered in a world state may carry: the arm's own accepted
     /// configurations, with the population as recorded and as the renderer reads it (a scoped population's base),
     /// and only the state line set to that state; none for a state this run's state checks did not measure.</summary>

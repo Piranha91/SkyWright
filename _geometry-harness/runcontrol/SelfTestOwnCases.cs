@@ -14,6 +14,30 @@ public static partial class SelfTestFinalize
     public static void RunOwnCases(Action<string, Func<string?>> @case)
     {
         Case = @case;
+        Case("fingerprint: the command answers each configuration by the owner's text, and refuses another schema or a missing state", () =>
+        {
+            var cfg = new PyDict
+            {
+                ["plugins"] = new List<object?> { new PyDict { ["name"] = "Skyrim.ESM", ["sha256"] = "ab" }, new PyDict { ["name"] = "Beta.esp", ["sha256"] = null } },
+                ["providers"] = new List<object?> { new PyDict { ["kind"] = "mod", ["name"] = "Beta Shrine" } },
+                ["overlays"] = new List<object?> { new PyDict { ["kind"] = "bos", ["sha256"] = "cd" } },
+                ["population"] = "load-time", ["state"] = "baseline", ["schemaVersion"] = 1L,
+            };
+            string want = Hashing.Sha256Text("schema:1\npopulation:load-time\nstate:baseline\nplugin:skyrim.esm:ab\nplugin:beta.esp:\n"
+                                              + "provider:mod:beta shrine\noverlay:bos:cd\n");
+            var got = BundleMedia.Fingerprints(new List<object?> { cfg });
+            if (got.Count != 1 || got[0] as string != want) return $"fingerprint gave {PyText.Repr(got)}; the owner's text hashes to {want}";
+            foreach (var (bad, why) in new (PyDict, string)[]
+            {
+                (new PyDict { ["population"] = "load-time", ["state"] = "baseline", ["schemaVersion"] = 2L }, "schemaVersion 2"),
+                (new PyDict { ["population"] = "load-time" }, "no population or state"),
+            })
+            {
+                try { BundleMedia.Fingerprints(new List<object?> { bad }); return $"a configuration with {why} was fingerprinted, not refused"; }
+                catch (Refusal r) when (r.Message.Contains(why)) { }
+            }
+            return null;
+        });
         Case("advice: the --with list is every other instance mod folder the configuration loads a plugin from, by its meta.ini id", () =>
         {
             using var t = new Temp();

@@ -94,8 +94,8 @@ def _load_points():
     return mod
 
 
-# The configuration fingerprint has ONE Python spelling, evalrun's `configuration_fingerprint` (the text of
-# `_shared/Configuration.cs`'s ConfigurationIdentity.Compute). Loaded the same way as the planner, for the same reason.
+# The configuration fingerprint has one owner, `_shared/Configuration.cs`'s ConfigurationIdentity.Compute; evalrun's
+# `configuration_fingerprint` asks it (`runcontrol fingerprint`). Loaded the same way as the planner, for the same reason.
 EVALRUN = HERE / "evalrun.py"
 
 

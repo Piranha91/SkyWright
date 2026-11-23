@@ -20,6 +20,9 @@ using RunControl;
 //        runcontrol --self-test          run every known answer; exit 0 when all pass, 1 otherwise
 //        runcontrol identity FOLDER      print the package identity of a build folder as JSON
 //        runcontrol canon                read JSON on standard input; print the hash of its two canonical forms
+//        runcontrol fingerprint          read a JSON list of configurations on standard input (plugins, providers, overlays,
+//                                        population, state, schemaVersion); print the list of their fingerprints as JSON.
+//                                        The Python that stays (switchflip, capture_acquire, evalrecords) asks this.
 //        runcontrol finalize --run RUN   derive disposition.json and STATUS.md from the ledger and receipts (evalrun finalize)
 //        runcontrol bundle --run RUN [--out DIR] [--reader-cmd CMD] [--reader-env K=V]... [--mod-name PLUGIN=NAME]... [--no-names]
 //                          [--media FILE] [--registry FILE] [--scope FILE] [--search FILE]   assemble one evidence bundle (evalrun bundle)
@@ -58,6 +61,14 @@ try
         object? doc = PyJson.Loads(PyJson.Decode(buffer.ToArray(), bom: true));
         Console.WriteLine($"sha256_json {PyJson.Sha256Json(doc)}");
         Console.WriteLine($"canonical   {Hashing.Sha256Text(PyJson.Canonical(doc))}");
+        return Exit.Ok;
+    }
+    if (args.Length == 1 && command == "fingerprint")
+    {
+        using var stdin = Console.OpenStandardInput();
+        using var buffer = new MemoryStream();
+        stdin.CopyTo(buffer);
+        Console.WriteLine(PyJson.Dumps(BundleMedia.Fingerprints(PyJson.Loads(PyJson.Decode(buffer.ToArray(), bom: true)))));
         return Exit.Ok;
     }
     if (command == "plan") return Plan.Run(PlanFlags(args));
