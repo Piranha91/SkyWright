@@ -18,7 +18,7 @@ the same run, parsed here, so the file is checked against what the probe already
     1442  control: without --rows the probe writes no rows file and lists the same 5 rows.
 
 Each test names the wrong answer it rejects. The probe comes from this checkout's Release build unless HC_RC_HARNESS names
-another harness folder.
+another build folder.
 """
 
 import json
@@ -33,7 +33,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
-PROBES = Path(os.environ.get("HC_RC_HARNESS") or HARNESS)
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
+PROBES = Path(os.environ.get("HC_RC_HARNESS") or buildlayout.root())
 FAILURES, PASSED = [], []
 LISTING = "---- Blocked / LikelyBlocked / NoLine / Unjudgeable references (route-cut) ----"
 ROW = re.compile(r"^\s+(Blocked|LikelyBlocked|NoLine|Unjudgeable)\s+was \S+\s+touched\s+\d+ passage\s+(≥?\s*\d+|-)\s.*?\)\s+(\S+)\s+.*?"
@@ -53,7 +55,7 @@ def check(name, fn):
 
 
 def exe(probe):
-    return PROBES / probe / "bin" / "Release" / "net9.0" / (probe + ".exe")
+    return buildlayout.program_under(PROBES, probe)
 
 
 def run(argv, env=None):

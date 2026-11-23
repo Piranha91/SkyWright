@@ -32,13 +32,15 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
 TOOLS = HARNESS / "viewprobe" / "tools"
 sys.path.insert(0, str(TOOLS))
 import shotplan as S  # noqa: E402
 
 FAKE = (sys.executable.replace("\\", "/") + " "
         + str(TOOLS / "fake_viewprobe.py").replace("\\", "/"))
-VP = HARNESS / "viewprobe" / "bin" / "Release" / "net9.0-windows10.0.19041.0" / "viewprobe.exe"
+VP = buildlayout.program("viewprobe")
 FAILS: list[str] = []
 
 

@@ -36,6 +36,7 @@ ROOT = HERE.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(HERE))
 from runlog import Run, Runner  # noqa: E402
+import buildlayout  # noqa: E402  where the build put scopeprobe
 
 ASSET_CLASSES = {"meshes": "mesh", "textures": "texture", "scripts": "script", "sound": "sound", "music": "sound",
                  "interface": "interface", "seq": "seq"}
@@ -278,7 +279,7 @@ def run_census(a) -> int:
         plugs = source_plugins(inst, a.profile, game)
         masters = {p: plugin_masters(f) for p, f in plugs.items()}
         timing["headers"] = round(time.perf_counter() - t0, 1)
-        exe = HERE / "scopeprobe" / "bin" / "Release" / "net9.0" / "scopeprobe.exe"
+        exe = buildlayout.program("scopeprobe")
         t0 = time.perf_counter()
         for i in range(0, len(cands), a.batch):
             js = scope_dir / f"batch-{i // a.batch:02d}.json"

@@ -2,8 +2,8 @@
 
     python _geometry-harness/tests/test_discovery_probes.py [--installed [HARNESS_DIR]]
 
---installed runs the same cases against the copies evalrun runs (HARNESS_DIR/<probe>/bin/Release/net9.0, default this
-checkout's harness) instead of a fresh build: the deploy smoke, and the check that would have caught a stale deployed
+--installed runs the same cases against the copies evalrun runs (the probes of the build folder HARNESS_DIR, default
+this checkout's build) instead of a fresh build: the deploy smoke, and the check that would have caught a stale deployed
 fomodprobe that ignored --json and exited 0 with no hit list. fomodprobe must also refuse an argument it does not know.
 
 Builds the three probes from this checkout into a temporary folder (never an older binary), writes a tiny scratch
@@ -33,6 +33,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
 PROBES = ("patchprobe", "poolprobe", "fomodprobe")
 FAILURES: list[str] = []
 
@@ -231,10 +233,11 @@ def inside(path, root: Path) -> bool:
 
 
 def installed(harness: Path) -> dict[str, Path]:
-    """The copies evalrun runs (`<harness>/<probe>/bin/Release/net9.0/<probe>.exe`), not a fresh build: a deploy check."""
+    """The copies evalrun runs (each probe where the build folder `harness`'s marker puts it), not a fresh build: a
+    deploy check."""
     exes = {}
     for p in PROBES:
-        exe = harness / p / "bin" / "Release" / "net9.0" / (f"{p}.exe" if os.name == "nt" else p)
+        exe = buildlayout.program_under(harness, p)
         if not exe.exists():
             raise SystemExit(f"  FAIL  no installed {p} at {exe}")
         dll = exe.with_suffix(".dll")
@@ -409,7 +412,7 @@ def main() -> int:
     try:
         if "--installed" in sys.argv:
             i = sys.argv.index("--installed")
-            exes = installed(Path(sys.argv[i + 1]) if len(sys.argv) > i + 1 else HARNESS)
+            exes = installed(Path(sys.argv[i + 1]) if len(sys.argv) > i + 1 else buildlayout.root())
         else:
             exes = build(tmp)
         m = machine(tmp / "machine", sz)

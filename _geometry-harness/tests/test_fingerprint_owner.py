@@ -12,7 +12,7 @@ that stays (switchflip, capture_acquire, evalrecords) asks it through `evalrun.c
     C2242  no harness module spells the fingerprint text itself (`plugin:` / `provider:` / `overlay:` lines beside
            `schema:`), so a second owner cannot come back unnoticed
 
-The controller is HOUSECARL_RUNCONTROL, else the harness's own build (`runcontrol/bin/Release/net9.0`). Exit 0: every
+The controller is HOUSECARL_RUNCONTROL, else this checkout's build (`buildlayout.runcontrol()`). Exit 0: every
 case passed; 1: a case failed.
 """
 from __future__ import annotations

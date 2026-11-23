@@ -18,7 +18,7 @@ Checked: the load-order check completes on both arms; object overlap and placeme
 selected folder's mesh wins for a placed reference and differs (FOLD-REVIEW finding 1), whatever the plugin; the rows
 PpMeshMod's mesh alone creates name the folder; the scope line is built from the mesh reach, never from a folder listing
 (finding 3). Each test names the wrong answer it rejects. The controller and the probes come from this checkout's
-Release builds unless HC_ASSET_HARNESS names another harness folder (the red run points it at a build of the base).
+Release builds unless HC_ASSET_HARNESS names another build folder (the red run points it at a build of the base).
 """
 
 import json
@@ -32,7 +32,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
-BUILDS = Path(os.environ.get("HC_ASSET_HARNESS") or HARNESS)
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
+BUILDS = Path(os.environ.get("HC_ASSET_HARNESS") or buildlayout.root())
 FAILURES, PASSED = [], []
 
 ORDER = ["Skyrim.esm", "PpBase.esm", "PpA.esp", "PpB.esp", "PpMover.esp", "PpDelta.esp"]
@@ -82,7 +84,7 @@ def check(name, fn):
 
 
 def exe(root, probe):
-    return root / probe / "bin" / "Release" / "net9.0" / (probe + ".exe")
+    return buildlayout.program_under(root, probe)
 
 
 class World:
@@ -91,7 +93,7 @@ class World:
     def __init__(self, tmp: Path):
         keep = tmp / "fixture"
         env = dict(os.environ, PD_FIXTURE_KEEP=str(keep), HOUSECARL_RUNLOG_DIR=str(tmp / "runlog"))
-        st = subprocess.run([str(exe(HARNESS, "overlapprobe")), "--self-test"], capture_output=True, text=True,
+        st = subprocess.run([str(exe(buildlayout.root(), "overlapprobe")), "--self-test"], capture_output=True, text=True,
                             encoding="utf-8", errors="replace", timeout=600, env=env)
         self.pp = keep / "pp"
         if not all((self.pp / n).exists() for n in ORDER):

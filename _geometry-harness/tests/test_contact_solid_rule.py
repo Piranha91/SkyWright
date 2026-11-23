@@ -30,7 +30,7 @@ candidate per mesh set.
           pair refused, "none"; policy unchanged.
     1887  --volume, the same two runs: a member read as a solid, the rule; every pair refused, "none"; policy unchanged.
 
-Probes under test come from this checkout's Release builds unless HC_CS_HARNESS names another harness folder (a base build,
+Probes under test come from this checkout's Release builds unless HC_CS_HARNESS names another build folder (a base build,
 for the red run); the fixture writers (proofprobe, stateprobe) come from HC_CS_FIXTURES, else this checkout.
 """
 
@@ -46,9 +46,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
 CORE = HARNESS.parent / "external" / "houseCARL" / "src" / "housecarl-core"
-PROBES = Path(os.environ.get("HC_CS_HARNESS") or HARNESS)
-FIXTURES = Path(os.environ.get("HC_CS_FIXTURES") or HARNESS)
+PROBES = Path(os.environ.get("HC_CS_HARNESS") or buildlayout.root())
+FIXTURES = Path(os.environ.get("HC_CS_FIXTURES") or buildlayout.root())
 FAILURES, PASSED = [], []
 
 ORDER = ["MlRoom.esm", "MlLights.esp"]
@@ -82,7 +84,7 @@ def check(name, fn):
 
 
 def exe(root, probe):
-    return root / probe / "bin" / "Release" / "net9.0" / (probe + ".exe")
+    return buildlayout.program_under(root, probe)
 
 
 def run(argv, env=None, **kw):

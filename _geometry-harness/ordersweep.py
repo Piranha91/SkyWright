@@ -77,6 +77,7 @@ from runlog import Run, Runner  # noqa: E402
 
 sys.path.insert(0, str(HERE))
 import toolidentity  # noqa: E402
+import buildlayout  # noqa: E402  where a build puts each probe
 
 DEFAULT_PROBES = ["navownprobe", "overlapprobe", "contactprobe"]
 VERDICT_RE = re.compile(r"verdict\s*:\s*(DIFFERENTIAL-[A-Z]+)")
@@ -110,15 +111,16 @@ def sha256_file(p: Path) -> str:
 
 
 def probe_exe(harness: Path, probe: str) -> Path:
-    name = f"{probe}.exe" if os.name == "nt" else probe
-    p = harness / probe / "bin" / "Release" / "net9.0" / name
+    """The probe's exe in the build folder `harness` names (as buildlayout.root() is one), where that build's marker
+    puts it (buildlayout owns the rule)."""
+    p = buildlayout.program_under(harness, probe)
     if not p.exists():
-        sys.exit(f"{probe}: no Release binary at {p} — build it first (dotnet build -c Release)")
+        sys.exit(f"{probe}: not built at {p}; build SkyWright first (scripts/build.ps1) or name its build with --harness.")
     return p
 
 
 def probe_program(harness: Path, probe: str, overrides: dict[str, str]) -> list[str]:
-    """The argv PREFIX that runs one probe (or conflictdiff). Normally the Release binary; a
+    """The argv PREFIX that runs one probe (or conflictdiff). Normally the built program; a
     `--probe-cmd NAME=<argv prefix>` stands a different program in, which is how a fixture runs a
     fake probe against the real driver. Nothing else about this driver changes: an override alters
     WHICH program runs, never how its result is read or classified."""
@@ -144,7 +146,7 @@ PAIR_RESULTS_SUFFIX = ".pair-results.jsonl.gz"
 
 def program_key(harness: Path, probe: str, overrides: dict[str, str]) -> str:
     """What the cache must key a program by: its identity under toolidentity's one rule, the digest evalrun freezes into
-    a plan and binds into receipts. A Release folder is keyed by the files a build puts there, by relative path and hash
+    a plan and binds into receipts. A built program's folder is keyed by the files a build puts there, by relative path and hash
     (every top-level file but debug symbols, and the runtimes/ tree; other subfolders are run-time output, so a run never
     changes its own key). The exe alone is the same launcher for every build of a project, so a deploy that replaces
     only the dlls changes the key. A fixture that stood a program in is keyed by its command text AND the bytes of the
@@ -426,7 +428,8 @@ def main() -> int:
     ap.add_argument("--probes", default=",".join(DEFAULT_PROBES))
     ap.add_argument("--instance"); ap.add_argument("--profile"); ap.add_argument("--game")
     ap.add_argument("--probe-args", default="", help="extra arguments passed to every probe, e.g. --state X")
-    ap.add_argument("--harness", default=str(HERE))
+    ap.add_argument("--harness", default=str(buildlayout.root()),
+                    help="the build folder the probes run from (default: this checkout's build)")
     ap.add_argument("--baseline", help="the baseline CandidateFile (default: the one named *-baseline.json)")
     ap.add_argument("--max-candidates", type=int)
     ap.add_argument("--diff-tolerance", default=None, help="conflictdiff --tolerance (points)")

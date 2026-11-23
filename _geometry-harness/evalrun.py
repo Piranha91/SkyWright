@@ -30,6 +30,7 @@ sys.path.insert(0, str(HERE.parent / "scripts"))
 from runlog import Run  # noqa: E402
 
 sys.path.insert(0, str(HERE))
+import buildlayout  # noqa: E402  where the build put houseCARL's server
 
 # Exit codes, spelled once.
 EXIT_OK = 0
@@ -233,19 +234,25 @@ def verify_quiet(d: Path) -> tuple[int | None, str | None]:
 READER_ENV = "HOUSECARL_RECORD_READER_CMD"
 
 
+def server_exe() -> Path:
+    """houseCARL's server in this checkout's build (buildlayout owns where)."""
+    return buildlayout.server()
+
+
 def default_reader_cmd(explicit: str | None) -> tuple[str | None, str]:
-    """The record reader the names enrichment starts: --reader-cmd, else HOUSECARL_RECORD_READER_CMD, else this
-    checkout's built houseCARL server. Returns (command, where it came from), or (None, one sentence why none)."""
+    """The record reader the names enrichment starts: --reader-cmd, else HOUSECARL_RECORD_READER_CMD, else the
+    houseCARL server in this checkout's build. Returns (command, where it came from), or (None, one sentence why none).
+    "build" is the source runcontrol's names step reports for the same reader (BundleSteps.ReaderSource)."""
     if explicit:
         return explicit, "--reader-cmd"
     env = (os.environ.get(READER_ENV) or "").strip()
     if env:
         return env, READER_ENV
-    exe = HERE.parent / "external" / "houseCARL" / "src" / "housecarl-mcp" / "bin" / "Release" / "net9.0" / exe_name("housecarl-mcp")
+    exe = server_exe()
     if exe.is_file():
-        return f'"{exe}"', "checkout"
-    return None, (f"no record reader was given (--reader-cmd or {READER_ENV}) and this checkout's houseCARL server is "
-                  f"not built at {exe}.")
+        return f'"{exe}"', "build"
+    return None, (f"no record reader was given (--reader-cmd or {READER_ENV}) and this checkout's build has no "
+                  f"houseCARL server at {exe}; build SkyWright (scripts/build.ps1).")
 
 
 def mod_names(pairs) -> dict:

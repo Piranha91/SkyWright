@@ -17,6 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
 import ordersweep as O  # noqa: E402
+import buildlayout  # noqa: E402
 
 FAILURES, PASSED = [], []
 
@@ -34,9 +35,11 @@ def check(name, fn):
 
 
 def harness(root, files):
-    """A harness folder with one probe's Release output: {relative path: bytes}."""
-    exe = "fakeprobe.exe" if os.name == "nt" else "fakeprobe"
-    out = Path(root) / "fakeprobe" / "bin" / "Release" / "net9.0"
+    """A fake build folder (this checkout's marker) with one probe's output where the marker puts it:
+    {relative path: bytes}."""
+    buildlayout.plant_marker(root)
+    exe = buildlayout.program_under(root, "fakeprobe").name
+    out = buildlayout.program_dir_under(root, "fakeprobe")
     out.mkdir(parents=True)
     for rel, data in files.items():
         p = out / rel.replace("{exe}", exe)
@@ -112,7 +115,7 @@ def copied_data_file_changes_key():
 
 
 def override_keeps_its_text_key():
-    # rejects: a --probe-cmd fixture keyed by a Release folder it does not run
+    # rejects: a --probe-cmd fixture keyed by a build folder it does not run
     k = O.program_key(Path("."), "fakeprobe", {"fakeprobe": "python fake.py"})
     assert k.startswith("probe-cmd:"), k
 

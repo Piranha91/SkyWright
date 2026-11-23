@@ -25,7 +25,9 @@ import time
 from pathlib import Path
 
 HARNESS = Path(__file__).resolve().parents[1]
-VP = HARNESS / "viewprobe" / "bin" / "Release" / "net9.0-windows10.0.19041.0" / "viewprobe.exe"
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
+VP = buildlayout.program("viewprobe")
 VP = Path(os.environ.get("VIEWPROBE_EXE", str(VP)))
 
 OK = FAILED = 0

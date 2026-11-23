@@ -28,22 +28,26 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
 FIXT = HERE / "fixtures" / "evalrun"          # tracked: the generator, the fakes, the expectations
 EXPECTED = FIXT / "expected"
 GEN = FIXT / "_generated"                     # generated per run; never tracked (set in main())
 EVALRUN = HARNESS / "evalrun.py"                # enrich and verify-bundle's Python spelling (what stays of evalrun)
-RUNCONTROL = HARNESS / "runcontrol" / "bin" / "Release" / "net9.0" / ("runcontrol.exe" if os.name == "nt" else "runcontrol")
+RUNCONTROL = buildlayout.program("runcontrol")
 # The controller every child-process case starts: the built-in one, runcontrol. EVALRUN_CONTROLLER_CMD names another
 # build of it. `enrich` is not part of it and goes to evalrun.py.
 CONTROLLER = (shlex.split(os.environ["EVALRUN_CONTROLLER_CMD"], posix=False) if os.environ.get("EVALRUN_CONTROLLER_CMD", "").strip()
               else [str(RUNCONTROL)])
 PYTHON_VERBS = {"enrich"}
 # conflictdiff is built from this checkout's source into the run's temp folder once per run (use_conflictdiff), so
-# a stale binary is never tested; HOUSECARL_EVALRUN_TEST_HARNESS names a tree to use as given instead (reproducing
-# an old run). Never a silent skip - a failed build or a missing binary fails the run and says so.
+# a stale binary is never tested; HOUSECARL_EVALRUN_TEST_HARNESS names a build folder to use as given instead
+# (reproducing an old run). Never a silent skip - a failed build or a missing binary fails the run and says so.
+# REAL_HARNESS is the build folder the controller is told the programs sit under (--harness): this checkout's build,
+# or the fake build use_conflictdiff makes, whose marker puts conflictdiff where buildlayout.program_under says.
 DIFF_NAME = "conflictdiff.exe" if os.name == "nt" else "conflictdiff"
-REAL_HARNESS = Path(os.environ.get("HOUSECARL_EVALRUN_TEST_HARNESS", HARNESS))
-DIFF_EXE = REAL_HARNESS / "conflictdiff" / "bin" / "Release" / "net9.0" / DIFF_NAME
+REAL_HARNESS = Path(os.environ.get("HOUSECARL_EVALRUN_TEST_HARNESS") or buildlayout.root())
+DIFF_EXE = buildlayout.program_under(REAL_HARNESS, "conflictdiff")
 DIFF_SOURCE: str | None = None                # set by use_conflictdiff(): where this run's conflictdiff came from
 
 PROBES = ["navownprobe", "overlapprobe", "contactprobe", "bosprobe", "switchprobe", "stateprobe",
@@ -2504,7 +2508,7 @@ def scope_exe_20(tmp: Path) -> tuple[Path, str]:
     name = "scopeprobe.exe" if os.name == "nt" else "scopeprobe"
     explicit = os.environ.get("HOUSECARL_EVALRUN_TEST_HARNESS")
     if explicit:
-        return Path(explicit) / "scopeprobe" / "bin" / "Release" / "net9.0" / name, f"explicit harness {explicit}"
+        return buildlayout.program_under(explicit, "scopeprobe"), f"explicit harness {explicit}"
     csproj = HARNESS / "scopeprobe" / "scopeprobe.csproj"
     build = Path(tmp) / "scopeprobe-build"
     out = build / "out"
@@ -2849,14 +2853,15 @@ def use_conflictdiff(tmp: Path) -> None:
     explicit = os.environ.get("HOUSECARL_EVALRUN_TEST_HARNESS")
     if explicit:
         REAL_HARNESS = Path(explicit)
-        DIFF_EXE = REAL_HARNESS / "conflictdiff" / "bin" / "Release" / "net9.0" / DIFF_NAME
+        DIFF_EXE = buildlayout.program_under(REAL_HARNESS, "conflictdiff")
         DIFF_SOURCE = (f"  conflictdiff source: explicit harness HOUSECARL_EVALRUN_TEST_HARNESS={explicit} "
                        f"(not rebuilt from this checkout's source)")
         return
     csproj = HARNESS / "conflictdiff" / "conflictdiff.csproj"
     build = Path(tmp) / "conflictdiff-build"
-    harness = build / "harness"
-    out = harness / "conflictdiff" / "bin" / "Release" / "net9.0"
+    harness = build / "harness"                  # a fake build folder: this checkout's marker, conflictdiff only
+    buildlayout.plant_marker(harness)
+    out = buildlayout.program_dir_under(harness, "conflictdiff")
     cmd = ["dotnet", "build", str(csproj), "-c", "Release", "--nologo", "--disable-build-servers",
            "--artifacts-path", str(build / "artifacts"), "-o", str(out)]
     try:
@@ -3877,6 +3882,7 @@ def _suite_copy(root: Path) -> Path:
     h = root / "_geometry-harness"
     (h / "tests").mkdir(parents=True)
     shutil.copy2(Path(__file__).resolve(), h / "tests" / "test_evalrun.py")
+    shutil.copy2(HARNESS / "buildlayout.py", h / "buildlayout.py")
     proj, dst = HARNESS / "conflictdiff", h / "conflictdiff"
     dst.mkdir()
     for f in [proj / "conflictdiff.csproj"] + sorted(proj.glob("*.cs")):
@@ -3908,7 +3914,11 @@ def case_46(tmp):
     root = tmp / case
     h = _suite_copy(root / "checkout")
     exe_name = "conflictdiff.exe" if os.name == "nt" else "conflictdiff"
-    planted = h / "conflictdiff" / "bin" / "Release" / "net9.0"
+    # the copy's own build folder (where this checkout's build sits, relative to its root), made a build by a marker,
+    # so the plant is exactly where the copy's buildlayout looks for conflictdiff
+    copy_build = root / "checkout" / buildlayout.root().relative_to(buildlayout.CHECKOUT)
+    buildlayout.plant_marker(copy_build)
+    planted = buildlayout.program_dir_under(copy_build, "conflictdiff")
     planted.mkdir(parents=True)
     for f in (exe_name, "conflictdiff.dll"):
         (planted / f).write_bytes(b"planted stale conflictdiff\n")
@@ -3951,8 +3961,8 @@ def case_46(tmp):
     check(exe is not None and exe[0] != planted / exe_name and exe[1] != plant_sha,
           f"{case}: with no explicit harness the suite does not use the stale conflictdiff on the harness path "
           f"(header names {exe[0] if exe else None})")
-    check(exe is not None and planted not in exe[0].parents and h not in exe[0].parents,
-          f"{case}: the conflictdiff used was built outside the checkout's bin folders ({exe[0] if exe else None})")
+    check(exe is not None and planted not in exe[0].parents and (root / "checkout") not in exe[0].parents,
+          f"{case}: the conflictdiff used was built outside the checkout's build folders ({exe[0] if exe else None})")
     when = None
     if dll:
         try:
@@ -3966,12 +3976,12 @@ def case_46(tmp):
           f"{case}: the header says conflictdiff was built from this checkout's {csproj}")
 
     # 2. An explicit harness is honoured as given (reproducing an old run) and labelled as such.
-    code, out, rows = suite(h)
+    code, out, rows = suite(copy_build)
     exe = rows.get(exe_name)
     check(exe is not None and exe[0] == planted / exe_name and exe[1] == plant_sha,
           f"{case}: an explicit HOUSECARL_EVALRUN_TEST_HARNESS is used as given (header names "
           f"{exe[0] if exe else None})")
-    check(f"conflictdiff source: explicit harness HOUSECARL_EVALRUN_TEST_HARNESS={h}" in out,
+    check(f"conflictdiff source: explicit harness HOUSECARL_EVALRUN_TEST_HARNESS={copy_build}" in out,
           f"{case}: the header labels the explicit harness and says it was not built from this checkout")
 
     # 3. The build fails: one-sentence refusal, no fallback to the plant, no case runs.
@@ -5078,8 +5088,8 @@ def case_565(tmp):
 
 
 def case_566(tmp):
-    """C566: the reader default: --reader-cmd, else HOUSECARL_RECORD_READER_CMD, else this checkout's built server;
-    with none, one sentence naming where the server was looked for."""
+    """C566: the reader default: --reader-cmd, else HOUSECARL_RECORD_READER_CMD, else the server in this checkout's
+    build (source "build", as runcontrol's names step reports it); with none, one sentence naming where it looked."""
     import importlib.util
     case = "case-566-reader-default"
     spec = importlib.util.spec_from_file_location("evalrun_case566", EVALRUN)
@@ -5092,18 +5102,18 @@ def case_566(tmp):
         expect(mod.default_reader_cmd(None), ("from-env", "HOUSECARL_RECORD_READER_CMD"),
                f"{case}: the variable is next", "C566")
         os.environ.pop("HOUSECARL_RECORD_READER_CMD")
-        fake_root = tmp / f"{case}-checkout"
-        mod.HERE = fake_root / "_geometry-harness"
+        fake_build = tmp / f"{case}-build"           # a fake build folder; its marker names where the server goes
+        buildlayout.plant_marker(fake_build)
+        exe = buildlayout.piece_under(fake_build, "server")
+        mod.server_exe = lambda: exe
         cmd, why = mod.default_reader_cmd(None)
-        exe = (fake_root / "external" / "houseCARL" / "src" / "housecarl-mcp" / "bin" / "Release" / "net9.0"
-               / mod.exe_name("housecarl-mcp"))
         check(cmd is None and str(exe) in why and why.endswith("."),
               f"{case}: with no server built, one sentence naming where it was looked for ({cmd!r}, {why!r})")
         exe.parent.mkdir(parents=True, exist_ok=True)
         exe.write_bytes(b"")
         cmd, why = mod.default_reader_cmd(None)
-        check(cmd is not None and str(exe) in cmd and why == "checkout",
-              f"{case}: the checkout's built server is the default ({cmd!r}, {why!r})")
+        check(cmd is not None and str(exe) in cmd and why == "build",
+              f"{case}: the build's server is the default ({cmd!r}, {why!r})")
     finally:
         if saved is None:
             os.environ.pop("HOUSECARL_RECORD_READER_CMD", None)

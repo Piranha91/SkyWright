@@ -25,6 +25,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
 REPO = HARNESS.parent
 EVALRUN = HARNESS / "evalrun.py"
 from test_evalrun import CONTROLLER  # noqa: E402  (the built-in controller, runcontrol, as test_evalrun starts it)
@@ -108,7 +110,7 @@ def plan(root: Path, *, with_instance=True):
         shutil.rmtree(out)
     inst, game = root / "instance", root / "game"
     args = [*CONTROLLER, "plan", "--registry", str(REGISTRY), "--scope", str(root / "scope.json"),
-            "--candidates", str(root / "candidates"), "--out", str(out), "--harness", str(HARNESS),
+            "--candidates", str(root / "candidates"), "--out", str(out), "--harness", str(buildlayout.root()),
             "--depth", "standard"]
     if with_instance:
         args += ["--instance", str(inst), "--game", str(game), "--profile", "P"]

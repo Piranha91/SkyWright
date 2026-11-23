@@ -85,8 +85,11 @@ DEFAULT_SIZE = 512
 SIDE_FOV = 90.0
 POLE_FOV = 92.0
 POLE_PITCH = 89.0
-DEFAULT_VP = os.path.join(VIEWPROBE_DIR, "bin", "Release",
-                          "net9.0-windows10.0.19041.0", "viewprobe.exe")
+# Where the build put viewprobe is buildlayout's rule (the harness folder, appended so nothing here is shadowed).
+if os.path.dirname(VIEWPROBE_DIR) not in sys.path:
+    sys.path.append(os.path.dirname(VIEWPROBE_DIR))
+import buildlayout  # noqa: E402
+DEFAULT_VP = str(buildlayout.program("viewprobe"))
 
 # The planner's own defaults for the surface tolerance, quoted from shotplan's argparse so the
 # survey's band is the SAME band the verification uses. Not tunable here on purpose.

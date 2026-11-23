@@ -29,6 +29,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
 FAILURES, PASSED = [], []
 
 REFUSALS = ("instance-not-explicit", "instance-env-persistent", "game-not-for-this-instance",
@@ -41,7 +43,7 @@ def check(ok: bool, label: str, detail: str = "") -> None:
 
 
 def exe(name: str) -> Path:
-    return HARNESS / name / "bin" / "Release" / "net9.0" / f"{name}.exe"
+    return buildlayout.program(name)
 
 
 def run(probe: str, args: list[str], tmp: Path, env_extra: dict[str, str] | None = None) -> tuple[int, str]:

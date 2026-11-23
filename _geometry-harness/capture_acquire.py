@@ -69,6 +69,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 SHOTPLAN = HERE / "viewprobe" / "tools" / "shotplan.py"
 sys.path.insert(0, str(HERE))
+import buildlayout  # noqa: E402  where the build put viewprobe
 import capture_navmesh as NAVCAM  # noqa: E402  the navmesh comparison's camera (its own file)
 
 EXIT_OK, EXIT_REFUSED = 0, 2
@@ -1732,7 +1733,7 @@ def cmd_acquire(a) -> int:
     return EXIT_OK
 
 
-VIEWPROBE = HERE / "viewprobe" / "bin" / "Release" / "net9.0-windows10.0.19041.0" / "viewprobe.exe"
+VIEWPROBE = buildlayout.program("viewprobe")
 VIEW_LABEL = re.compile(r"^view-label: (.*?) \| rect (\d+),(\d+),(\d+),(\d+)\s*$")
 
 

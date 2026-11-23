@@ -35,12 +35,14 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
 sys.path.insert(0, str(HARNESS))
 sys.path.insert(0, str(HERE))
 os.environ["PYTHONUTF8"] = "1"
 import capture_fixture_lab as LAB  # noqa: E402
 
-PROD_VP = HARNESS / "viewprobe" / "bin" / "Release" / "net9.0-windows10.0.19041.0" / "viewprobe.exe"
+PROD_VP = buildlayout.program("viewprobe")
 
 # Frozen at Gate B (2026-10-31): the top-down acceptance count. A participant must show at least this many of its own
 # marked pixels (--ref-surface colour or --coverage-of mask) in the top-down probe frame, 320 px wide at the request's

@@ -35,7 +35,7 @@ ordersweep's emit readers and evalreport's row identity on it:
           against one whose rows do; two such emits still compare.
 
 Each test names the wrong answer it rejects. Probes come from this checkout's Release builds unless HC_EI_HARNESS names another
-harness folder.
+build folder.
 """
 
 import hashlib
@@ -51,7 +51,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
-PROBES = Path(os.environ.get("HC_EI_HARNESS") or HARNESS)
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
+PROBES = Path(os.environ.get("HC_EI_HARNESS") or buildlayout.root())
 sys.path.insert(0, str(HARNESS))
 sys.path.insert(0, str(HERE))
 FAILURES, PASSED = [], []
@@ -84,7 +86,7 @@ def check(name, fn):
 
 
 def exe(root, probe):
-    return root / probe / "bin" / "Release" / "net9.0" / (probe + ".exe")
+    return buildlayout.program_under(root, probe)
 
 
 def run(argv, **kw):

@@ -10,16 +10,18 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-BIN = HERE.parent / "bin" / "Release"
+sys.path.append(str(HERE.parents[1]))
+import buildlayout  # noqa: E402  where the build put viewprobe
+
+EXE = buildlayout.program("viewprobe")
 
 
 def main():
-    exes = sorted(BIN.rglob("viewprobe.exe")) if BIN.is_dir() else []
-    if not exes:
-        print("FAIL: viewprobe is not built under %s; build the solution first" % BIN)
+    if not EXE.is_file():
+        print("FAIL: viewprobe is not built at %s; build the solution first (scripts/build.ps1)" % EXE)
         return 1
     with tempfile.TemporaryDirectory(prefix="hc-occlusion-rule-") as tmp:
-        r = subprocess.run([str(exes[0]), "--occlusion-rule-selftest", tmp], capture_output=True, text=True,
+        r = subprocess.run([str(EXE), "--occlusion-rule-selftest", tmp], capture_output=True, text=True,
                            encoding="utf-8", errors="replace")
     sys.stdout.write(r.stdout)
     sys.stderr.write(r.stderr)

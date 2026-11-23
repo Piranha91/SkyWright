@@ -32,6 +32,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import shotplan as S
+import buildlayout  # noqa: E402  (shotplan put the harness folder on the path)
 
 FAILS = []
 
@@ -44,12 +45,18 @@ def check(name, cond, detail=""):
     print(("  ok   " if cond else "  FAIL ") + name + (("  " + detail) if detail else ""))
 
 
+def build_of(root):
+    """The fake build folder a fabricated repository's viewprobe source folder `root` is built into."""
+    return os.path.join(os.path.dirname(os.path.dirname(root)), "build")
+
+
 def call_vp_command(vp=None, root=None):
-    """vp_command with its output captured. Returns (cmd, stdout, stderr)."""
+    """vp_command with its output captured. Returns (cmd, stdout, stderr). A fabricated `root` runs from its own
+    fake build (build_of)."""
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         try:
-            cmd = S.vp_command(vp) if root is None else S.vp_command(vp, root=root)
+            cmd = S.vp_command(vp) if root is None else S.vp_command(vp, root=root, build=build_of(root))
         except SystemExit as e:                  # a refusal: no command, its sentence on stderr
             cmd = None
             err.write(str(e.code))
@@ -66,7 +73,9 @@ def write(path, text, when):
 
 def fabricate(base, *, exe=True, newer=None):
     """A repository shaped like this one: the probe, the shared sources, the core library, and
-    optionally a built executable. `newer` names which source is NEWER than the executable."""
+    optionally a built executable in a fake build folder (build_of(root), with this checkout's build
+    marker, so the executable sits where buildlayout says). `newer` names which source is NEWER than
+    the executable."""
     root = os.path.join(base, "_geometry-harness", "viewprobe")
     files = {
         "viewprobe": os.path.join(root, "Program.cs"),
@@ -76,9 +85,9 @@ def fabricate(base, *, exe=True, newer=None):
     for key, path in files.items():
         write(path, "// %s\n" % key, NEW if key == newer else OLD)
     # A stale build output must not be mistaken for a source: it sits under bin/ and is ignored.
-    write(os.path.join(root, "bin", "Release", "net9.0-windows10.0.19041.0", "Generated.cs"),
-          "// build output\n", NEW)
-    exe_path = os.path.join(root, "bin", "Release", "net9.0-windows10.0.19041.0", "viewprobe.exe")
+    write(os.path.join(root, "bin", "Generated.cs"), "// build output\n", NEW)
+    buildlayout.plant_marker(build_of(root))
+    exe_path = str(buildlayout.program_under(build_of(root), "viewprobe"))
     if exe:
         os.makedirs(os.path.dirname(exe_path), exist_ok=True)
         with open(exe_path, "wb") as f:
@@ -109,8 +118,8 @@ def test_built_exe_is_preferred():
 
 
 def test_no_executable_refuses_and_says_so():
-    """`dotnet run -c Release` builds into bin/Release, which is the production viewprobe, so the
-    planner never builds: it refuses and names --vp (2026-10-13 incident)."""
+    """A build rewrites the configuration's one build folder, which a running evaluation may be
+    using, so the planner never builds: it refuses and names --vp (2026-10-13 incident)."""
     with tempfile.TemporaryDirectory() as tmp:
         root, _, _ = fabricate(tmp, exe=False)
         cmd, out, err = call_vp_command(None, root=root)
@@ -174,13 +183,13 @@ def test_resolver_reports_both_halves():
         return
     with tempfile.TemporaryDirectory() as tmp:
         root, exe, _ = fabricate(tmp)
-        got = fn(root)
+        got = fn(root, build_of(root))
         check("resolver returns (path, reason)", isinstance(got, tuple) and len(got) == 2, repr(got))
         if isinstance(got, tuple) and len(got) == 2:
             check("...the path of the built executable", got[0] == exe, repr(got))
     with tempfile.TemporaryDirectory() as tmp:
         root, _, _ = fabricate(tmp, exe=False)
-        got = fn(root)
+        got = fn(root, build_of(root))
         check("resolver returns no path when there is none",
               isinstance(got, tuple) and got[0] is None, repr(got))
         check("...with a reason a caller can print",
@@ -193,8 +202,7 @@ def test_this_checkout_default():
     restore does exactly that, content unchanged) is a real stale executable to this rule, and the
     honest answer is then the fallback, naming that file. After a rebuild the other arm applies.
     """
-    built = os.path.join(S.VIEWPROBE_DIR, "bin", "Release", "net9.0-windows10.0.19041.0",
-                         "viewprobe.exe")
+    built = str(buildlayout.program("viewprobe"))
     if not os.path.isfile(built):
         check("this checkout has a built viewprobe to prefer", False,
               "not built: %s - this case cannot decide anything here" % built)
@@ -227,6 +235,7 @@ def test_cell_is_still_the_first_argument_viewprobe_sees():
     with tempfile.TemporaryDirectory() as tmp:
         root, exe, _ = fabricate(tmp)
         saved, S.VIEWPROBE_DIR = S.VIEWPROBE_DIR, root     # the Runner resolves the default root
+        saved_build, S.VIEWPROBE_BUILD = S.VIEWPROBE_BUILD, build_of(root)     # ...and the default build
         try:
             r = S.Runner("SomeCell", vp=None, out=None, size=320, echo=False)
         except TypeError as e:
@@ -234,6 +243,7 @@ def test_cell_is_still_the_first_argument_viewprobe_sees():
             return
         finally:
             S.VIEWPROBE_DIR = saved
+            S.VIEWPROBE_BUILD = saved_build
         base = r.base
         check("the base command ends where the cell begins",
               base and (base[-1] == "--" or os.path.basename(base[-1]).lower() == "viewprobe.exe"),
@@ -259,7 +269,8 @@ def deployed(base, *, exe=T0, dll=None, core=None, sources=None):
              "core": os.path.join(base, "src", "housecarl-core", "Progress", "RunLog.cs")}
     for key, path in files.items():
         write(path, "// %s\n" % key, (sources or {}).get(key, T0 - 1000))
-    out = os.path.join(root, "bin", "Release", "net9.0-windows10.0.19041.0")
+    buildlayout.plant_marker(build_of(root))
+    out = str(buildlayout.program_dir_under(build_of(root), "viewprobe"))
     os.makedirs(out, exist_ok=True)
     made = {}
     for name, when in (("viewprobe.exe", exe), ("viewprobe.dll", dll), ("housecarl-core.dll", core)):
@@ -281,7 +292,7 @@ def test_c590_dll_only_deploy_is_current():
         cmd, out, err = call_vp_command(None, root=root)
         check("C590 a source newer than the exe but older than the deployed dll is not stale",
               cmd == [made["viewprobe.exe"]], repr(cmd) + " " + repr(err[:200]))
-        got = S.viewprobe_exe(root)
+        got = S.viewprobe_exe(root, build_of(root))
         check("C590 ...and the reason names the file it judged (viewprobe.dll)", "viewprobe.dll" in got[1], repr(got[1]))
 
 

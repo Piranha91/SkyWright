@@ -32,7 +32,7 @@ case that needs point readings.
     1967  lightprobe --list-interiors: no rows; both "none"; identity.policy still LightReach's.
     1968  lightclash folds five arms written with the new identity fields (the reader is not broken by them).
 
-Probes under test come from this checkout's Release builds unless HC_SR_HARNESS names another harness folder (a base build, for the
+Probes under test come from this checkout's Release builds unless HC_SR_HARNESS names another build folder (a base build, for the
 red run); the fixture writers (proofprobe, stateprobe) come from HC_SR_FIXTURES, else this checkout.
 """
 
@@ -48,9 +48,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
 CORE = HARNESS.parent / "external" / "houseCARL" / "src" / "housecarl-core"
-PROBES = Path(os.environ.get("HC_SR_HARNESS") or HARNESS)
-FIXTURES = Path(os.environ.get("HC_SR_FIXTURES") or HARNESS)
+PROBES = Path(os.environ.get("HC_SR_HARNESS") or buildlayout.root())
+FIXTURES = Path(os.environ.get("HC_SR_FIXTURES") or buildlayout.root())
 FAILURES, PASSED = [], []
 
 ORDER = ["MlRoom.esm", "MlLights.esp"]
@@ -82,7 +84,7 @@ def check(name, fn):
 
 
 def exe(root, probe):
-    return root / probe / "bin" / "Release" / "net9.0" / (probe + ".exe")
+    return buildlayout.program_under(root, probe)
 
 
 def run(argv, **kw):

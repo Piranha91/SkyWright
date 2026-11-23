@@ -23,6 +23,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
 REPO = HARNESS.parent
 EVALRUN = HARNESS / "evalrun.py"
 from test_evalrun import CONTROLLER  # noqa: E402  (the built-in controller, runcontrol, as test_evalrun starts it)
@@ -67,7 +69,7 @@ def evalrun(args, env):
 
 def case_455(tmp: Path):
     """blockprobe takes several targets positionally and refuses an argument it does not know (it used to skip it)."""
-    exe = HARNESS / "blockprobe" / "bin" / "Release" / "net9.0" / ("blockprobe.exe" if os.name == "nt" else "blockprobe")
+    exe = buildlayout.program("blockprobe")
     print("\n=== case-455: blockprobe's arguments ===")
     if not exe.exists():
         check(False, f"455: blockprobe is not built at {exe}; build it (dotnet build -c Release). Not a skip.")
@@ -112,7 +114,7 @@ def main() -> int:
         for p in ("scopeprobe", "blockprobe"):
             cmds += ["--probe-cmd", f"{p}={sys.executable} {FIXT / 'fakeprobes' / p}.py"]
         p = evalrun(["plan", "--registry", fx["registry"], "--scope", fx["scope"], "--candidates", fx["cands"],
-                     "--out", run, "--harness", HARNESS, "--depth", "standard"] + cmds, env)
+                     "--out", run, "--harness", buildlayout.root(), "--depth", "standard"] + cmds, env)
         plan = json.loads((run / "plan.json").read_text(encoding="utf-8")) if (run / "plan.json").exists() else {}
 
         print("\n=== case-452: route-cut is planned on every arm ===")

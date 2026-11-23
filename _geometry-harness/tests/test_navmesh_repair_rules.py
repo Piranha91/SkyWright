@@ -93,7 +93,7 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
     2566  self-test: NAVI linked doors: added in place on the winner's entry with the base game's Unknown; a door already linked,
           an unstated navmesh, and a whole interior entry (the write engine's compose gap) are refused by name
 
-Probes come from this checkout's Release builds unless HC_NR_HARNESS names another harness folder; the houseCARL server
+Probes come from this checkout's Release builds unless HC_NR_HARNESS names another build folder; the houseCARL server
 and generator from this checkout's src (HC_NR_SRC another). HC_NR_CASES (e.g. "2463,2483") runs those cases only.
 """
 
@@ -109,7 +109,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
-PROBES = Path(os.environ.get("HC_NR_HARNESS") or HARNESS)
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
+PROBES = Path(os.environ.get("HC_NR_HARNESS") or buildlayout.root())
 SRC = Path(os.environ.get("HC_NR_SRC") or HARNESS.parent / "external" / "houseCARL" / "src")
 sys.path.insert(0, str(HARNESS))
 ONLY = {s.strip() for s in (os.environ.get("HC_NR_CASES") or "").split(",") if s.strip()}
@@ -146,7 +148,7 @@ def check(name, fn):
 
 
 def exe(probe):
-    return PROBES / probe / "bin" / "Release" / "net9.0" / (probe + ".exe")
+    return buildlayout.program_under(PROBES, probe)
 
 
 def run(argv):
@@ -631,7 +633,7 @@ def t2563():
     out = Path(tempfile.mkdtemp(prefix="navedit-masters-"))
     edits = out / "edits.json"
     edits.write_text(json.dumps({"edits": [{"navmesh": N["G4"], "use_version": "Skyrim.esm"}]}), encoding="utf-8")
-    navedit = PROBES / "navedit" / "bin" / "Release" / "net9.0" / "navedit.exe"
+    navedit = buildlayout.program_under(PROBES, "navedit")
     plan = run([navedit, "plan", "--edits", edits, "--out", out / "plan.json", "--instance", L.inst, "--game", L.game, "--profile", "P"])
     assert plan.returncode == 0, f"plan exit {plan.returncode}: {(plan.stdout + plan.stderr)[-600:]}"
     row = json.loads((out / "plan.json").read_text(encoding="utf-8"))["edits"][0]
@@ -681,8 +683,10 @@ def flow():
         return L.flow
     f = L.flow = {}
     assert L.plan is not None, f"no repair plan{L.why('plan')}"
+    # The rulebook generator is houseCARL's own project, built in the pin by houseCARL's layout (scripts/build.ps1 makes
+    # it), not a piece of SkyWright's build; the server is SkyWright's build's (buildlayout).
     gen = SRC / "housecarl-generator" / "bin" / "Release" / "net9.0" / "housecarl-generator.exe"
-    mcp = SRC / "housecarl-mcp" / "bin" / "Release" / "net9.0" / "housecarl-mcp.exe"
+    mcp = buildlayout.server()
     corpus = L.tmp / "corpus" / "gen" / "corpus.json"
     g = run([gen, L.tmp / "corpus" / "gen", L.tmp / "corpus" / "ref"])
     if not corpus.exists():
@@ -839,7 +843,7 @@ class MoverLab:
         self.tmp, self.plan_path = tmp, tmp / "plan.json"
         self.log = run([exe("navownprobe"), "--instance", inst, "--game", game, "--profile", "P", "--emit", tmp / "emit.json", "--repair-plan", self.plan_path])
         self.plan = json.loads(self.plan_path.read_text(encoding="utf-8")) if self.log.returncode == 0 and self.plan_path.exists() else None
-        navedit = PROBES / "navedit" / "bin" / "Release" / "net9.0" / "navedit.exe"
+        navedit = buildlayout.program_under(PROBES, "navedit")
         self.navedit = navedit
         self.out = tmp / "patch" / "MoverFix.esp"
         self.write = run([navedit, "write", "--repair-plan", self.plan_path, "--out", self.out]) if self.plan else None
@@ -966,7 +970,7 @@ def navedit_mover():
     if _NAVEDIT_MOVER is None:
         tmp = Path(tempfile.mkdtemp(prefix="navmesh-repair-navedit-mover-"))
         inst, game = _mover_instance(tmp, ["doors", "neighbour"])
-        navedit = PROBES / "navedit" / "bin" / "Release" / "net9.0" / "navedit.exe"
+        navedit = buildlayout.program_under(PROBES, "navedit")
         (tmp / "edits.json").write_text(json.dumps({"edits": [{"navmesh": GM, "use_version": "Mover.esp"}]}), encoding="utf-8")
         plan = run([navedit, "plan", "--edits", tmp / "edits.json", "--out", tmp / "plan.json", "--instance", inst, "--game", game, "--profile", "P"])
         out = tmp / "patch" / "Carried.esp"

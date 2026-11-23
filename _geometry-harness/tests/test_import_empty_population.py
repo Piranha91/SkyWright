@@ -44,6 +44,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
 REPO = HARNESS.parent
 EVALRUN = HARNESS / "evalrun.py"
 from test_evalrun import CONTROLLER  # noqa: E402  (the built-in controller, runcontrol, as test_evalrun starts it)
@@ -152,7 +154,7 @@ def main() -> int:
             env.pop(k, None)
         run = tmp / "run"
         p = evalrun(["plan", "--registry", fx["registry"], "--scope", fx["scope"], "--candidates", fx["cands"],
-                     "--out", run, "--harness", HARNESS, "--depth", "standard",
+                     "--out", run, "--harness", buildlayout.root(), "--depth", "standard",
                      "--probe-cmd", f"scopeprobe={sys.executable} {FIXT / 'fakeprobes' / 'scopeprobe'}.py"], env)
         plan = json.loads((run / "plan.json").read_text(encoding="utf-8")) if (run / "plan.json").exists() else {}
         arms = {a["armId"]: a for a in plan.get("arms") or []}

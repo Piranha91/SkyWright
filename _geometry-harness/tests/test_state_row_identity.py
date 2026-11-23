@@ -32,7 +32,7 @@ ordersweep's emit reader on it:
     1381  control: a row no other row shares (the C1 floor row) is written exactly as it is today.
 
 Each test names the wrong answer it rejects. Probes come from this checkout's Release builds unless HC_RI_HARNESS names another
-harness folder.
+build folder.
 """
 
 import json
@@ -47,7 +47,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
-PROBES = Path(os.environ.get("HC_RI_HARNESS") or HARNESS)
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
+PROBES = Path(os.environ.get("HC_RI_HARNESS") or buildlayout.root())
 sys.path.insert(0, str(HARNESS))
 FAILURES, PASSED = [], []
 
@@ -79,7 +81,7 @@ def check(name, fn):
 
 
 def exe(root, probe):
-    return root / probe / "bin" / "Release" / "net9.0" / (probe + ".exe")
+    return buildlayout.program_under(root, probe)
 
 
 def run(argv, **kw):

@@ -36,8 +36,10 @@ except ImportError:  # the file still runs standalone; see the __main__ block be
     pytest = None
 
 HARNESS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
 # HOUSECARL_TEST_OVERLAPPROBE runs the cases against another build (a baseline or a sabotage arm).
-EXE = os.environ.get("HOUSECARL_TEST_OVERLAPPROBE") or os.path.join(HARNESS, "overlapprobe", "bin", "Release", "net9.0", "overlapprobe.exe")
+EXE = os.environ.get("HOUSECARL_TEST_OVERLAPPROBE") or str(buildlayout.program("overlapprobe"))
 CANDIDATE = os.environ.get("HOUSECARL_TEST_CANDIDATE")
 
 SKIP_REASON = ("needs a built overlapprobe and HOUSECARL_TEST_CANDIDATE pointing at a real "

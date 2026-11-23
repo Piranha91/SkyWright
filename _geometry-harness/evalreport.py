@@ -47,6 +47,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 from runlog import Run  # noqa: E402
 sys.path.insert(0, str(HERE))
+import buildlayout  # noqa: E402  where the build put houseCARL's server
 import evalsettings  # noqa: E402
 import recordrows  # noqa: E402
 import refscan  # noqa: E402
@@ -11584,7 +11585,7 @@ def resolve_mod_names(bundle: Path, siblings, a, out: Path) -> tuple[dict, dict]
     nexus_mode = getattr(a, "nexus_names", None) or "offline"
     reader_ = getattr(a, "nexus_reader_cmd", None) or os.environ.get("HOUSECARL_RECORD_READER_CMD") or None
     if nexus_mode == "fetch" and not reader_:
-        exe_ = HERE.parent / "external" / "houseCARL" / "src" / "housecarl-mcp" / "bin" / "Release" / "net9.0" / ("housecarl-mcp.exe" if os.name == "nt" else "housecarl-mcp")
+        exe_ = buildlayout.server()
         reader_ = f'"{exe_}"' if exe_.is_file() else None
     mod_names, names_doc = modnames.resolve([b.plan] + [x.plan for x in sbs],
                                             ((b.scope or {}).get("targets") or [])

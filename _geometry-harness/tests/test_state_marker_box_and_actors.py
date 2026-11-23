@@ -30,7 +30,7 @@ Placed actors a state brings in ("changed placed actors"; no actor is ever a row
     1747  guard: no row names an actor in any state, the creature's included.
 
 HC_SL_DUMP=DIR keeps every emit and log. Probes come from this checkout's Release builds unless HC_SL_HARNESS names another
-harness folder. Each test names the wrong answer it rejects.
+build folder. Each test names the wrong answer it rejects.
 """
 
 import hashlib
@@ -45,7 +45,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
-PROBES = Path(os.environ.get("HC_SL_HARNESS") or HARNESS)
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
+PROBES = Path(os.environ.get("HC_SL_HARNESS") or buildlayout.root())
 FAILURES, PASSED = [], []
 
 ORDER = ["MxRoom.esm", "MxObjects.esp"]
@@ -73,7 +75,7 @@ def check(name, fn):
 
 
 def exe(root, probe):
-    return root / probe / "bin" / "Release" / "net9.0" / (probe + ".exe")
+    return buildlayout.program_under(root, probe)
 
 
 def run(argv, **kw):

@@ -48,6 +48,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
 FAILURES: list[str] = []
 PASSED: list[str] = []
 ENABLE_SENTENCE = "CANNOT ENABLE - 'Ghost.esp' has no load-order position: loadorder.txt does not list it"
@@ -60,9 +62,8 @@ def check(ok: bool, label: str, detail: str = "") -> None:
 
 
 def exe(name: str) -> Path:
-    """The Release exe under any net9.0 target folder (viewprobe targets net9.0-windows...)."""
-    hits = sorted((HARNESS / name / "bin" / "Release").glob(f"net9.0*/{name}.exe"))
-    return hits[0] if hits else HARNESS / name / "bin" / "Release" / "net9.0" / f"{name}.exe"
+    """The program in this checkout's build (buildlayout)."""
+    return buildlayout.program(name)
 
 
 def plugin(path: Path, masters: list[str], esm: bool = False) -> None:

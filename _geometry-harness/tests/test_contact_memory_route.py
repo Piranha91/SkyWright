@@ -18,7 +18,7 @@ On PopulationFixture laid out as an MO2 instance (test_contact_reverse.py's Lab,
   CR-20  out of memory before the route is decided (HC_CONTACT_FAULT=oom-before-route; on the large order a 4 GiB heap limit did
          this at 37 s with a bare "Out of memory." and exit e0434352): exit 2, one sentence, no stack trace, no emit or rows.
 Each case names the wrong answer it rejects. The probe comes from this checkout's Release build unless HC_REVERSE_HARNESS names
-another harness folder.
+another build folder.
 """
 import json
 import os

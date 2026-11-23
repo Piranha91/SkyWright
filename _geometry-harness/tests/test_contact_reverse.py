@@ -17,7 +17,7 @@ test_reverse_reconcile.py does), with the REAL contactprobe, whole-order and wit
   - the same for the --terrain and --empty-space emits (task 2026-10-21-contactprobe-terrain-empty-space-policy): each records
     its own policy, a run under one changed option records another, and either mode's emit is refused against the sweep's.
 Each test names the wrong answer it rejects. Probes come from this checkout's Release build unless HC_REVERSE_HARNESS names
-another harness folder (the sabotage run points it at a build whose refusal checks are short-circuited).
+another build folder (the sabotage run points it at a build whose refusal checks are short-circuited).
 """
 
 import json
@@ -31,7 +31,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
-PROBES = Path(os.environ.get("HC_REVERSE_HARNESS") or HARNESS)
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
+PROBES = Path(os.environ.get("HC_REVERSE_HARNESS") or buildlayout.root())
 FAILURES, PASSED = [], []
 ORDER = ["PpBase.esm", "PpA.esp", "PpB.esp", "PpMover.esp", "PpDelta.esp"]
 PRE_LOOP_LINES = ["plugins", "moved hosts", "dependent snaps hashed", "winner-arm physical refs"]
@@ -50,7 +52,7 @@ def check(name, fn):
 
 
 def exe(root, probe):
-    return root / probe / "bin" / "Release" / "net9.0" / (probe + ".exe")
+    return buildlayout.program_under(root, probe)
 
 
 def run(argv, **kw):
@@ -62,7 +64,7 @@ class Lab:
     def __init__(self, tmp: Path):
         self.tmp = tmp
         keep = tmp / "fixture"
-        st = run([exe(HARNESS, "overlapprobe"), "--self-test"], env=dict(os.environ, PD_FIXTURE_KEEP=str(keep)))
+        st = run([exe(buildlayout.root(), "overlapprobe"), "--self-test"], env=dict(os.environ, PD_FIXTURE_KEEP=str(keep)))
         pp = keep / "pp"
         if not all((pp / n).exists() for n in ORDER):
             raise RuntimeError(f"the fixture was not written (overlapprobe --self-test exit {st.returncode}): {st.stdout[-800:]}")

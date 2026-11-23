@@ -34,11 +34,13 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
 sys.path.insert(0, str(HERE))
 os.environ["PYTHONUTF8"] = "1"
 import capture_fixture_lab as LAB  # noqa: E402
 
-PROD_VP = HARNESS / "viewprobe" / "bin" / "Release" / "net9.0-windows10.0.19041.0" / "viewprobe.exe"
+PROD_VP = buildlayout.program("viewprobe")
 CASES = ("C2300", "C2301", "C2306")
 TOP = ["--eye", "0,0,1500", "--look", "0,1,0", "--size", "64", "--msaa", "0", "--nav", "off", "--route-solve"]
 FAILS: list[str] = []

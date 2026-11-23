@@ -1,0 +1,133 @@
+"""Where SkyWright's built programs are, for the Python tools.
+
+A build of the solution writes bin/<Configuration>/<.NET version>/ with SkyWright.exe, Probes/<name>/, Tools/<name>/,
+Data/ and the marker skywright-layout.json. Directory.Build.props owns that layout and writes the marker; the C#
+programs (CheckoutLayout.cs) and this module both read the marker instead of spelling a path.
+
+The configuration is SKYWRIGHT_CONFIG, else Release: the optimized build, which evaluations and timings use. When no
+build of that configuration exists, the paths returned point into a folder named for that fact, so a caller's
+"not built at <path>" message says why.
+"""
+from __future__ import annotations
+
+import json
+import os
+from functools import lru_cache
+from pathlib import Path
+
+CHECKOUT = Path(__file__).resolve().parent.parent
+MARKER = "skywright-layout.json"
+
+
+def configuration(config: str | None = None) -> str:
+    return config or os.environ.get("SKYWRIGHT_CONFIG") or "Release"
+
+
+@lru_cache(maxsize=None)
+def _found(config: str) -> tuple[Path, dict] | None:
+    hits = sorted((CHECKOUT / "bin" / config).glob(f"*/{MARKER}"))
+    if not hits:
+        return None
+    if len(hits) > 1:
+        raise RuntimeError(f"more than one SkyWright {config} build under {CHECKOUT / 'bin' / config} "
+                           f"({', '.join(str(h.parent) for h in hits)}); delete the stale one.")
+    return hits[0].parent, json.loads(hits[0].read_text(encoding="utf-8"))
+
+
+def root(config: str | None = None) -> Path:
+    """The build folder (SkyWright.exe's folder) of a configuration."""
+    cfg = configuration(config)
+    found = _found(cfg)
+    return found[0] if found else CHECKOUT / "bin" / cfg / f"(no {cfg} build: run scripts/build.ps1)"
+
+
+def _spec(config: str | None) -> dict | None:
+    found = _found(configuration(config))
+    return found[1] if found else None
+
+
+def program(name: str, config: str | None = None) -> Path:
+    """A probe's (or conflictdiff's, navedit's) exe; runcontrol and housecarl-mcp are tools and come back as such."""
+    spec = _spec(config)
+    if spec is None:
+        return root(config) / f"{name}.exe"
+    return _place(root(config), spec, name)
+
+
+def _place(base: Path, spec: dict, name: str) -> Path:
+    template = spec["tool"] if name in spec["tools"] else spec["program"]
+    return base / template.replace("{name}", name)
+
+
+def program_dir(name: str, config: str | None = None) -> Path:
+    return program(name, config).parent
+
+
+def marker_of(build_root: Path | str) -> dict | None:
+    """The marker of a given build folder (any folder, not only this checkout's builds), or None without one."""
+    p = Path(build_root) / MARKER
+    return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else None
+
+
+def program_under(build_root: Path | str, name: str) -> Path:
+    """program(name) for a given build folder, by that folder's own marker. A folder without a marker gives a path
+    into a folder named for that fact, so a caller's "not built at <path>" message says why."""
+    base = Path(build_root)
+    spec = marker_of(base)
+    if spec is None:
+        return base / "(no SkyWright build here)" / f"{name}.exe"
+    return _place(base, spec, name)
+
+
+def program_dir_under(build_root: Path | str, name: str) -> Path:
+    return program_under(build_root, name).parent
+
+
+def piece_under(build_root: Path | str, key: str) -> Path:
+    """piece(key) for a given build folder, by that folder's own marker (as program_under)."""
+    base = Path(build_root)
+    spec = marker_of(base)
+    if spec is None:
+        return base / "(no SkyWright build here)" / key
+    return base / spec[key]
+
+
+# The marker a test writes into a fake build folder when no real build exists to copy it from. Directory.Build.props
+# owns the real one; this copy only stands in so tests can plant programs without a build.
+_FALLBACK_MARKER = {
+    "kind": "skywright-build", "app": "SkyWright.exe", "program": "Probes/{name}/{name}.exe",
+    "tool": "Tools/{name}/{name}.exe", "tools": ["runcontrol", "housecarl-mcp"],
+    "server": "Tools/housecarl-mcp/housecarl-mcp.exe", "corpus": "Tools/housecarl-mcp/corpus.json",
+    "registry": "Data/check-registry.json", "severity": "Data/workbench-severity.json",
+    "scenePolicy": "Data/scene-policy.json",
+}
+
+
+def plant_marker(build_root: Path | str, config: str | None = None) -> dict:
+    """Make a folder a fake build (for tests): write this checkout's marker into it (the fallback copy when there is
+    no build) and return it. Programs then go where program_under(build_root, name) says."""
+    spec = _spec(config) or dict(_FALLBACK_MARKER)
+    base = Path(build_root)
+    base.mkdir(parents=True, exist_ok=True)
+    (base / MARKER).write_text(json.dumps(spec), encoding="utf-8")
+    return spec
+
+
+def piece(key: str, config: str | None = None) -> Path:
+    """A named piece: "server", "corpus", "registry", "severity", "scenePolicy", or "app"."""
+    spec = _spec(config)
+    if spec is None:
+        return root(config) / key
+    return root(config) / spec[key]
+
+
+def runcontrol(config: str | None = None) -> Path:
+    return program("runcontrol", config)
+
+
+def server(config: str | None = None) -> Path:
+    return piece("server", config)
+
+
+def app(config: str | None = None) -> Path:
+    return piece("app", config)

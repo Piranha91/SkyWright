@@ -25,11 +25,13 @@ import tempfile
 import unittest
 
 HARNESS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
 sys.path.insert(0, HARNESS)
 import overlap_attribution  # noqa: E402
 
 # HOUSECARL_TEST_OVERLAPPROBE runs the cases against another build (a baseline or a sabotage arm).
-EXE = os.environ.get("HOUSECARL_TEST_OVERLAPPROBE") or os.path.join(HARNESS, "overlapprobe", "bin", "Release", "net9.0", "overlapprobe.exe")
+EXE = os.environ.get("HOUSECARL_TEST_OVERLAPPROBE") or str(buildlayout.program("overlapprobe"))
 KNOWN_ANSWER = os.environ.get("HOUSECARL_TEST_P111_FIXTURE")
 
 BASE = "TestBase.esm"

@@ -27,6 +27,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
 REPO = HARNESS.parent
 EVALRUN = HARNESS / "evalrun.py"
 from test_evalrun import CONTROLLER  # noqa: E402  (the built-in controller, runcontrol, as test_evalrun starts it)
@@ -72,7 +74,7 @@ def setup(tmp: Path) -> dict:
 def plan_args(run: Path) -> list:
     return ["plan", "--registry", Path("inputs") / "registry.json", "--scope", Path("scope") / "scope.json",
             "--candidates", "candidates", "--settings", Path("inputs") / "settings.json", "--out", run,
-            "--harness", HARNESS, "--probe-cmd", f"scopeprobe={sys.executable} {FIXT / 'fakeprobes' / 'scopeprobe'}.py"]
+            "--harness", buildlayout.root(), "--probe-cmd", f"scopeprobe={sys.executable} {FIXT / 'fakeprobes' / 'scopeprobe'}.py"]
 
 
 def stored_paths(plan: dict) -> dict:

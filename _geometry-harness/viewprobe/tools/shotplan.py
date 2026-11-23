@@ -85,7 +85,6 @@ Run `shotplan.py <subcommand> --help` for the flags.
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import math
 import os
@@ -142,6 +141,12 @@ def _run(op, **kw):
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VIEWPROBE_DIR = os.path.dirname(HERE)
+# Where the build put viewprobe is buildlayout's rule (the harness folder, appended so nothing here is shadowed).
+if os.path.dirname(VIEWPROBE_DIR) not in sys.path:
+    sys.path.append(os.path.dirname(VIEWPROBE_DIR))
+import buildlayout  # noqa: E402
+#: the build folder whose viewprobe runs by default; None is this checkout's build of SKYWRIGHT_CONFIG (buildlayout)
+VIEWPROBE_BUILD: str | None = None
 
 # viewprobe's own conventions, restated here because every formula below depends on them:
 #   yaw  degrees, 0 = north (+Y), increasing CLOCKWISE   (Program.cs: atan2(dx, dy))
@@ -791,17 +796,23 @@ def newest_source(root: str, roots: list[str] | None = None) -> tuple[str | None
     return newest, when
 
 
-def viewprobe_exe(root: str | None = None) -> tuple[str | None, str]:
+def _built_viewprobe(build: str | None) -> str:
+    """viewprobe's exe in a build folder (`build`, else VIEWPROBE_BUILD, else this checkout's build): buildlayout's rule."""
+    build = build or VIEWPROBE_BUILD
+    return str(buildlayout.program_under(build, "viewprobe") if build else buildlayout.program("viewprobe"))
+
+
+def viewprobe_exe(root: str | None = None, build: str | None = None) -> tuple[str | None, str]:
     """(path, reason): the built executable to launch, or None and why it is not being used.
 
+    `root` is viewprobe's source folder (the staleness question is asked of it), `build` the build folder the
+    executable is taken from (default: this checkout's build, buildlayout.root()).
     The reason is returned rather than printed so a driver can record it; `vp_command` prints it.
     """
     root = root or VIEWPROBE_DIR
-    built = os.path.join(root, "bin", "Release")
-    found = [p for p in glob.glob(os.path.join(built, "*", "viewprobe.exe")) if os.path.isfile(p)]
-    if not found:
-        return None, "no built viewprobe.exe under %s" % built.replace("\\", "/")
-    exe = max(found, key=lambda p: os.stat(p).st_mtime)
+    exe = _built_viewprobe(build)
+    if not os.path.isfile(exe):
+        return None, "no built viewprobe at %s" % exe.replace("\\", "/")
     # A deploy replaces the managed viewprobe.dll (and housecarl-core.dll) beside the exe and leaves
     # the apphost exe with its first build's time (P75): the build that runs is the newest of them.
     # The renderer's own and shared sources compile into viewprobe.dll; the core library's into
@@ -822,22 +833,25 @@ def viewprobe_exe(root: str | None = None) -> tuple[str | None, str]:
                  "every source in this repository it is built from" % newest(["viewprobe.exe", "viewprobe.dll"])[1])
 
 
-def vp_command(vp: str | None = None, root: str | None = None) -> list[str]:
+def vp_command(vp: str | None = None, root: str | None = None, build: str | None = None) -> list[str]:
     """The command every probe invocation is built on.
 
     An explicit --vp always wins. Otherwise only a current built executable is used. A missing or
-    stale one is refused with its reason, never rebuilt: `dotnet run -c Release` builds into
-    bin/Release, which is the production viewprobe (2026-10-13 incident). The refusal goes to
-    stderr, so a caller parsing stdout (the configuration fingerprint line) sees nothing new.
+    stale one is refused with its reason, never rebuilt: a build of a configuration rewrites that
+    configuration's one build folder at the checkout root (buildlayout.root()), which a running
+    evaluation may be using (the 2026-10-13 incident rebuilt the renderer under a live run). Work
+    in parallel builds in its own git worktree. The refusal goes to stderr, so a caller parsing
+    stdout (the configuration fingerprint line) sees nothing new.
     """
     if vp:
         return shlex.split(vp)
     root = root or VIEWPROBE_DIR
-    exe, why = viewprobe_exe(root)
+    exe, why = viewprobe_exe(root, build)
     if exe:
         return [exe]
-    raise SystemExit("viewprobe: %s, and shotplan will not build it because bin/Release is the "
-                     "production viewprobe; pass --vp with a viewprobe built elsewhere (%s)."
+    raise SystemExit("viewprobe: %s, and shotplan will not build it, because a build rewrites the build folder a "
+                     "running evaluation may be using; build this checkout yourself (scripts/build.ps1) when "
+                     "nothing runs from it, or pass --vp with a viewprobe built in another worktree (%s)."
                      % (why, LIBRARY_NOTE))
 
 
@@ -3680,9 +3694,10 @@ def add_common(p, need_subjects=True):
     p.add_argument("--out", default=None, help="where probe PNGs go")
     p.add_argument("--vp", default=None,
                    help="the viewprobe command. Anything that takes viewprobe's args, e.g. a "
-                        "wrapper script. Default: the built bin/Release viewprobe.exe; shotplan "
+                        "wrapper script. Default: viewprobe.exe in this checkout's build; shotplan "
                         "refuses, with the reason, when there is none or a source in this "
-                        "repository is newer than it, because it never builds the production copy")
+                        "repository is newer than it, because it never rebuilds a build folder "
+                        "an evaluation may be running from")
     p.add_argument("--quiet", action="store_true", help="do not echo each invocation")
     p.add_argument("--no-bind-scene", action="store_true",
                    help="do not ask the renderer for its configuration identity on the "

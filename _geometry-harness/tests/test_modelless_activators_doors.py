@@ -68,7 +68,7 @@ And the rest of "changed references with a box" is named by cause rather than co
 HC_MA_DUMP=DIR keeps every emit and log.
 
 Each test names the wrong answer it rejects. Probes come from this checkout's Release builds unless HC_MA_HARNESS names another
-harness folder.
+build folder.
 """
 
 import json
@@ -82,7 +82,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
-PROBES = Path(os.environ.get("HC_MA_HARNESS") or HARNESS)
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
+PROBES = Path(os.environ.get("HC_MA_HARNESS") or buildlayout.root())
 FAILURES, PASSED = [], []
 
 ORDER = ["MaRoom.esm", "MaObjects.esp", "MaMover.esp"]
@@ -119,7 +121,7 @@ def check(name, fn):
 
 
 def exe(root, probe):
-    return root / probe / "bin" / "Release" / "net9.0" / (probe + ".exe")
+    return buildlayout.program_under(root, probe)
 
 
 def run(argv, **kw):

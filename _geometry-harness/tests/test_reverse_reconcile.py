@@ -15,7 +15,7 @@ test_population_scope.py does), with the REAL overlapprobe, whole-order and with
     reference whose base no candidate uses makes the --reverse-of run measure the full reverse, and its emit equals a plain
     full reverse.
 Each test names the wrong answer it rejects. Probes come from this checkout's Release build unless HC_REVERSE_HARNESS names
-another harness folder (the sabotage run points it at a build whose refusal checks are short-circuited).
+another build folder (the sabotage run points it at a build whose refusal checks are short-circuited).
 """
 
 import json
@@ -29,7 +29,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
-PROBES = Path(os.environ.get("HC_REVERSE_HARNESS") or HARNESS)
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
+PROBES = Path(os.environ.get("HC_REVERSE_HARNESS") or buildlayout.root())
 FAILURES, PASSED = [], []
 ORDER = ["PpBase.esm", "PpA.esp", "PpB.esp", "PpMover.esp", "PpDelta.esp"]
 
@@ -47,7 +49,7 @@ def check(name, fn):
 
 
 def exe(root, probe):
-    return root / probe / "bin" / "Release" / "net9.0" / (probe + ".exe")
+    return buildlayout.program_under(root, probe)
 
 
 def run(argv, **kw):

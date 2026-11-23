@@ -77,7 +77,9 @@ import traceback
 from pathlib import Path
 
 HARNESS = Path(__file__).resolve().parent.parent
-PROBES = Path(os.environ.get("HC_NR_HARNESS") or HARNESS)
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
+PROBES = Path(os.environ.get("HC_NR_HARNESS") or buildlayout.root())
 ONLY = {s.strip() for s in (os.environ.get("HC_NR_CASES") or "").split(",") if s.strip()}
 FAILURES, PASSED = [], []
 SELF = None
@@ -86,7 +88,7 @@ SELF = None
 def selftest(name):
     global SELF
     if SELF is None:
-        exe = PROBES / "navedit" / "bin" / "Release" / "net9.0" / "navedit.exe"
+        exe = buildlayout.program_under(PROBES, "navedit")
         SELF = subprocess.run([str(exe), "--selftest"], capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=600)
     lines = [l for l in SELF.stdout.splitlines() if l.startswith((f"ok {name} ", f"FAIL {name} "))]
@@ -171,7 +173,7 @@ def ms_marker_known_answer():
     (tmp / "m.json").write_text(json.dumps({"worldspace": "00003C:Skyrim.esm", "markers": [
         {"name": "N", "at": [177792.0, -48952.0, 2250.0]}, {"name": "Ni", "at": [177792.0, -48912.0, 2250.0]},
         {"name": "S", "at": [177792.0, -49352.0, 2430.0]}]}), encoding="utf-8")
-    exe = PROBES / "navedit" / "bin" / "Release" / "net9.0" / "navedit.exe"
+    exe = buildlayout.program_under(PROBES, "navedit")
     for profile, south in (("NR2-U", "026F59:MoonAndStar_MAS.esp"), ("NR2-V", "079A5A:Skyrim.esm")):
         out = tmp / f"r-{profile}.json"
         p = subprocess.run([str(exe), "marker", "--markers", str(tmp / "m.json"), "--out", str(out),

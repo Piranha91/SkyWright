@@ -21,7 +21,7 @@ advice is shown to be advice and not decoration. The octree runs on one thread s
           to the machine, not to a pair or a member).
     1885  the same cap, contactprobe with the advice taken (--motion-budget 64): exit 0 and the swept row is measured.
 
-Probes under test come from this checkout's Release builds unless HC_OOM_HARNESS names another harness folder (a base build,
+Probes under test come from this checkout's Release builds unless HC_OOM_HARNESS names another build folder (a base build,
 for the red run); the fixture writers come from HC_CS_FIXTURES, else this checkout. The caps can be overridden for a
 calibration run with HC_OOM_CAP_SWEEP, HC_OOM_CAP_DELTA and HC_OOM_CAP_CONTACT (hexadecimal bytes).
 """
@@ -38,7 +38,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import test_contact_solid_rule as cs  # noqa: E402  (the shared MO2 lab)
 
-PROBES = Path(os.environ.get("HC_OOM_HARNESS") or cs.HARNESS)
+PROBES = Path(os.environ.get("HC_OOM_HARNESS") or cs.buildlayout.root())
 CAP_SWEEP = os.environ.get("HC_OOM_CAP_SWEEP", "0x8000000")      # 128 MiB: the sliding box's volume does not fit
 CAP_DELTA = os.environ.get("HC_OOM_CAP_DELTA", "0x1000000")      # 16 MiB: 200000 held samples do not fit (40000 fit at 32 MiB)
 CAP_CONTACT = os.environ.get("HC_OOM_CAP_CONTACT", "0x4000000")  # 64 MiB: the fixture order loads, 200000 samples do not fit

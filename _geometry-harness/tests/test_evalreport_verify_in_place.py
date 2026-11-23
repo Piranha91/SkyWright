@@ -22,7 +22,7 @@ fixtures go (default: the system temp folder); it needs about 200 MiB.
            `runcontrol verify-bundle`, the pipeline's media check is the same command, evalrun.py has no verify-bundle,
            and no harness module starts the Python verb
 
-The controller is HOUSECARL_RUNCONTROL, else the harness's own build (`runcontrol/bin/Release/net9.0`).
+The controller is HOUSECARL_RUNCONTROL, else this checkout's build (`buildlayout.runcontrol()`).
 
 Each case names the wrong answer it rejects. A crash is a failure, never a skip. Exit 0: every case passed; 1: a case
 failed.

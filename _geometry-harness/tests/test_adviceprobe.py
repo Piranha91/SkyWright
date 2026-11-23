@@ -25,6 +25,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
 FAILURES: list[str] = []
 URL = "https://www.nexusmods.com/skyrimspecialedition/mods/{}"
 
@@ -61,7 +63,7 @@ def build(tmp: Path) -> Path:
 
 
 def installed(harness: Path) -> Path:
-    exe = harness / "adviceprobe" / "bin" / "Release" / "net9.0" / ("adviceprobe.exe" if os.name == "nt" else "adviceprobe")
+    exe = buildlayout.program_under(harness, "adviceprobe")
     if not exe.exists():
         raise SystemExit(f"  FAIL  no installed adviceprobe at {exe}")
     print(f"  adviceprobe: installed {exe}")
@@ -138,7 +140,7 @@ def main() -> int:
     try:
         if "--installed" in sys.argv:
             i = sys.argv.index("--installed")
-            exe = installed(Path(sys.argv[i + 1]) if len(sys.argv) > i + 1 else HARNESS)
+            exe = installed(Path(sys.argv[i + 1]) if len(sys.argv) > i + 1 else buildlayout.root())
         else:
             exe = build(tmp)
         m = machine(tmp / "machine")

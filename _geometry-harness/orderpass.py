@@ -27,12 +27,13 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 sys.path.insert(0, str(HERE))
 from runlog import Runner  # noqa: E402
+import buildlayout  # noqa: E402  where the build put the probes
 
 PROBES = ("ordermap", "overlapprobe", "contactprobe", "switchprobe", "stateprobe", "navownprobe", "seamprobe", "waterprobe", "depprobe", "driftprobe", "blockprobe")
 
 
 def default_resolve(name):
-    return [str(HERE / name / "bin" / "Release" / "net9.0" / f"{name}.exe")]
+    return [str(buildlayout.program(name))]
 
 
 def _present(argv0):

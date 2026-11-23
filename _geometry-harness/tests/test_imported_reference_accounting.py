@@ -42,7 +42,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import test_scene_scope_import as scope_import  # noqa: E402
 
 HARNESS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EXE = os.path.join(HARNESS, "overlapprobe", "bin", "Release", "net9.0", "overlapprobe.exe")
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
+EXE = str(buildlayout.program("overlapprobe"))
 
 # Generic identities. EMITTED is an ordinary measured reference; EXCLUDED stands for a member that
 # IS enumerated but sits outside the selected state (disabled or deleted) -- it has a row, so the

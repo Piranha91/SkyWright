@@ -50,6 +50,7 @@ ROOT = HERE.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(HERE))
 from runlog import Run, Runner  # noqa: E402
+import buildlayout  # noqa: E402  where the build put runcontrol and viewprobe
 
 STAGES = ("census", "prepare", "scope", "plan", "evaluate", "records", "scenes", "bundle", "precedent",
           "report-plan", "capture", "image-observations", "report", "reel", "deliver")
@@ -63,7 +64,6 @@ MEASURING_NON_BLOCKING = frozenset({"scenes"})
 #: the presentation keys each measuring stage reads, as runcontrol declares them (runcontrol/StageLedger.cs,
 #: PresentationReads); a stage's entry hash binds them, so a receipt runcontrol wrote is reused only under the same rule
 MEASURING_READS = {"bundle": ["modNames"]}
-DEFAULT_RUNCONTROL = Path("_geometry-harness/runcontrol/bin/Release/net9.0/runcontrol.exe")
 EXIT_OK, EXIT_REFUSED, EXIT_JUDGEMENT = 0, 2, 3
 MAX_PATH = 240  # leave room under Windows' 260-character limit for the probes' own file names
 
@@ -233,7 +233,6 @@ RENDERER_STAGES = frozenset({"capture"})
 CONTROLLER_STAGES = frozenset({"report-plan", "capture", "report"})
 #: this driver: modules a tool imports may import it, and its code is recorded on every receipt, not bound
 DRIVER = "_geometry-harness/evalpipeline.py"
-DEFAULT_VIEWPROBE_DIR = Path("_geometry-harness/viewprobe/bin/Release/net9.0-windows10.0.19041.0")
 
 
 def _local_imports(path: Path, roots: list[Path]) -> list[Path]:
@@ -289,12 +288,12 @@ def stage_tools(stage: str, machine: dict | None = None, root: Path | None = Non
     if stage in RENDERER_STAGES:
         import toolidentity
         vp = machine.get("viewprobe")
-        folder = Path(vp).parent if vp else root / DEFAULT_VIEWPROBE_DIR
+        folder = Path(vp).parent if vp else buildlayout.program_dir("viewprobe")
         seen["viewprobe"] = toolidentity.package(folder)["digest"]
     if stage in CONTROLLER_STAGES:
         import toolidentity
         rc = machine.get("runcontrol")
-        exe = Path(rc) if rc else root / DEFAULT_RUNCONTROL
+        exe = Path(rc) if rc else buildlayout.runcontrol()
         seen["runcontrol"] = toolidentity.package(exe.parent)["digest"] if exe.is_file() else None
     return dict(sorted(seen.items()))
 
@@ -445,10 +444,10 @@ def runcontrol_exe(machine: dict | None) -> Path:
     """The built-in controller: the machine file's `runcontrol`, else HOUSECARL_RUNCONTROL, else this checkout's build;
     refused when it is absent."""
     named = (machine or {}).get("runcontrol") or (os.environ.get(RUNCONTROL_ENV) or "").strip()
-    exe = Path(named) if named else ROOT / DEFAULT_RUNCONTROL
+    exe = Path(named) if named else buildlayout.runcontrol()
     if not exe.is_file():
-        raise Refusal(f"the built-in controller is not at {fwd(exe)}; build it (dotnet build _geometry-harness/runcontrol -c "
-                      f"Release) or name runcontrol.exe under the key runcontrol in the machine file.")
+        raise Refusal(f"the built-in controller is not at {fwd(exe)}; build it (scripts/build.ps1) or "
+                      f"name runcontrol.exe under the key runcontrol in the machine file.")
     return exe
 
 

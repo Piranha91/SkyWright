@@ -21,11 +21,13 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
 REPO = HARNESS.parent
 EVALRUN = HARNESS / "evalrun.py"
 from test_evalrun import CONTROLLER  # noqa: E402  (the built-in controller, runcontrol, as test_evalrun starts it)
 REGISTRY = REPO / "data" / "check-registry.json"
-EXE = HARNESS / "overlapprobe" / "bin" / "Release" / "net9.0" / ("overlapprobe.exe" if os.name == "nt" else "overlapprobe")
+EXE = buildlayout.program("overlapprobe")
 
 FAILURES: list[str] = []
 
@@ -70,7 +72,7 @@ def candidate(folder: Path, stem: str, mods, base_profile="P", provenance=None) 
     return p
 
 
-def plan(root: Path, cands: Path, *, instance=None, game=None, profile="P", harness=HARNESS, extra=()):
+def plan(root: Path, cands: Path, *, instance=None, game=None, profile="P", harness=buildlayout.root(), extra=()):
     out = root / "run"
     if out.exists():
         shutil.rmtree(out)

@@ -13,7 +13,7 @@ Mesh responsibility (cases M1-M8, K4, K5 of the fixture's table; mesh-responsibi
 creates name the folder; the whole-order runs credit the population's folders (--mesh-folder, so scoped = whole holds), and one
 more whole-order run on the arm with the delta credits every folder (--mesh-folder *).
 Each test names the wrong answer it rejects. Probes come from this checkout's Release builds unless HC_POP_HARNESS names
-another harness folder (the red run points it at a build without --population).
+another build folder (the red run points it at a build without --population).
 """
 
 import json
@@ -27,7 +27,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
-PROBES = Path(os.environ.get("HC_POP_HARNESS") or HARNESS)
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
+PROBES = Path(os.environ.get("HC_POP_HARNESS") or buildlayout.root())
 FAILURES, PASSED = [], []
 
 
@@ -44,7 +46,7 @@ def check(name, fn):
 
 
 def exe(root, probe):
-    return root / probe / "bin" / "Release" / "net9.0" / (probe + ".exe")
+    return buildlayout.program_under(root, probe)
 
 
 def run(argv, **kw):
@@ -143,7 +145,7 @@ class Lab:
     def __init__(self, tmp: Path):
         self.tmp = tmp
         keep = tmp / "fixture"
-        st = run([exe(HARNESS, "overlapprobe"), "--self-test"], env=dict(os.environ, PD_FIXTURE_KEEP=str(keep)))
+        st = run([exe(buildlayout.root(), "overlapprobe"), "--self-test"], env=dict(os.environ, PD_FIXTURE_KEEP=str(keep)))
         pp = keep / "pp"
         if not all((pp / n).exists() for n in ORDER):
             raise RuntimeError(f"the fixture was not written (overlapprobe --self-test exit {st.returncode}): {st.stdout[-800:]}")
@@ -508,7 +510,7 @@ class ScLab:
     def __init__(self, tmp: Path):
         self.tmp = tmp
         keep = tmp / "fixture"
-        st = run([exe(HARNESS, "stateprobe"), "--write-scope-fixture", keep])
+        st = run([exe(buildlayout.root(), "stateprobe"), "--write-scope-fixture", keep])
         sc = keep / "sc"
         if st.returncode != 0 or not all((sc / n).exists() for n in SC_ORDER):
             raise RuntimeError(f"the scope fixture was not written (exit {st.returncode}): {st.stdout[-600:]} {st.stderr[-600:]}")

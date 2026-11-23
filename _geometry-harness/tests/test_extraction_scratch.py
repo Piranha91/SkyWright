@@ -47,7 +47,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
-VP = HARNESS / "viewprobe" / "bin" / "Release" / "net9.0-windows10.0.19041.0" / "viewprobe.exe"
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
+VP = buildlayout.program("viewprobe")
 # A private build may be pointed at instead, which is how this is run against a build under test
 # without touching the production folder another session may be rendering from.
 VP = Path(os.environ.get("VIEWPROBE_EXE", str(VP)))

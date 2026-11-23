@@ -21,7 +21,9 @@ import traceback
 from pathlib import Path
 
 HARNESS = Path(__file__).resolve().parent.parent
-PROBES = Path(os.environ.get("HC_NR_HARNESS") or HARNESS)
+sys.path.append(str(HARNESS))
+import buildlayout  # noqa: E402  where the build put each program
+PROBES = Path(os.environ.get("HC_NR_HARNESS") or buildlayout.root())
 DATA = os.environ.get("HC_NAVGRID_DATA") or ""
 ONLY = {s.strip() for s in (os.environ.get("HC_NR_CASES") or "").split(",") if s.strip()}
 FAILURES, PASSED = [], []
@@ -31,7 +33,7 @@ SELF = None
 def selftest(name):
     global SELF
     if SELF is None:
-        exe = PROBES / "navownprobe" / "bin" / "Release" / "net9.0" / "navownprobe.exe"
+        exe = buildlayout.program_under(PROBES, "navownprobe")
         SELF = subprocess.run([str(exe), "--navgrid-selftest", *([DATA] if DATA else [])], capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=600)
     lines = [l for l in SELF.stdout.splitlines() if l.startswith((f"ok {name} ", f"FAIL {name} "))]
