@@ -160,6 +160,18 @@ internal static class ResultsView
             view.SortDescriptions.Add(new System.ComponentModel.SortDescription(path, dir));
         }));
         Rows.SelectionChanged += (_, _) => { if (_filling || Rows.SelectedItem is not ResultTableRow item) return; Say(() => OpenRow(item.Row)); };
+        // right-click a row: Zoom to its object (the camera goes there whether or not the row is the open one), or copy its FormKey
+        var zoom = new MenuItem { Header = "Zoom to", ToolTip = "move the camera to this row's object" };
+        var copy = new MenuItem { Header = "Copy FormKey" };
+        Rows.ContextMenu = new ContextMenu { Items = { zoom, copy } };
+        ResultTableRow? Clicked() => Rows.SelectedItem as ResultTableRow;
+        Rows.PreviewMouseRightButtonDown += (_, e) =>
+        {
+            // the row under the mouse becomes the selected one, as a left click would make it
+            if (e.OriginalSource is DependencyObject d && ItemsControl.ContainerFromElement(Rows, d) is ListViewItem li) li.IsSelected = true;
+        };
+        zoom.Click += (_, _) => { if (Clicked() is { } item) Say(() => ZoomTo(item.Row)); };
+        copy.Click += (_, _) => { if (Clicked() is { } item) Clipboard.SetText(item.ObjectTip); };
         Legend.Text = "In the scene: " + ResultMarks.Legend(Groups.Select(g => (g.Value.Mark, g.Value.Words)))
                     + "; cyan: the row's object, magenta: its other object. " + NotScoredMeans;
         // the finer filters, the notes and the marks' legend fold away, so the rows keep the height
@@ -450,6 +462,20 @@ internal static class ResultsView
             });
         }), TaskScheduler.Default);
         return waited ? $"reading the load order of {order.Label} to place {RecordWords.Named(r.RecordType, r.EditorId, r.BaseEditorId, r.FormKey)} (once per setup, a few seconds)" : $"opening {RecordWords.Named(r.RecordType, r.EditorId, r.BaseEditorId, r.FormKey)} on {order.Label}";
+    }
+
+    /// <summary>Move the camera to a row's object: in the scene shown when it is this row's, landing again (the camera may
+    /// have moved since); else the row is opened, which lands on it.</summary>
+    internal static string ZoomTo(ResultRow r)
+    {
+        var key = r.Place.RefKey ?? r.FormKey;
+        if (ReferenceEquals(Open, r) && OpenCell is not null && Shell.Current is { } h && SceneDirector.Showing is not null
+            && Mutagen.Bethesda.Plugins.FormKey.TryFactory(key, out var fk))
+        {
+            h.Land(fk);
+            return Shell.BannerText;
+        }
+        return OpenRow(r);
     }
 
     /// <summary>Mark, in the scene shown, every listed row of the open row's pair that the scene draws, each in its group's shape.</summary>

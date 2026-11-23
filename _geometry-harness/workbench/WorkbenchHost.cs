@@ -754,6 +754,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             // why, in the walk's own word when it read the reference: no model (a light, a marker), disabled, deleted; else it is not in this cell's scene
             string why = _opt.RefOutcomes is { } ro && ro.TryGetValue(key, out var w) ? (w.Outcome == "drawn" ? "its model could not be read" : NotDrawnWords(w.Outcome))
                        : "the scene's walk did not meet it in this cell or the cells around it";
+            if (LandOnRecordPlace(key, why)) return true;
             Select(null);                                   // the last object landed on is not this one: nothing stays selected in its place
             Shell.SetBanner($"{key} is not drawn in this scene ({why}); nothing to land on.");
             Shell.LastLanding = $"{key}: not drawn ({why})";
@@ -838,6 +839,36 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         string why = outcome.Length > 0 ? NotDrawnWords(outcome) : "it is not drawn";
         Shell.SetBanner($"{key} has no model of its own ({why}); the view shows a stand-in in cyan: {what}.");
         Shell.LastLanding = $"{key}: a stand-in, {what}";
+        UpdateKey(); Invalidate("stand-in");
+        return true;
+    }
+
+    /// <summary>A reference the scene does not draw (disabled, deleted, its model unreadable) still has the position its
+    /// record gives: the view looks at that place and marks it with a solid cyan diamond, so Zoom to always takes the camera
+    /// there. False when the load order's record index is not read yet or the record has no position.</summary>
+    bool LandOnRecordPlace(FormKey key, string why)
+    {
+        if (SceneDirector.Order is not { } order) return false;
+        var index = LoadOrderIndexes.For(order);
+        if (!index.IsCompletedSuccessfully) return false;
+        Located? at;
+        try { at = index.Result.Locate(key.ToString()); }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException) { return false; }
+        if (at?.Position is not { Length: >= 3 } pos) return false;
+        var p = new Vector3(pos[0], pos[1], pos[2]);
+        Select(null);
+        var tris = new List<float>();
+        MarkerGizmos.DiamondTriangles(tris, p + new Vector3(0, 0, 40f), 32f);
+        _marks.StandIn = new(); _marks.StandInTris = tris; _marks.StandInShaded = true;
+        _marks.StandInFor = $"{key}, which is not drawn ({why}): a solid diamond where its record places it";
+        _pitch = 30f; _eye = p - Forward() * 400f;
+        float floor = MathF.Max(p.Z, _opt.TerrainHeightAt?.Invoke(_eye.X, _eye.Y) ?? float.MinValue) + 100f;
+        if (_eye.Z < floor) _eye = new Vector3(_eye.X, _eye.Y, floor);
+        var flat = MathF.Sqrt((p.X - _eye.X) * (p.X - _eye.X) + (p.Y - _eye.Y) * (p.Y - _eye.Y));
+        _pitch = MathF.Atan2(_eye.Z - p.Z, MathF.Max(flat, 1f)) * 180f / MathF.PI;
+        SyncCamera();
+        Shell.SetBanner($"{key} is not drawn in this scene ({why}); the view looks at where its record places it, marked with a cyan diamond.");
+        Shell.LastLanding = $"{key}: not drawn ({why}); looked at its record's place";
         UpdateKey(); Invalidate("stand-in");
         return true;
     }
