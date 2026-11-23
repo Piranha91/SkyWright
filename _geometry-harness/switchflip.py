@@ -130,8 +130,13 @@ def validate_plan(doc) -> list[str]:
         if not ((c.get("arrival") or {}).get("cell")):
             p.append(f"condition {cid}: arrival.cell is required")
         w = c.get("windowSeconds")
-        if not isinstance(w, (int, float)) or isinstance(w, bool) or w < window_min():
-            p.append(f"condition {cid}: windowSeconds must be at least {window_min():g}")
+        try:
+            least = window_min()
+        except RuntimeError as ex:
+            p.append(str(ex))
+            break
+        if not isinstance(w, (int, float)) or isinstance(w, bool) or w < least:
+            p.append(f"condition {cid}: windowSeconds must be at least {least:g}")
         s = c.get("settleSeconds", 0)
         if not isinstance(s, (int, float)) or isinstance(s, bool) or s < 0:
             p.append(f"condition {cid}: settleSeconds must be a non-negative number")
@@ -375,12 +380,17 @@ def cmd_batch(a) -> int:
             return rc
         finally:
             readings = {}
-            for cid in sorted({r["condition"] for r in rows}):
-                readings[cid] = O.arm_reading([r for r in rows if r["condition"] == cid])
-            (out / "block.json").write_text(json.dumps({"flipPlanSha256": plan_sha, "launches": rows,
-                                                        "readings": readings, "exitCode": rc}, indent=1),
-                                            encoding="utf-8")
-            release_lock(lock)
+            try:
+                for cid in sorted({r["condition"] for r in rows}):
+                    readings[cid] = O.arm_reading([r for r in rows if r["condition"] == cid])
+            except RuntimeError as ex:   # the block's record and the lock never wait on the rule's owner
+                readings = {"error": str(ex)}
+            try:
+                (out / "block.json").write_text(json.dumps({"flipPlanSha256": plan_sha, "launches": rows,
+                                                            "readings": readings, "exitCode": rc}, indent=1),
+                                                encoding="utf-8")
+            finally:
+                release_lock(lock)
             log({"step": "unlock", "present": lock.exists()})
             blog.close()
 
@@ -484,6 +494,15 @@ def measured_configuration(db, a, arm: dict, eval_plan: dict | None, instance: s
     return cfg, limits
 
 
+def rule_build() -> str:
+    """The reading rule's build for a receipt, or the sentence why it could not be identified (the receipt is still
+    written: a launch always leaves one)."""
+    try:
+        return O.owner_identity()
+    except RuntimeError as ex:
+        return f"unidentified: {ex}"
+
+
 def cmd_launch(a) -> int:
     """One launch, as a Runner child of `batch` (which holds the lock). Always writes receipt.json."""
     doc = json.loads(Path(a.plan).read_text(encoding="utf-8"))
@@ -513,7 +532,7 @@ def cmd_launch(a) -> int:
                "settleSeconds": cond.get("settleSeconds", 0), "cell": cond["arrival"]["cell"],
                "calls": cond["calls"], "expect": cond.get("expect"), "idle": json.loads(a.idle_json),
                "tool": {f: sha256_file(HERE / f) for f in ("switchflip.py", "switchflip_outcome.py", "machineidle.py")}
-               | {"dbharness.py": sha256_file(DBHARNESS_DIR / "dbharness.py"), "runcontrol": O.owner_identity()}}
+               | {"dbharness.py": sha256_file(DBHARNESS_DIR / "dbharness.py"), "runcontrol": rule_build()}}
 
     def log(**row):
         row["t"] = round(time.time(), 3)
@@ -556,7 +575,12 @@ def cmd_launch(a) -> int:
             timed("heartbeat", "realtime", lambda: db.ret("Utility", "GetCurrentRealTime", None, None, timeout_ms=1500))
             if not alive():
                 break
-            if O.classify(events + crash_logs(state["flip_start"]), state["flip_start"])["outcome"] == "fail":
+            try:
+                early = O.classify(events + crash_logs(state["flip_start"]), state["flip_start"])["outcome"] == "fail"
+            except RuntimeError as ex:
+                log(step="classify_unasked", error=str(ex))
+                early = False
+            if early:
                 log(step="classified_early")
                 break
             time.sleep(max(0.0, 1.0 - (time.time() - tick)))
@@ -663,9 +687,20 @@ def cmd_launch(a) -> int:
         alive()
         all_events = events + crashes
         receipt.setdefault("flipStart", state["flip_start"])
-        cls = (O.classify(all_events, state["flip_start"], cond["windowSeconds"]) if state["flip_start"] else
-               {"outcome": "not-measured", "branch": None,
-                "why": "the flip was never started" + (f": {receipt.get('abort')}" if receipt.get("abort") else "")})
+        try:
+            cls = (O.classify(all_events, state["flip_start"], cond["windowSeconds"]) if state["flip_start"] else
+                   {"outcome": "not-measured", "branch": None,
+                    "why": "the flip was never started" + (f": {receipt.get('abort')}" if receipt.get("abort") else "")})
+        except RuntimeError as ex:
+            # never a verdict: the import re-reads the events, and refuses this stored label if they read otherwise
+            cls = {"outcome": "not-measured", "branch": None, "why": str(ex)}
+            receipt["classificationError"] = str(ex)
+        try:   # the build that classified, when it is not the one named at the launch's start
+            used = O.owner_identity()
+            if used != receipt["tool"].get("runcontrol"):
+                receipt["toolAtClassification"] = {"runcontrol": used}
+        except RuntimeError as ex:
+            receipt["toolAtClassification"] = {"runcontrol": f"unidentified: {ex}"}
         receipt["classification"] = cls
         log(step="classified", **cls)
         if (cond.get("canaryAfter") and state["flip_start"] and cls["outcome"] == "complete" and alive()):

@@ -22,7 +22,13 @@ public static class RuleQueries
             {
                 throw new Refusal($"{args[0]}: standard input is not one JSON document ({ex.Message}); send the request as JSON.");
             }
-            object answer = args[0] == "fingerprint" ? BundleMedia.Fingerprints(request) : SwitchFlipOutcome.Answer(request);
+            object answer;
+            try { answer = args[0] == "fingerprint" ? BundleMedia.Fingerprints(request) : SwitchFlipOutcome.Answer(request); }
+            catch (Exception ex) when (EvalCommands.IsShapeError(ex) && ex is not IOException and not UnauthorizedAccessException)
+            {
+                throw new Refusal($"{args[0]}: the request holds a value of a shape the rule cannot read ({ex.GetType().Name}: {ex.Message}); "
+                                  + "send each configuration or event as the documented JSON object.");
+            }
             Console.WriteLine(PyJson.Dumps(answer, ensureAscii: false));
             return Exit.Ok;
         }

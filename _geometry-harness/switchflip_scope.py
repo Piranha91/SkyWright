@@ -1,7 +1,8 @@
 """switchflip_scope — which switches the runtime state-switch check (`runtime.state-switch-flip`) is about, on one arm.
 
-A library, not an entry point: evalrun (the not-applicable answer at run/resume), evallive (the import refusal) and
-flipplan (the generator's population) call `population`; the caller owns the run.
+A library, not an entry point: flipplan (the generator's population) calls `population`; the caller owns the run.
+The run controller's own reading of the same census, at run/resume and in the live import's refusal, is runcontrol's
+SwitchFlipScope.cs.
 
 The census (switchprobe --json, the arm's `state.switch-census` output) covers the whole load order, so the base game's
 own scripted switches are always in it. The check is about the switches that touch the evaluated targets:

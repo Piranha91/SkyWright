@@ -294,6 +294,46 @@ def main():
         good = imp(opt, make_import(k / "good-fail", plo, a0, ["crash", "crash"]))
         check(good.returncode == 0, "K13: two re-read crashes import as a finding"
               + ("" if good.returncode == 0 else f" -- {(good.stdout + good.stderr)[-400:]}"))
+        # K13s: what an accepted live import writes, strictly: its receipt, its ledger entry, and the imports folder (the
+        # document, then each output in role order flip-plan, launch receipts, events, each a byte copy)
+        key0 = f"{CID}__{a0['armId']}"
+        src0 = k / "good-fail"
+        rc0 = load(opt / "receipts" / f"{key0}.json") if (opt / "receipts" / f"{key0}.json").is_file() else {}
+        cons, res0, imp0 = rc0.get("consumed") or {}, rc0.get("result") or {}, rc0.get("imported") or {}
+        check((rc0.get("adapter") or {}) == {"kind": "live-import", "sourceKind": "live-import"},
+              f"K13s: the receipt's adapter is live-import ({rc0.get('adapter')})")
+        check(cons.get("configurationSource") == "live-driver" and (cons.get("configuration") or {}).get("fingerprint")
+              == load(src0 / "import.json")["configuration"]["fingerprint"]
+              and ((cons.get("programs") or {}).get("controller") or {}).get("checked") == ["preflight"]
+              and (cons.get("tool") or {}).get("name") == "switchflip",
+              "K13s: the receipt names the driver's configuration, the tool and the controller it checked")
+        check((rc0.get("validation") or {}).get("accepted") is True and (rc0.get("validation") or {}).get("rejections") == [],
+              "K13s: the receipt is accepted with no rejection")
+        rd = (res0.get("readings") or {}).get("C1") or {}
+        check(res0.get("execution") == "completed" and res0.get("detector") == "finding" and res0.get("findings") == 1
+              and res0.get("coverage") == [{"Population": "switch-flip launches: C1", "Judged": 2, "Unjudgeable": {}}]
+              and (rd.get("reading"), rd.get("failed"), rd.get("completed")) == ("finding", 2, 0),
+              f"K13s: the result is the re-read one: a finding on C1 from two failures ({res0})")
+        check(imp0.get("origin") == "fresh" and imp0.get("bindingRecordedAtLaunch") is True and imp0.get("launches") == 2
+              and imp0.get("flipPlanSha256") == sha(src0 / "flipplan.json")
+              and imp0.get("sourceSha256") == sha(src0 / "import.json"),
+              f"K13s: the imported block names the fresh origin, the flip plan, two launches and the document ({imp0})")
+        e0s = load(opt / "ledger.json")["entries"].get(key0) or {}
+        check((e0s.get("status"), e0s.get("detector"), e0s.get("imported"), e0s.get("importOrigin"), e0s.get("receiptId"))
+              == ("completed", "finding", True, "fresh", rc0.get("receiptId")),
+              f"K13s: the ledger entry is completed/finding, imported fresh, and backs this receipt ({e0s})")
+        dest0 = opt / "imports" / key0
+        want_names = ["01-flipplan.json", "02-C1-1.receipt.json", "03-C1-2.receipt.json", "04-C1-1.events.jsonl",
+                      "05-C1-2.events.jsonl", "result.json"]
+        got_names = sorted(p.name for p in dest0.iterdir()) if dest0.is_dir() else []
+        check(got_names == want_names, f"K13s: the imports folder holds the document and each output in role order ({got_names})")
+        srcs = {"result.json": src0 / "import.json", "01-flipplan.json": src0 / "flipplan.json"}
+        srcs.update({f"0{i}-{n}": src0 / n for i, n in ((2, "C1-1.receipt.json"), (3, "C1-2.receipt.json"),
+                                                        (4, "C1-1.events.jsonl"), (5, "C1-2.events.jsonl"))})
+        check(dest0.is_dir() and all(sha(dest0 / n) == sha(p) for n, p in srcs.items()),
+              "K13s: each copy in the imports folder has its source's bytes")
+        check(sorted(str(o) for o in rc0.get("outputs") or []) and len(rc0.get("outputs") or []) == 6,
+              f"K13s: the receipt lists the six copied files ({len(rc0.get('outputs') or [])})")
         good2 = imp(opt, make_import(k / "good-ok", plo, a1, ["complete", "complete"]))
         check(good2.returncode == 0, "K13: two re-read completions import as no finding"
               + ("" if good2.returncode == 0 else f" -- {(good2.stdout + good2.stderr)[-400:]}"))

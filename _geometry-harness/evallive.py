@@ -1,9 +1,8 @@
 """evallive — import a live game driver's receipts into an evaluation run (`live-import` checks).
 
-The Python controller's `import-results` called it when the planned check's adapter kind was `live-import`. That
-command is gone (step 3 of the controller's port), and the built-in controller (runcontrol) refuses a live import in
-one sentence until this module is ported to it (step 4); until then nothing calls it, and it is kept as that port's
-source. It is not an entry point of its own. The first such check is `runtime.state-switch-flip`, fed by `switchflip.py`.
+SUPERSEDED, NOT RUN. The live import is runcontrol's (`runcontrol import-results`, runcontrol/LiveImport.cs, step 4(b)
+of the controller's port); nothing calls this module, and it no longer runs (switchflip_outcome holds no rule now).
+It stays only until Piranha's go to delete it, which step 4(b) offers. Do not fix or call it: change LiveImport.cs.
 
 What it refuses to trust. A live receipt says what the game did, so every claim in it is re-derived here:
   - each launch receipt names the plan, check and arm it was launched for (written by the driver BEFORE the

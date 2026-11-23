@@ -3,7 +3,7 @@
     python tests/test_fingerprint_owner.py [--harness DIR]
 
 The rule is `_shared/Configuration.cs`'s ConfigurationIdentity.Compute; `runcontrol fingerprint` answers it. The Python
-that stays (switchflip, capture_acquire, evalrecords, evallive) asks it through `evalrun.configuration_fingerprint`.
+that stays (switchflip, capture_acquire, evalrecords) asks it through `evalrun.configuration_fingerprint`.
 
     C2240  evalrun.configuration_fingerprint starts `runcontrol fingerprint` once and returns its answer, which is the
            sha256 of the owner's text worked here by hand (so a Python copy that drifted, or a call that never reached
