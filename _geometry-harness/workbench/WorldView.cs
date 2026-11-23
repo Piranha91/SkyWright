@@ -311,6 +311,7 @@ internal static class WorldView
             }
             _index = t.Result; IndexSeconds = sw.Elapsed.TotalSeconds;
             Fill();
+            if (_followCell is { } follow) { _followCell = null; Reveal(follow); }
             FillMapWorlds();
             var x = _index;
             int exterior = x.Cells.Count(c => !c.IsPersistentCell && c.Worldspace is not null);
@@ -533,6 +534,17 @@ internal static class WorldView
         Hits.Visibility = hits.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         SearchCount.Text = hits.Count == 0 ? "no cell matches" : hits.Count >= max ? $"the first {max} of more" : $"{hits.Count} of {x.Cells.Count:N0} cells";
         return hits.Count == 0 ? $"no cell matches '{text}'" : $"{hits.Count} cell(s) match '{text}'";
+    }
+
+    static string? _followCell;
+
+    /// <summary>The scene's cell in the tree: on the scene's own load order (opened here when the tab shows another, or none),
+    /// the tree opened down to the cell and the cell selected, without loading it again.</summary>
+    internal static void Follow(LoadOrderSpec order, string cellKey)
+    {
+        if (_order is null || _order.Key != order.Key) { _followCell = cellKey; Open(order with { Navmesh = false }, Array.Empty<string>()); return; }
+        if (_index is null) { _followCell = cellKey; return; }        // still reading: revealed when the tree fills
+        Reveal(cellKey);
     }
 
     /// <summary>Open the tree down to a cell and select it, without starting a second load for the selection.</summary>

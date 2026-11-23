@@ -139,7 +139,7 @@ internal static class Shell
                     break;
             }
         };
-        Records.SelectedItemChanged += (_, e) => { if (e.NewValue is TreeViewItem { Tag: TreeNode { Kind: "ref" } n }) { CurrentRow = null; OpenRef(n.Key, CellOfRef(n.Key)); } };
+        Records.SelectedItemChanged += (_, e) => { if (!_following && e.NewValue is TreeViewItem { Tag: TreeNode { Kind: "ref" } n }) { CurrentRow = null; OpenRef(n.Key, CellOfRef(n.Key)); } };
         ScrollViewer.SetHorizontalScrollBarVisibility(FindingList, ScrollBarVisibility.Auto);
         FindingList.SelectionChanged += (_, _) =>
         {
@@ -241,7 +241,12 @@ internal static class Shell
             body.RowDefinitions[2].MinHeight = show ? 120 : 0;
         }
         // the group tabs and the tabs inside them both raise SelectionChanged here
-        tabs.AddHandler(System.Windows.Controls.Primitives.Selector.SelectionChangedEvent, new SelectionChangedEventHandler((_, e) => { if (e.OriginalSource is TabControl) PlaceTable(); }));
+        tabs.AddHandler(System.Windows.Controls.Primitives.Selector.SelectionChangedEvent, new SelectionChangedEventHandler((_, e) =>
+        {
+            if (e.OriginalSource is not TabControl) return;
+            PlaceTable();
+            if (Views.TryGetValue("Explore", out var ex) && Tabs.SelectedItem == ex.Group) FollowScene();
+        }));
         table.Visibility = tableSplit.Visibility = Visibility.Collapsed;
         body.RowDefinitions[2].Height = new GridLength(0); body.RowDefinitions[2].MinHeight = 0;
         PlaceTable();
@@ -455,6 +460,31 @@ internal static class Shell
             else foreach (var c in n.Children) t.Items.Add(Item(c));
             return t;
         }
+    }
+
+    /// <summary>Explore follows the scene shown: Records opens at the scene's cell (and its selected object), and World,
+    /// when it is the tab in front, opens the scene's load order at that cell.</summary>
+    static bool _following;   // the tree is being opened to the scene: its selection lands on nothing
+    internal static void FollowScene()
+    {
+        if (Current is not { } h || h.SceneCell is not { } cell) return;
+        _following = true;
+        try { FollowRecords(cell, h.Session.Selected?.ToString()); } finally { _following = false; }
+        if (Views.TryGetValue("World", out var w) && w.Inner is { Parent: TabControl inner } && inner.SelectedItem == w.Inner && SceneDirector.Order is { } order)
+            WorldView.Follow(order, cell);
+    }
+
+    static void FollowRecords(string cell, string? selected)
+    {
+        foreach (var top in Records.Items.OfType<TreeViewItem>())
+            foreach (var c in top.Items.OfType<TreeViewItem>())
+            {
+                if (c.Tag is not TreeNode { Kind: "cell" } n || !string.Equals(n.Key, cell, StringComparison.OrdinalIgnoreCase)) continue;
+                top.IsExpanded = true; c.IsExpanded = true;
+                var target = selected is null ? null : c.Items.OfType<TreeViewItem>().FirstOrDefault(r => r.Tag is TreeNode { Kind: "ref" } rn && string.Equals(rn.Key, selected, StringComparison.OrdinalIgnoreCase));
+                (target ?? c).IsSelected = true;
+                (target ?? c).BringIntoView();
+            }
     }
 
     internal static string? CellOfRef(string refKey) =>
