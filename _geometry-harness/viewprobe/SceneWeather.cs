@@ -30,6 +30,14 @@ namespace ViewProbe;
 internal sealed record SceneWeather(string Name, string Slot, V3 SkyUpper, V3 Sunlight, V3 AmbientUp,
     V3 FogNearColor, V3 FogFarColor, float FogNear, float FogFar, float FogPower, float FogMax)
 {
+    /// <summary>The weather's enabled cloud layers in draw order, at the slot's time of day: each texture (a game path under
+    /// textures\), its colour and alpha, and its scroll speed (the WTHR's raw units, per layer as the engine stores them).</summary>
+    internal IReadOnlyList<(string Texture, V3 Color, float Alpha, float XSpeed, float YSpeed)> Clouds { get; init; } = Array.Empty<(string, V3, float, float, float)>();
+    /// <summary>The slot's sun disc colour and sun glare colour.</summary>
+    internal V3 SunColor { get; init; }
+    internal V3 SunGlareColor { get; init; }
+    internal V3 StarsColor { get; init; }
+
     /// <summary>The slot's image space (IMGS), or null.</summary>
     internal FormKey? ImageSpace { get; init; }
     /// <summary>The slot's sky-lower and horizon colours (the sky dome's other two gradient colours).</summary>
@@ -206,8 +214,13 @@ internal sealed record SceneWeather(string Name, string Slot, V3 SkyUpper, V3 Su
     /// <summary>Every climate's sunrise and sunset (begin, end), in hours, winner-takes-all.</summary>
     internal static readonly System.Collections.Generic.Dictionary<FormKey, (float RiseBegin, float RiseEnd, float SetBegin, float SetEnd, string Name)> Climates = new();
 
+    /// <summary>Every climate's sun and glare textures and its moons (game paths; null when the climate names none).</summary>
+    internal static readonly System.Collections.Generic.Dictionary<FormKey, (string? Sun, string? Glare, bool Masser, bool Secunda)> ClimateSkies = new();
+
     internal static void NoteClimate(IClimateGetter c)
     {
+        ClimateSkies[c.FormKey] = (c.SunTexture?.DataRelativePath.Path, c.SunGlareTexture?.DataRelativePath.Path,
+                                   c.Moons.HasFlag(Climate.Moon.Masser), c.Moons.HasFlag(Climate.Moon.Secunda));
         static float H(TimeOnly t) => t.Hour + t.Minute / 60f;
         Climates[c.FormKey] = (H(c.SunriseBegin), H(c.SunriseEnd), H(c.SunsetBegin), H(c.SunsetEnd), c.EditorID ?? c.FormKey.ToString());
         ClimateWeathers[c.FormKey] = c.WeatherTypes.Select(t => (t.Weather.FormKey, t.Chance)).ToArray();
@@ -250,6 +263,15 @@ internal sealed record SceneWeather(string Name, string Slot, V3 SkyUpper, V3 Su
         var amb = w.DirectionalAmbientLightingColors;
         var ambSlot = slot switch { "sunrise" => amb.Sunrise, "sunset" => amb.Sunset, "night" => amb.Night, _ => amb.Day };
         bool night = slot == "night";
+        // the cloud layers: a texture slot per layer, enabled ones only, at the slot's time of day
+        var clouds = new List<(string, V3, float, float, float)>();
+        for (int i = 0; i < Math.Min(w.CloudTextures.Count, w.Clouds.Count); i++)
+        {
+            var layer = w.Clouds[i];
+            if (layer.Enabled != true || layer.Colors is null || w.CloudTextures[i]?.DataRelativePath.Path is not { Length: > 0 } tex) continue;
+            float alpha = layer.Alphas is { } a ? slot switch { "sunrise" => a.Sunrise, "sunset" => a.Sunset, "night" => a.Night, _ => a.Day } : 1f;
+            clouds.Add((tex, Pick(layer.Colors), alpha, layer.XSpeed ?? 0f, layer.YSpeed ?? 0f));
+        }
         var isp = w.ImageSpaces;
         var ispKey = isp is null ? null : (slot switch { "sunrise" => isp.Sunrise, "sunset" => isp.Sunset, "night" => isp.Night, _ => isp.Day }).FormKeyNullable;
         return new SceneWeather(w.EditorID ?? w.FormKey.ToString(), slot,
@@ -264,6 +286,7 @@ internal sealed record SceneWeather(string Name, string Slot, V3 SkyUpper, V3 Su
             night ? w.FogDistanceNightMax : w.FogDistanceDayMax)
         {
             ImageSpace = ispKey,
+            Clouds = clouds, SunColor = Pick(w.SunColor), SunGlareColor = Pick(w.SunGlareColor), StarsColor = Pick(w.StarsColor),
             SkyLower = Pick(w.SkyLowerColor), Horizon = Pick(w.HorizonColor), WaterMultiplier = Pick(w.WaterMultiplierColor),
             Ambient6 = new[] { C(ambSlot.DirectionalXPlus), C(ambSlot.DirectionalXMinus), C(ambSlot.DirectionalYPlus),
                                C(ambSlot.DirectionalYMinus), C(ambSlot.DirectionalZPlus), C(ambSlot.DirectionalZMinus) },

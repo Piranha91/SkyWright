@@ -11,6 +11,9 @@
     <!-- Distant LOD on a live scene (LiveDistantLod, a draw-time cut) exists from SkyRender 4.1, but not in the 4.1
          prerelease made for the tint alone. -->
     <DefineConstants Condition="$([MSBuild]::VersionGreaterThanOrEquals('$(SkyRenderVersion.Split(`-`)[0])', '4.1')) and !$(SkyRenderVersion.Contains('cutouttint'))">$(DefineConstants);SKYRENDER_LIVE_LOD</DefineConstants>
+    <!-- The sky (dome, clouds, sun, moons, stars: GlRenderer.Sky) exists from SkyRender 4.1, but not in its first two
+         prereleases. -->
+    <DefineConstants Condition="$([MSBuild]::VersionGreaterThanOrEquals('$(SkyRenderVersion.Split(`-`)[0])', '4.1')) and !$(SkyRenderVersion.Contains('cutouttint')) and !$(SkyRenderVersion.EndsWith('livelod.1'))">$(DefineConstants);SKYRENDER_SKY</DefineConstants>
   </PropertyGroup>
 
   <!-- The build layout, one folder per configuration: bin\<Configuration>\<the app's .NET version>\ holds SkyWright.exe,

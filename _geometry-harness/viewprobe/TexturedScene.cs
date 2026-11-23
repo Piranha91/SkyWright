@@ -746,6 +746,15 @@ static class TexturedScene
                     renderer.SkyGradient = new SkyGradient(skyKeys.Select(k => new SkyGradientKey(k.El, new GlVec3(k.Color.X, k.Color.Y, k.Color.Z))).ToArray());
                     if (!SceneWeather.SkyGiven) renderer.ClearColor = renderer.SkyGradient.At(20f);
                     Console.WriteLine($"   weather sky: gradient of {skyKeys.Length} keys, horizon {skyKeys[0].Color:0.000}, 20 deg {renderer.SkyGradient.At(20f):0.000}, zenith {skyKeys[^1].Color:0.000}");
+#if SKYRENDER_SKY
+                    // The sky itself (SceneSky.cs): the dome by the gradient, the weather's cloud layers, the climate's sun, and
+                    // the moons and stars at night. VP_SKY_OFF=1 keeps the plain background.
+                    if (Environment.GetEnvironmentVariable("VP_SKY_OFF") != "1")
+                    {
+                        renderer.Sky = SceneSky.Settings(sw, renderer.SkyGradient, GlWorldFactory.LoaderFor(textures));
+                        Console.WriteLine($"   weather sky: {SceneSky.Describe(sw)}");
+                    }
+#endif
                 }
                 // Diagnostics for the colour balance (README, VP_WEATHER_*): drop the fog, or scale the ambient.
                 if (float.TryParse(Environment.GetEnvironmentVariable("VP_WEATHER_AMBIENT_SCALE"),

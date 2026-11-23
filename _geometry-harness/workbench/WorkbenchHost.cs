@@ -652,6 +652,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         }
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         GL.Viewport(0, 0, W, H);
+#if SKYRENDER_SKY
+        _renderer.SkyTime = (float)Clock.Elapsed.TotalSeconds;   // the clouds drift with each frame drawn
+#endif
         _gpu.Begin();
         _renderer.Render(_camera, W, H);
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
