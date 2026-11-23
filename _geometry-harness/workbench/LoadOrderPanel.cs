@@ -152,7 +152,9 @@ internal static class LoadOrderPanel
         Title.Text = "Load order";
         Said.Text = "Open a row or a cell to list the load order its scene is built on. A tag marks the plugins that edit the selected object (cyan), the clash's other object (magenta) or both.";
         var panel = new DockPanel();
-        foreach (var top in new UIElement[] { Title, Said, bar, AllBack }) { DockPanel.SetDock(top, Dock.Top); panel.Children.Add(top); }
+        // what the panel says (how to use it, what the scene is built on) is the title's tooltip, not a line of grey text
+        Title.SetBinding(FrameworkElement.ToolTipProperty, new System.Windows.Data.Binding(nameof(TextBlock.Text)) { Source = Said });
+        foreach (var top in new UIElement[] { Title, bar, AllBack }) { DockPanel.SetDock(top, Dock.Top); panel.Children.Add(top); }
         panel.Children.Add(List);
         SceneDirector.Requested += Requested;
         return _built = panel;
@@ -177,7 +179,7 @@ internal static class LoadOrderPanel
         Task.Run(() => LoadOrderRules.Entries(order)).ContinueWith(t => ui.BeginInvoke(() =>
         {
             if (gen != _generation) return;
-            if (t.IsFaulted) { Said.Text = $"the load order could not be listed: {t.Exception!.GetBaseException().Message}"; return; }
+            if (t.IsFaulted) { Said.Text = $"the load order could not be listed: {t.Exception!.GetBaseException().Message}"; Shell.SetBanner(Said.Text); return; }
             _entries = t.Result;
             SayOrder(); Fill(); ReadEdits();
         }), TaskScheduler.Default);

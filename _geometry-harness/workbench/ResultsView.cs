@@ -172,7 +172,9 @@ internal static class ResultsView
         DockPanel.SetDock(pairLabel, Dock.Left);
         PairBox.Margin = new Thickness(0, 0, 6, 0);
         pairRow.Children.Add(pairLabel); pairRow.Children.Add(PairBox);
-        foreach (var top in new UIElement[] { Header, pairRow, filters, Means, controls, aboutBox, CountLine }) { DockPanel.SetDock(top, Dock.Top); panel.Children.Add(top); }
+        // the explanations are tooltips, not lines of grey text: what "addressed" means on the filters, the count on the header
+        filters.ToolTip = AddressedMeans + " " + NotScoredMeans;
+        foreach (var top in new UIElement[] { Header, pairRow, filters, controls, aboutBox }) { DockPanel.SetDock(top, Dock.Top); panel.Children.Add(top); }
         // the open row's values fill the tab; the rows themselves are the table the window shows across its full width
         // under the view (Table), while this tab is in front
         // under them, the open row's values and the load order its scene is built on share the pane, the load order the larger
@@ -251,7 +253,8 @@ internal static class ResultsView
         // the folder's name and pair count shown; where it is and what was checked, in the tooltip
         Header.Text = $"{Path.GetFileName(r.Folder.TrimEnd('\\', '/'))}: {r.Pairs.Count} pairs";
         Header.FontWeight = FontWeights.SemiBold;
-        Header.ToolTip = $"{r.Folder}{Environment.NewLine}{r.Checked.Count} file(s) match the evaluation's receipt.{Environment.NewLine}All pairs: {CountsText(r.Totals)}";
+        Header.ToolTip = $"{r.Folder}{Environment.NewLine}{r.Checked.Count} file(s) match the evaluation's receipt.{Environment.NewLine}All pairs: {CountsText(r.Totals)}"
+                       + (CountLine.Text is { Length: > 0 } listed ? Environment.NewLine + listed + "." : "");
         var notes = r.Notes.Concat(Pair is null ? Enumerable.Empty<string>() : r.Pairs.Where(p => p.Id == Pair).SelectMany(p => p.Notes)).Distinct().ToList();
         NotesLine.Text = string.Join(" ", notes.Select(n => n.TrimEnd('.') + "."));
         NotesLine.Visibility = notes.Count > 0 ? Visibility.Visible : Visibility.Collapsed;

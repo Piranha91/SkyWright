@@ -122,7 +122,9 @@ internal static class WorldView
         Grid.SetRow(mapPanel, 0); Grid.SetRow(bar, 1); Grid.SetRow(Tree, 2);
         body.Children.Add(mapPanel); body.Children.Add(bar); body.Children.Add(Tree);
         var panel = new DockPanel();
-        foreach (var top in new UIElement[] { Header, Notes, BrowseProfile, find, Hits }) { DockPanel.SetDock(top, Dock.Top); panel.Children.Add(top); }
+        // the notes are the header's tooltip, not a line of grey text
+        Header.SetBinding(FrameworkElement.ToolTipProperty, new System.Windows.Data.Binding(nameof(TextBlock.Text)) { Source = Notes, TargetNullValue = null });
+        foreach (var top in new UIElement[] { Header, BrowseProfile, find, Hits }) { DockPanel.SetDock(top, Dock.Top); panel.Children.Add(top); }
         panel.Children.Add(body);
         return panel;
     }
