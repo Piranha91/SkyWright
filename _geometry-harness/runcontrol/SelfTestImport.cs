@@ -334,10 +334,6 @@ public static partial class SelfTestFinalize
                             int at = gotErr.IndexOf(cut, StringComparison.Ordinal);
                             gotErr = at < 0 ? gotErr : gotErr[..(at + cut.Length)];
                         }
-                        if (step["live"] is true)
-                            // a live driver's export is not read here: one sentence that says so, naming no command that would refuse
-                            wantErr = "REFUSED: wrong-check: r.live is a live game driver's check, and importing a live driver's export is not available "
-                                      + "on the built-in engine until evallive.py's validator is ported to it.\n";
                         string? key = (string?)step["key"];
                         string receipt = key == null ? "" : t.At($"receipts/{key}.json");
                         var ledger = File.Exists(t.At("ledger.json")) ? PyJson.LoadEvalFile(t.At("ledger.json")) as PyDict : null;

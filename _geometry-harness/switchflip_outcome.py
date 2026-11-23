@@ -1,107 +1,91 @@
-"""switchflip_outcome — the reading rule for the runtime state-switch check (`runtime.state-switch-flip`).
+"""switchflip_outcome — the live driver's client for the runtime state-switch check's reading rule.
 
-Pure functions, no I/O: the live driver (`switchflip.py`) and the importer (`evallive.py`) both call them, so a
-receipt's stored classification can always be re-derived from its recorded events, and is never trusted on its own.
+The rule (`runtime.state-switch-flip`: classify one launch's events; read an arm's replicates of one condition) has one
+owner, the built-in controller's `SwitchFlipOutcome` (`runcontrol/SwitchFlipOutcome.cs`). The live import there
+re-derives every receipt's classification from its recorded events with the same code, so a stored label is never
+trusted on its own. This module holds no copy of the rule: each function asks `runcontrol switchflip-outcome`
+(HOUSECARL_RUNCONTROL, else this checkout's build) and returns its answer.
 
-One launch's events after the flip starts:
-  {"kind": "call", "name", "ok": bool, "t", "err"?}            one scheduled Enable/Disable call
-  {"kind": "readback", "name", "ok": bool, "t", "err"?, "target_reached": bool}
-  {"kind": "skipped", "name", "t", "why"}                       a call dropped because the marker already had its target
-  {"kind": "heartbeat", "ok": bool, "t", "err"?}               a liveness call during the observation window
-  {"kind": "alive", "exe": bool, "t"}                           the game process present or not
-  {"kind": "crashlog", "path", "mtime"}                         a crash log the driver found
+  classify(events, flip_start, window_s=None) -> {"outcome": complete|fail|not-measured, "branch", "why"}
+  arm_reading(classifications)                -> {"reading": finding|no-finding|unsettled, "failed", "completed",
+                                                  "unjudgeable", "why"}
+  window_s()                                  -> the shortest observation window a completion may claim (seconds)
+  owner_identity()                            -> the package digest of the runcontrol build that answers, for a receipt
 
-classify(): fail(crash) = the game process gone AND a crash log newer than the flip start; fail(stall) = two
-consecutive liveness timeouts (heartbeats, or a scheduled call or readback that timed out) while the process is
-alive; complete = every scheduled call and readback answered, every readback at its target, and every heartbeat
-answered over the whole observation window; anything else is not-measured, with the reason. Never a pass.
-
-arm_reading(): an arm's replicates of one condition. finding = at least two measured failures; no-finding = at
-least two measured completions and no failure; anything else is unsettled (run another replicate). Not-measured
-launches are counted as unjudgeable with their reasons, never as either outcome.
+The event shapes and the outcomes are documented at the owner. A controller that cannot be started, or that refuses
+the request, raises RuntimeError with one sentence; nothing here answers in its place.
 """
 from __future__ import annotations
 
-#: The shortest observation window a completion may claim (seconds after the last call).
-WINDOW_S = 60.0
-#: Slack on the window for the heartbeat cadence: a beat lands within this of the window's end.
-WINDOW_SLACK_S = 2.0
-#: Consecutive liveness timeouts that make a stall.
-STALL_RUN = 2
-#: Measured launches an arm reading needs on one side.
-MIN_REPLICATES = 2
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
 
 OUTCOMES = ("complete", "fail", "not-measured")
 READINGS = ("finding", "no-finding", "unsettled")
 
 
-def is_timeout(e: dict) -> bool:
-    """A failed liveness probe: the call did not answer in time, or the transport could not reach the game."""
-    s = str(e.get("err") or "")
-    return (not e.get("ok")) and ("504" in s or "VM stalled" in s or "timed out" in s.lower()
-                                  or "_transport" in s or "ConnectionRefused" in s)
+def _exe() -> Path:
+    import evalpipeline
+    try:
+        return evalpipeline.runcontrol_exe(None)
+    except evalpipeline.Refusal as ex:
+        raise RuntimeError(f"the switch-flip reading rule could not be asked: {ex}") from None
 
 
-def _r(outcome, branch, why):
-    return {"outcome": outcome, "branch": branch, "why": why}
+def _ask(request: dict):
+    exe = _exe()
+    try:
+        r = subprocess.run([str(exe), "switchflip-outcome"], input=json.dumps(request, default=str), capture_output=True,
+                           text=True, encoding="utf-8", timeout=120)
+    except (OSError, subprocess.SubprocessError) as ex:
+        raise RuntimeError(f"the switch-flip reading rule could not be asked: runcontrol switchflip-outcome could not run "
+                           f"({ex}); rebuild runcontrol and try again.") from None
+    try:
+        got = json.loads(r.stdout) if r.returncode == 0 else None
+    except ValueError:
+        got = None
+    if not isinstance(got, dict):
+        why = (r.stderr or r.stdout or "").strip().splitlines()
+        raise RuntimeError("the switch-flip reading rule could not be asked: "
+                           + (why[-1].removeprefix("REFUSED: ") if why else
+                              f"runcontrol switchflip-outcome exited {r.returncode} with no answer"))
+    return got
 
 
-def classify(events: list[dict], flip_start: float, window_s: float = WINDOW_S) -> dict:
-    crash = [e for e in events if e.get("kind") == "crashlog" and (e.get("mtime") or 0) > flip_start]
-    exe_gone = any(e.get("kind") == "alive" and not e.get("exe") for e in events)
-    if exe_gone and crash:
-        return _r("fail", "crash", f"game process gone; crash log {crash[0].get('path')}")
-    stream = sorted((e for e in events if e.get("kind") in ("heartbeat", "call", "readback")), key=lambda e: e["t"])
-    run = 0
-    for e in stream:
-        if is_timeout(e):
-            run += 1
-            if run >= STALL_RUN:
-                alive_after = [a for a in events if a.get("kind") == "alive" and a["t"] >= e["t"] - 1]
-                if not alive_after or all(a.get("exe") for a in alive_after):
-                    return _r("fail", "stall", f"{STALL_RUN} consecutive liveness timeouts ending at "
-                                               f"t={e['t']:.1f} with the game process alive")
-        else:
-            run = 0
-    if exe_gone:
-        return _r("not-measured", None, "game process gone without a crash log newer than the flip "
-                                        "(cannot classify as a crash)")
-    calls = [e for e in events if e.get("kind") == "call"]
-    backs = [e for e in events if e.get("kind") == "readback"]
-    beats = [e for e in events if e.get("kind") == "heartbeat"]
-    if not calls:
-        return _r("not-measured", None, "no scheduled call was sent")
-    if not all(e.get("ok") for e in calls + backs):
-        return _r("not-measured", None, "a call or readback failed without consecutive timeouts")
-    missed = [e.get("name") for e in backs if not e.get("target_reached")]
-    if missed:
-        return _r("not-measured", None, "did not reach its target: " + ", ".join(map(str, missed))
-                  + " (never counted as a flip)")
-    if len(backs) < len(calls):
-        return _r("not-measured", None, "a call has no readback")
-    if not beats or beats[-1]["t"] - max(e["t"] for e in calls) < window_s - WINDOW_SLACK_S:
-        return _r("not-measured", None, "observation window shorter than required")
-    if not all(e.get("ok") for e in beats):
-        return _r("not-measured", None, "an isolated heartbeat failed (not consecutive timeouts)")
-    return _r("complete", None, f"{len(calls)} calls answered, {len(beats)} heartbeats answered")
+def classify(events: list[dict], flip_start: float, window_s: float | None = None) -> dict:
+    req = {"events": events, "flipStart": flip_start}
+    if window_s is not None:
+        req["windowSeconds"] = window_s
+    return _ask({"classify": req})
 
 
 def arm_reading(classifications: list[dict]) -> dict:
     """Read one arm's replicates of one condition. Each item is a classify() result."""
-    fails = [c for c in classifications if c.get("outcome") == "fail"]
-    comps = [c for c in classifications if c.get("outcome") == "complete"]
-    unjudgeable: dict[str, int] = {}
-    for c in classifications:
-        if c.get("outcome") not in ("fail", "complete"):
-            why = str(c.get("why") or "unclassified")
-            unjudgeable[why] = unjudgeable.get(why, 0) + 1
-    counts = {"failed": len(fails), "completed": len(comps), "unjudgeable": unjudgeable}
-    if len(fails) >= MIN_REPLICATES:
-        branches = sorted({str(c.get("branch")) for c in fails})
-        return {"reading": "finding", **counts,
-                "why": f"{len(fails)} measured failures ({', '.join(branches)}), {len(comps)} completions"}
-    if not fails and len(comps) >= MIN_REPLICATES:
-        return {"reading": "no-finding", **counts,
-                "why": f"{len(comps)} measured completions, no failure: no failure under this condition, never 'safe'"}
-    return {"reading": "unsettled", **counts,
-            "why": f"{len(fails)} failure(s) and {len(comps)} completion(s) measured: run another replicate"}
+    return _ask({"armReading": classifications})
+
+
+def window_s() -> float:
+    return float(_ask({"rules": True})["windowSeconds"])
+
+
+def owner_identity() -> str:
+    """The package digest (`runcontrol identity`) of the build whose rule classified a launch: a receipt names it, as
+    it names the driver's own scripts, so what read the launch can be shown later."""
+    exe = _exe()
+    try:
+        r = subprocess.run([str(exe), "identity", str(exe.parent)], capture_output=True, text=True, encoding="utf-8",
+                           timeout=300)
+        digest = json.loads(r.stdout).get("digest") if r.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError) as ex:
+        raise RuntimeError(f"the switch-flip reading rule's build could not be identified ({ex}); rebuild runcontrol "
+                           "and try again.") from None
+    if not isinstance(digest, str) or not digest:
+        raise RuntimeError("the switch-flip reading rule's build could not be identified: runcontrol identity gave no "
+                           "digest; rebuild runcontrol and try again.")
+    return digest

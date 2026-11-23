@@ -1,13 +1,14 @@
-"""Known answers for the opt-in live-import lane (evalrun `--opt-in`, `not-opted-in`, evallive.py).
+"""Known answers for the opt-in live-import lane (`--opt-in`, `not-opted-in`, runcontrol import-results' LiveImport).
 
     python _geometry-harness/tests/test_evallive.py
 
 Drives the REAL controller on the evalrun fixtures (generated into a temporary folder by make_fixtures.py, with the
 fake probes), on the built-in controller: K14 the default is unchanged when the check is not opted in; K15 opting in
-without a receipt keeps the evaluation incomplete; K13 an import is refused in one sentence, since the built-in controller
-does not read a live driver's export until evallive.py is ported (the earlier K13, refusals by wrong input and acceptance
-when its launches re-read, and K28 judged the Python controller's import, which is gone)
-to a settled reading. Synthetic launch receipts only; a recorded lab receipt is replayed outside the tracked tree.
+without a receipt keeps the evaluation incomplete; K13 an import is refused for each named wrong input and accepted only
+when its launches re-read to a settled reading; K26 the arm's census answers the check; K28 an import for an arm the
+census answered is refused by name. K13 and K28 are the Python controller's known answers (houseCARL 0ba0a2af, where they
+passed on evallive.py), restored unchanged in text against runcontrol's LiveImport. Synthetic launch receipts only; a
+recorded lab receipt is replayed outside the tracked tree.
 
 conflictdiff is built from this checkout's source once per run (test_evalrun.use_conflictdiff), or taken as given
 from the tree named by HOUSECARL_EVALRUN_TEST_HARNESS; a failed build fails the run.
@@ -253,18 +254,64 @@ def main():
         check(bad.returncode == 2 and "not opt-in" in (bad.stdout + bad.stderr),
               "K15: --opt-in on a default check is refused by name")
 
-        # K13: importing a live receipt is not available on the built-in engine until evallive.py is ported ----------
+        # K13: imports ---------------------------------------------------------------------------------------
         arms = [a for a in plo["arms"] if a["armId"] in
                 [x["armId"] for x in rowo["arms"] if x["status"] == "live-import"]]
         check(len(arms) >= 2, "K13: two arms wait for a live receipt")
-        r13 = imp(opt, make_import(tmp / "imports" / "good-fail", plo, arms[0], ["crash", "crash"]))
-        out13 = r13.stdout + r13.stderr
-        check(r13.returncode == 2 and "is not available on the built-in engine until evallive.py's validator is ported" in out13,
-              "K13: a live receipt's import is refused in one sentence saying it is not available yet"
-              + ("" if r13.returncode == 2 else f" -- got {r13.returncode}: {out13.strip()[-300:]}"))
+        a0, a1 = arms[0], arms[1]
+        k = tmp / "imports"
+
+        def refused(tag, manifest, needle, run=None):
+            r = imp(run or opt, manifest)
+            out = r.stdout + r.stderr
+            check(r.returncode == 2 and needle in out, f"K13: {tag} refused ({needle})"
+                  + ("" if r.returncode == 2 and needle in out else f" -- got {r.returncode}: {out.strip()[-300:]}"))
+
+        refused("foreign plan", make_import(k / "foreign", plo, a0, ["crash", "crash"], plan_id="000000000000"),
+                "foreign-run")
+        refused("launched for another arm", make_import(k / "otherarm", plo, a0, ["crash", "crash"],
+                                                        bind_arm=a1["armId"]), "foreign-run")
+
+        def wrong_hash(cfg):
+            cfg["plugins"][0]["sha256"] = "0" * 64
+        refused("fingerprint not the arm's request", make_import(k / "fp", plo, a0, ["crash", "crash"],
+                                                                 cfg_mutate=wrong_hash), "identity-mismatch")
+        refused("tampered events", make_import(k / "tamper", plo, a0, ["crash", "crash"], tamper_events=True),
+                "output-stale")
+        refused("stored label over crash events",
+                make_import(k / "label", plo, a0, ["crash", "crash"], stored={"outcome": "complete", "branch": None}),
+                "never preferred")
+        refused("unsettled (one crash, one completion)", make_import(k / "unsettled", plo, a0, ["crash", "complete"],
+                                                                     detector="finding"), "unsettled")
+        refused("one crash only", make_import(k / "one", plo, a0, ["crash"], detector="finding"), "unsettled")
+        refused("detector contradicting the launches",
+                make_import(k / "contra", plo, a0, ["crash", "crash"], detector="no-finding", findings=0),
+                "re-read as finding")
+        not_opted_arm = next(a for a in pl["arms"])
+        refused("row not opted in", make_import(k / "notopted", pl, not_opted_arm, ["crash", "crash"]),
+                "not opted in", run=live)
+
+        good = imp(opt, make_import(k / "good-fail", plo, a0, ["crash", "crash"]))
+        check(good.returncode == 0, "K13: two re-read crashes import as a finding"
+              + ("" if good.returncode == 0 else f" -- {(good.stdout + good.stderr)[-400:]}"))
+        good2 = imp(opt, make_import(k / "good-ok", plo, a1, ["complete", "complete"]))
+        check(good2.returncode == 0, "K13: two re-read completions import as no finding"
+              + ("" if good2.returncode == 0 else f" -- {(good2.stdout + good2.stderr)[-400:]}"))
+        dup = imp(opt, make_import(k / "dup", plo, a0, ["crash", "crash"]))
+        check(dup.returncode == 2 and "duplicate-receipt" in dup.stdout + dup.stderr, "K13: a second import is refused")
         led = load(opt / "ledger.json")["entries"]
-        check(all(e["status"] == "live-import" for e in led.values() if e["checkId"] == CID),
-              "K13: and every arm still waits for its live receipt")
+        e0 = next(e for e in led.values() if e["checkId"] == CID and e["armId"] == a0["armId"])
+        e1 = next(e for e in led.values() if e["checkId"] == CID and e["armId"] == a1["armId"])
+        check((e0["status"], e0.get("detector")) == ("completed", "finding"), "K13: arm 0 ledger completed/finding")
+        check((e1["status"], e1.get("detector")) == ("completed", "no-finding"), "K13: arm 1 ledger completed/no-finding")
+        scen = gen / "cases" / CASE / "scenario.json"
+        ev(["finalize", "--run", opt], scen)
+        dfin = disposition(opt)
+        findings = (dfin.get("evaluation") or {}).get("findings") or []
+        check(any(f.get("checkId") == CID and f.get("armId") == a0["armId"] for f in findings),
+              "K13: finalize carries the live finding")
+        check("accepted live receipts" in str((dfin.get("unassessed") or {}).get("runtimeObservations")),
+              "K13: finalize no longer says no runtime observation was supplied")
 
         # K26/K28: the arm's own accepted census answers the live check (switchflip_scope) --------------------
         def case_with(name, switches):
@@ -326,6 +373,16 @@ def main():
         dctl = disposition(ctl_run).get("evaluation") or {}
         check(any(m.get("checkId") == CID for m in dctl.get("missing") or []),
               "K26 control: and finalize still names the check missing")
+
+        pl_na = load(na_run / "plan.json")
+        arm_na = next(a for a in pl_na["arms"] if a["armId"] in [x["armId"] for x in plan_check(pl_na, CID)["arms"]
+                                                                if x["status"] == "live-import"])
+        r28 = imp(na_run, make_import(k / "na", pl_na, arm_na, ["crash", "crash"]))
+        out28 = r28.stdout + r28.stderr
+        check(r28.returncode == 2 and "not applicable on arm" in out28,
+              "K28: an import for an arm the census answered not-applicable is refused by name"
+              + ("" if r28.returncode == 2 and "not applicable on arm" in out28
+                 else f" -- got {r28.returncode}: {out28.strip()[-300:]}"))
 
     except Exception:
         traceback.print_exc()

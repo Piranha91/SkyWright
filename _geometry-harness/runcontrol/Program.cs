@@ -9,7 +9,7 @@ using RunControl;
 // over the foundations (the JSON bytes, hashes, orderings and text forms its files are read in, the program identity
 // rule, the stage ledger). The names in brackets below are the Python commands each replaced. For a lab entry the
 // records stage starts the record capture, which stays the Python tool evalrecords.py until it is ported, and then this
-// program's own import-results. A plan is bound to the controller build that froze it. The stages from report-plan on
+// program's own import-results, which also imports a live game driver's export (LiveImport). A plan is bound to the controller build that froze it. The stages from report-plan on
 // are the Python pipeline's (evalpipeline.py), which continues a run folder this program took through the bundle.
 //
 // usage: runcontrol run    --entry ENTRY.json --out RUN [--machine MACHINE.json] [--through STAGE]
@@ -23,6 +23,9 @@ using RunControl;
 //        runcontrol fingerprint          read a JSON list of configurations on standard input (plugins, providers, overlays,
 //                                        population, state, schemaVersion); print the list of their fingerprints as JSON.
 //                                        The Python that stays (switchflip, capture_acquire, evalrecords) asks this.
+//        runcontrol switchflip-outcome   read one JSON request on standard input ({"classify": {events, flipStart, windowSeconds?}},
+//                                        {"armReading": [...]} or {"rules": true}); print the switch-flip reading rule's answer.
+//                                        The live driver, switchflip.py, asks this.
 //        runcontrol finalize --run RUN   derive disposition.json and STATUS.md from the ledger and receipts (evalrun finalize)
 //        runcontrol bundle --run RUN [--out DIR] [--reader-cmd CMD] [--reader-env K=V]... [--mod-name PLUGIN=NAME]... [--no-names]
 //                          [--media FILE] [--registry FILE] [--scope FILE] [--search FILE]   assemble one evidence bundle (evalrun bundle)
@@ -37,6 +40,7 @@ using RunControl;
 
 if (args.Length >= 1 && args[0] == "ordersweep") return OrderSweep.Run(args[1..]);   // before the lines below: the sweep keeps the console code page its probes inherit, and its run-log records are ordersweep.py's
 ConsoleText.WriteUtf8();   // this program's own two streams; the console's code page is left as it is, because the probes inherit it
+if (RuleQueries.Handles(args)) return RuleQueries.Run(args);   // pure answers asked many times a run (one each second by switchflip): no run-log record, whose opening costs seconds
 if (EvalCommands.Handles(args)) return EvalCommands.Run(args);   // evalrun's commands: before the process run below, so their run-log records are evalrun.py's
 string command = args.Length >= 1 ? args[0] : "";
 bool pipeline = command is "run" or "arms" or "status";
@@ -61,14 +65,6 @@ try
         object? doc = PyJson.Loads(PyJson.Decode(buffer.ToArray(), bom: true));
         Console.WriteLine($"sha256_json {PyJson.Sha256Json(doc)}");
         Console.WriteLine($"canonical   {Hashing.Sha256Text(PyJson.Canonical(doc))}");
-        return Exit.Ok;
-    }
-    if (args.Length == 1 && command == "fingerprint")
-    {
-        using var stdin = Console.OpenStandardInput();
-        using var buffer = new MemoryStream();
-        stdin.CopyTo(buffer);
-        Console.WriteLine(PyJson.Dumps(BundleMedia.Fingerprints(PyJson.Loads(PyJson.Decode(buffer.ToArray(), bom: true)))));
         return Exit.Ok;
     }
     if (command == "plan") return Plan.Run(PlanFlags(args));

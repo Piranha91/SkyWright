@@ -14,6 +14,41 @@ public static partial class SelfTestFinalize
     public static void RunOwnCases(Action<string, Func<string?>> @case)
     {
         Case = @case;
+        Case("switch flip: a launch is read from its events, a stored label that differs and an unsettled condition are refused", () =>
+        {
+            const double t0 = 1000;
+            List<object?> Ev(params PyDict[] e) => e.Cast<object?>().ToList();
+            PyDict E(string kind, double t, bool ok = true, string? err = null) => new() { ["kind"] = kind, ["name"] = "m0", ["ok"] = ok, ["t"] = t, ["err"] = err, ["target_reached"] = true };
+            var flip = Ev(E("call", t0 + 1), E("readback", t0 + 1.3));
+            var complete = flip.Concat(Enumerable.Range(0, 62).Select(i => (object?)E("heartbeat", t0 + 2 + i))).ToList();
+            var crash = flip.Concat(Ev(new PyDict { ["kind"] = "alive", ["exe"] = false, ["t"] = t0 + 5 }, new PyDict { ["kind"] = "crashlog", ["path"] = "c.log", ["mtime"] = t0 + 4 })).ToList();
+            var stall = flip.Concat(Ev(E("heartbeat", t0 + 3, false, "HTTP 504"), E("heartbeat", t0 + 4, false, "timed out"))).ToList();
+            var shortWindow = flip.Concat(Enumerable.Range(0, 30).Select(i => (object?)E("heartbeat", t0 + 2 + i))).ToList();
+            foreach (var (events, want, branch) in new (List<object?>, string, string?)[]
+                     { (complete, "complete", null), (crash, "fail", "crash"), (stall, "fail", "stall"), (shortWindow, "not-measured", null) })
+            {
+                var got = SwitchFlipOutcome.Classify(events, t0);
+                if (!PyValue.Eq(got["outcome"], want) || !PyValue.Eq(got["branch"], branch))
+                    return $"a {want}/{branch ?? "-"} stream classified {PyText.Str(got["outcome"])}/{PyText.Str(got["branch"])} ({PyText.Str(got["why"])})";
+            }
+            if (SwitchFlipOutcome.Classify(stall, t0)["why"] is not "2 consecutive liveness timeouts ending at t=1004.0 with the game process alive")
+                return "the stall's sentence is not Python's";
+            PyDict Rc(int rep, string outcome, string? branch) => new()
+            {
+                ["condition"] = "C1", ["replicate"] = (long)rep, ["flipStart"] = t0, ["windowSeconds"] = 60L,
+                ["classification"] = new PyDict { ["outcome"] = outcome, ["branch"] = branch },
+            };
+            var (errs, readings) = LiveImport.RereadLaunches([(Rc(1, "fail", "crash"), crash), (Rc(2, "fail", "crash"), crash)]);
+            if (errs.Count > 0 || !PyValue.Eq(PyValue.Dict(readings["C1"])["reading"], "finding")) return $"two re-read crashes are not a finding: {string.Join("; ", errs)}";
+            (errs, _) = LiveImport.RereadLaunches([(Rc(1, "complete", null), crash), (Rc(2, "fail", "crash"), crash)]);
+            if (!errs.Any(e => e.Contains("never preferred"))) return "a stored completion over crash events was accepted";
+            (errs, _) = LiveImport.RereadLaunches([(Rc(1, "fail", "crash"), crash), (Rc(2, "complete", null), complete)]);
+            if (!errs.Any(e => e.Contains("unsettled"))) return "one crash beside one completion was read as settled";
+            var tooShort = Rc(1, "complete", null);
+            tooShort["windowSeconds"] = 30L;
+            (errs, _) = LiveImport.RereadLaunches([(tooShort, complete)]);
+            return errs.Any(e => e.Contains("windowSeconds 30 is below the rule's 60 s")) ? null : "a 30 s window was not refused";
+        });
         Case("fingerprint: the command answers each configuration by the owner's text, and refuses another schema or a missing state", () =>
         {
             var cfg = new PyDict

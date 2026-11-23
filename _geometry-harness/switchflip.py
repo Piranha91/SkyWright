@@ -31,7 +31,8 @@ noted. Each launch is a `scripts/runlog.py` Runner child with a
 deadline, and runs: profile snapshot, launch outside this shell's job object, readiness, strict game-capture
 recording, one arrival (a new game and `coc`), the calls (send and return times, a readback before and after each
 call), the observation window (heartbeat, process liveness), crash-log capture, teardown, MO2 close, profile
-restore proof. The classification is switchflip_outcome.classify, written beside the events it was read from.
+restore proof. The classification is the built-in controller's reading rule (runcontrol switchflip-outcome, asked
+through switchflip_outcome.py), written beside the events it was read from; the receipt names that build's digest.
 
 Exit codes: 0 block finished; 2 usage or a refused input; 3 refused by the idle gate or the lock; 4 a launch failed
 without a receipt, or a known-answer block met a contrary outcome (the block stopped there).
@@ -40,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import functools
 import json
 import math
 import os
@@ -58,7 +60,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 sys.path.insert(0, str(HERE))
 DBHARNESS_DIR = REPO / "external" / "houseCARL" / ".claude" / "skills" / "devbench-in-game-testing" / "scripts"
 
-import switchflip_outcome as O  # noqa: E402
+import switchflip_outcome as O  # noqa: E402  (asks the rule's owner, runcontrol switchflip-outcome)
 import machineidle  # noqa: E402
 
 PLAN_SCHEMA = 1
@@ -82,6 +84,12 @@ def sha256_file(p) -> str:
 
 
 # ------------------------------------------------------------------------------------------ the flip plan --
+
+@functools.lru_cache(maxsize=1)
+def window_min() -> float:
+    """The shortest observation window the reading rule accepts, asked once of its owner."""
+    return O.window_s()
+
 
 def validate_plan(doc) -> list[str]:
     """Every problem with a flip plan, as sentences; [] means valid. Nothing launches on a plan with a problem."""
@@ -122,8 +130,8 @@ def validate_plan(doc) -> list[str]:
         if not ((c.get("arrival") or {}).get("cell")):
             p.append(f"condition {cid}: arrival.cell is required")
         w = c.get("windowSeconds")
-        if not isinstance(w, (int, float)) or isinstance(w, bool) or w < O.WINDOW_S:
-            p.append(f"condition {cid}: windowSeconds must be at least {O.WINDOW_S:g}")
+        if not isinstance(w, (int, float)) or isinstance(w, bool) or w < window_min():
+            p.append(f"condition {cid}: windowSeconds must be at least {window_min():g}")
         s = c.get("settleSeconds", 0)
         if not isinstance(s, (int, float)) or isinstance(s, bool) or s < 0:
             p.append(f"condition {cid}: settleSeconds must be a non-negative number")
@@ -505,7 +513,7 @@ def cmd_launch(a) -> int:
                "settleSeconds": cond.get("settleSeconds", 0), "cell": cond["arrival"]["cell"],
                "calls": cond["calls"], "expect": cond.get("expect"), "idle": json.loads(a.idle_json),
                "tool": {f: sha256_file(HERE / f) for f in ("switchflip.py", "switchflip_outcome.py", "machineidle.py")}
-               | {"dbharness.py": sha256_file(DBHARNESS_DIR / "dbharness.py")}}
+               | {"dbharness.py": sha256_file(DBHARNESS_DIR / "dbharness.py"), "runcontrol": O.owner_identity()}}
 
     def log(**row):
         row["t"] = round(time.time(), 3)
@@ -754,8 +762,7 @@ def cmd_launch(a) -> int:
 # --------------------------------------------------------------------------------------------- export --
 
 def cmd_export(a) -> int:
-    """Assemble one arm's live import document from a block's launch folders (the built-in controller reads it once
-    evallive.py is ported)."""
+    """Assemble one arm's live import document from a block's launch folders, for `runcontrol import-results --file`."""
     block = Path(a.block)
     doc = json.loads((block / "flipplan.json").read_text(encoding="utf-8"))
     if not doc.get("binding"):
@@ -844,7 +851,7 @@ def main(argv=None) -> int:
             p.add_argument("--plan-sha", required=True)
             p.add_argument("--idle-json", required=True)
             p.set_defaults(fn=cmd_launch)
-    p = sub.add_parser("export", help="assemble one arm's live import document (read once evallive.py is ported)")
+    p = sub.add_parser("export", help="assemble one arm's live import document (for runcontrol import-results --file)")
     p.add_argument("--block", required=True)
     p.add_argument("--arm", required=True)
     p.add_argument("--out", required=True)

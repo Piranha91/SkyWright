@@ -4,7 +4,8 @@ using HousecarlCore.Progress;
 namespace RunControl;
 
 /// <summary>`runcontrol import-results --run RUN --file DOC` (evalrun.py's cmd_import_results): binds evidence a record
-/// reader already produced to one arm the plan left open (mcp-only), and writes a normal receipt for it.
+/// reader already produced to one arm the plan left open (mcp-only), or a live game driver's export (live-import,
+/// LiveImport), and writes a normal receipt for it.
 /// Exit 0, or 2 with one REFUSED line that joins every reason.</summary>
 public static class ImportResults
 {
@@ -156,9 +157,8 @@ public static class ImportResults
         var arm = Ev.Items(plan.Get("arms")).Select(PyValue.Dict).FirstOrDefault(x => Ev.Eq(x.Get("armId"), aid));
         if (check == null) return Refuse($"wrong-check: plan {Ev.Str(plan["planId"])} has no check {PyText.Repr(cid)}");
         var adapter = Ev.OrEmpty(check.Get("adapter"));
-        if (adapter.Get("kind") is "live-import")
-            return Refuse($"wrong-check: {Ev.Str(cid)} is a live game driver's check, and importing a live driver's export is not available on the built-in "
-                          + "engine until evallive.py's validator is ported to it.");
+        if (adapter.Get("kind") is "live-import")   // a live game driver's receipts: their own validator re-reads every launch
+            return LiveImport.Import(run, src, plan, ledger, check, arm, doc, manifestBytes, programs, runId, outputs, imported);
         if (adapter.Get("kind") is not "mcp-only")
             return Refuse($"wrong-check: {Ev.Str(cid)} is {PyText.Repr(adapter.Get("kind"))}, not mcp-only; "
                           + "import-results cannot replace a runnable or unsupported detector");
