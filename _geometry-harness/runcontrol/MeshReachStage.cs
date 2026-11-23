@@ -8,7 +8,7 @@ public static class MeshReachStage
 {
     public const string FileName = "mesh-reach.json";
 
-    public static string OverlapprobeExe => PyPath.Join(Checkout.Harness, "overlapprobe", "bin", "Release", "net9.0", "overlapprobe.exe");
+    public static string OverlapprobeExe => Checkout.Program("overlapprobe");
 
     /// <summary>(the file, its content). Refuses in one sentence when the probe fails.</summary>
     public static (string file, PyDict doc) Measure(RunContext ctx, PyDict res, string sdir)

@@ -167,8 +167,7 @@ internal sealed class WorldIndex : IDisposable
     static string CorpusPathOr(string? given)
     {
         if (given is { Length: > 0 }) return given;
-        if (Environment.GetEnvironmentVariable("WB_CORPUS") is { Length: > 0 } env) return env;
-        try { return Program.DefaultCorpus(); }
+        try { return Program.Corpus(); }
         catch (InvalidOperationException)
         {
             throw new InvalidOperationException("the houseCARL rulebook (corpus.json) was not found, so record types cannot be named; set WB_CORPUS to its path.");

@@ -30,7 +30,7 @@ internal static class NavRepairLane
     internal static readonly HashSet<string> Kinds = new(StringComparer.Ordinal) { "EDGE-IDX", "EDGE-NAV", "EDGE-NOMATCH", "EDGE-ONEWAY", "NAV-GROUND" };
 
     internal static string ProbeExe(string harness) => Environment.GetEnvironmentVariable("WB_NAVOWNPROBE") is { Length: > 0 } e ? e
-        : Path.Combine(harness, "navownprobe", "bin", "Release", "net9.0", "navownprobe.exe");
+        : HarnessShared.CheckoutLayout.ProgramExe(harness, "navownprobe");
 
     static (int Exit, string Text) Probe(string exe, IEnumerable<string> args, string log)
     {

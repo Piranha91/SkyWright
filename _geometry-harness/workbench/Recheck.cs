@@ -186,7 +186,7 @@ internal static class Recheck
         var bundleDigest = BundleDigest(bundleDir, probe);
         var candidates = buildDirs.Select(d => Path.Combine(d, probe)).ToList();
         if (BundleLocator(bundleDir, probe) is { } loc) candidates.Add(loc);
-        var local = localProbesRoot is null ? null : Path.Combine(localProbesRoot, probe, "bin", "Release", "net9.0");
+        var local = localProbesRoot is null ? null : HarnessShared.CheckoutLayout.ProgramFolder(localProbesRoot, probe);
         var (folder, digest, buildSentence) = ChooseBuild(probe, bundleDigest, candidates, local, f => engine.PackageDigest(f, workDir));
         say(buildSentence);
         if (folder is null) throw new InvalidOperationException(buildSentence);

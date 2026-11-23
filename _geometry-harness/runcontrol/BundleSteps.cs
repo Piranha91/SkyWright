@@ -7,11 +7,14 @@ public static class BundleSteps
     /// <summary>The environment variable naming the record reader when --reader-cmd names none.</summary>
     public const string ReaderVariable = "HOUSECARL_RECORD_READER_CMD";
 
-    /// <summary>The houseCARL server built in this checkout's pinned houseCARL (external/houseCARL).</summary>
+    /// <summary>houseCARL's server in this program's layout: the install's housecarl-mcp, or the server built in the
+    /// checkout's pinned houseCARL (external/houseCARL). Outside both, the name beside this program, which is never there.</summary>
     public static string CheckoutReader() =>
-        PyPath.Join(HarnessShared.CheckoutLayout.Housecarl(HarnessShared.CheckoutLayout.FindRoot()
-                                                           ?? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."))),
-            "src", "housecarl-mcp", "bin", "Release", "net9.0", "housecarl-mcp.exe");
+        PyPath.Str(HarnessShared.CheckoutLayout.Locate(null, out _)?.PathOf(HarnessShared.CheckoutLayout.Piece.Server)
+                   ?? Path.Combine(AppContext.BaseDirectory, "housecarl-mcp.exe"));
+
+    /// <summary>Where <see cref="CheckoutReader"/> comes from, for the names step's source.</summary>
+    public static string ReaderSource() => HarnessShared.CheckoutLayout.Locate(null, out _)?.Installed == true ? "install" : "checkout";
 
     /// <summary>The record reader the names enrichment starts: --reader-cmd, else the environment variable, else this
     /// checkout's built server. (command, where it came from), or (null, one sentence why there is none).</summary>
@@ -21,8 +24,8 @@ public static class BundleSteps
         string env = PyValue.Strip(Environment.GetEnvironmentVariable(ReaderVariable) ?? "");
         if (env.Length > 0) return (env, ReaderVariable);
         string exe = CheckoutReader();
-        if (File.Exists(exe)) return ($"\"{exe}\"", "checkout");
-        return (null, $"no record reader was given (--reader-cmd or {ReaderVariable}) and this checkout's houseCARL server is not built at {exe}.");
+        if (File.Exists(exe)) return ($"\"{exe}\"", ReaderSource());
+        return (null, $"no record reader was given (--reader-cmd or {ReaderVariable}) and this {ReaderSource()}'s houseCARL server is not at {exe}.");
     }
 
     /// <summary>--mod-name PLUGIN=NAME pairs, each side stripped.</summary>

@@ -13,7 +13,7 @@ public static class PlanIdentity
     public static readonly HashSet<string> LaunchKinds = new(StringComparer.Ordinal)
     { "scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target", "adviceprobe", "patchprobe" };
 
-    public static string ProbeExe(string harness, string probe) => PyPath.Join(harness, probe, "bin", "Release", "net9.0", probe + ".exe");
+    public static string ProbeExe(string harness, string probe) => PyPath.Str(HarnessShared.CheckoutLayout.ProgramExe(harness, probe));
 
     /// <summary>The child's program: a --probe-cmd prefix split on spaces, else the probe's build; null when there is neither.</summary>
     public static List<string>? ProbeArgv(PyDict opts, string harness, string? exe)

@@ -29,9 +29,9 @@ internal static class Shell
         var b = Bundle ?? throw new InvalidOperationException("no bundle is open, so the repair has no order to plan on.");
         var t = WorkbenchHost.TargetFromEnv() ?? throw new InvalidOperationException("no write target is set (the launcher's profile, or WB_INSTANCE, WB_PROFILE and WB_GAME_DATA), so the order cannot be read.");
         return (BundleConflicts.CandidateFile(b.Dir, b.Arm), t, NavRepairLane.ProbeExe(Launcher.Engine.HarnessDir()), RepairWork());
-    }, t => PatchWriter.StartAsync(Environment.GetEnvironmentVariable("WB_SERVER") is { Length: > 0 } s ? s : Program.DefaultServerExe(), t,
+    }, t => PatchWriter.StartAsync(Program.ServerExe(), t,
                                    Path.Combine(RepairWork(), "housecarl-data-repair"),
-                                   Environment.GetEnvironmentVariable("WB_CORPUS") is { Length: > 0 } cp ? cp : Program.DefaultCorpus(), WorkbenchHost.Say));
+                                   Program.Corpus(), WorkbenchHost.Say));
     static string RepairWork() => Environment.GetEnvironmentVariable("WB_OUT") is { Length: > 0 } o ? o : Path.Combine(Path.GetTempPath(), "workbench");
 
     /// <summary>Each view by name: the group tab it sits in, and its tab inside the group (null for Start, a group of its
@@ -332,14 +332,11 @@ internal static class Shell
     internal static string? ScenePolicyRefusal => _scenePolicy.Value.Refusal;
     static readonly Lazy<(SceneKeyPolicy? Policy, string? Refusal)> _scenePolicy = new(() =>
     {
-        var path = Environment.GetEnvironmentVariable("WB_SCENE_POLICY");
-        if (string.IsNullOrWhiteSpace(path))
-            // beside the app, or in a checkout's pinned houseCARL (external/houseCARL), whose reporting skill owns the policy
-            for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null && path is null; dir = dir.Parent)
-                foreach (var cand in new[] { Path.Combine(dir.FullName, SceneKeyPolicy.RelativePath),
-                                             Path.Combine(HarnessShared.CheckoutLayout.Housecarl(dir.FullName), SceneKeyPolicy.RelativePath) })
-                    if (File.Exists(cand)) { path = cand; break; }
-        if (string.IsNullOrWhiteSpace(path)) return (null, "the reporting skill's scene policy was not found beside the workbench, so rows are listed without scenes.");
+        // WB_SCENE_POLICY, else the install's housecarl/ or the checkout's pinned houseCARL, whose reporting skill owns the policy
+        string? path;
+        try { path = Program.Piece(HarnessShared.CheckoutLayout.Piece.ScenePolicy, "reporting skill's scene-policy.json"); }
+        catch (InvalidOperationException ex) { return (null, ex.Message); }
+        if (!File.Exists(path)) return (null, $"the reporting skill's scene policy is not at '{path}', so rows are listed without scenes.");
         try { return (SceneKeyPolicy.Load(path), null); }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or System.Text.Json.JsonException) { return (null, ex.Message); }
     });

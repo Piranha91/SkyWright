@@ -7,25 +7,15 @@ namespace Workbench;
 /// <c>viewprobe --interactive</c> takes), then hands it to the workbench window instead of the fly-through.</summary>
 internal static class Program
 {
-    /// <summary>The SkyWright checkout this exe was built from (the folder holding SkyWright.sln), or null.</summary>
-    internal static string? CheckoutRoot() => HarnessShared.CheckoutLayout.FindRoot();
+    /// <summary>A piece this workbench takes from its layout: its WB_* override, else the install beside the workbench,
+    /// else the checkout it was built in (<see cref="HarnessShared.CheckoutLayout"/> owns where). One sentence when none.</summary>
+    internal static string Piece(HarnessShared.CheckoutLayout.Piece p, string what) => HarnessShared.CheckoutLayout.Resolve(p, what);
 
-    /// <summary>The houseCARL server built in this checkout's pinned houseCARL: external/houseCARL/src/housecarl-mcp/bin/Release.</summary>
-    internal static string DefaultServerExe()
-    {
-        var root = CheckoutRoot()
-            ?? throw new InvalidOperationException("this workbench was not built inside a SkyWright checkout; set WB_SERVER to the housecarl-mcp.exe it should use.");
-        return HarnessShared.CheckoutLayout.ServerExe(root);
-    }
+    /// <summary>houseCARL's server: WB_SERVER, else the install's housecarl-mcp, else the one built in the checkout's pinned houseCARL.</summary>
+    internal static string ServerExe() => Piece(HarnessShared.CheckoutLayout.Piece.Server, "housecarl-mcp.exe it should use");
 
-    internal static string FromCheckoutPublic(string env, string what, params string[] rel) => FromCheckout(env, what, rel);
-
-    static string FromCheckout(string env, string what, params string[] rel)
-    {
-        if (Environment.GetEnvironmentVariable(env) is { Length: > 0 } v) return v;
-        var root = CheckoutRoot() ?? throw new InvalidOperationException($"this workbench was not built inside a SkyWright checkout; set {env} to the {what}.");
-        return Path.Combine(new[] { root }.Concat(rel).ToArray());
-    }
+    /// <summary>The rulebook the server reads: WB_CORPUS, else the install's (beside its server), else the checkout's generated/corpus.json.</summary>
+    internal static string Corpus() => Piece(HarnessShared.CheckoutLayout.Piece.Corpus, "rulebook corpus.json");
 
     /// <summary>--bundle DIR [--arm A]: verify and read the bundle, rank its rows, and turn the cells its rows sit in into
     /// a worklist (one placeholder shot per cell: the workbench frames the camera on the reference after each build), so
@@ -45,7 +35,7 @@ internal static class Program
         arm ??= BundleConflicts.DefaultArm(dir);               // the plan's review arm in manual mode, else baseline
         var work = Environment.GetEnvironmentVariable("WB_OUT") is { Length: > 0 } o ? o : outDir ?? Path.Combine(Path.GetTempPath(), "workbench");
         Directory.CreateDirectory(work);
-        var sevPath = FromCheckout("WB_SEVERITY", "severity table", "data", "workbench-severity.json");
+        var sevPath = Piece(HarnessShared.CheckoutLayout.Piece.Severity, "severity table workbench-severity.json");
         Shell.Severity = SeverityTable.Load(sevPath);
         var sw = System.Diagnostics.Stopwatch.StartNew();
         Shell.Bundle = BundleConflicts.Open(dir, arm, Path.Combine(work, "bundle-verify.json"), Shell.Launcher.Engine);
@@ -95,15 +85,6 @@ internal static class Program
         return new[] { "--worklist", wlPath }.Concat(rest).ToArray();
     }
 
-    /// <summary>The rulebook the server reads: this checkout's generated/corpus.json (the generator writes it).</summary>
-    internal static string DefaultCorpus()
-    {
-        var exe = DefaultServerExe();
-        // the server's own default is the corpus.json beside it, where the generator writes it; else the checkout's generated/
-        var beside = Path.Combine(Path.GetDirectoryName(exe)!, "corpus.json");
-        return File.Exists(beside) ? beside : Path.Combine(Path.GetDirectoryName(exe)!, "..", "..", "..", "..", "..", "generated", "corpus.json");
-    }
-
     /// <summary>Open a bundle folder in the window that is already shown (the Open control): its rows fill the tabs and,
     /// when a row names a placed reference, its first cell is asked for as a scene. Needs the launcher's profile, or
     /// WB_INSTANCE, WB_PROFILE and WB_GAME_DATA, to know the load order the bundle was measured on.</summary>
@@ -147,6 +128,10 @@ internal static class Program
             Console.Error.WriteLine("workbench: " + said + Environment.NewLine + e.ExceptionObject);
             Tell(said + (SessionLog.FilePath is { } p ? $" The details are in {p}." : ""));
         };
+        // where the pieces come from, overrides named; a broken install beside the workbench is refused before anything opens
+        if (HarnessShared.CheckoutLayout.Locate(null, out var noLayout) is { } layout) WorkbenchHost.Say(layout.Describe());
+        else if (HarnessShared.CheckoutLayout.BesideInstall()) { Console.Error.WriteLine("workbench: " + noLayout); Tell(noLayout + "."); return 2; }
+        else WorkbenchHost.Say(noLayout + "; only the WB_* overrides name its pieces.");
         args = FrameSwitches(args);
         InteractiveViewer.Host = WorkbenchHost.Run;
         RenderStages.Tick = SceneDirector.Tick;                // the window is answered while a scene builds

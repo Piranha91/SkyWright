@@ -45,7 +45,7 @@ internal static class LoadOrderIndexes
             {
                 var paths = PathsOf(o);
                 say?.Report($"reading {paths.Count} plugin(s) of {o.Label}");
-                var corpus = Environment.GetEnvironmentVariable("WB_CORPUS") is { Length: > 0 } cp ? cp : Program.DefaultCorpus();
+                var corpus = Program.Corpus();
                 return await WorldIndex.BuildAsync(paths, say, CancellationToken.None, corpus);
             });
             Built.Add((key, task));

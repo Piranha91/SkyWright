@@ -242,7 +242,7 @@ internal sealed class Launcher : IAsyncDisposable
     internal static IReadOnlyList<RegistryCheck> Registry()
     {
         if (_registry is not null) return _registry;
-        var path = Program.FromCheckoutPublic("WB_REGISTRY", "check registry", "data", "check-registry.json");
+        var path = Program.Piece(HarnessShared.CheckoutLayout.Piece.Registry, "check registry check-registry.json");
         if (!File.Exists(path)) throw new InvalidOperationException($"the check registry is not at '{path}'; set WB_REGISTRY to check-registry.json.");
         using var d = JsonDocument.Parse(File.ReadAllText(path));
         _registry = d.RootElement.GetProperty("checks").EnumerateArray().Select(c =>
@@ -450,7 +450,7 @@ internal sealed class Launcher : IAsyncDisposable
             ? System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(mf))!.AsObject() : new System.Text.Json.Nodes.JsonObject();
         if (!m.ContainsKey("readerCmd"))
         {
-            var exe = Environment.GetEnvironmentVariable("WB_SERVER") is { Length: > 0 } sx ? sx : StateServerExe();
+            var exe = StateServerExe();
             m["readerCmd"] = "\"" + exe + "\"";
         }
         File.WriteAllText(machine, m.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
@@ -565,7 +565,7 @@ internal sealed class Launcher : IAsyncDisposable
         }
     }
 
-    static string StateServerExe() { try { return Program.DefaultServerExe(); } catch (InvalidOperationException) { return "housecarl-mcp.exe"; } }
+    static string StateServerExe() { try { return Program.ServerExe(); } catch (InvalidOperationException) { return "housecarl-mcp.exe"; } }
 
     /// <summary>The houseCARL server bound to the open profile by explicit paths, its data folder under the Work Folder
     ///, started on the first forwarded call.</summary>
@@ -578,8 +578,8 @@ internal sealed class Launcher : IAsyncDisposable
             NeedProfile();
             if (Output is null) throw new InvalidOperationException("choose an Output Folder first (workbench_act verb set_output): in manual mode every houseCARL write goes under it.");
             if (WorkFolder is null) throw new InvalidOperationException("choose a Work Folder outside the instance and the game folder first (workbench_act verb set_work_folder): the houseCARL server keeps its data there.");
-            var exe = Environment.GetEnvironmentVariable("WB_SERVER") is { Length: > 0 } s ? s : Program.DefaultServerExe();
-            var corpus = Environment.GetEnvironmentVariable("WB_CORPUS") is { Length: > 0 } cp ? cp : Program.DefaultCorpus();
+            var exe = Program.ServerExe();
+            var corpus = Program.Corpus();
             var target = new WriteTarget(Instance!, Profile!, Path.Combine(Game!, "Data"), Output);
             var data = Path.Combine(WorkFolder, "hcdata");
             _starting = Task.Run(async () =>

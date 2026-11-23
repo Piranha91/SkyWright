@@ -92,7 +92,7 @@ public static class StageRecords
         object workersAsked = ParseWorkers(ctx.Machine.ContainsKey("recordWorkers") ? ctx.Machine["recordWorkers"] : "auto", "the machine file's recordWorkers");
         int n = Directory.Exists(sdir) ? Directory.EnumerateFileSystemEntries(sdir, "capture-*").Count() : 0;
         string cap = PyPath.Join(sdir, $"capture-{n + 1:00}"), checkpoints = PyPath.Join(sdir, "checkpoints"), commands = PyPath.Join(sdir, "commands");
-        var argv = new List<string> { Python(ctx), PyOrder.Fwd(PyPath.Join(Checkout.Harness, "evalrecords.py")), "capture", "--run", PyOrder.Fwd(run) };
+        var argv = new List<string> { Python(ctx), PyOrder.Fwd(Checkout.Script("evalrecords.py", "the record capture")), "capture", "--run", PyOrder.Fwd(run) };
         foreach (string arm in openArms) argv.AddRange(["--arm", arm]);
         argv.AddRange(["--baseline-from", PyOrder.Fwd(PyPath.Join(ctx.Out, "prepare", "preparation.json")), "--reader-cmd", StageBundle.ReaderCmd(ctx),
             "--data", PyOrder.Fwd(PyPath.Join(ctx.Game, "Data")), "--mods", PyOrder.Fwd(PyPath.Join(ctx.Instance, "mods")),

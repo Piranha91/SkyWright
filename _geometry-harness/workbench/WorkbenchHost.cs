@@ -1077,7 +1077,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var engine = Shell.Launcher.Engine;
         var harness = engine.HarnessDir();
         var conflictdiff = Environment.GetEnvironmentVariable("WB_CONFLICTDIFF") is { Length: > 0 } cd ? cd
-            : Path.Combine(harness, "conflictdiff", "bin", "Release", "net9.0", "conflictdiff.exe");
+            : HarnessShared.CheckoutLayout.ProgramExe(harness, "conflictdiff");
         var buildDirs = (Environment.GetEnvironmentVariable("WB_PROBE_DIRS") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries);
         var game = Path.GetDirectoryName(Path.GetFullPath(t.DataDir.TrimEnd('\\', '/')))!;
         string population = "not read";
@@ -1428,9 +1428,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         if (_writer is not null) return _writer;
         var target = TargetFromEnv()
             ?? throw new InvalidOperationException("no write target: set WB_INSTANCE, WB_PROFILE and WB_GAME_DATA to the MO2 instance, profile and game Data folder the scene was built from.");
-        var exe = Environment.GetEnvironmentVariable("WB_SERVER") is { Length: > 0 } s ? s : Program.DefaultServerExe();
+        var exe = Program.ServerExe();
         var dataDir = Path.Combine(_outDir, "housecarl-data");
-        var corpus = Environment.GetEnvironmentVariable("WB_CORPUS") is { Length: > 0 } cp ? cp : Program.DefaultCorpus();
+        var corpus = Program.Corpus();
         _writer = await PatchWriter.StartAsync(exe, target, dataDir, corpus, Say);
         // the await may resume off the window's thread (the context read waits on this task from the pool), and the status
         // line belongs to the window: it is updated there
@@ -1521,7 +1521,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             var engine = Shell.Launcher.Engine;
             var harness = engine.HarnessDir();
             var conflictdiff = Environment.GetEnvironmentVariable("WB_CONFLICTDIFF") is { Length: > 0 } cd ? cd
-                : Path.Combine(harness, "conflictdiff", "bin", "Release", "net9.0", "conflictdiff.exe");
+                : HarnessShared.CheckoutLayout.ProgramExe(harness, "conflictdiff");
             var buildDirs = (Environment.GetEnvironmentVariable("WB_PROBE_DIRS") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries);
             var game = Path.GetDirectoryName(Path.GetFullPath(t.DataDir.TrimEnd('\\', '/')))!;
             var work = Path.Combine(_outDir, "recheck-" + DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss"));

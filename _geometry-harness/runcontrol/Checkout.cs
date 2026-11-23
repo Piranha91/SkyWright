@@ -1,24 +1,31 @@
 namespace RunControl;
 
-/// <summary>The checkout this build sits in, and the tools and data the stages take from it.</summary>
+/// <summary>The SkyWright layout this program sits in (an install, or the checkout it was built in), and the tools and
+/// data the stages take from it. Where each piece is belongs to <see cref="HarnessShared.CheckoutLayout"/>; this class
+/// only asks it. runcontrol's own flags (--registry, --harness, --reader-cmd) are its overrides.</summary>
 public static class Checkout
 {
-    static string? _root;
+    static HarnessShared.CheckoutLayout.Layout? _layout;
 
-    /// <summary>The SkyWright checkout (the folder holding SkyWright.sln), above this program's own folder.</summary>
-    public static string Root => _root ??= Find();
+    /// <summary>The layout: the install beside this program's folder, else the checkout above it.</summary>
+    internal static HarnessShared.CheckoutLayout.Layout Layout => _layout ??= Find();
 
-    public static string Harness => PyPath.Join(Root, "_geometry-harness");
-    public static string ScopeprobeExe => PyPath.Join(Harness, "scopeprobe", "bin", "Release", "net9.0", "scopeprobe.exe");
-    public static string Registry => PyPath.Resolve(HarnessShared.CheckoutLayout.Registry(Root));
-    public static string Corpus => PyPath.Resolve(HarnessShared.CheckoutLayout.Corpus(Root));
+    /// <summary>The layout's root: the install root, or the folder holding SkyWright.sln.</summary>
+    public static string Root => PyPath.Resolve(Layout.Root);
 
-    static string Find()
-    {
-        string? dir = HarnessShared.CheckoutLayout.FindRoot();
-        if (dir == null)
-            throw new Refusal($"runcontrol is not inside a SkyWright checkout (no {HarnessShared.CheckoutLayout.Marker} above {PyOrder.Fwd(AppContext.BaseDirectory)}); "
-                              + "build it in the checkout whose probes it should run.");
-        return PyPath.Resolve(dir);
-    }
+    public static string Harness => PyPath.Str(Layout.Harness);
+    public static string ScopeprobeExe => Program("scopeprobe");
+    public static string Registry => PyPath.Resolve(Layout.PathOf(HarnessShared.CheckoutLayout.Piece.Registry));
+    public static string Corpus => PyPath.Resolve(Layout.PathOf(HarnessShared.CheckoutLayout.Piece.Corpus));
+
+    /// <summary>One of SkyWright's programs in this layout.</summary>
+    public static string Program(string name) => PyPath.Str(Layout.Program(name));
+
+    /// <summary>A Python script of the checkout's harness; an install carries no Python, so there it is refused.</summary>
+    public static string Script(string name, string step) => Layout.Installed
+        ? throw new Refusal($"{step} is a Python step that runs only from a SkyWright checkout, and this runcontrol is installed at {PyOrder.Fwd(Layout.Root)}; run it from a checkout's runcontrol.")
+        : PyPath.Join(Harness, name);
+
+    static HarnessShared.CheckoutLayout.Layout Find() =>
+        HarnessShared.CheckoutLayout.Locate(null, out var why) ?? throw new Refusal(why + "; run the runcontrol of an install or of the checkout whose probes it should run.");
 }

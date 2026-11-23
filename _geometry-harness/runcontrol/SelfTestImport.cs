@@ -95,7 +95,7 @@ public static partial class SelfTestFinalize
                     else if (minutes != backstop) wrong ??= $"the capture's deadline was {minutes} minutes";
                     more = new PyDict { ["deadline_min"] = backstop, ["heavy"] = true, ["hold_min"] = backstop, ["purpose"] = "evalpipeline m records" };
                     if (argv[0] != S(machine["python"])) wrong ??= $"the capture was started with {argv[0]}";
-                    if (argv[1] != PyOrder.Fwd(PyPath.Join(Checkout.Harness, "evalrecords.py"))) wrong ??= $"the capture's script was {argv[1]}";
+                    if (argv[1] != PyOrder.Fwd(Checkout.Script("evalrecords.py", "the record capture"))) wrong ??= $"the capture's script was {argv[1]}";
                 }
                 else
                 {

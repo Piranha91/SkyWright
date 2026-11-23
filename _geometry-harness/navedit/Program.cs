@@ -606,8 +606,8 @@ static class NavEditCli
             if (!again[i].Ok || again[i].Row["ops"]!.ToJsonString() != rows[i]!["ops"]!.ToJsonString())
                 throw new Refusal($"navedit write: {rows[i]!["navmesh"]} no longer plans the same on this load order; run navedit plan again.");
 
-        var root = CheckoutLayout.FindRoot() ?? throw new Refusal("navedit write: the SkyWright checkout (SkyWright.sln) was not found above this program, so the rulebook cannot be located.");
-        var corpus = CheckoutLayout.Corpus(root);
+        var layout = CheckoutLayout.Locate(null, out var noLayout) ?? throw new Refusal($"navedit write: {noLayout}, so the rulebook cannot be located.");
+        var corpus = layout.PathOf(CheckoutLayout.Piece.Corpus);
         if (!File.Exists(corpus)) throw new Refusal($"navedit write: the rulebook {corpus} is missing; generate it (see CLAUDE.md, Build and check).");
         var rulebook = CorpusRulebook.Load(corpus);
         Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
@@ -768,8 +768,8 @@ static class NavEditCli
             foreach (var k in u.Expect.Keys)
                 if (rowSources.Contains(k) || !uvSeen.Add(k))
                     throw new Refusal($"navedit write: {k} is changed by carrying a version of {(string)row["source"]!} and by another row of the plan, which one patch cannot hold both of; plan again with a current navownprobe --repair-plan.");
-        var root = CheckoutLayout.FindRoot() ?? throw new Refusal("navedit write: the SkyWright checkout (SkyWright.sln) was not found above this program, so the rulebook cannot be located.");
-        var corpus = CheckoutLayout.Corpus(root);
+        var layout = CheckoutLayout.Locate(null, out var noLayout) ?? throw new Refusal($"navedit write: {noLayout}, so the rulebook cannot be located.");
+        var corpus = layout.PathOf(CheckoutLayout.Piece.Corpus);
         if (!File.Exists(corpus)) throw new Refusal($"navedit write: the rulebook {corpus} is missing; generate it (see CLAUDE.md, Build and check).");
         var rulebook = CorpusRulebook.Load(corpus);
         Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);

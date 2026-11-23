@@ -46,7 +46,7 @@ public static class OrderSweep
 
     static string ProbeExe(string harness, string probe)
     {
-        string p = PyPath.Join(harness, probe, "bin", "Release", "net9.0", OperatingSystem.IsWindows() ? probe + ".exe" : probe);
+        string p = PyPath.Str(HarnessShared.CheckoutLayout.ProgramExe(harness, probe));
         if (!SweepFiles.Exists(p)) throw new SweepExit(1, $"{probe}: no Release binary at {p} — build it first (dotnet build -c Release)");
         return p;
     }

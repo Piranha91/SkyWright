@@ -7,6 +7,17 @@ namespace RunControl;
 /// Exit 0, or 2 on a refusal or a program that changed.</summary>
 public static class EvaluateRun
 {
+    /// <summary>One line when the plan's probes are not this runcontrol's own layout's (an install running a checkout's
+    /// plan, the reverse, or an explicit --harness): where they are and where this program is. Null when they match.</summary>
+    public static string? LayoutNote(PyDict plan)
+    {
+        string harness = PyPath.Str(Ev.Str(PyValue.Dict(plan["options"])["harness"]));
+        var own = HarnessShared.CheckoutLayout.Locate(null, out _);
+        if (own is not null && string.Equals(Path.GetFullPath(harness).TrimEnd('\\', '/'), Path.GetFullPath(own.Harness).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase)) return null;
+        return $"note: this plan's probes are at {PyOrder.Fwd(harness)} (its --harness), not in this runcontrol's {(own?.Installed == true ? "install" : "checkout")} "
+               + $"{(own is null ? "(none found)" : PyOrder.Fwd(own.Root))}; they run as the plan recorded them, and their identities are checked by content.";
+    }
+
     public static int Run(EvalArgs a, bool resuming)
     {
         string run = PyPath.Str(a.Run!);
@@ -19,6 +30,8 @@ public static class EvaluateRun
         if (IdentityChecks.ContractRefusal(plan) is { } noContract) throw new Refusal(noContract);
         var (changed, measured) = ToolPreflight.Check(run, plan);
         if (changed != null) throw new Refusal(changed);
+        // a plan made for another layout's probes (its --harness) runs them as recorded, never silently
+        if (LayoutNote(plan) is { } note) Console.Error.WriteLine(note);
         // the plan's premises are read before anything is written: a ledger rebuild writes the ledger
         if (EvalStore.PremiseRefusal(plan) is { } premise) throw new Refusal(premise);
         var ledger = new Ledger(run, plan);

@@ -27,9 +27,9 @@ internal sealed class RunEngine
     /// <summary>runcontrol.exe, or one sentence saying where it should be.</summary>
     internal string ControllerExe()
     {
-        var exe = _exe ?? Program.FromCheckoutPublic("WB_RUNCONTROL", "built-in run engine runcontrol.exe", "_geometry-harness", "runcontrol", "bin", "Release", "net9.0", "runcontrol.exe");
+        var exe = _exe ?? Program.Piece(HarnessShared.CheckoutLayout.Piece.Runcontrol, "built-in run engine runcontrol.exe");
         if (!File.Exists(exe))
-            throw new InvalidOperationException($"the built-in run engine is not at '{exe}'; build it (dotnet build _geometry-harness/runcontrol -c Release), or set WB_RUNCONTROL to runcontrol.exe.");
+            throw new InvalidOperationException($"the built-in run engine is not at '{exe}'; build it (dotnet build _geometry-harness/runcontrol -c Release) or publish an install, or set WB_RUNCONTROL to runcontrol.exe.");
         return exe;
     }
 
@@ -42,9 +42,9 @@ internal sealed class RunEngine
     /// <summary>The folder the probes are built under (conflictdiff, navownprobe, a re-check's local probe builds).</summary>
     internal string HarnessDir()
     {
-        if (Environment.GetEnvironmentVariable("WB_HARNESS") is { Length: > 0 } h) return h;
-        return _exe is not null ? Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(_exe))!, "..", "..", "..", ".."))
-            : Program.FromCheckoutPublic("WB_HARNESS", "harness folder (_geometry-harness)", "_geometry-harness");
+        if (Environment.GetEnvironmentVariable(HarnessShared.CheckoutLayout.OverrideVariable(HarnessShared.CheckoutLayout.Piece.Harness)) is { Length: > 0 } h) return h;
+        return _exe is not null ? HarnessShared.CheckoutLayout.HarnessOf(_exe)
+            : Program.Piece(HarnessShared.CheckoutLayout.Piece.Harness, "folder the programs sit under (an install, or a checkout's _geometry-harness)");
     }
 
     /// <summary>The engine's own command: it writes UTF-8, and its run records go where the caller keeps them.</summary>
