@@ -171,9 +171,11 @@ public static class ConflictIo
     /// so does the key.</para>
     /// <para>A PART (2026-10-24): an EDGE-IDX row is one broken link, so its identity is the linking navmesh, the target in
     /// their roles (direction kept) and the target triangle; without a part the string is exactly what it was.</para>
-    public static string RowIdentity(string kind, string formKey, string? other, string a, int? part = null)
+    /// <para>A row with no mod pair (an imported check's row, such as a dangling reference: the file carries no A) keys with an
+    /// empty A, as a row whose A is empty does.</para>
+    public static string RowIdentity(string kind, string formKey, string? other, string? a, int? part = null)
     {
-        kind = kind.ToLowerInvariant(); formKey = formKey.ToLowerInvariant(); a = a.ToLowerInvariant(); other = other?.ToLowerInvariant();
+        kind = kind.ToLowerInvariant(); formKey = formKey.ToLowerInvariant(); a = (a ?? "").ToLowerInvariant(); other = other?.ToLowerInvariant();
         if (other is null) return $"{kind}|{formKey}|{a}";
         if (part is not null) return $"{kind}|{formKey}|{other}|{part}";
         return string.CompareOrdinal(formKey, other) <= 0 ? $"{kind}|{formKey}|{other}" : $"{kind}|{other}|{formKey}";
