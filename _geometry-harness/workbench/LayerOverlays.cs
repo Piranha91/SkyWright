@@ -89,12 +89,13 @@ internal sealed class CellBorders : IRenderOverlay
 
 /// <summary>What the game does not draw, where the walk met it (<see cref="InteractiveOptions.UndrawnAt"/>): an editor
 /// marker as a violet stem with an arrow the way it faces, and an object with no model (most lights, sound markers) as a
-/// yellow diamond. Drawn by the overlay line pass, through anything in front, as the conflict marks are.</summary>
+/// yellow diamond, drawn solid (a wire diamond was not read as a shape until seen filled). Drawn through anything in front.</summary>
 internal sealed class MarkerGizmos : IRenderOverlay
 {
     internal static readonly GlVec3 MarkerColour = new(0.65f, 0.45f, 1f), NoModelColour = new(1f, 0.9f, 0.3f);
     internal bool Enabled;
     readonly List<OverlayLineSegment> _lines = new();
+    readonly List<float> _diamonds = new();
     internal int Markers { get; }
     internal int NoModel { get; }
 
@@ -104,7 +105,7 @@ internal sealed class MarkerGizmos : IRenderOverlay
         {
             var at = new Vector3(p.X, p.Y, p.Z);
             if (marker) { Markers++; foreach (var (a, b) in MarkerLines(at, r)) Add(a, b, MarkerColour); }
-            else { NoModel++; foreach (var (a, b) in DiamondLines(at, 20f)) Add(a, b, NoModelColour); }
+            else { NoModel++; DiamondTriangles(_diamonds, at, 20f); }
         }
     }
 
@@ -144,10 +145,38 @@ internal sealed class MarkerGizmos : IRenderOverlay
         }
     }
 
+    /// <summary>A solid diamond (an octahedron's 8 faces, wound outward) of radius <paramref name="r"/> around the point,
+    /// added to a 6-float (position, normal) triangle list in the view's Y-up space.</summary>
+    internal static void DiamondTriangles(List<float> into, Vector3 at, float r)
+    {
+        var up = at + new Vector3(0, 0, r); var down = at - new Vector3(0, 0, r);
+        var ring = new[] { at + new Vector3(r, 0, 0), at + new Vector3(0, r, 0), at - new Vector3(r, 0, 0), at - new Vector3(0, r, 0) };
+        for (int i = 0; i < 4; i++)
+        {
+            Vector3 a = ring[i], b = ring[(i + 1) % 4];
+            OutwardTriangle(into, at, a, b, up);
+            OutwardTriangle(into, at, a, b, down);
+        }
+    }
+
+    /// <summary>A Skyrim-space triangle into a Y-up list, wound so its face points away from <paramref name="centre"/>.</summary>
+    static void OutwardTriangle(List<float> into, Vector3 centre, Vector3 a, Vector3 b, Vector3 c)
+    {
+        Vector3 ya = TexturedScene.YUp(a), yb = TexturedScene.YUp(b), yc = TexturedScene.YUp(c), yo = TexturedScene.YUp(centre);
+        var n = Vector3.Cross(yb - ya, yc - ya);
+        if (Vector3.Dot(n, (ya + yb + yc) / 3f - yo) < 0) (yb, yc) = (yc, yb);
+        ConflictMarks.AddTriangle(into, ya, yb, yc);
+    }
+
     public void Draw(GlRenderer renderer, in OverlayContext context)
     {
-        if (!Enabled || _lines.Count == 0) return;
-        if (!renderer.BeginOverlayLinePass(context, out var state)) return;
+        if (!Enabled || (_lines.Count == 0 && _diamonds.Count == 0)) return;
+        if (_diamonds.Count >= 18 && renderer.BeginOverlaySurfacePass(context, out var st))
+        {
+            renderer.DrawOverlaySolidTriangles(_diamonds, NoModelColour);
+            renderer.EndOverlaySurfacePass(st);
+        }
+        if (_lines.Count == 0 || !renderer.BeginOverlayLinePass(context, out var state)) return;
         renderer.DrawOverlayLines(_lines, 2f, context);
         renderer.EndOverlayLinePass(state);
     }

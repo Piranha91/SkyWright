@@ -18,8 +18,8 @@ internal sealed class ConflictMarks : IRenderOverlay
     internal static readonly GlVec3 SelectedColour = new(0f, 1f, 1f);     // cyan
     internal static readonly GlVec3 PartnerColour = new(1f, 0f, 1f);      // magenta
     internal static readonly GlVec3 OverlapColour = new(1f, 0.9f, 0.05f); // yellow
-    internal const string Legend = "cyan tint: the selected object; magenta tint: the other object of the open clash; yellow: where the two pass into each other "
-                                 + "(their outlines and the yellow line show through anything in front; leaves and other see-through cards are outlined, not tinted)";
+    internal const string Legend = "cyan tint: the selected object; magenta tint: the other object of the open clash; yellow: where the two meet "
+                                 + "(Outlines draws their outlines and the line where they cross through anything in front)";
     internal const int MaxEdges = 40000;                                  // per reference; a whole building stays readable
     const float TintAlpha = 0.45f, OverlapAlpha = 0.9f, OutlineDim = 0.55f;
     const double CreaseCos = 0.77;                                        // an edge between faces more than about 40° apart is drawn
@@ -27,10 +27,15 @@ internal sealed class ConflictMarks : IRenderOverlay
     internal RefOcclusion? Selected, Partner;
     /// <summary>A stand-in for an object with no model that the view landed on (Y-up segments), and what it stands for.</summary>
     internal List<(Vector3 A, Vector3 B)> StandIn = new();
-    /// <summary>The stand-in's own triangles (an occlusion plane's), tinted like a selected object; empty for a diamond or marker.</summary>
+    /// <summary>The stand-in's own triangles, filled half-transparent cyan: an occlusion plane's (flat, both sides) or a
+    /// diamond's (shaded, so its faces read as a solid).</summary>
     internal List<float> StandInTris = new();
+    internal bool StandInShaded;
+    const float StandInAlpha = 0.5f;
     internal string? StandInFor;
     internal bool Enabled = Environment.GetEnvironmentVariable("WB_MARKS") != "off";
+    /// <summary>The bar's "Outlines": each object's outline and the crossing line through anything in front. Off by default.</summary>
+    internal bool Outlines;
     /// <summary>Asked for a new frame when the crossing measured off the window's thread arrives.</summary>
     internal Action? Changed;
 
@@ -150,11 +155,13 @@ internal sealed class ConflictMarks : IRenderOverlay
         Task.Run(() =>
         {
             var (contact, pieces) = SurfaceVisibility.MeasureWithPieces(sa, null, sb, null, VolumeGeometry.Render, new SurfaceOptions(MaxTrianglePairs: 20_000_000), cts.Token);
-            var tris = new List<float>();
-            // the crossing triangles of solid shapes are tinted; a cut-out card's crossing shows as the yellow line only
-            foreach (var t in pieces.SelectMany(p => p.TrianglesA).Distinct().Where(t => !cutA[t])) AddTriangle(tris, sa.Vertices[sa.Indices[3 * t]], sa.Vertices[sa.Indices[3 * t + 1]], sa.Vertices[sa.Indices[3 * t + 2]]);
-            foreach (var t in pieces.SelectMany(p => p.TrianglesB).Distinct().Where(t => !cutB[t])) AddTriangle(tris, sb.Vertices[sb.Indices[3 * t]], sb.Vertices[sb.Indices[3 * t + 1]], sb.Vertices[sb.Indices[3 * t + 2]]);
             var segs = pieces.Select(p => (new Vector3((float)p.X0, (float)p.Y0, (float)p.Z0), new Vector3((float)p.X1, (float)p.Y1, (float)p.Z1))).ToList();
+            // where they meet: a band of each crossing triangle along its own crossing segments, not the whole triangle (a
+            // wall's triangle can be metres long, and tinting it all painted a stripe of wall that does not touch the other)
+            float width = BandWidth(sa, sb);
+            var tris = new List<float>();
+            Band(tris, sa, pieces.SelectMany(p => p.TrianglesA.Where(t => !cutA[t]).Select(t => (t, p))), width, cts.Token);
+            Band(tris, sb, pieces.SelectMany(p => p.TrianglesB.Where(t => !cutB[t]).Select(t => (t, p))), width, cts.Token);
             string said = contact.Status != "measured" ? $"where they cross was not measured ({contact.Reason ?? contact.Status})"
                         : segs.Count == 0 ? "their surfaces do not cross" : $"their surfaces cross along {segs.Count:N0} segment(s)";
             return (tris, segs, said);
@@ -167,6 +174,56 @@ internal sealed class ConflictMarks : IRenderOverlay
         }, TaskScheduler.Default);
     }
 
+    /// <summary>How wide the band where two objects meet is drawn: 3% of the smaller object's size, 3 to 16 units.</summary>
+    internal static float BandWidth(TriangleSoup a, TriangleSoup b)
+    {
+        static float Size(TriangleSoup s) => s.Vertices.Length == 0 ? 0f : (s.Vertices.Aggregate(Vector3.Max) - s.Vertices.Aggregate(Vector3.Min)).Length();
+        return Math.Clamp(0.03f * MathF.Min(Size(a), Size(b)), 3f, 16f);
+    }
+
+    internal const int MaxBandTriangles = 400_000;
+
+    /// <summary>The parts of each listed triangle within <paramref name="width"/> of that triangle's own crossing segments:
+    /// the triangle is split in four, again and again, down to pieces about the band's width, and a piece is kept when its
+    /// middle lies that close to one of its segments. Drawing only; the crossing itself is houseCARL's measure.</summary>
+    internal static void Band(List<float> into, TriangleSoup soup, IEnumerable<(int Tri, CrossingPiece Piece)> crossings, float width, CancellationToken ct = default)
+    {
+        foreach (var g in crossings.GroupBy(x => x.Tri))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (into.Count / 18 > MaxBandTriangles) return;
+            var segs = g.Select(x => (new Vector3((float)x.Piece.X0, (float)x.Piece.Y0, (float)x.Piece.Z0), new Vector3((float)x.Piece.X1, (float)x.Piece.Y1, (float)x.Piece.Z1))).ToList();
+            int t = g.Key;
+            Split(into, soup.Vertices[soup.Indices[3 * t]], soup.Vertices[soup.Indices[3 * t + 1]], soup.Vertices[soup.Indices[3 * t + 2]], segs, width, 0);
+        }
+    }
+
+    static void Split(List<float> into, Vector3 a, Vector3 b, Vector3 c, List<(Vector3 A, Vector3 B)> segs, float width, int depth)
+    {
+        float longest = MathF.Sqrt(MathF.Max(Vector3.DistanceSquared(a, b), MathF.Max(Vector3.DistanceSquared(b, c), Vector3.DistanceSquared(c, a))));
+        var mid = (a + b + c) / 3f;
+        float near = segs.Min(s => DistanceToSegment(mid, s.A, s.B));
+        if (near > width + longest) return;                          // no part of this piece is in the band
+        if (longest <= width || depth >= 10)
+        {
+            if (near <= width) AddTriangle(into, a, b, c);
+            return;
+        }
+        Vector3 ab = (a + b) * 0.5f, bc = (b + c) * 0.5f, ca = (c + a) * 0.5f;
+        Split(into, a, ab, ca, segs, width, depth + 1);
+        Split(into, ab, b, bc, segs, width, depth + 1);
+        Split(into, ca, bc, c, segs, width, depth + 1);
+        Split(into, ab, bc, ca, segs, width, depth + 1);
+    }
+
+    internal static float DistanceToSegment(Vector3 p, Vector3 a, Vector3 b)
+    {
+        var ab = b - a;
+        float len2 = ab.LengthSquared();
+        float t = len2 > 0 ? Math.Clamp(Vector3.Dot(p - a, ab) / len2, 0f, 1f) : 0f;
+        return Vector3.Distance(p, a + ab * t);
+    }
+
     public void Draw(GlRenderer renderer, in OverlayContext context)
     {
         if (!Enabled || (Selected is null && Partner is null && StandIn.Count == 0)) return;
@@ -177,7 +234,13 @@ internal sealed class ConflictMarks : IRenderOverlay
             var none = Array.Empty<(int, int, GlVec3)>();
             if (_partnerTris.Count >= 18) renderer.DrawOverlayTranslucentTint(_partnerTris, PartnerColour, TintAlpha, none);
             if (_selTris.Count >= 18) renderer.DrawOverlayTranslucentTint(_selTris, SelectedColour, TintAlpha, none);
-            if (StandInTris.Count >= 18) renderer.DrawOverlayTranslucentTint(StandInTris, SelectedColour, TintAlpha, none);
+            if (StandInTris.Count >= 18)
+            {
+                // a plane is one flat sheet: unlit, so it reads as the same cyan from either side and at any angle to the light
+                renderer.SetOverlayShaded(StandInShaded);
+                renderer.DrawOverlayTranslucentTint(StandInTris, SelectedColour, StandInAlpha, none);
+                renderer.SetOverlayShaded(true);
+            }
             var overlap = _overlapTris;
             if (overlap.Count >= 18) renderer.DrawOverlayTranslucentTint(overlap, OverlapColour, OverlapAlpha, none);
             renderer.EndOverlaySurfacePass(st);
@@ -191,8 +254,7 @@ internal sealed class ConflictMarks : IRenderOverlay
             foreach (var (a, b, cut) in Outline(ro))
                 _lines.Add(new OverlayLineSegment { A = new GlVec3(a.X, a.Y, a.Z), B = new GlVec3(b.X, b.Y, b.Z), Color = cut ? col : col * OutlineDim });
         }
-        Add(Partner, PartnerColour);
-        Add(Selected, SelectedColour);
+        if (Outlines) { Add(Partner, PartnerColour); Add(Selected, SelectedColour); }
         if (renderer.BeginOverlayLinePass(context, out var ls))
         {
             if (_lines.Count > 0) renderer.DrawOverlayLines(_lines, 1.2f, context);
@@ -200,10 +262,10 @@ internal sealed class ConflictMarks : IRenderOverlay
             {
                 _lines.Clear();
                 foreach (var (a, b) in StandIn) _lines.Add(new OverlayLineSegment { A = new GlVec3(a.X, a.Y, a.Z), B = new GlVec3(b.X, b.Y, b.Z), Color = SelectedColour });
-                renderer.DrawOverlayLines(_lines, 3f, context);
+                renderer.DrawOverlayLines(_lines, 2f, context);
             }
             var crossing = _crossing;
-            if (crossing.Count > 0)
+            if (Outlines && crossing.Count > 0)
             {
                 _lines.Clear();
                 foreach (var (a, b) in crossing) _lines.Add(new OverlayLineSegment { A = new GlVec3(a.X, a.Y, a.Z), B = new GlVec3(b.X, b.Y, b.Z), Color = OverlapColour });

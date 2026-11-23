@@ -9,7 +9,7 @@ using ViewProbe;
 namespace Workbench;
 
 /// <summary>A layer of the 3D view that the toolbar above the view's buttons switches.</summary>
-internal enum Layer { Navmesh, Borders, Markers, Planes, Terrain, Water, Grass, Trees, Clutter, Statics, Marks }
+internal enum Layer { Navmesh, Borders, Markers, Planes, Terrain, Water, Grass, Trees, Clutter, Statics, Marks, Boxes, Outlines }
 
 /// <summary>The window's choice of layers: one on or off per layer, kept across cell switches (the choice is the
 /// window's, not the scene's). What each scene can draw is <see cref="SceneLayers"/>.</summary>
@@ -30,7 +30,11 @@ internal static class ViewLayers
         new(Layer.Trees, "trees", "Trees", "trees and plants (tree and flora objects)", true),
         new(Layer.Clutter, "clutter", "Clutter", "items, containers, furniture and light fittings", true),
         new(Layer.Statics, "statics", "Statics", "buildings, rocks, doors and every other drawn object that is not a tree, a plant or clutter", true),
-        new(Layer.Marks, "marks", "Marks", ConflictMarks.Legend + "; and the Results tab's boxes; the key under the view names each one shown", Environment.GetEnvironmentVariable("WB_MARKS") != "off"),
+        new(Layer.Marks, "marks", "Marks", ConflictMarks.Legend + "; the key under the view names each one shown", Environment.GetEnvironmentVariable("WB_MARKS") != "off"),
+        // off by default: a box around every listed row's object crowds the view and reads as part of the scene
+        new(Layer.Boxes, "boxes", "Row boxes", "a box around the object of each Earlier results row this scene draws, in the shape and colour of its result (the key under the view names each one)", false),
+        // off by default: the marked objects are drawn solid and tinted; lines through everything are for finding a buried one
+        new(Layer.Outlines, "outlines", "Outlines", "the marked objects' outlines and the line where they cross, drawn as lines through anything in front, to find an object buried inside another", false),
     };
 
     static readonly Dictionary<Layer, bool> On = All.ToDictionary(i => i.Layer, i => i.Default);
@@ -111,6 +115,8 @@ internal sealed record LayerSwitches(
     Action<bool> Borders,
     Action<bool> Markers,
     Action<bool> Marks,
+    Action<bool> Boxes,
+    Action<bool> Outlines,
     Action<IEnumerable<GlMesh>, bool> Hide);
 
 /// <summary>One scene's layers: which of them it can draw (and why not), and the switch each one sets.</summary>
@@ -179,6 +185,8 @@ internal sealed class SceneLayers
         Objects(Layer.Statics, "no building, rock or other static is drawn in this scene.");
 
         s.Offer(Layer.Marks, sw.Marks);
+        s.Offer(Layer.Boxes, sw.Boxes);
+        s.Offer(Layer.Outlines, sw.Outlines);
         return s;
     }
 

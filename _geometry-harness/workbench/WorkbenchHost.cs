@@ -201,7 +201,6 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     void UpdateKey()
     {
         _key.Children.Clear();
-        if (!_marks.Enabled) return;
         UIElement Item(System.Windows.Media.Color c, bool box, string words, string? tip = null)
         {
             var sp = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 14, 2), ToolTip = tip };
@@ -212,14 +211,14 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             return sp;
         }
         static System.Windows.Media.Color C(OpenTK.Mathematics.Vector3 v) => System.Windows.Media.Color.FromRgb((byte)(v.X * 255), (byte)(v.Y * 255), (byte)(v.Z * 255));
-        if (_marks.StandInFor is { } standIn) _key.Children.Add(Item(C(ConflictMarks.SelectedColour), true, "stand-in for " + standIn, "an object with no model has nothing of its own to draw; this outline stands in for it"));
-        if (_marks.Selected is { } sel) _key.Children.Add(Item(C(ConflictMarks.SelectedColour), false, $"{NameOf(sel)}, selected", "tinted cyan; its outline shows through anything in front"));
-        if (_marks.Partner is { } par) _key.Children.Add(Item(C(ConflictMarks.PartnerColour), false, $"{NameOf(par)}, the other object of the clash", "tinted magenta; its outline shows through anything in front"));
-        if (_marks.Selected is not null && _marks.Partner is not null)
+        if (_marks.Enabled && _marks.StandInFor is { } standIn) _key.Children.Add(Item(C(ConflictMarks.SelectedColour), true, "stand-in for " + standIn, "an object with no model has nothing of its own to draw; this cyan shape stands in for it"));
+        if (_marks.Enabled && _marks.Selected is { } sel) _key.Children.Add(Item(C(ConflictMarks.SelectedColour), false, $"{NameOf(sel)}, selected", "tinted cyan; Outlines shows its outline through anything in front"));
+        if (_marks.Enabled && _marks.Partner is { } par) _key.Children.Add(Item(C(ConflictMarks.PartnerColour), false, $"{NameOf(par)}, the other object of the clash", "tinted magenta; Outlines shows its outline through anything in front"));
+        if (_marks.Enabled && _marks.Selected is not null && _marks.Partner is not null)
             _key.Children.Add(Item(C(ConflictMarks.OverlapColour), false, _marks.CrossingSegments > 0 ? "where they pass into each other" : _marks.Overlap ?? "measuring where they cross",
-                                   "measured from the two objects' own surfaces; the yellow line shows through anything in front"));
+                                   "a band along where the two objects' own surfaces meet; Outlines shows the line where they cross through anything in front"));
         var words = ResultRules.Groups.ToDictionary(g => g.Value.Mark, g => g.Value.Words);
-        foreach (var style in _resultMarks.StylesShown.OrderBy(x => x))
+        foreach (var style in _resultMarks.Enabled ? _resultMarks.StylesShown.OrderBy(x => x) : Enumerable.Empty<MarkStyle>())
         {
             var (colour, shape, colourName) = ResultMarks.Styles[style];
             _key.Children.Add(Item(C(colour), true, $"{shape}: a listed row, {words[style]}", $"the Results tab marks each listed row of the open pair that this scene draws, {colourName}"));
@@ -777,7 +776,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         string outcome = _opt.RefOutcomes is { } ro && ro.TryGetValue(key, out var w) ? w.Outcome : "";
         Vector3 min, max; string what;
         var lines = new List<(Vector3 A, Vector3 B)>(); var tris = new List<float>();
-        float? faceYaw = null;
+        float? faceYaw = null; bool shaded = false;
         if (_opt.PickShapes.FirstOrDefault(sh => sh.Kind == PickKind.Plane && sh.Plane?.Key == key) is { } plane)
         {
             // the plane's own triangles (Y-up), back to Skyrim space for the camera
@@ -813,14 +812,15 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             var p = new Vector3(place.Position.X, place.Position.Y, place.Position.Z);
             bool marker = outcome == "marker";
             min = p - new Vector3(48f); max = p + new Vector3(48f, 48f, marker ? 96f : 48f);
-            what = marker ? "a diamond around the marker the Markers layer draws at its place (a stem with an arrow the way it faces)" : "a diamond at its place";
-            // a marker's stem and arrow, inside a diamond so the small mark is found among the others
-            foreach (var (a, b2) in (marker ? MarkerGizmos.MarkerLines(p, place.Rotation) : Enumerable.Empty<(Vector3, Vector3)>()).Concat(MarkerGizmos.DiamondLines(p + new Vector3(0, 0, marker ? 48f : 0f), marker ? 64f : 40f)))
-                lines.Add((TexturedScene.YUp(a), TexturedScene.YUp(b2)));
+            what = marker ? "a solid diamond over the marker the Markers layer draws at its place (a stem with an arrow the way it faces)" : "a solid diamond at its place";
+            // a marker's stem and arrow, under a solid diamond so the small mark is found among the others
+            if (marker) foreach (var (a, b2) in MarkerGizmos.MarkerLines(p, place.Rotation)) lines.Add((TexturedScene.YUp(a), TexturedScene.YUp(b2)));
+            MarkerGizmos.DiamondTriangles(tris, p + new Vector3(0, 0, marker ? 48f : 0f), marker ? 32f : 40f);
+            shaded = true;
         }
         else return false;
         Select(null);
-        _marks.StandIn = lines; _marks.StandInTris = tris;
+        _marks.StandIn = lines; _marks.StandInTris = tris; _marks.StandInShaded = shaded;
         _marks.StandInFor = $"{key}, which has no model: {what}";
         var c = (min + max) * 0.5f;
         float r = MathF.Max((max - min).Length() * 0.5f, 48f);
@@ -836,7 +836,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         }
         SyncCamera();
         string why = outcome.Length > 0 ? NotDrawnWords(outcome) : "it is not drawn";
-        Shell.SetBanner($"{key} has no model of its own ({why}); the view shows a stand-in, outlined in cyan: {what}.");
+        Shell.SetBanner($"{key} has no model of its own ({why}); the view shows a stand-in in cyan: {what}.");
         Shell.LastLanding = $"{key}: a stand-in, {what}";
         UpdateKey(); Invalidate("stand-in");
         return true;
@@ -994,7 +994,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             Planes: on => _opt.ShowPlanes = on,
             Borders: on => { _opt.ShowCellOutline = on; if (_borders is not null) _borders.Enabled = on; },
             Markers: on => _markerGizmos.Enabled = on,
-            Marks: on => { _marks.Enabled = on; _resultMarks.Enabled = on; UpdateKey(); },
+            Marks: on => { _marks.Enabled = on; UpdateKey(); },
+            Boxes: on => { _resultMarks.Enabled = on; UpdateKey(); },
+            Outlines: on => _marks.Outlines = on,
             Hide: (meshes, hidden) => _viewState.SetLayerHidden(meshes, hidden)));
         _layers.ApplyAll();
     }

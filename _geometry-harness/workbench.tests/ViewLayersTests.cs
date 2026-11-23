@@ -20,7 +20,7 @@ public class ViewLayersTests : IDisposable
         public readonly Dictionary<string, bool> Last = new();
         public readonly List<(List<GlMesh> Meshes, bool Hidden)> Hides = new();
         public LayerSwitches Switches(ViewState? v = null) => new(
-            on => Last["navmesh"] = on, on => Last["planes"] = on, on => Last["borders"] = on, on => Last["markers"] = on, on => Last["marks"] = on,
+            on => Last["navmesh"] = on, on => Last["planes"] = on, on => Last["borders"] = on, on => Last["markers"] = on, on => Last["marks"] = on, on => Last["boxes"] = on, on => Last["outlines"] = on,
             (m, hidden) => { Hides.Add((m.ToList(), hidden)); v?.SetLayerHidden(m, hidden); });
     }
 
