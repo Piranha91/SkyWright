@@ -83,9 +83,20 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _live = new LiveCells(opt);
         if (_live.Available && opt.Grid is { } home)
         {
+            // the scene's own cell before the window shows; the rest of the square is built, nearest first, once it draws
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            foreach (var c in LiveCells.Square(home, opt.GridsToLoad).Where(opt.Loaded.Contains)) _live.Add(c);
-            Say(FormattableString.Invariant($"loaded cells: {_live.Held.Count} ({opt.GridsToLoad}x{opt.GridsToLoad}, {opt.GridsToLoadSource}) built in {sw.Elapsed.TotalSeconds:0.0} s"));
+            var square = LiveCells.Square(home, opt.GridsToLoad).Where(opt.Loaded.Contains).ToList();
+            if (square.Contains(home))
+            {
+                try { opt.PrefetchCell?.Invoke(home, true, CancellationToken.None); }   // read in parallel first; the build then uploads
+                catch (Exception ex) { Say($"the scene's cell could not be read ahead ({ex.Message}); it is built without"); }
+                _live.Add(home);
+                _prefetched[home] = true;
+            }
+            foreach (var c in square.Where(c => !_live.Holds(c))) _queue.Enqueue(c);
+            _queueClock.Restart(); _queueBuilt = 0;
+            StartPrefetch();
+            Say(FormattableString.Invariant($"loaded cells: {_live.Held.Count} built in {sw.Elapsed.TotalSeconds:0.0} s before the window shows; {_queue.Count} more of the {opt.GridsToLoad}x{opt.GridsToLoad} square ({opt.GridsToLoadSource}) follow"));
         }
         _session = new EditSession(opt.Occlusion?.Refs ?? (IEnumerable<RefOcclusion>)Array.Empty<RefOcclusion>());
         // an edit of the object shown as another version: it is drawn as the scene has it again first, so the edit starts from what is drawn
@@ -382,6 +393,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             if (Shell.PendingLand is { } land) { Shell.PendingLand = null; _landOnFirstFrame = land; }
             else if (ViewLayers.TakePose(SceneDirector.Showing?.Cell) is { } kept) SetPose(kept.Eye, kept.Yaw, kept.Pitch);   // the same cell again, for a layer
             else if (SceneDirector.Showing is not null) FrameScene();   // a cell asked for with no reference to land on
+            ScheduleCell();   // the rest of the loaded square, once the window draws
         }
         SyncCamera();
         UpdateStatus();
@@ -391,6 +403,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         else _window.Dispatcher.BeginInvoke(Start, DispatcherPriority.Loaded);
         if (!Shell.Closed) Dispatcher.PushFrame(_frameLoop);
         _alive = false;
+        // the scene's asset owners are disposed when this loop returns: the prefetch stops reading through them first
+        _prefetch?.Cancel();
+        try { _prefetchTask.Wait(TimeSpan.FromSeconds(30)); } catch (AggregateException) { }
         _sizeWatch?.Stop();
         _fpsTimer?.Stop();
         _pacer?.Dispose();
@@ -624,6 +639,10 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             _landOnFirstFrame = null;
             // a reference this scene does not draw has nothing to land on: say so, and show the cell instead of the placeholder pose
             if (!Land(FormKey.Factory(land)) && !_session.IsDrawn(FormKey.Factory(land)) && SceneDirector.Showing is not null) FrameScene();
+        }
+        else if (_queue.Count > 0 && (_opt.PrefetchCell is null || _prefetched.ContainsKey(_queue.Peek())))
+        {
+            BuildNextCell();   // one loaded cell per frame, once the worker has read it; its AfterCellsChanged asks for the next frame
         }
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         GL.Viewport(0, 0, W, H);
@@ -1115,19 +1134,81 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var (add, drop) = LiveCells.Plan(_opt.Grid!.Value, grids, _live.Held, _opt.Reach);
         var kept = drop.Where(c => _live.All.First(l => l.Grid == c).Refs.Any(r => _session.Holds(r.Ref.RefKey))).ToList();
         drop = drop.Except(kept).ToList();
-        var sw = System.Diagnostics.Stopwatch.StartNew();
         if (_window is not null) _view.MakeCurrent();
-        int built = 0;
-        foreach (var c in add)
-            if (_live.Add(c) is { } lc) { _session.Add(lc.Refs); built++; }
         foreach (var c in drop)
             if (_live.Drop(c, _renderer) is { } lc) _session.Remove(lc.Refs);
         _live.SetGrids(grids);
+        // the cells that come in are built one at a time, nearest first, with the view drawing between them
+        _queue.Clear(); foreach (var c in add) _queue.Enqueue(c);
+        _queueClock.Restart(); _queueBuilt = 0;
+        StartPrefetch();
         AfterCellsChanged();
-        var said = FormattableString.Invariant($"Loaded cells {grids}x{grids}: {built} cell(s) built in {sw.Elapsed.TotalSeconds:0.0} s, {drop.Count} freed, {_live.Held.Count} held")
+        var said = $"Loaded cells {grids}x{grids}: " + (add.Count > 0 ? $"building {add.Count} cell(s), nearest first" : "nothing to build")
+                 + $", {drop.Count} freed, {_live.Held.Count} held"
                  + (kept.Count > 0 ? $"; {kept.Count} cell(s) outside the square kept because they hold the selection or an edit" : "");
         Say(said);
+        ScheduleCell();
         return said;
+    }
+
+    // ---- the cells still to build: one at the start of each frame, so the view keeps drawing while they come in ---------
+    // (a dispatcher job below Render priority starves while anything asks for frames continuously, such as flying)
+    readonly Queue<(int X, int Y)> _queue = new();
+    readonly System.Diagnostics.Stopwatch _queueClock = new();
+    int _queueBuilt;
+    /// <summary>Loaded cells are still being built.</summary>
+    internal bool CellsBuilding => _queue.Count > 0;
+
+    CancellationTokenSource? _prefetch;
+    Task _prefetchTask = Task.CompletedTask;
+    // cells whose meshes and textures the worker has read: the window builds a queued cell only once it is here
+    readonly System.Collections.Concurrent.ConcurrentDictionary<(int X, int Y), bool> _prefetched = new();
+    /// <summary>Read the queued cells' meshes and decode their textures on a worker, in the queue's order, so each cell's
+    /// build on the window's thread is mostly upload. A new queue cancels the old prefetch.</summary>
+    void StartPrefetch()
+    {
+        _prefetch?.Cancel();
+        if (_opt.PrefetchCell is not { } prefetch || _queue.Count == 0) return;
+        var cts = _prefetch = new CancellationTokenSource();
+        var cells = _queue.ToList();
+        var before = _prefetchTask;
+        _prefetchTask = Task.Run(() =>
+        {
+            before.Wait();   // one prefetch at a time: the cancelled one finishes its current mesh first
+            foreach (var c in cells)
+            {
+                if (cts.IsCancellationRequested) return;
+                try { prefetch(c, false, cts.Token); }
+                catch (Exception ex) { Console.WriteLine($"   [wb] prefetch of cell {c.X},{c.Y} stopped: {ex.Message} (the cell is built on the window's thread instead)"); }
+                _prefetched[c] = true;
+                _window?.Dispatcher.BeginInvoke(() => ScheduleCell());   // the window builds it on its next frame
+            }
+        });
+    }
+
+    /// <summary>Ask for a frame, which builds the next queued cell first.</summary>
+    void ScheduleCell() { if (_queue.Count > 0 && _window is not null && _alive) Invalidate("cells"); }
+
+    /// <summary>Build one queued cell (the frame calls it with the context current), and ask for the next frame if more remain.</summary>
+    void BuildNextCell()
+    {
+        if (_queue.Count == 0) return;
+        var c = _queue.Dequeue();
+        var cellSw = System.Diagnostics.Stopwatch.StartNew();
+        if (_live.Add(c) is { } lc) { _session.Add(lc.Refs); _queueBuilt++; }
+        Console.WriteLine(FormattableString.Invariant($"   [wb] cell {c.X},{c.Y} built on the window's thread in {cellSw.Elapsed.TotalMilliseconds:0} ms"));
+        bool done = _queue.Count == 0;
+        AfterCellsChanged(tree: done);
+        if (done)
+        {
+            var said = FormattableString.Invariant($"loaded cells: {_queueBuilt} cell(s) built in {_queueClock.Elapsed.TotalSeconds:0.0} s; {_live.Held.Count} held ({_live.Grids}x{_live.Grids})");
+            Say(said); Shell.SetBanner(said);
+            UpdateMarks();
+        }
+        else
+        {
+            Shell.SetBanner($"building loaded cells: {_queueBuilt} built, {_queue.Count} to go");
+        }
     }
 
     /// <summary>The cell of the prepared square a request names (by FormKey), or null when it is not one this scene can
@@ -1154,7 +1235,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
 
     /// <summary>What reads the drawn cells is read again: the layers (and their hidden state on the new meshes), the cell
     /// borders, the markers, the tree and the key.</summary>
-    void AfterCellsChanged()
+    void AfterCellsChanged(bool tree = true)
     {
         if (_borders is not null) _renderer.Overlays.Remove(_borders);
         if (_markerGizmos is not null) _renderer.Overlays.Remove(_markerGizmos);
@@ -1162,7 +1243,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         BuildLayers(_renderer);
         _layerBar?.Refresh();
         FillGrids();
-        if (_window is not null) { Shell.FillTree(BuildTree()); UpdateKey(); UpdateStatus(); Invalidate("cells"); }
+        if (_window is not null) { if (tree) Shell.FillTree(BuildTree()); UpdateKey(); UpdateStatus(); Invalidate("cells"); }
     }
 
     /// <summary>The Loaded cells choice beside the layer toggles: the square's width, up to what the scene prepared.</summary>

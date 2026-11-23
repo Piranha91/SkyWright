@@ -202,6 +202,7 @@ sealed class InteractiveOptions
     // ---- the live scene (LiveScene.cs): cells a host adds to and drops from the scene it shows, without a rebuild ----------
     public LiveSession? Live;                              // set by the build just before the host's loop; dead after it
     public Func<(int X, int Y), LiveCell?>? BuildCell;     // build one cell of Reach into the live scene; null when it is not in Reach
+    public Func<(int X, int Y), bool, CancellationToken, int>? PrefetchCell;   // read a cell's meshes and decode its textures (in parallel or not), off the window's thread
     public IReadOnlySet<(int X, int Y)> Reach = new HashSet<(int X, int Y)>();   // the cells the walk prepared: what BuildCell can add
     public IReadOnlySet<(int X, int Y)> Loaded = new HashSet<(int X, int Y)>();  // the cells the first build drew
     public IReadOnlyDictionary<FormKey, (int X, int Y)> CellGrids = new Dictionary<FormKey, (int X, int Y)>();   // each walked cell's square (from its references)

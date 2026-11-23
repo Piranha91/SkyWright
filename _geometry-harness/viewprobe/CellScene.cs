@@ -115,11 +115,12 @@ public sealed class CellScene : IDisposable
 
 public sealed class MeshState
 {
+    // locked: the live scene's prefetch fills it off the window's thread while a slice build reads it (LiveScene.cs)
     readonly Dictionary<string, MeshOutcome> _outcomes = new(StringComparer.OrdinalIgnoreCase);
     public NifMeshBuilder Builder { get; }
     public MeshState(NifMeshBuilder builder) => Builder = builder;
-    internal bool TryGet(string rel, out MeshOutcome outcome) => _outcomes.TryGetValue(rel, out outcome!);
-    internal void Store(string rel, MeshOutcome outcome) => _outcomes[rel] = outcome;
+    internal bool TryGet(string rel, out MeshOutcome outcome) { lock (_outcomes) return _outcomes.TryGetValue(rel, out outcome!); }
+    internal void Store(string rel, MeshOutcome outcome) { lock (_outcomes) _outcomes[rel] = outcome; }
 }
 
 internal sealed record MeshOutcome(List<NifMeshBuilder.BuiltMesh>? Built, string InputHash,

@@ -307,6 +307,60 @@ static class TexturedScene
         }
     }
 
+    /// <summary>One mesh read the way the retained mesh table keeps it (CellScene.cs <see cref="MeshState"/>): built,
+    /// stripped of its root transform, normalised, with the file's identity. A missing file, a failed build and a failed
+    /// identity read are each part of the outcome. GL-free: the live scene's prefetch calls it off the window's thread.</summary>
+    internal static (MeshOutcome Outcome, Exception? IdentityFailure) ReadOutcome(string? abs,
+        Func<string, List<NifMeshBuilder.BuiltMesh>> build, Func<string, byte[]> readBytes)
+    {
+        if (abs is null) return (new MeshOutcome(null, "", null, true), null);
+        List<NifMeshBuilder.BuiltMesh>? built = null;
+        Exception? buildFailure = null, identityFailure = null;
+        string hash = "";
+        try
+        {
+            built = build(abs);
+            StripNifRootTransform(abs, built);
+            built = NormalizeMeshes(built);
+        }
+        catch (Exception ex) { buildFailure = ex; built = null; }
+        try { hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(readBytes(abs))); }
+        catch (Exception ex) { identityFailure = ex; }
+        return (new MeshOutcome(built, hash, buildFailure, false), identityFailure);
+    }
+
+    /// <summary>The live scene's prefetch (LiveScene.cs): read the meshes of <paramref name="refs"/> into the session's mesh
+    /// table and decode their textures into its pixel cache, off the window's thread, so the slice build that follows mostly
+    /// uploads. Stops early when cancelled. Returns how many meshes it read.</summary>
+    internal static int Prefetch(LiveSession session, IEnumerable<SceneRef> refs, bool parallel, CancellationToken ct)
+    {
+        int read = 0;
+        var rels = refs.Select(r => r.MeshRelPath.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? r.MeshRelPath : Path.Combine("meshes", r.MeshRelPath))
+                       .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        // parallel (half the cores) only while nothing is drawn; beside a drawing window one thread, which measured smoother
+        var options = new ParallelOptions { CancellationToken = ct, MaxDegreeOfParallelism = parallel ? Math.Max(1, Environment.ProcessorCount / 2) : 1 };
+        try { Parallel.ForEach(rels, options, rel => { if (One(rel)) Interlocked.Increment(ref read); }); }
+        catch (OperationCanceledException) { }
+        return read;
+
+        bool One(string rel)
+        {
+            bool made = false;
+            if (!session.Mesh.TryGet(rel, out var outcome))
+            {
+                var (read1, identityFailure) = ReadOutcome(session.Assets.Resolver.ResolveAssetPath(rel), p => session.Mesh.Builder.BuildFromFile(p), File.ReadAllBytes);
+                outcome = read1;
+                if (read1.MissingPath || read1.Failure is not null || identityFailure is null) session.Mesh.Store(rel, read1);
+                made = true;
+            }
+            foreach (var b in outcome.Built ?? new List<NifMeshBuilder.BuiltMesh>())
+                foreach (var t in b.TexturePaths.Values)
+                    if (t is { Length: > 0 } && !ct.IsCancellationRequested)
+                        try { session.Assets.Cache.GetOrLoadDdsPixels(t); } catch { /* the slice build reports what it cannot read */ }
+            return made;
+        }
+    }
+
     static List<NifMeshBuilder.BuiltMesh>? NormalizeMeshes(List<NifMeshBuilder.BuiltMesh>? built)
     {
         if (built is null) return null;
@@ -945,7 +999,7 @@ static class TexturedScene
             string rendererInputHash = "";
             if (!builtCache.TryGetValue(rel, out var built))
             {
-                if (cellScene is null)
+                if (cellScene is null && live is null)
                 {
                     built = null;
                     var abs = meshReadHooks is null ? resolver.ResolveAssetPath(rel) : meshReadHooks.Resolve(rel);
@@ -976,38 +1030,17 @@ static class TexturedScene
                     MeshOutcome outcome;
                     if (!meshState.TryGet(rel, out outcome!))
                     {
-                        built = null;
                         var abs = meshReadHooks is null ? resolver.ResolveAssetPath(rel) : meshReadHooks.Resolve(rel);
-                        if (abs is null)
-                        {
-                            outcome = new MeshOutcome(null, "", null, true);
-                            meshState.Store(rel, outcome);
-                        }
-                        else
-                        {
-                            Exception? buildFailure = null;
-                            Exception? identityFailure = null;
-                            try
-                            {
-                                NifDumpIfAsked(rel, abs);
-                                built = meshReadHooks is null ? builder.BuildFromFile(abs) : meshReadHooks.Build(abs);
-                                StripNifRootTransform(abs, built);
-                                built = NormalizeMeshes(built);
-                            }
-                            catch (Exception ex) { buildFailure = ex; built = null; }
-                            try
-                            {
-                                var renderedBytes = meshReadHooks?.ReadBytes(abs) ?? File.ReadAllBytes(abs);
-                                rendererInputHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(renderedBytes));
-                            }
-                            catch (Exception ex) { identityFailure = ex; }
-                            outcome = new MeshOutcome(built, rendererInputHash, buildFailure, false);
-                            // A build failure is itself the stable outcome to project each shot.
-                            // Successful geometry needs a real identity; empty is never equality.
-                            if (buildFailure is not null || identityFailure is null) meshState.Store(rel, outcome);
-                            if (buildFailure is null && identityFailure is not null)
-                                geometryInputIssues[rel] = $"renderer identity read failed: {identityFailure.GetType().Name}: {identityFailure.Message}";
-                        }
+                        if (abs is not null) NifDumpIfAsked(rel, abs);
+                        var (read, identityFailure) = ReadOutcome(abs,
+                            meshReadHooks is null ? p => builder.BuildFromFile(p) : meshReadHooks.Build,
+                            p => meshReadHooks?.ReadBytes(p) ?? File.ReadAllBytes(p));
+                        outcome = read;
+                        // A build failure is itself the stable outcome to project each shot.
+                        // Successful geometry needs a real identity; empty is never equality.
+                        if (outcome.MissingPath || outcome.Failure is not null || identityFailure is null) meshState.Store(rel, outcome);
+                        if (outcome.Failure is null && identityFailure is not null)
+                            geometryInputIssues[rel] = $"renderer identity read failed: {identityFailure.GetType().Name}: {identityFailure.Message}";
                     }
                     built = outcome.Built;
                     rendererInputHash = outcome.InputHash;

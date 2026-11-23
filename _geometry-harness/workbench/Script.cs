@@ -128,6 +128,7 @@ internal sealed class Script
     internal void Tick()
     {
         if (_busy) return;
+        if (_h.CellsBuilding) return;      // a step waits for the loaded cells still being built
         if (_wait > 0) { _wait--; return; }
         if (_steps.Count == 0) return;
         var line = _steps.Dequeue();

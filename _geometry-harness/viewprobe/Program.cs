@@ -5517,6 +5517,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 if (cellKey is { } ck) ((Dictionary<FormKey, (int X, int Y)>)iopt.CellGrids)[ck] = liveGrid;
                 iopt.LandCells = new List<(int X, int Y)>();
                 Console.WriteLine($"   live scene: {reach.Count} cell(s) prepared; the host loads {grids}x{grids} of them ({gridsWhy}) and adds or drops cells live");
+                iopt.PrefetchCell = (cell, parallel, ct) => iopt.Live is { } ps && reach.Contains(cell)
+                    ? ViewProbe.TexturedScene.Prefetch(ps, live.For(new[] { cell }).Refs, parallel, ct) : 0;
                 iopt.BuildCell = cell =>
                 {
                     if (!reach.Contains(cell) || iopt.Live is not { } session) return null;
