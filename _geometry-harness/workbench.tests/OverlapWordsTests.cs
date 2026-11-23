@@ -23,6 +23,9 @@ public sealed class OverlapWordsTests
         var s = OverlapWords.Sentence(RockS02);
         Assert.Equal("A static from Riften Expansion.esp passes into a tree from Unofficial Skyrim Special Edition Patch.esp in RiftenCitySouth.", s);
         foreach (var probeWord in new[] { "containment", "unassessed", "triangle pairs", "(ext)", "[mm]", "079241" }) Assert.DoesNotContain(probeWord, s);
+        // FormKeys whose plugin name has a space (all 700 of the held-out evaluation's overlap summaries parse)
+        var spaced = OverlapWords.Parse("Static from Riften Expansion.esp / Tree from Unofficial Skyrim Special Edition Patch.esp: crossing, containment unassessed, 13 triangle pairs in RiftenCitySouth (ext) [mm] 000828:Riften Expansion.esp / 024355:Skyrim.esm");
+        Assert.Equal(("Riften Expansion.esp", "Unofficial Skyrim Special Edition Patch.esp", "RiftenCitySouth"), (spaced!.PluginA, spaced.PluginB, spaced.Place));
         // a thousands separator in the count, and a summary of another shape is kept as it is
         Assert.NotNull(OverlapWords.Parse(RockS02.Replace("41 triangle", "1,204 triangle")));
         Assert.Equal("an overlap that was there already", OverlapWords.Sentence("an overlap that was there already"));

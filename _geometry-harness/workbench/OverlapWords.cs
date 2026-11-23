@@ -11,7 +11,7 @@ internal static partial class OverlapWords
     /// unassessed, 41 triangle pairs in RiftenCitySouth (ext) [mm] 079241:Skyrim.esm / 079242:Skyrim.esm".</summary>
     internal sealed record Parts(string TypeA, string PluginA, string TypeB, string PluginB, string Relation, string? Containment, string? Place);
 
-    [GeneratedRegex(@"^(?<ta>\w[\w ]*?) from (?<pa>.+?) / (?<tb>\w[\w ]*?) from (?<pb>.+?): (?<rel>[a-z_ ]+?)(?:, containment (?<cont>[a-z_ ]+?))?(?:, [\d,]+ triangle pairs)?(?: in (?<place>.+?) \((?:ext|int)\))?(?: \[\w+\])?(?: \S+:\S+ / \S+:\S+)?\s*$")]
+    [GeneratedRegex(@"^(?<ta>\w[\w ]*?) from (?<pa>.+?) / (?<tb>\w[\w ]*?) from (?<pb>.+?): (?<rel>[a-z_ ]+?)(?:, containment (?<cont>[a-z_ ]+?))?(?:, [\d,]+ triangle pairs)?(?: in (?<place>.+?) \((?:ext|int)\))?(?: \[\w+\])?(?: [0-9A-Fa-f]{6}:.+? / [0-9A-Fa-f]{6}:.+?)?\s*$")]
     private static partial Regex Summary();
 
     internal static Parts? Parse(string summary)
