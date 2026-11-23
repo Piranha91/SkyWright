@@ -50,6 +50,7 @@ namespace Workbench;
 /// expect partner FORMKEY|none    pass or fail on the marked partner
 /// marks on|off                   the toolbar's Marks layer (the same as layer marks on|off)
 /// layer NAME on|off              a layer of the view (ViewLayers): navmesh, borders, markers, planes, terrain, water, grass, trees, clutter, statics, marks
+/// borders through|fence on|off   an option of the cell borders, as their arrow's menu: the outline drawn through objects; the fence
 /// expect landed [FORMKEY]        pass or fail: that reference (default: the selected one) selected, the screen-centre ray crossing its shapes
 /// expect inview FORMKEY          pass or fail: the reference's box centre is drawn inside the view and the screen-centre ray crosses it
 /// waitfile PATH [MAXSEC]         wait (drawing nothing) until PATH exists, or MAXSEC seconds (default 900): an MCP client drives the window meanwhile
@@ -300,6 +301,12 @@ internal sealed class Script
             {
                 var (step, why) = ViewLayers.ParseStep(a);
                 if (step is { } st) _h.SetLayer(st.Layer, st.On); else WorkbenchHost.Say("step refused: " + why);
+                _wait = 3; break;
+            }
+            case "borders":
+            {
+                var (step, why) = ViewLayers.ParseBorderStep(a);
+                if (step is { } st) _h.SetBorderOption(st.Option, st.On); else WorkbenchHost.Say("step refused: " + why);
                 _wait = 3; break;
             }
             case "idlecpu": IdleCpu(F(a[1])); break;

@@ -118,6 +118,20 @@ public class ViewLayersTests : IDisposable
     }
 
     [Fact]
+    public void The_cell_border_options_start_off_parse_and_reset()
+    {
+        ViewLayers.Reset();
+        Assert.False(ViewLayers.IsOn(BorderOption.Through), "the outline is drawn through objects by default");
+        Assert.False(ViewLayers.IsOn(BorderOption.Fence), "the fence is shown by default");
+        Assert.Equal((BorderOption.Fence, true), ViewLayers.ParseBorderStep(new[] { "borders", "FENCE", "on" }).Step);
+        Assert.Equal((BorderOption.Through, false), ViewLayers.ParseBorderStep(new[] { "borders", "through", "off" }).Step);
+        Assert.Equal("'roof' is not an option of the cell borders; use through or fence.", ViewLayers.ParseBorderStep(new[] { "borders", "roof", "on" }).Why);
+        ViewLayers.Choose(BorderOption.Fence, true);
+        ViewLayers.Reset();
+        Assert.False(ViewLayers.IsOn(BorderOption.Fence), "Reset kept the fence on");
+    }
+
+    [Fact]
     public void Objects_split_by_base_type_and_a_hidden_layer_is_not_clickable_and_survives_restore()
     {
         var tree = Boxes.Box(0x901, new Vec3(0, 0, 0), new Vector3(50, 50, 300), name: "TestTree");

@@ -3329,7 +3329,8 @@ static class TexturedScene
                         GL.Uniform1(alphaLoc, layerAlpha);
                     }
                     else { GL.Disable(EnableCap.Blend); GL.Uniform1(alphaLoc, 1.0f); }
-                    if (depthTested) { GL.Enable(EnableCap.DepthTest); GL.DepthFunc(DepthFunction.Lequal); }
+                    // the cell outline is built drawn through everything; a host can have it hidden behind what is in front
+                    if (depthTested || (nav == 5 && interactive is { CellOutlineThrough: false })) { GL.Enable(EnableCap.DepthTest); GL.DepthFunc(DepthFunction.Lequal); }
                     else GL.Disable(EnableCap.DepthTest);
                     if (cullBack) { GL.Enable(EnableCap.CullFace); GL.CullFace(CullFaceMode.Back); }
                     else GL.Disable(EnableCap.CullFace);

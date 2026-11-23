@@ -130,7 +130,7 @@ internal sealed class StateTools
                  "abort (one probe of the running run by `checks`, leaving the rest running; with no checks, the whole run), capture_window (`path`, a .png of the window), show_tab (`tab`, by its header), search_mods (`search`, filters the Start tab's mod list by name). " +
                  "results (the Results tab of an opened evaluation: `pair`, `groups`, `categories`, `setup` and `search` choose what is listed; `row` opens a row: its values, and its cell in the setup before or after the patch with the camera on its object). " +
                  "world (the World tab of an opened load order: `search` filters its cells; `cell` opens a cell; `ref` opens the cell a record is in and lands on it; read-only). " +
-                 "layer (`layer`: one of the 3D view's layers, navmesh, borders, markers, planes, terrain, water, grass, trees, clutter, statics, marks, boxes or outlines; `show` true or false: as the toolbar's button does; a layer this scene cannot draw is refused with the reason, and navmesh in a cell opened without it opens the cell again with it). " +
+                 "layer (`layer`: one of the 3D view's layers, navmesh, borders, markers, planes, terrain, water, grass, trees, clutter, statics, marks, boxes or outlines; `show` true or false: as the toolbar's button does; a layer this scene cannot draw is refused with the reason, and navmesh in a cell opened without it opens the cell again with it; borders.through and borders.fence are the cell borders' options on the arrow beside their button: the outline drawn through objects, and the fence). " +
                  "frame_log (`path`: write one CSV row per frame of the 3D view to that file; with no path, stop the log and say its summary: frames, median, 1% low and worst frame time). " +
                  "map (the World tab's map: `worldspace` by EditorID or FormKey, `map_centre` [x, y] in Skyrim units, `pixels_per_cell` the zoom in screen pixels across one cell, `textured` the Textured checkbox; read the tiles' progress with workbench_state world). " +
                  "open (`path`: open a folder or file in the window, as its Open control does; what it is is detected from the names on disk, and anything the window does not open is refused in one sentence). " +
@@ -178,7 +178,7 @@ internal sealed class StateTools
         [Description("results: which setup a row's scene is built on: own (each row's own), before or after the patch.")] string? setup = null,
         [Description("results: the key of the row to open, as workbench_state's results list it (pair|f3, pair|e12, pair|o7).")] string? row = null,
         [Description("world: the FormKey of the cell to open.")] string? cell = null,
-        [Description("layer: the layer to switch, by its name (navmesh, borders, markers, planes, terrain, water, grass, trees, clutter, statics, marks, boxes, outlines).")] string? layer = null,
+        [Description("layer: the layer to switch, by its name (navmesh, borders, markers, planes, terrain, water, grass, trees, clutter, statics, marks, boxes, outlines), or a cell borders option (borders.through, borders.fence).")] string? layer = null,
         [Description("layer: true shows the layer, false hides it.")] bool? show = null,
         [Description("map: the worldspace to show, by EditorID or FormKey.")] string? worldspace = null,
         [Description("map: the point to centre on, [x, y] in Skyrim units (+X east, +Y north).")] double[]? map_centre = null,
@@ -234,6 +234,13 @@ internal sealed class StateTools
     static CallToolResult LayerOnUi(string? name, bool? show)
     {
         if (Shell.Current is not { } h) return Refuse("no scene is open, so there is no view to switch a layer of.");
+        if ((name ?? "").Trim().StartsWith("borders.", StringComparison.OrdinalIgnoreCase))
+        {
+            if (show is not { } set) return Refuse("a cell borders option needs show: true to turn it on or false to turn it off.");
+            var (step, refused) = ViewLayers.ParseBorderStep(["borders", name!.Trim()["borders.".Length..], set ? "on" : "off"]);
+            if (step is not { } st) return Refuse(refused!);
+            var told = h.SetBorderOption(st.Option, st.On); Shell.SetBanner(told); return Answer(new { said = told, layers = h.Layers.State() });
+        }
         var (l, why) = ViewLayers.Parse(name);
         if (l is null) return Refuse(why!);
         if (show is not { } on) return Refuse("layer needs show: true to show the layer or false to hide it.");

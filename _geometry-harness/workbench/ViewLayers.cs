@@ -11,6 +11,10 @@ namespace Workbench;
 /// <summary>A layer of the 3D view that the toolbar above the view's buttons switches.</summary>
 internal enum Layer { Navmesh, Borders, Markers, Planes, Terrain, Water, Grass, Trees, Clutter, Statics, Marks, Boxes, Outlines }
 
+/// <summary>The cell borders' options, on the arrow beside their button: the dashed outline drawn through what stands
+/// in front of it, and the fence (the translucent curtain standing on the outline).</summary>
+internal enum BorderOption { Through, Fence }
+
 /// <summary>The window's choice of layers: one on or off per layer, kept across cell switches (the choice is the
 /// window's, not the scene's). What each scene can draw is <see cref="SceneLayers"/>.</summary>
 internal static class ViewLayers
@@ -21,7 +25,7 @@ internal static class ViewLayers
     internal static readonly IReadOnlyList<Info> All = new Info[]
     {
         new(Layer.Navmesh, "navmesh", "Navmesh", "the navmesh, as a translucent sheet with its triangle edges; red where a finding names it", true),
-        new(Layer.Borders, "borders", "Cell borders", "the exterior cell grid: a gold curtain around this scene's cell (with its white dashed outline), pale blue around the cells loaded beside it", true),
+        new(Layer.Borders, "borders", "Cell borders", "the exterior cell grid: a white dashed outline around this scene's cell; the arrow beside the button draws it through objects or adds a fence (a gold curtain around this cell, pale blue around the cells loaded beside it)", true),
         new(Layer.Markers, "markers", "Markers", "objects the game does not draw: editor markers as violet stems with an arrow the way they face, and objects with no model, such as most lights and sound markers, as yellow diamonds", false),
         new(Layer.Planes, "planes", "Occlusion", "occlusion planes: grey vanilla, gold inherited, magenta added, teal moved", false),
         new(Layer.Terrain, "terrain", "Terrain", "the landscape", true),
@@ -39,6 +43,31 @@ internal static class ViewLayers
 
     static readonly Dictionary<Layer, bool> On = All.ToDictionary(i => i.Layer, i => i.Default);
 
+    internal sealed record OptionInfo(BorderOption Option, string Name, string Label, string Tip);
+
+    /// <summary>The cell borders' options, both off by default: the outline hides behind what stands in front of it, and
+    /// no fence stands on it.</summary>
+    internal static readonly IReadOnlyList<OptionInfo> BorderOptions = new OptionInfo[]
+    {
+        new(BorderOption.Through, "through", "Draw through objects", "the dashed outline drawn through anything in front of it, so the whole border shows behind a hill or a building"),
+        new(BorderOption.Fence, "fence", "Show fence", "a translucent curtain standing on the border: gold around this cell, pale blue around the cells loaded beside it"),
+    };
+
+    static readonly Dictionary<BorderOption, bool> Options = BorderOptions.ToDictionary(o => o.Option, _ => false);
+    internal static bool IsOn(BorderOption o) => Options[o];
+    internal static void Choose(BorderOption o, bool on) => Options[o] = on;
+    internal static OptionInfo Of(BorderOption o) => BorderOptions.First(i => i.Option == o);
+
+    /// <summary>The script's <c>borders through|fence on|off</c> step, or the sentence refusing it.</summary>
+    internal static ((BorderOption Option, bool On)? Step, string? Why) ParseBorderStep(IReadOnlyList<string> a)
+    {
+        string names = string.Join(" or ", BorderOptions.Select(o => o.Name));
+        if (a.Count != 3) return (null, $"the borders step is 'borders NAME on|off', with NAME {names}.");
+        var hit = BorderOptions.FirstOrDefault(o => string.Equals(o.Name, a[1].Trim(), StringComparison.OrdinalIgnoreCase));
+        if (hit is null) return (null, $"'{a[1]}' is not an option of the cell borders; use {names}.");
+        return OnOff(a[2]) is { } on ? ((hit.Option, on), null) : (null, $"'{a[2]}' is not on or off.");
+    }
+
     internal static Info Of(Layer l) => All.First(i => i.Layer == l);
     internal static bool IsOn(Layer l) => On[l];
     internal static void Choose(Layer l, bool on) { On[l] = on; if (l == Layer.Navmesh) WantsNavmesh = on; }
@@ -53,7 +82,7 @@ internal static class ViewLayers
     internal const string NavAskedMode = "both";
 
     /// <summary>Back to the defaults (a new window; the tests).</summary>
-    internal static void Reset() { foreach (var i in All) On[i.Layer] = i.Default; WantsNavmesh = false; _pose = null; }
+    internal static void Reset() { foreach (var i in All) On[i.Layer] = i.Default; foreach (var o in BorderOptions) Options[o.Option] = false; WantsNavmesh = false; _pose = null; }
 
     /// <summary>A layer by the name a script or a state tool uses (any case, or its label), or the sentence refusing it.</summary>
     internal static (Layer? Layer, string? Why) Parse(string? name)
@@ -218,6 +247,7 @@ internal sealed class SceneLayers
     {
         layer = i.Name, label = i.Label, available = Has(i.Layer), on = ViewLayers.IsOn(i.Layer), shown = Shown(i.Layer),
         count = Count(i.Layer), why = Has(i.Layer) ? null : Why(i.Layer), canLoad = i.Layer == Layer.Navmesh && NavLoadable ? true : (bool?)null,
+        options = i.Layer == Layer.Borders ? ViewLayers.BorderOptions.ToDictionary(o => o.Name, o => ViewLayers.IsOn(o.Option)) : null,
     }).ToList();
 }
 
@@ -226,10 +256,12 @@ internal sealed class SceneLayers
 internal sealed class LayerBar
 {
     readonly Dictionary<Layer, ToggleButton> _buttons = new();
+    readonly Dictionary<BorderOption, MenuItem> _options = new();
+    readonly Button? _borderArrow;
     readonly Func<SceneLayers> _scene;
     internal UIElement Element { get; }
 
-    internal LayerBar(Func<SceneLayers> scene, Action<Layer, bool> press)
+    internal LayerBar(Func<SceneLayers> scene, Action<Layer, bool> press, Action<BorderOption, bool> option)
     {
         _scene = scene;
         var row = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(2, 0, 2, 0) };
@@ -237,15 +269,37 @@ internal sealed class LayerBar
         Layer[] gap = { Layer.Terrain, Layer.Marks };       // overlays | the scene's own geometry | marks
         foreach (var i in ViewLayers.All)
         {
-            var b = new ToggleButton { Content = i.Label, Margin = new Thickness(gap.Contains(i.Layer) ? 12 : 2, 2, 2, 2), Padding = new Thickness(6, 1, 6, 1), Focusable = false };
+            bool arrow = i.Layer == Layer.Borders;
+            var b = new ToggleButton { Content = i.Label, Margin = new Thickness(gap.Contains(i.Layer) ? 12 : 2, 2, arrow ? 0 : 2, 2), Padding = new Thickness(6, 1, 6, 1), Focusable = false };
             ToolTipService.SetShowOnDisabled(b, true);
             var layer = i.Layer;
             b.Click += (_, _) => press(layer, b.IsChecked == true);
             _buttons[layer] = b;
             row.Children.Add(b);
+            if (arrow) row.Children.Add(_borderArrow = OptionsArrow(option));
         }
         Element = row;
         Refresh();
+    }
+
+    /// <summary>The arrow beside Cell borders: a menu of the borders' options, each a check box.</summary>
+    Button OptionsArrow(Action<BorderOption, bool> option)
+    {
+        var menu = new ContextMenu();
+        foreach (var o in ViewLayers.BorderOptions)
+        {
+            var item = new MenuItem { Header = o.Label, IsCheckable = true, StaysOpenOnClick = true, ToolTip = Capital(o.Tip) + "." };
+            var which = o.Option;
+            item.Click += (_, _) => option(which, item.IsChecked);
+            _options[which] = item;
+            menu.Items.Add(item);
+        }
+        var a = new Button { Content = "\u25BE",Margin = new Thickness(0, 2, 2, 2), Padding = new Thickness(3, 1, 3, 1), Focusable = false, ContextMenu = menu };
+        ToolTipService.SetShowOnDisabled(a, true);
+        menu.PlacementTarget = a;
+        menu.Placement = PlacementMode.Bottom;
+        a.Click += (_, _) => menu.IsOpen = true;
+        return a;
     }
 
     /// <summary>Each button from the scene and the choice: checked while its layer is drawn.</summary>
@@ -262,6 +316,12 @@ internal sealed class LayerBar
             b.ToolTip = has ? $"{Capital(info.Tip)} ({(ViewLayers.IsOn(l) ? "shown; press to hide" : "hidden; press to show")})."
                       : load ? Capital(s.Why(l)!) : $"{info.Label}: {s.Why(l)}" + (ViewLayers.IsOn(l) && l != Layer.Navmesh ? " It is on, and shows in a scene that has it." : "");
         }
+        if (_borderArrow is null) return;
+        bool borders = s.Has(Layer.Borders);
+        _borderArrow.IsEnabled = borders;
+        _borderArrow.ToolTip = borders ? "Cell border options: " + string.Join("; ", ViewLayers.BorderOptions.Select(o => $"{o.Label} {(ViewLayers.IsOn(o.Option) ? "on" : "off")}")) + "."
+                                       : $"Cell border options: {s.Why(Layer.Borders)}";
+        foreach (var (o, item) in _options) item.IsChecked = ViewLayers.IsOn(o);
     }
 
     static string Capital(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];

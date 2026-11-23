@@ -1625,7 +1625,7 @@ not a second copy of the rules. `InteractiveViewer.ApplyNavMode(opt, mode)` is t
 effect (sheet visibility and alpha, wire flags), shared. `InteractiveOptions` also carries what a
 host's toolbar needs: `LayerMeshes` (the build's terrain, water and grass meshes, by name),
 `ShowCellOutline` (the target cell's white dashed outline, overlay tag 5, read per frame like the
-planes' tag 4), `TerrainHeightAt` and `LandCells` (the drawn ground and the grid cells whose land
+planes' tag 4; `CellOutlineThrough` false draws it depth-tested instead of through what stands in front of it), `TerrainHeightAt` and `LandCells` (the drawn ground and the grid cells whose land
 the scene read), `BaseTypes` (each modeled base's record type) and `UndrawnAt` (where each
 reference the walk left out as an editor marker or for having no model stands). A host's cell
 request can carry a navmesh display mode for that cell's shots (`InteractiveViewer.CellRequestNav`):

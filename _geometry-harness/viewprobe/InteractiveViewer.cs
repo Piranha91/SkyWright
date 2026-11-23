@@ -197,6 +197,7 @@ sealed class InteractiveOptions
     // ---- what a host's layer switches read (the workbench's view toolbar); the fly-through does not use them -----
     public Dictionary<string, List<GlMesh>> LayerMeshes = new();   // "terrain", "water", "grass": the build's meshes of each
     public bool ShowCellOutline = true;                    // the target cell's white dashed outline, read per frame by the overlay draw
+    public bool CellOutlineThrough = true;                 // that outline drawn through what stands in front of it (false: depth-tested), read per frame
     public Func<float, float, float?>? TerrainHeightAt;    // ground height at Skyrim X,Y on the drawn terrain; null off the land
     public IReadOnlyCollection<(int X, int Y)> LandCells = Array.Empty<(int, int)>();   // grid cells whose land the scene read
     public IReadOnlyDictionary<FormKey, string>? BaseTypes; // a modeled base's record type (Static, Tree, Light, ...)

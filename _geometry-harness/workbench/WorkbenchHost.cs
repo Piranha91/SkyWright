@@ -305,7 +305,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         Grid.SetColumn(context, 1);
         pendingPanel.Children.Add(edits); pendingPanel.Children.Add(context);
         DockPanel.SetDock(pendingPanel, Dock.Bottom);
-        _layerBar = new LayerBar(() => _layers, (l, on) => { try { Shell.SetBanner(SetLayer(l, on)); } catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); _layerBar?.Refresh(); } });
+        _layerBar = new LayerBar(() => _layers, (l, on) => { try { Shell.SetBanner(SetLayer(l, on)); } catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); _layerBar?.Refresh(); } },
+                                 (o, on) => { try { Shell.SetBanner(SetBorderOption(o, on)); } catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); _layerBar?.Refresh(); } });
         // the layer toggles, with the frame-rate switch at the row's right end and its readout under the row when shown
         var topRow = new DockPanel();
         var fps = FpsToggle();
@@ -1111,13 +1112,36 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _layers = SceneLayers.From(facts, new LayerSwitches(
             Navmesh: on => InteractiveViewer.ApplyNavMode(_opt, on ? navEntry : "off"),
             Planes: on => _opt.ShowPlanes = on,
-            Borders: on => { _opt.ShowCellOutline = on; if (_borders is not null) _borders.Enabled = on; },
+            Borders: on => { _bordersOn = on; ApplyBorders(); },
             Markers: on => _markerGizmos.Enabled = on,
             Marks: on => { _marks.Enabled = on; UpdateKey(); },
             Boxes: on => { _resultMarks.Enabled = on; UpdateKey(); },
             Outlines: on => _marks.Outlines = on,
             Hide: (meshes, hidden) => _viewState.SetLayerHidden(meshes, hidden)));
         _layers.ApplyAll();
+    }
+
+    bool _bordersOn;
+
+    /// <summary>The cell borders as the layer and its two options say: the outline, drawn through what is in front or
+    /// hidden behind it, and the fence standing on it.</summary>
+    void ApplyBorders()
+    {
+        _opt.ShowCellOutline = _bordersOn;
+        _opt.CellOutlineThrough = ViewLayers.IsOn(BorderOption.Through);
+        if (_borders is not null) _borders.Enabled = _bordersOn && ViewLayers.IsOn(BorderOption.Fence);
+    }
+
+    /// <summary>Switch one of the cell borders' options for the window (the arrow's menu, the script's borders step, the
+    /// state tool's layer verb); one sentence back. The choice is kept in a scene without cell borders too.</summary>
+    internal string SetBorderOption(BorderOption o, bool on)
+    {
+        ViewLayers.Choose(o, on);
+        ApplyBorders();
+        var said = $"Cell borders: {ViewLayers.Of(o).Label} {(on ? "on" : "off")}"
+                 + (_layers.Has(Layer.Borders) ? (_bordersOn ? "" : "; the cell borders are hidden, so it shows when they are shown") : $"; {_layers.Why(Layer.Borders)}");
+        Say(said); UpdateStatus(); _layerBar?.Refresh(); Invalidate("layer");
+        return said;
     }
 
     /// <summary>Switch a layer for the window (the toolbar, the script's layer step, the state tool's layer verb). One
