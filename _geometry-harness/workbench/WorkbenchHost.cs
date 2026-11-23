@@ -454,6 +454,13 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 { _yaw = (_yaw + (p.X - l.X) * 0.15f + 360f) % 360f; _pitch = Math.Clamp(_pitch + (p.Y - l.Y) * 0.15f, -89f, 89f); _look = p; SyncCamera(); }
                 else OnMove(p);
                 break;
+            case 0x20A:                                                      // WM_MOUSEWHEEL: the point is in screen pixels
+            {
+                var pt = new POINT { X = x, Y = y };
+                ScreenToClient(_view.Handle, ref pt);
+                WheelZoom(new Vector2(pt.X, pt.Y), (short)((wParam.ToInt64() >> 16) & 0xFFFF) / 120f);
+                break;
+            }
             case 0x0008: _viewState.OnFocusLost(); _held.Clear(); break;          // WM_KILLFOCUS: a held key's release will not come
             case 0x101:                                                      // WM_KEYUP
                 _held.Remove((int)wParam.ToInt64());
@@ -472,6 +479,32 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         }
     }
     [DllImport("user32.dll")] static extern short GetKeyState(int vk);
+    [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
+    [DllImport("user32.dll")] static extern bool ScreenToClient(IntPtr hwnd, ref POINT p);
+
+    /// <summary>The wheel moves the eye toward (up) or away from (down) the point under the mouse: a fifth of the way to
+    /// what is under it per notch, or a fixed step when nothing is (Shift: five times as far).</summary>
+    internal void WheelZoom(Vector2 px, float notches)
+    {
+        if (notches == 0) return;
+        var (_, dir) = RayAt(px);
+        float toHit = PickAt(px) is { } hit ? hit.T : 0f;
+        bool shift = (GetKeyState(0x10) & 0x8000) != 0;
+        float step = WheelStep(toHit, notches) * (shift ? 5f : 1f);
+        _eye += Vector3.Normalize(dir) * step;
+        SyncCamera();
+    }
+
+    /// <summary>How far one wheel turn moves the eye along the mouse's ray: in, a fifth of the distance to what is under
+    /// the mouse (never through it, at least 8 units); out, a quarter of it; 256 units a notch when nothing is under it.</summary>
+    internal static float WheelStep(float toHit, float notches)
+    {
+        if (toHit <= 0f) return 256f * notches;
+        float frac = notches > 0 ? 0.2f : 0.25f;
+        float step = MathF.Max(toHit * frac, 8f) * notches;
+        return notches > 0 ? MathF.Min(step, toHit * 0.9f) : step;
+    }
+
     static string MessageName(int msg) => msg switch
     {
         0x200 => "mousemove", 0x201 or 0x202 => "lbutton", 0x204 or 0x205 => "rbutton", 0x100 => "keydown", 0x101 => "keyup",
