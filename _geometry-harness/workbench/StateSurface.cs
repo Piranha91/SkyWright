@@ -40,6 +40,8 @@ internal interface IWorkbenchSurface
     /// <summary>What a click on a clickable Findings row does: the Records tree's path to its reference and cell.</summary>
     string OpenFinding(RankedFinding row) => $"finding {row.Rank} names {row.Row.RefKey} in cell {row.Row.Cell}, but no window is shown to open it in.";
     /// <summary>Plan a navmesh Findings row's repair (<see cref="RepairDesk"/>); nothing is written.</summary>
+    /// <summary>Say a sentence where the window says things (its banner); a surface with no window says nothing.</summary>
+    void Say(string sentence) { }
     Task<RepairPreview> RepairPreviewAsync(RankedFinding row) => Task.FromException<RepairPreview>(new InvalidOperationException("this window cannot plan a navmesh repair."));
     /// <summary>Write that row's previewed repair to the new patch, read it back and re-check it.</summary>
     Task<RepairWritten> RepairWriteAsync(RankedFinding row, string patch) => Task.FromException<RepairWritten>(new InvalidOperationException("this window cannot write a navmesh repair."));
@@ -123,6 +125,7 @@ internal sealed class LiveSurface : IWorkbenchSurface
     public RowState RowStateOf(RankedRow r) => new(r.Row.Physical?.ToString(), r.Row.Summary,
         Shell.Bundle is { } b && Recheck.ProbeOfCheck.TryGetValue(r.Row.CheckId, out var probe) ? Recheck.BundleDigest(b.Dir, probe) ?? "" : "");
 
+    public void Say(string sentence) => Shell.SetBanner(sentence);
     public Task<RepairPreview> RepairPreviewAsync(RankedFinding row) => Shell.Repair.PreviewAsync(row);
     public Task<RepairWritten> RepairWriteAsync(RankedFinding row, string patch) => Shell.Repair.WriteAsync(row, patch);
     public RepairPreview? LastRepairPreview => Shell.Repair.Preview;

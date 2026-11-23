@@ -434,7 +434,7 @@ internal sealed class StateTools
                                          : "repair written: " + (await s.RepairWriteAsync(row, patch!.Trim())).Sentence;
         }
         catch (InvalidOperationException ex) { return Refuse(ex.Message); }
-        Shell.SetBanner(said);                               // the window says it, as its own Preview and Write buttons do
+        s.Say(said);                                         // the window says it, as its own Preview and Write buttons do
         return Answer(new { said, state = Project(s, new[] { "repair" }, 20, 0, null) });
     }
 
