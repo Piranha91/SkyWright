@@ -232,8 +232,10 @@ internal static class Program
         return code;
     }
 
-    /// <summary>The frame-rate switches, taken off the command line before viewprobe reads it: <c>--fps</c> shows the
-    /// readout (as <c>WB_FPS=on</c>), <c>--fps-log PATH</c> writes the frame log from the first scene on (as <c>WB_FPS_LOG</c>).</summary>
+    /// <summary>The window's own switches, taken off the command line before viewprobe reads it: <c>--fps</c> shows the
+    /// readout (as <c>WB_FPS=on</c>), <c>--fps-log PATH</c> writes the frame log from the first scene on (as <c>WB_FPS_LOG</c>),
+    /// and <c>--mcp-port N</c> serves the state tools on that port (as <c>WB_MCP_PORT</c>), for a launcher such as MO2's
+    /// Executables that passes arguments but not environment variables.</summary>
     internal static string[] FrameSwitches(string[] args)
     {
         var rest = new List<string>();
@@ -241,6 +243,7 @@ internal static class Program
         {
             if (args[i] == "--fps") Environment.SetEnvironmentVariable("WB_FPS", "on");
             else if (args[i] == "--fps-log" && i + 1 < args.Length) Environment.SetEnvironmentVariable("WB_FPS_LOG", args[++i]);
+            else if (args[i] == "--mcp-port" && i + 1 < args.Length) Environment.SetEnvironmentVariable("WB_MCP_PORT", args[++i]);
             else rest.Add(args[i]);
         }
         return rest.ToArray();
