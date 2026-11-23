@@ -23,7 +23,7 @@ internal static class ResultDetail
             5 => "; the change is not measured.",
             _ => ".",
         }),
-        _ => "The checks predicted these objects overlap; the scorecard does not score overlaps.",
+        _ => "The checks predicted these objects overlap. Overlaps are not counted as addressed or not addressed.",
     };
 
     /// <summary>A value as read: "x 21,273.9  y −7,263.2  z −3,435.6" for a position, each part of a list on its own line.</summary>

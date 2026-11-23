@@ -319,6 +319,9 @@ internal static class Theme
 
     /// <summary>The dark dictionary, parsed once.</summary>
     internal static ResourceDictionary Dark => _dark ??= (ResourceDictionary)XamlReader.Parse(Xaml);
+    /// <summary>A copy of the theme of its own, for a thread that is not the window's (a rendering test): the shared one
+    /// belongs to the thread that first read it.</summary>
+    internal static ResourceDictionary Copy() => (ResourceDictionary)XamlReader.Parse(Xaml);
 
     /// <summary>Apply the dark theme to an application (the workbench's default).</summary>
     internal static void Apply(Application app) { if (!app.Resources.MergedDictionaries.Contains(Dark)) app.Resources.MergedDictionaries.Add(Dark); }

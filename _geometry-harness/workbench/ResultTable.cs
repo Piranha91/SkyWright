@@ -137,7 +137,7 @@ internal sealed record ResultTableRow(ResultRow Row, string Line, ResultPair? Pa
     {
         ("FormKey", nameof(FormKey), 150, "the record's FormID and the plugin it comes from"),
         ("Type", nameof(Type), 175, "the kind of record"),
-        ("", null, 30, "green: addressed · red: not addressed · amber: a patch change nothing predicted · grey: an overlap the scorecard does not score"),
+        ("", null, 30, "green: addressed · red: not addressed · amber: a patch change nothing predicted · grey: an overlap, not counted as addressed or not addressed"),
         ("Mod", nameof(Mod), 190, "the mod the pair checks; for an overlap, the plugin of the row's own object (cyan in the view)"),
         ("Against", nameof(Against), 170, "the mod it is checked against; for an overlap, the plugin of the object it passes into (magenta in the view)"),
         ("Change", nameof(What), 130, "what was done to the record"),

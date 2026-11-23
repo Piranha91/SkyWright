@@ -61,6 +61,7 @@ public sealed class OverlapWordsTests
             if (Environment.GetEnvironmentVariable("WB_DETAIL_PNG") is { Length: > 0 } png)
             {
                 var host = new Border { Background = Theme.Brush("#1E1F22"), Width = 420, Child = pane };
+                host.Resources.MergedDictionaries.Add(Theme.Copy());   // the app's own styles, as the window draws it
                 System.Windows.Documents.TextElement.SetForeground(host, Brushes.Gainsboro);
                 host.Measure(new Size(420, double.PositiveInfinity)); host.Arrange(new Rect(host.DesiredSize)); host.UpdateLayout();
                 var bmp = new RenderTargetBitmap((int)Math.Ceiling(host.ActualWidth * 1.5), (int)Math.Ceiling(host.ActualHeight * 1.5), 144, 144, PixelFormats.Pbgra32);

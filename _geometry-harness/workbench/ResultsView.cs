@@ -9,7 +9,7 @@ namespace Workbench;
 internal static class ResultRules
 {
     internal const string AddressedMeans = "Addressed means the patch edits that record or object. It does not show the clash is gone.";
-    internal const string NotScoredMeans = "Predicted object overlap: the scorecard does not score overlap, so these rows are neither addressed nor missed.";
+    internal const string NotScoredMeans = "Predicted object overlaps are not counted as addressed or not addressed.";
 
     /// <summary>A group as the tab names it: the tag's shape and words, and the scene mark.</summary>
     internal static readonly IReadOnlyDictionary<ResultGroup, (string Shape, string Words, MarkStyle Mark)> Groups =
@@ -264,11 +264,12 @@ internal static class ResultsView
         try
         {
             PairBox.Items.Clear();
-            PairBox.Items.Add(new ComboBoxItem { Content = $"All pairs  —  {CountsText(r.Totals)}", Tag = null });
+            // short enough to fit the box; the counts are in each item's tooltip and beside the filters below
+            PairBox.Items.Add(new ComboBoxItem { Content = $"All {r.Pairs.Count} pairs", Tag = null, ToolTip = CountsText(r.Totals) });
             foreach (var p in r.Pairs)
                 // the pair by its mods, as a modder knows it; its id and patch in the tooltip
-                PairBox.Items.Add(new ComboBoxItem { Content = $"{string.Join(", ", p.Subject)} against {string.Join(", ", p.Partner)}  —  {CountsText(p.Counts)}", Tag = p.Id,
-                                                     ToolTip = $"{p.Id}; patch {p.PatchPlugin}" });
+                PairBox.Items.Add(new ComboBoxItem { Content = new TextBlock { Text = $"{string.Join(", ", p.Subject)} against {string.Join(", ", p.Partner)}", TextWrapping = TextWrapping.Wrap }, Tag = p.Id,
+                                                     ToolTip = $"{p.Id}; patch {p.PatchPlugin}; {CountsText(p.Counts)}" });
             PairBox.SelectedIndex = Pair is null ? 0 : 1 + r.Pairs.ToList().FindIndex(p => p.Id == Pair);
         }
         finally { _filling = was; }
