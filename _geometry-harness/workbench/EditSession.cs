@@ -33,6 +33,24 @@ internal sealed class EditSession
     /// showing originals first and the screen and the list stay in agreement.</summary>
     internal event Action? Replacing;
 
+    /// <summary>A cell added to the live scene: its drawn references become selectable (an existing one stays).</summary>
+    internal void Add(IEnumerable<RefOcclusion> refs)
+    {
+        foreach (var ro in refs)
+            if (!ro.Ref.RefKey.IsNull && ro.Meshes.Count > 0) _refs.TryAdd(ro.Ref.RefKey, ro);
+    }
+
+    /// <summary>A cell dropped from the live scene: its references are no longer drawn. The caller keeps a cell that holds
+    /// the selection or an edit (<see cref="Holds"/>), so neither is lost.</summary>
+    internal void Remove(IEnumerable<RefOcclusion> refs)
+    {
+        foreach (var ro in refs)
+            if (_refs.TryGetValue(ro.Ref.RefKey, out var held) && ReferenceEquals(held, ro)) _refs.Remove(ro.Ref.RefKey);
+    }
+
+    /// <summary>The reference is selected, or has a staged or written edit.</summary>
+    internal bool Holds(FormKey key) => Selected == key || _pending.Any(e => e.Ref == key) || _written.ContainsKey(key);
+
     internal bool IsDrawn(FormKey key) => _refs.ContainsKey(key);
     internal RefOcclusion RefOf(FormKey key) => _refs.TryGetValue(key, out var ro) ? ro
         : throw new InvalidOperationException($"{key} is not a drawn reference in this scene; select one the window shows.");

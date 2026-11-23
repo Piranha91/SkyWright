@@ -167,8 +167,14 @@ internal static class SceneDirector
                 "placeholder pose: the workbench frames the camera once the cell is built", new[] { 0f, 0f, 0f }) { Nav = ViewLayers.NavFor(req.Order) } }) }.ToList());
         var path = Path.Combine(work, "workbench-request-worklist.json");
         HarnessShared.WorklistIo.Write(path, wl);
-        return new[] { "--worklist", path }.Concat(req.Order.Args()).Concat(new[] { "--out", work }).ToArray();
+        // --ring/--live: the walk prepares the cells for a loaded square up to 2*LiveReach+1 wide, and the view adds and drops
+        // them live (LiveCells.cs); an interior ignores both
+        return new[] { "--worklist", path }.Concat(req.Order.Args())
+            .Concat(new[] { "--ring", LiveReach.ToString(System.Globalization.CultureInfo.InvariantCulture), "--live", "--out", work }).ToArray();
     }
+
+    /// <summary>How many cells out from the scene's cell the walk prepares: the widest loaded square is 2*LiveReach+1.</summary>
+    internal const int LiveReach = 5;
 
     /// <summary>A viewprobe run starts on this load order (null: one the command line or the launcher named in full).</summary>
     internal static void Began(LoadOrderSpec? order, SceneRequest? first)

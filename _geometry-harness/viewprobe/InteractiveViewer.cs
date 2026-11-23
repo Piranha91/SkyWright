@@ -198,6 +198,14 @@ sealed class InteractiveOptions
     public Dictionary<string, List<GlMesh>> LayerMeshes = new();   // "terrain", "water", "grass": the build's meshes of each
     public bool ShowCellOutline = true;                    // the target cell's white dashed outline, read per frame by the overlay draw
     public bool CellOutlineThrough = true;                 // that outline drawn through what stands in front of it (false: depth-tested), read per frame
+
+    // ---- the live scene (LiveScene.cs): cells a host adds to and drops from the scene it shows, without a rebuild ----------
+    public LiveSession? Live;                              // set by the build just before the host's loop; dead after it
+    public Func<(int X, int Y), LiveCell?>? BuildCell;     // build one cell of Reach into the live scene; null when it is not in Reach
+    public IReadOnlySet<(int X, int Y)> Reach = new HashSet<(int X, int Y)>();   // the cells the walk prepared: what BuildCell can add
+    public IReadOnlySet<(int X, int Y)> Loaded = new HashSet<(int X, int Y)>();  // the cells the first build drew
+    public int GridsToLoad = 3;                            // the profile's uGridsToLoad (or the game default), the loaded square's width
+    public string GridsToLoadSource = "";                  // where that number came from, in words
     public Func<float, float, float?>? TerrainHeightAt;    // ground height at Skyrim X,Y on the drawn terrain; null off the land
     public IReadOnlyCollection<(int X, int Y)> LandCells = Array.Empty<(int, int)>();   // grid cells whose land the scene read
     public IReadOnlyDictionary<FormKey, string>? BaseTypes; // a modeled base's record type (Static, Tree, Light, ...)

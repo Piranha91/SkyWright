@@ -536,7 +536,9 @@ static class TexturedScene
         GraphicsCell? graphicsCell = null,              // opt-in retained GL owner; null preserves the per-shot path
         string? preparedIdentity = null,                // retained CPU-walk identity; required with graphicsCell
         DepthMeasurement? depthMeasurement = null,      // --depth-measurement: only alpha-tested diffuses load (DepthMeasurement.cs)
-        NativeTerrainExtras? terrainExtras = null)      // LAND normals / colours and TXST normal maps for the native terrain
+        NativeTerrainExtras? terrainExtras = null,      // LAND normals / colours and TXST normal maps for the native terrain
+        LiveSession? live = null,                       // a cell slice built into a live scene (LiveScene.cs); null = a whole build
+        List<GlMesh>? liveMeshes = null)                // slice mode: receives the meshes the slice added, for the caller to own
     {
         // THE CANVAS IS TWO NUMBERS, NOT ONE. It used to be `size` on both axes, and the camera's
         // fov went to the projection at aspect 1 -- so a pose planned for a 16:9 deliverable was
@@ -595,14 +597,14 @@ static class TexturedScene
             return new CellAssets(made,
                 new AssetCache(made, logger, gate, new CvSettings()));
         }
-        var (resolver, cache) = cellScene is null ? MakeAssets() : cellScene.Assets(MakeAssets);
+        var (resolver, cache) = live is not null ? live.Assets : cellScene is null ? MakeAssets() : cellScene.Assets(MakeAssets);
 
         MeshState MakeMeshState()
         {
             meshReadHooks?.ObserveMeshStateFactory?.Invoke();
             return new MeshState(new NifMeshBuilder(logger, gate, resolver, new CvSettings()));
         }
-        var meshState = cellScene is null ? MakeMeshState() : cellScene.Mesh(MakeMeshState);
+        var meshState = live?.Mesh ?? (cellScene is null ? MakeMeshState() : cellScene.Mesh(MakeMeshState));
         var builder = meshState.Builder;
         // Declared before the real GL owners so it disposes after them, while Program's real
         // GameWindow/context is still current. The scope queries handles but owns none of them.
@@ -620,13 +622,14 @@ static class TexturedScene
         // Shot-local textures never join the cell's resident cache (Gate B2 review, C2 option A): in reuse mode the
         // per-shot manager is built exactly as the no-flag path builds it, so what it loads dies with the shot and
         // the resident cache holds only the retained install textures.
-        using var textures = new GlTextureManager(cache, logger, null);
-        textures.Initialize();
+        using var ownTextures = live is null ? new GlTextureManager(cache, logger, null) : null;
+        ownTextures?.Initialize();
+        var textures = live?.Textures ?? ownTextures!;
         graphicsShot?.TextureManagerReady(textures, initializedNow: true,
             role: graphicsCell is null ? "install" : "shot", cellLifetime: graphicsCell is null);
 
-        using var localRenderer = graphicsCell is null ? new GlRenderer() : null;
-        var renderer = graphicsCell?.Renderer ?? localRenderer!;
+        using var localRenderer = graphicsCell is null && live is null ? new GlRenderer() : null;
+        var renderer = live?.Renderer ?? graphicsCell?.Renderer ?? localRenderer!;
         graphicsShot?.RendererMembership("shot-start", renderer);   // G3 RED, measurement only
         if (localRenderer is not null)
         {
@@ -635,79 +638,83 @@ static class TexturedScene
             renderer.Initialize(Environment.GetEnvironmentVariable("VP_SHADER_DIR"));
             graphicsShot?.RendererReady(renderer, initializedNow: true);
         }
-        renderer.EnableBloom = false;                    // deterministic output; no post FX
-        renderer.EnableShadows = false;
-        renderer.ShadowBounds = null;
-        renderer.PointLights.Clear();
-        renderer.EnableAmbientOcclusion = false;
-        // The sky. GlRenderer.Render() clears the frame AGAIN with its own ClearColor, so this
-        // is the setting that decides the background — the GL.ClearColor in Draw() below only
-        // matters for the instant before the library's clear lands on top of it.
-        renderer.ClearColor = new GlVec3(skyColor.X, skyColor.Y, skyColor.Z);
-        renderer.SetAmbientIntensity(0.55f);
-        renderer.SetKeyLight(azimuthDeg: 135f, elevationDeg: 55f, intensity01: 0.85f, new GlVec3(1f, 0.98f, 0.92f));
-        renderer.SetFillLight(azimuthDeg: 315f, elevationDeg: 20f, intensity01: 0.35f, new GlVec3(0.85f, 0.9f, 1f));
-        // --weather (SceneWeather.cs): the WTHR's sky, sun, ambient and fog replace the fixed studio
-        // lights. The sun is placed from the worldspace's climate (below); there is no fill light in the engine.
-        renderer.Fog = null;
-        renderer.ImageSpace = null;
-        renderer.SkyColor = null;
-        renderer.SkyGradient = null;
-        renderer.Lights[0].Color = new GlVec3(1f, 1f, 1f);   // a reused renderer may carry a weather's ambient
-        if (SceneWeather.Requested is not null && SceneWeather.Current is null)
-            Console.WriteLine($"   weather: no WTHR '{SceneWeather.Requested}' in the load order (or this walk was retained) - studio lights kept");
-        if (SceneWeather.Current is { } sw)
+        // The lights, sky and fog are the scene's, set by its first build; a slice adds geometry to them and changes none.
+        if (live is null)
         {
-            if (!SceneWeather.SkyGiven) renderer.ClearColor = new GlVec3(sw.SkyUpper.X, sw.SkyUpper.Y, sw.SkyUpper.Z);
-            renderer.SkyColor = new GlVec3(sw.SkyUpper.X, sw.SkyUpper.Y, sw.SkyUpper.Z);
-            renderer.Lights[0].Color = new GlVec3(sw.AmbientUp.X, sw.AmbientUp.Y, sw.AmbientUp.Z);
-            renderer.SetAmbientIntensity(1f);
-            // The image space: the engine scales the sun's colour by its HDR sunlight scale and
-            // finishes the frame with its tone map and cinematic grade (SkyRender ImageSpaceFinish).
-            var isd = SceneWeather.ImageSpaceOff ? null : SceneWeather.ImageSpaceData;
-            // The sun's direction from the worldspace's climate at --game-hour (SceneWeather.SunPath);
-            // the fixed studio direction when there is no climate. VP_SUN_FIXED=1 keeps the fixed one.
-            var sunPath = Environment.GetEnvironmentVariable("VP_SUN_FIXED") == "1" ? null : SceneWeather.SunPath();
-            renderer.SetKeyLight(azimuthDeg: sunPath?.Azimuth ?? 135f, elevationDeg: sunPath?.Elevation ?? 55f,
-                                 intensity01: isd?.SunlightScale ?? 1f,
-                                 new GlVec3(sw.Sunlight.X, sw.Sunlight.Y, sw.Sunlight.Z));
-            Console.WriteLine(sunPath is { } spx ? $"   weather sun: {spx.Text}"
-                                                 : "   weather sun: fixed studio direction (azimuth 135, elevation 55) - no climate read");
-            if (isd is not null)
-                renderer.ImageSpace = new ImageSpaceFinish(isd.White, isd.Saturation, isd.Brightness, isd.Contrast,
-                    new GlVec3(isd.TintColor.X, isd.TintColor.Y, isd.TintColor.Z), isd.TintAmount, SceneWeather.AdaptedLuminance);
-            renderer.SetFillLight(azimuthDeg: 315f, elevationDeg: 20f, intensity01: 0f, new GlVec3(1f, 1f, 1f));
-            // The sky by elevation (SceneWeather.SkyKeys): what sky-reflecting water reflects, per pixel,
-            // and the frame's background (the dome at 20 degrees; the fogged sky is nearly flat).
-            // VP_SKY_FLAT=1 keeps the single sky-upper colour; VP_SKY_NO_FOG=1 drops the fog over the sky.
-            if (Environment.GetEnvironmentVariable("VP_SKY_FLAT") != "1")
+            renderer.EnableBloom = false;                    // deterministic output; no post FX
+            renderer.EnableShadows = false;
+            renderer.ShadowBounds = null;
+            renderer.PointLights.Clear();
+            renderer.EnableAmbientOcclusion = false;
+            // The sky. GlRenderer.Render() clears the frame AGAIN with its own ClearColor, so this
+            // is the setting that decides the background — the GL.ClearColor in Draw() below only
+            // matters for the instant before the library's clear lands on top of it.
+            renderer.ClearColor = new GlVec3(skyColor.X, skyColor.Y, skyColor.Z);
+            renderer.SetAmbientIntensity(0.55f);
+            renderer.SetKeyLight(azimuthDeg: 135f, elevationDeg: 55f, intensity01: 0.85f, new GlVec3(1f, 0.98f, 0.92f));
+            renderer.SetFillLight(azimuthDeg: 315f, elevationDeg: 20f, intensity01: 0.35f, new GlVec3(0.85f, 0.9f, 1f));
+            // --weather (SceneWeather.cs): the WTHR's sky, sun, ambient and fog replace the fixed studio
+            // lights. The sun is placed from the worldspace's climate (below); there is no fill light in the engine.
+            renderer.Fog = null;
+            renderer.ImageSpace = null;
+            renderer.SkyColor = null;
+            renderer.SkyGradient = null;
+            renderer.Lights[0].Color = new GlVec3(1f, 1f, 1f);   // a reused renderer may carry a weather's ambient
+            if (SceneWeather.Requested is not null && SceneWeather.Current is null)
+                Console.WriteLine($"   weather: no WTHR '{SceneWeather.Requested}' in the load order (or this walk was retained) - studio lights kept");
+            if (SceneWeather.Current is { } sw)
             {
-                var skyKeys = sw.SkyKeys(isd?.SkyScale ?? 0f, fog: Environment.GetEnvironmentVariable("VP_SKY_NO_FOG") != "1");
-                renderer.SkyGradient = new SkyGradient(skyKeys.Select(k => new SkyGradientKey(k.El, new GlVec3(k.Color.X, k.Color.Y, k.Color.Z))).ToArray());
-                if (!SceneWeather.SkyGiven) renderer.ClearColor = renderer.SkyGradient.At(20f);
-                Console.WriteLine($"   weather sky: gradient of {skyKeys.Length} keys, horizon {skyKeys[0].Color:0.000}, 20 deg {renderer.SkyGradient.At(20f):0.000}, zenith {skyKeys[^1].Color:0.000}");
+                if (!SceneWeather.SkyGiven) renderer.ClearColor = new GlVec3(sw.SkyUpper.X, sw.SkyUpper.Y, sw.SkyUpper.Z);
+                renderer.SkyColor = new GlVec3(sw.SkyUpper.X, sw.SkyUpper.Y, sw.SkyUpper.Z);
+                renderer.Lights[0].Color = new GlVec3(sw.AmbientUp.X, sw.AmbientUp.Y, sw.AmbientUp.Z);
+                renderer.SetAmbientIntensity(1f);
+                // The image space: the engine scales the sun's colour by its HDR sunlight scale and
+                // finishes the frame with its tone map and cinematic grade (SkyRender ImageSpaceFinish).
+                var isd = SceneWeather.ImageSpaceOff ? null : SceneWeather.ImageSpaceData;
+                // The sun's direction from the worldspace's climate at --game-hour (SceneWeather.SunPath);
+                // the fixed studio direction when there is no climate. VP_SUN_FIXED=1 keeps the fixed one.
+                var sunPath = Environment.GetEnvironmentVariable("VP_SUN_FIXED") == "1" ? null : SceneWeather.SunPath();
+                renderer.SetKeyLight(azimuthDeg: sunPath?.Azimuth ?? 135f, elevationDeg: sunPath?.Elevation ?? 55f,
+                                     intensity01: isd?.SunlightScale ?? 1f,
+                                     new GlVec3(sw.Sunlight.X, sw.Sunlight.Y, sw.Sunlight.Z));
+                Console.WriteLine(sunPath is { } spx ? $"   weather sun: {spx.Text}"
+                                                     : "   weather sun: fixed studio direction (azimuth 135, elevation 55) - no climate read");
+                if (isd is not null)
+                    renderer.ImageSpace = new ImageSpaceFinish(isd.White, isd.Saturation, isd.Brightness, isd.Contrast,
+                        new GlVec3(isd.TintColor.X, isd.TintColor.Y, isd.TintColor.Z), isd.TintAmount, SceneWeather.AdaptedLuminance);
+                renderer.SetFillLight(azimuthDeg: 315f, elevationDeg: 20f, intensity01: 0f, new GlVec3(1f, 1f, 1f));
+                // The sky by elevation (SceneWeather.SkyKeys): what sky-reflecting water reflects, per pixel,
+                // and the frame's background (the dome at 20 degrees; the fogged sky is nearly flat).
+                // VP_SKY_FLAT=1 keeps the single sky-upper colour; VP_SKY_NO_FOG=1 drops the fog over the sky.
+                if (Environment.GetEnvironmentVariable("VP_SKY_FLAT") != "1")
+                {
+                    var skyKeys = sw.SkyKeys(isd?.SkyScale ?? 0f, fog: Environment.GetEnvironmentVariable("VP_SKY_NO_FOG") != "1");
+                    renderer.SkyGradient = new SkyGradient(skyKeys.Select(k => new SkyGradientKey(k.El, new GlVec3(k.Color.X, k.Color.Y, k.Color.Z))).ToArray());
+                    if (!SceneWeather.SkyGiven) renderer.ClearColor = renderer.SkyGradient.At(20f);
+                    Console.WriteLine($"   weather sky: gradient of {skyKeys.Length} keys, horizon {skyKeys[0].Color:0.000}, 20 deg {renderer.SkyGradient.At(20f):0.000}, zenith {skyKeys[^1].Color:0.000}");
+                }
+                // Diagnostics for the colour balance (README, VP_WEATHER_*): drop the fog, or scale the ambient.
+                if (float.TryParse(Environment.GetEnvironmentVariable("VP_WEATHER_AMBIENT_SCALE"),
+                                   System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ambScale))
+                    renderer.SetAmbientIntensity(ambScale);
+                // VP_WEATHER_AMBIENT_FROM=0..5: take the ambient from another of the six directional
+                // ambient colours (+X, -X, +Y, -Y, +Z, -Z) instead of -Z, or 6 = their mean.
+                if (int.TryParse(Environment.GetEnvironmentVariable("VP_WEATHER_AMBIENT_FROM"), out var ambFrom)
+                    && sw.Ambient6.Length == 6 && ambFrom >= 0 && ambFrom <= 6)
+                {
+                    var ac = ambFrom == 6 ? (sw.Ambient6[0] + sw.Ambient6[1] + sw.Ambient6[2] + sw.Ambient6[3] + sw.Ambient6[4] + sw.Ambient6[5]) / 6f
+                                          : sw.Ambient6[ambFrom];
+                    renderer.Lights[0].Color = new GlVec3(ac.X, ac.Y, ac.Z);
+                }
+                renderer.Fog = Environment.GetEnvironmentVariable("VP_WEATHER_NO_FOG") == "1" ? null : sw.FogFar > sw.FogNear
+                    ? new DistanceFog(new GlVec3(sw.FogNearColor.X, sw.FogNearColor.Y, sw.FogNearColor.Z),
+                                      new GlVec3(sw.FogFarColor.X, sw.FogFarColor.Y, sw.FogFarColor.Z),
+                                      sw.FogNear, sw.FogFar, sw.FogPower, sw.FogMax)
+                    : null;
+                Console.WriteLine($"   weather: {sw}" + (SceneWeather.CurrentWhy is { } why ? $"  [{why}; --no-weather for the studio lights]" : ""));
+                if (SceneWeather.ImageSpaceText is { } ist)
+                    Console.WriteLine($"   weather image space ({(isd is null ? "not applied" : $"applied, adapted luminance {SceneWeather.AdaptedLuminance:0.###}; bloom and eye adaptation not modelled; sky scale on the sky gradient only")}): {ist}");
             }
-            // Diagnostics for the colour balance (README, VP_WEATHER_*): drop the fog, or scale the ambient.
-            if (float.TryParse(Environment.GetEnvironmentVariable("VP_WEATHER_AMBIENT_SCALE"),
-                               System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ambScale))
-                renderer.SetAmbientIntensity(ambScale);
-            // VP_WEATHER_AMBIENT_FROM=0..5: take the ambient from another of the six directional
-            // ambient colours (+X, -X, +Y, -Y, +Z, -Z) instead of -Z, or 6 = their mean.
-            if (int.TryParse(Environment.GetEnvironmentVariable("VP_WEATHER_AMBIENT_FROM"), out var ambFrom)
-                && sw.Ambient6.Length == 6 && ambFrom >= 0 && ambFrom <= 6)
-            {
-                var ac = ambFrom == 6 ? (sw.Ambient6[0] + sw.Ambient6[1] + sw.Ambient6[2] + sw.Ambient6[3] + sw.Ambient6[4] + sw.Ambient6[5]) / 6f
-                                      : sw.Ambient6[ambFrom];
-                renderer.Lights[0].Color = new GlVec3(ac.X, ac.Y, ac.Z);
-            }
-            renderer.Fog = Environment.GetEnvironmentVariable("VP_WEATHER_NO_FOG") == "1" ? null : sw.FogFar > sw.FogNear
-                ? new DistanceFog(new GlVec3(sw.FogNearColor.X, sw.FogNearColor.Y, sw.FogNearColor.Z),
-                                  new GlVec3(sw.FogFarColor.X, sw.FogFarColor.Y, sw.FogFarColor.Z),
-                                  sw.FogNear, sw.FogFar, sw.FogPower, sw.FogMax)
-                : null;
-            Console.WriteLine($"   weather: {sw}" + (SceneWeather.CurrentWhy is { } why ? $"  [{why}; --no-weather for the studio lights]" : ""));
-            if (SceneWeather.ImageSpaceText is { } ist)
-                Console.WriteLine($"   weather image space ({(isd is null ? "not applied" : $"applied, adapted luminance {SceneWeather.AdaptedLuminance:0.###}; bloom and eye adaptation not modelled; sky scale on the sky gradient only")}): {ist}");
         }
         var meshes = new List<GlMesh>();
         var borrowedNpcMeshes = new List<GlMesh>();
@@ -786,9 +793,9 @@ static class TexturedScene
             return made;
         }
         var orangeLease = builtScene?.OwnedTexture("static-diagnostic-orange", CreateOrange);
-        int orange = orangeLease?.Handle ?? CreateOrange();
+        int orange = orangeLease?.Handle ?? (live is not null ? live.Orange(CreateOrange) : CreateOrange());
         if (builtScene is not null) graphicsShot?.TrackCellOwnedTexture("diagnostic-orange", orange);
-        else { graphicsShot?.TrackOwnedTexture("diagnostic-orange", orange); shotResources.TrackTexture(orange); }
+        else if (live is null) { graphicsShot?.TrackOwnedTexture("diagnostic-orange", orange); shotResources.TrackTexture(orange); }
 
         var builtCache = new Dictionary<string, List<NifMeshBuilder.BuiltMesh>?>(StringComparer.OrdinalIgnoreCase);
 
@@ -1908,6 +1915,15 @@ static class TexturedScene
             }
         }
 
+        // A slice stops here: its references, terrain, water and grass are in the live renderer. What follows is drawn once
+        // for the scene's target cell by its first build (LOD, actors, the navmesh, the overlays) or is the one-shot frame.
+        if (live is not null)
+        {
+            liveMeshes?.AddRange(meshes);
+            meshes.Clear();                              // the caller owns them now; the shot scope must not free them
+            if (interactive is not null) interactive.Occlusion = occl;
+            return shapes;
+        }
         // ---- DISTANT LOD (--lod, opt-in; DistantLodLayer.cs) --------------------------------
         // Terrain, object and tree LOD beyond the loaded cells, picked for this camera the way the
         // engine picks blocks, and cut away under every cell whose terrain this frame draws (and the
@@ -3484,6 +3500,8 @@ static class TexturedScene
             // while deciding where to fly, and a census printed on exit is a census nobody used.
             PrintBuildCensus();
 
+            // the owners a host's later cell slices build through (LiveScene.cs); disposed below, after the loop
+            interactive.Live = new LiveSession { Renderer = renderer, Textures = textures, Assets = new CellAssets(resolver, cache), Mesh = meshState };
             if (InteractiveViewer.Host is { } host) host(interactive, renderer, cam, wireOverlay);
             else InteractiveViewer.Run(interactive, renderer, cam, wireOverlay);
 

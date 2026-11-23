@@ -1627,7 +1627,14 @@ host's toolbar needs: `LayerMeshes` (the build's terrain, water and grass meshes
 `ShowCellOutline` (the target cell's white dashed outline, overlay tag 5, read per frame like the
 planes' tag 4; `CellOutlineThrough` false draws it depth-tested instead of through what stands in front of it), `TerrainHeightAt` and `LandCells` (the drawn ground and the grid cells whose land
 the scene read), `BaseTypes` (each modeled base's record type) and `UndrawnAt` (where each
-reference the walk left out as an editor marker or for having no model stands). A host's cell
+reference the walk left out as an editor marker or for having no model stands). **`--live`** (with `--ring N`, interactive under a host only) makes the scene live
+(`LiveScene.cs`): the walk prepares the whole `--ring` square, the first build draws none of its cells,
+and the host builds each cell into the live renderer as a slice (`InteractiveOptions.BuildCell`) —
+`RenderToPng` in slice mode reuses the first build's renderer, texture manager, resolver, pixel cache and
+mesh builder, adds the cell's references (by position), terrain, water and grass, and stops before the
+lights, LOD, navmesh and overlays. A slice's meshes are the host's to drop (`LiveCell.Drop`). The
+loaded square's width starts at the profile's `uGridsToLoad` (`ProfileIni.cs`; the game's default 5
+when unset). A host's cell
 request can carry a navmesh display mode for that cell's shots (`InteractiveViewer.CellRequestNav`):
 the cell is built again in the same run with its navmesh, without re-reading the load order. A host
 frames its own camera after the build and asks with a placeholder pose at the origin; in an exterior

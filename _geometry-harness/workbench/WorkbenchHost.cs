@@ -79,6 +79,14 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _pitch = float.RadiansToDegrees(MathF.Atan2(-d0.Z, MathF.Max(MathF.Sqrt(d0.X * d0.X + d0.Y * d0.Y), 1e-3f)));
         _fov = cam.FovDeg;
         _camera.FieldOfView = _fov;
+        // the live scene's cells (LiveCells.cs): the loaded square is built here, before anything reads the drawn references
+        _live = new LiveCells(opt);
+        if (_live.Available && opt.Grid is { } home)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            foreach (var c in LiveCells.Square(home, opt.GridsToLoad).Where(opt.Loaded.Contains)) _live.Add(c);
+            Say(FormattableString.Invariant($"loaded cells: {_live.Held.Count} ({opt.GridsToLoad}x{opt.GridsToLoad}, {opt.GridsToLoadSource}) built in {sw.Elapsed.TotalSeconds:0.0} s"));
+        }
         _session = new EditSession(opt.Occlusion?.Refs ?? (IEnumerable<RefOcclusion>)Array.Empty<RefOcclusion>());
         // an edit of the object shown as another version: it is drawn as the scene has it again first, so the edit starts from what is drawn
         _session.Replacing += () => { if (_versionKey is not null) LoadOrderPanel.ForgetObjectSwitches(); };
@@ -312,7 +320,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var fps = FpsToggle();
         fps.Padding = new Thickness(6, 1, 6, 1); fps.Margin = new Thickness(2, 2, 6, 2); fps.VerticalAlignment = VerticalAlignment.Center;
         DockPanel.SetDock(fps, Dock.Right);
-        topRow.Children.Add(fps); topRow.Children.Add(_layerBar.Element);
+        var grids = GridsControl();
+        DockPanel.SetDock(grids, Dock.Right);
+        topRow.Children.Add(fps); topRow.Children.Add(grids); topRow.Children.Add(_layerBar.Element);
         DockPanel.SetDock(topRow, Dock.Top);
         bar.Children.Add(topRow);
         _fpsText.Width = double.NaN; _fpsText.Margin = new Thickness(8, 0, 8, 2);
@@ -1082,6 +1092,70 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         return c?.Shape is { Kind: PickKind.Ref } sh ? sh.Ref.RefKey.ToString() : c is null ? null : c.Shape.Kind.ToString();
     }
 
+    // ---- the loaded cells (LiveCells.cs): the square around the scene's cell, added and dropped without a rebuild -------
+    readonly LiveCells _live;
+    internal LiveCells Live => _live;
+    ComboBox? _gridsBox;
+
+    /// <summary>Load a square <paramref name="grids"/> cells wide around the scene's cell: build the cells that come in, free the
+    /// cells that go out, and leave every other cell as it is drawn. A cell holding the selected reference or an edit is kept.
+    /// One sentence back.</summary>
+    internal string SetGrids(int grids)
+    {
+        if (_live.Refuse(grids) is { } why) throw new InvalidOperationException("Loaded cells: " + why);
+        var (add, drop) = LiveCells.Plan(_opt.Grid!.Value, grids, _live.Held, _opt.Reach);
+        var kept = drop.Where(c => _live.All.First(l => l.Grid == c).Refs.Any(r => _session.Holds(r.Ref.RefKey))).ToList();
+        drop = drop.Except(kept).ToList();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        if (_window is not null) _view.MakeCurrent();
+        int built = 0;
+        foreach (var c in add)
+            if (_live.Add(c) is { } lc) { _session.Add(lc.Refs); built++; }
+        foreach (var c in drop)
+            if (_live.Drop(c, _renderer) is { } lc) _session.Remove(lc.Refs);
+        _live.SetGrids(grids);
+        AfterCellsChanged();
+        var said = FormattableString.Invariant($"Loaded cells {grids}x{grids}: {built} cell(s) built in {sw.Elapsed.TotalSeconds:0.0} s, {drop.Count} freed, {_live.Held.Count} held")
+                 + (kept.Count > 0 ? $"; {kept.Count} cell(s) outside the square kept because they hold the selection or an edit" : "");
+        Say(said);
+        return said;
+    }
+
+    /// <summary>What reads the drawn cells is read again: the layers (and their hidden state on the new meshes), the cell
+    /// borders, the markers, the tree and the key.</summary>
+    void AfterCellsChanged()
+    {
+        if (_borders is not null) _renderer.Overlays.Remove(_borders);
+        if (_markerGizmos is not null) _renderer.Overlays.Remove(_markerGizmos);
+        _borders = null;
+        BuildLayers(_renderer);
+        _layerBar?.Refresh();
+        if (_gridsBox is not null) _gridsBox.SelectedItem = _live.Grids;
+        if (_window is not null) { Shell.FillTree(BuildTree()); UpdateKey(); UpdateStatus(); Invalidate("cells"); }
+    }
+
+    /// <summary>The Loaded cells choice beside the layer toggles: the square's width, up to what the scene prepared.</summary>
+    UIElement GridsControl()
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 2, 0) };
+        if (!_live.Available) return row;
+        row.Children.Add(new TextBlock { Text = "Loaded cells:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0), Foreground = Theme.Brush(Theme.Dim) });
+        _gridsBox = new ComboBox { Margin = new Thickness(0, 2, 2, 2), Padding = new Thickness(6, 1, 6, 1), Focusable = false,
+            ToolTip = $"How many cells around this one are loaded, as the game's uGridsToLoad: a square this many cells wide. It starts at {_opt.GridsToLoadSource}. "
+                    + "A change builds only the cells that come in and frees the cells that go out." };
+        for (int g = 1; g <= _live.MaxGrids; g += 2) _gridsBox.Items.Add(g);
+        _gridsBox.ItemStringFormat = "{0}\u00d7{0}";
+        _gridsBox.SelectedItem = _live.Grids;
+        _gridsBox.SelectionChanged += (_, _) =>
+        {
+            if (_gridsBox.SelectedItem is not int g || g == _live.Grids) return;
+            try { Shell.SetBanner(SetGrids(g)); }
+            catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); _gridsBox.SelectedItem = _live.Grids; }
+        };
+        row.Children.Add(_gridsBox);
+        return row;
+    }
+
     // ---- the view's layers (ViewLayers.cs): what this scene can draw, set to the window's choice ---------------------
     SceneLayers _layers = null!;
     LayerBar? _layerBar;
@@ -1103,6 +1177,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         // a plane is a marker too, and the planes layer draws it as what it is
         var planes = _opt.PickShapes.Where(s => s.Kind == PickKind.Plane && s.Plane is not null).Select(s => s.Plane!.Key).ToHashSet();
         var places = (_opt.UndrawnAt ?? new Dictionary<FormKey, (Vec3, Vec3)>()).Where(kv => !planes.Contains(kv.Key))
+            .Where(kv => !_live.Available || _live.Holds(LiveSlicer.CellOf(kv.Value.Item1.X, kv.Value.Item1.Y)))   // markers of the loaded cells
             .Select(kv => (kv.Key, kv.Value.Position, kv.Value.Rotation, _opt.RefOutcomes is { } ro && ro.TryGetValue(kv.Key, out var o) && o.Outcome == "marker")).ToList();
         _markerGizmos = new MarkerGizmos(places);
         renderer.Overlays.Add(_markerGizmos);

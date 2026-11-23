@@ -412,6 +412,7 @@ bool ringRefs = true;
 // most --ring-cap cells, the target's 3x3 always included. Terrain, water and full references are loaded in all of them,
 // beyond the game's ±2 grid too (the game draws LOD there); the console says how many cells and why any were cut.
 string ringMode = "1";
+bool liveScene = false;   // --live: a host adds and drops cells of the --ring square live (LiveScene.cs)
 int ringReach = ViewProbe.VisibleCells.DefaultReach, ringCap = ViewProbe.VisibleCells.DefaultCap;
 HashSet<(int X, int Y)>? visibleSet = null;   // per shot: null = the ±1 ring
 // --large-refs-child union|none: which large-reference list a CHILD worldspace (a city) uses (WinningRefs.cs). union,
@@ -693,6 +694,7 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--no-cell-outline") cellOutline = false;
     else if (args[i] == "--no-ring-refs") ringRefs = false;
     else if (args[i] == "--lod") ViewProbe.DistantLodLayer.Requested = true;
+    else if (args[i] == "--live") liveScene = true;
     else if (args[i] == "--no-grass") ViewProbe.GrassLayer.Requested = false;
     else if (args[i] == "--grass") ViewProbe.GrassLayer.Requested = true;
     else if (args[i] == "--ring" && i + 1 < args.Length)
@@ -5457,7 +5459,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 ReportMode = reportMode,
                 // read by a host's layer switches (the workbench's view toolbar)
                 TerrainHeightAt = terrainHeightAt,
-                LandCells = landHeights.Keys.ToList(),
+                LandCells = landHeights.Keys.ToList(),   // --live narrows it to the loaded square below
                 BaseTypes = baseType,
                 UndrawnAt = refUndrawnAt,
             };
@@ -5482,12 +5484,66 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 float hcx = hostGrid.X * 4096f + 2048f, hcy = hostGrid.Y * 4096f + 2048f, hgz = terrainHeightAt?.Invoke(hcx, hcy) ?? 0f;
                 entryLook = new(hcx, hcy, hgz); entryEye = new(hcx - 1100f, hcy - 3000f, hgz + 2700f);
             }
+            // --live (LiveScene.cs): the walk prepared the whole --ring square; the first build draws the loaded square (the
+            // profile's uGridsToLoad around the target) and the host adds or drops the other cells of the square live.
+            IReadOnlyList<ViewProbe.SceneRef> firstScene = scene;
+            IReadOnlyDictionary<string, List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>> firstPatches = terrainPatches;
+            IReadOnlyList<(string Diffuse, List<(System.Numerics.Vector3 A, System.Numerics.Vector3 B, System.Numerics.Vector3 C, float Oa, float Ob, float Oc)> Tris)> firstLayers = terrainLayers;
+            IReadOnlyList<ViewProbe.WaterPlane> firstWater = waterPlanes;
+            if (liveScene && ViewProbe.InteractiveViewer.Host is not null && !interior && targetGrid is { } liveGrid && visibleSet is { } reach)
+            {
+                int grids = ViewProbe.ProfileIni.Int("General", "uGridsToLoad", 5, out var gridsWhy);
+                if (grids < 1 || grids % 2 == 0)
+                {
+                    gridsWhy += $"; the game loads an odd square, so {grids} is read as {Math.Max(1, grids | 1)}";
+                    grids = Math.Max(1, grids | 1);
+                }
+                int half = grids / 2;
+                var loaded = reach.Where(c => Math.Abs(c.X - liveGrid.X) <= half && Math.Abs(c.Y - liveGrid.Y) <= half).ToHashSet();
+                var allGrass = ViewProbe.GrassLayer.Cells.ToList();
+                var live = new ViewProbe.LiveSlicer(scene, terrainPatches, terrainLayers, waterPlanes);
+                // The first build draws no cell: every cell is a slice the host adds (and can drop again), the loaded square first.
+                (firstScene, firstPatches, firstLayers, firstWater) = live.For(Array.Empty<(int X, int Y)>());
+                ViewProbe.GrassLayer.Cells.Clear();
+                iopt.Reach = reach; iopt.Loaded = loaded; iopt.GridsToLoad = grids; iopt.GridsToLoadSource = gridsWhy;
+                iopt.LandCells = new List<(int X, int Y)>();
+                Console.WriteLine($"   live scene: {reach.Count} cell(s) prepared; the host loads {grids}x{grids} of them ({gridsWhy}) and adds or drops cells live");
+                iopt.BuildCell = cell =>
+                {
+                    if (!reach.Contains(cell) || iopt.Live is not { } session) return null;
+                    var one = new HashSet<(int X, int Y)> { cell };
+                    var (cScene, cPatches, cLayers, cWater) = live.For(one);
+                    ViewProbe.GrassLayer.Cells.Clear(); ViewProbe.GrassLayer.Cells.AddRange(allGrass.Where(c => c.GridX == cell.X && c.GridY == cell.Y));
+                    var collect = new ViewProbe.InteractiveOptions { Window = iopt.Window, RuntimeId = iopt.RuntimeId, CellLabel = iopt.CellLabel, OutDir = iopt.OutDir, SafeName = iopt.SafeName };
+                    var added = new List<SkyRender.GlMesh>();
+                    var cellSw = System.Diagnostics.Stopwatch.StartNew();
+                    ViewProbe.TexturedScene.RenderToPng(
+                        cScene, assets, dataDir, modFolders, overwriteDir,
+                        (entryEye, entryLook, fov), Array.Empty<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>(),
+                        Array.Empty<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>(), cPatches, cLayers, "off", navColor,
+                        skyColor, terrainHeightAt, false, false, msaa, cullAbove, null,
+                        noDiff, diffColor, new List<(int X, int Y)>(), new List<string>(), new List<(string Text, System.Numerics.Vector3 Color)>(),
+                        new List<ViewProbe.NpcActorRender>(), false, new List<ViewProbe.TexturedScene.RouteRender>(), null,
+                        new List<ViewProbe.TexturedScene.OverlayLine>(), keepFx, fxStatic, false,
+                        cWater, coverings, new List<ViewProbe.PlaneRender>(), false, "off", size, fpOut,
+                        reportMode, null, collect, null, bosMode, stateView, stateArm?.Name ?? "",
+                        refSurface: refSurface, refSurfaceOpacity: refSurfaceOpacity, terrainExtras: terrainExtras,
+                        live: session, liveMeshes: added);
+                    var made = new ViewProbe.LiveCell
+                    {
+                        Grid = cell, PickShapes = collect.PickShapes, Refs = collect.Occlusion?.Refs.ToList() ?? new(),
+                        LayerMeshes = collect.LayerMeshes, HasLand = landHeights.ContainsKey(cell), Seconds = cellSw.Elapsed.TotalSeconds,
+                    };
+                    made.Meshes.AddRange(added);
+                    return made;
+                };
+            }
             int iShapes = ViewProbe.TexturedScene.RenderToPng(
-                scene, assets, dataDir, modFolders, overwriteDir,
-                (entryEye, entryLook, fov), navTris, redTris, terrainPatches, terrainLayers, navMode, navColor,
+                firstScene, assets, dataDir, modFolders, overwriteDir,
+                (entryEye, entryLook, fov), navTris, redTris, firstPatches, firstLayers, navMode, navColor,
                 skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                 noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRenders, gridRender, overlayLines, keepFx, fxStatic, listMeshes,
-                waterPlanes, coverings, planes, showPlanes, occlusionMode, size, fpOut,
+                firstWater, coverings, planes, showPlanes, occlusionMode, size, fpOut,
                 reportMode, camMeta, iopt, planeReportSink, bosMode, stateView, stateArm?.Name ?? "", navColourGroups: navColourGroups,
                 refSurface: refSurface, refSurfaceOpacity: refSurfaceOpacity, graphicsReuseRed: graphicsReuseRed,
                 graphicsCell: graphicsCell, preparedIdentity: preparedKey, terrainExtras: terrainExtras);
