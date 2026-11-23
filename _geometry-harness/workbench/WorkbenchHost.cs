@@ -614,6 +614,26 @@ internal sealed class WorkbenchHost : IWorkbenchScene
 
     /// <summary>The cell this scene was built for, as the bundle names cells (a FormKey string).</summary>
     internal string? SceneCell => _opt.CellKey?.ToString();
+
+    /// <summary>Whether this scene already shows <paramref name="cell"/> well enough to land in it without a rebuild
+    /// (walkthrough problem 9): an exterior scene draws the cells around its own, so a cell is shown when it is the scene's
+    /// cell or holds a reference the scene walked, and the object to land on and the clash's other object are drawn (or,
+    /// having no model, have a stand-in place). The caller checks the load order and the read-only state are the same.</summary>
+    internal bool Shows(string cell, string? landOn, string? partner) => WhyNotShown(cell, landOn, partner) is null;
+
+    /// <summary>Why <see cref="Shows"/> says no, in a few words; null when it says yes.</summary>
+    internal string? WhyNotShown(string cell, string? landOn, string? partner)
+    {
+        bool own = string.Equals(SceneCell, cell, StringComparison.OrdinalIgnoreCase);
+        if (!own && _opt.Interior) return "an interior scene shows its own cell only";
+        if (!own && (_opt.RefCells is not { } rc || !rc.Values.Any(c => string.Equals(c.ToString(), cell, StringComparison.OrdinalIgnoreCase))))
+            return $"cell {cell} is not among the cells this scene drew";
+        bool Here(string? k) => k is null || FormKey.TryFactory(k, out var fk) && (_session.IsDrawn(fk) || _opt.UndrawnAt?.ContainsKey(fk) == true
+                                                                                   || _opt.PickShapes.Any(s => s.Kind == PickKind.Plane && s.Plane?.Key == fk));
+        if (!Here(landOn)) return $"{landOn} is not drawn in this scene";
+        if (!Here(partner)) return $"the clash's other object {partner} is not drawn in this scene";
+        return null;
+    }
     internal string SceneLabel => _opt.CellLabel;
 
     /// <summary>A three-quarter view of the scene's own cell, for a scene opened with no reference to land on: the camera

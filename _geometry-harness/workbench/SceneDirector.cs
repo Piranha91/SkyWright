@@ -74,6 +74,10 @@ internal static class SceneDirector
     internal const double PumpEveryMs = 30;
 
     internal static bool HasPending => _pending is not null;
+    /// <summary>Requests answered by the scene already shown (its own cell, or one drawn beside it), with no rebuild.</summary>
+    internal static int Reused { get; private set; }
+    /// <summary>Why the last request on an open scene rebuilt instead of reusing it; null when it reused it.</summary>
+    internal static string? LastRebuildWhy { get; private set; }
 
     /// <summary>Take the request waiting for a new viewprobe run.</summary>
     internal static SceneRequest? Take() { var r = _pending; _pending = null; return r; }
@@ -87,13 +91,19 @@ internal static class SceneDirector
             if (h.Session.Pending.Count > 0)
                 throw new InvalidOperationException($"opening cell {req.Cell} would drop {h.Session.Pending.Count} staged edit(s); write or undo them first.");
             bool same = Order is not null && Order.Key == req.Order.Key;
-            if (same && !req.Reload && h.ReadOnly == req.ReadOnly && (string.Equals(h.SceneCell, req.Cell, StringComparison.OrdinalIgnoreCase)
-                                                    || string.Equals(h.SceneLabel, req.Cell, StringComparison.OrdinalIgnoreCase)))
+            bool shown = string.Equals(h.SceneCell, req.Cell, StringComparison.OrdinalIgnoreCase) || string.Equals(h.SceneLabel, req.Cell, StringComparison.OrdinalIgnoreCase);
+            // a cell this scene already draws beside its own, on the same load order: land there, no rebuild
+            string? partner = req.LandOn is { } lo ? Shell.PartnerFor?.Invoke(lo) : null;
+            LastRebuildWhy = shown ? null : !same ? "another load order" : req.Reload ? "a layer it was built without was asked for"
+                           : h.ReadOnly != req.ReadOnly ? "the scene's read-only state differs" : h.WhyNotShown(req.Cell, req.LandOn, partner);
+            bool beside = !shown && LastRebuildWhy is null;
+            if (same && !req.Reload && h.ReadOnly == req.ReadOnly && (shown || beside))
             {
-                Showing = req;
+                Showing = req; Reused++;
                 if (req.LandOn is { } k && Mutagen.Bethesda.Plugins.FormKey.TryFactory(k, out var key)) h.Land(key);
                 req.Shown?.Invoke();
-                return $"cell {req.Cell} is the scene shown" + (req.LandOn is null ? "" : $"; {Shell.BannerText}");
+                return (shown ? $"cell {req.Cell} is the scene shown" : $"cell {req.Cell} is already drawn beside cell {h.SceneLabel} on this load order, so the scene is not rebuilt")
+                       + (req.LandOn is null ? "" : $"; {Shell.BannerText}");
             }
             Shell.PendingLand = req.LandOn; Shell.SwitchCell = req.Cell; Shell.SwitchClock = Stopwatch.StartNew();
             Shell.CurrentRow = null; Shell.ReadOnlyScene = req.ReadOnly;
@@ -243,7 +253,7 @@ internal static class SceneDirector
         loadOrder = Order?.Label, orderFile = Order?.OrderFile, profile = Order?.Profile,
         showing = Showing is null ? null : new { cell = Showing.Cell, landOn = Showing.LandOn, why = Showing.Why, readOnly = Showing.ReadOnly },
         pending = _pending?.Cell ?? _next?.Cell,
-        lastBuildSeconds = LastBuildSeconds, lastBuildLongestWaitMs = LastBuildLongestGapMs, lastBuildPumps = Pumps,
+        reused = Reused, lastRebuildWhy = LastRebuildWhy, lastBuildSeconds = LastBuildSeconds, lastBuildLongestWaitMs = LastBuildLongestGapMs, lastBuildPumps = Pumps,
         pumpEveryMs = PumpEveryMs,
     };
 }
