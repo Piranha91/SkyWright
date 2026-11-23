@@ -308,10 +308,12 @@ internal static class Shell
     internal static void Mount(UIElement view, UIElement bar) { ViewSlot.Content = view; BarSlot.Content = bar; }
     internal static void Unmount() { ViewSlot.Content = EmptyView; BarSlot.Content = null; }
 
-    /// <summary>What the 3D view shows before any scene: what will appear there and how to get it.</summary>
+    /// <summary>What the 3D view shows before any scene: its name only (a sentence about clashes read as an error before
+    /// anything was loaded); how to fill it is in the tooltip.</summary>
     static readonly UIElement EmptyView = new TextBlock
     {
-        Text = "The 3D view shows a clash here." + Environment.NewLine + "Pick one under Conflicts › In the world, or a place under Explore › World.",
+        Text = "3D view",
+        ToolTip = "Pick a clash under Conflicts › In the world, or a place under Explore › World, to see it here.",
         TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxWidth = 620, FontSize = 14,
         HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Dim),
     };
