@@ -525,7 +525,7 @@ public static class SelfTestPlanModules
         // program's own, and its recorded answers above are the known answers)
         string[] names = ["checkout: the registry in this checkout validates, and its patterns compile",
                           "live: Python's record of the settings on this machine"];
-        string? root = HarnessShared.CheckoutLayout.FindRoot();
+        string? root = HarnessShared.CheckoutLayout.BuiltInCheckout();
         string harness = root == null ? "" : Path.Combine(root, "_geometry-harness");
         string registryPath = root == null ? "" : HarnessShared.CheckoutLayout.Registry(root);
         if (!File.Exists(registryPath))

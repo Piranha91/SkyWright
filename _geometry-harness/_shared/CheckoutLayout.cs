@@ -175,6 +175,10 @@ internal static class CheckoutLayout
         return null;
     }
 
+    /// <summary>The checkout this program was built in, or null when it runs from an install (even one placed inside a
+    /// checkout's folder) or from neither. For checks that are about a checkout itself, such as its Python.</summary>
+    public static string? BuiltInCheckout(string? from = null) => Locate(from, out _) is { Kind: Kind.Checkout } l ? l.Root : null;
+
     /// <summary>Whether the folder <paramref name="from"/> (default: this program's) sits in an install: its parent holds the manifest.</summary>
     public static bool BesideInstall(string? from = null) =>
         Path.GetDirectoryName(Path.GetFullPath(from ?? AppContext.BaseDirectory).TrimEnd('\\', '/')) is { } parent && File.Exists(Path.Combine(parent, ManifestName));

@@ -504,7 +504,7 @@ public static partial class SelfTest
     {
         string[] names = ["live: toolidentity.package of real build folders", "live: toolidentity.probe_cmd with an interpreter on PATH",
                           "live: Python reuses a stage this program recorded", "live: this program reuses a stage Python recorded"];
-        string? root = HarnessShared.CheckoutLayout.FindRoot();
+        string? root = HarnessShared.CheckoutLayout.BuiltInCheckout();
         string harness = root == null ? "" : Path.Combine(root, "_geometry-harness");
         string? reason = !File.Exists(Path.Combine(harness, "evalpipeline.py")) ? "this build is not inside a SkyWright checkout with the Python controller"
             : Python(harness, "--version") is not { exit: 0 } ? "python is not on PATH" : null;
