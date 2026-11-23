@@ -757,8 +757,17 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 Vector3 a = plane.Verts[plane.Tris[t]], b2 = plane.Verts[plane.Tris[t + 1]], c2 = plane.Verts[plane.Tris[t + 2]];
                 ConflictMarks.AddTriangle(tris, a, b2, c2);
                 ConflictMarks.AddTriangle(tris, a, c2, b2);      // a plane has one face; both sides are tinted
-                for (int e = 0; e < 3; e++) lines.Add((plane.Verts[plane.Tris[t + e]], plane.Verts[plane.Tris[t + (e + 1) % 3]]));
             }
+            // its outline: the edges only one triangle has, so the panel reads as one, without the diagonal between its triangles
+            var edges = new Dictionary<(int, int), int>();
+            for (int t = 0; t + 2 < plane.Tris.Length; t += 3)
+                for (int e = 0; e < 3; e++)
+                {
+                    int i = plane.Tris[t + e], j = plane.Tris[t + (e + 1) % 3];
+                    var k = (Math.Min(i, j), Math.Max(i, j));
+                    edges[k] = edges.GetValueOrDefault(k) + 1;
+                }
+            foreach (var ((i, j), n) in edges) if (n == 1) lines.Add((plane.Verts[i], plane.Verts[j]));
             // look at the plane square on: the heading along its face's normal, in Skyrim space
             if (corners.Count >= 3)
             {
