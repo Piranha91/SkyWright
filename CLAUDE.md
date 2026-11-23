@@ -21,7 +21,16 @@ _geometry-harness/runcontrol/bin/Release/net9.0/runcontrol.exe --self-test
 dotnet test _geometry-harness/workbench.tests -c Release --no-build
 ```
 
-The app and runcontrol find their pieces from the folder holding `SkyWright.sln`: one owner, `_geometry-harness/_shared/CheckoutLayout.cs`. The `WB_*` variables override it.
+Every program finds its pieces through one owner, `_geometry-harness/_shared/CheckoutLayout.cs`: a `WB_*` override, else the install beside it, else the checkout above it. Never spell a probe's path (`<probe>/bin/Release/...`) anywhere else; ask `CheckoutLayout.ProgramExe`.
+
+Evaluations run from an install, never from the checkout's `bin`. Publish one (it refuses uncommitted changes) and check it:
+
+```
+dotnet run --project _geometry-harness/publish -c Release -- --commit HEAD --to C:/hc-runs/skywright-install
+dotnet run --project _geometry-harness/publish -c Release -- --verify C:/hc-runs/skywright-install/<commit>
+```
+
+The install is `C:/hc-runs/skywright-install/<commit>/`, with each program in its own folder and `skywright-install.json` at its root. README.md, "Install a commit", has the layout.
 
 ## Commits
 

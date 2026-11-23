@@ -22,6 +22,31 @@ _geometry-harness/workbench/bin/Release/net9.0-windows10.0.19041.0/workbench.exe
 
 Set `WB_MCP_PORT` to a port number to serve the app's state tools (`workbench_state`, `workbench_act`) on `http://127.0.0.1:<port>/`.
 
+## Install a commit
+
+The checkout is for development: a build there replaces the programs in its own `bin` folders. To run evaluations, or to use the app while you keep building, publish a commit into its own folder:
+
+```
+dotnet run --project _geometry-harness/publish -c Release -- [--commit REV] [--to DIR]
+```
+
+It refuses a checkout with uncommitted changes. It exports the commit and its pinned houseCARL with `git archive`, builds them off the checkout (`C:/hc-runs/skywright-install-src/`, deleted afterwards), and publishes into `DIR/<commit>/` (default `C:/hc-runs/skywright-install/<commit>/`):
+
+| Path in the install | What |
+|---|---|
+| `skywright-install.json` | The manifest: the commit, the houseCARL pin, the named pieces and every file's sha256 |
+| `workbench/workbench.exe` | The app, with the same `viewprobe.exe` the install's `viewprobe/` holds |
+| `runcontrol/`, `<probe>/` | The run controller and every probe, each in its own folder |
+| `housecarl-mcp/` | houseCARL's server, built from the pin, with the rulebook `corpus.json` beside it |
+| `housecarl/` | houseCARL's other data the app reads (the reporting skill's scene policy) |
+| `data/` | The check registry, the severity table and the rest of `data/` |
+
+Check an install against its manifest with `dotnet run --project _geometry-harness/publish -c Release -- --verify DIR/<commit>`.
+
+The install needs the .NET 9 runtime (Desktop Runtime for the app). It needs no SDK, no Python and no houseCARL.
+
+**How each program finds its pieces.** First a `WB_*` override (`WB_SERVER`, `WB_CORPUS`, `WB_REGISTRY`, `WB_SEVERITY`, `WB_RUNCONTROL`, `WB_HARNESS`, `WB_SCENE_POLICY`), which the app names in its log when it starts. Then the install the program sits in, when its folder's parent holds `skywright-install.json`. Last, the checkout above it (the folder holding `SkyWright.sln`). A program in an install never falls back to a checkout. A damaged install (a listed piece missing, or the folder not one of its programs) is refused in one sentence. The lab entry's record capture is a Python step, so it runs only from a checkout's runcontrol.
+
 ## Layout
 
 | Path | What |
@@ -30,6 +55,7 @@ Set `WB_MCP_PORT` to a port number to serve the app's state tools (`workbench_st
 | `_geometry-harness/runcontrol/` | The run controller: census through bundle |
 | `_geometry-harness/*probe/`, `_shared/` | The probes and the code they share |
 | `_geometry-harness/viewprobe/` | The renderer host the 3D view uses (on SkyRender) |
+| `_geometry-harness/publish/` | `skywright-publish`: builds an install from a commit (not itself installed) |
 | `_geometry-harness/*.py`, `tests/`, `planeassess/` | Pipeline, reporting and video tools and their tests; not shipped in the app |
 | `data/` | The check registry, the severity table, the record field scope and the overlap triage policy |
 | `external/houseCARL/` | houseCARL, pinned as a git submodule: its core, server (which writes patches) and generator |
