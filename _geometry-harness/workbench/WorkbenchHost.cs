@@ -219,6 +219,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         if (_marks.Enabled && _marks.Selected is not null && _marks.Partner is not null)
             _key.Children.Add(Item(C(ConflictMarks.OverlapColour), false, _marks.CrossingSegments > 0 ? "where they pass into each other" : _marks.Overlap ?? "measuring where they cross",
                                    "a band along where the two objects' own surfaces meet; Outlines shows the line where they cross through anything in front"));
+        if (_marks.Enabled && _marks.Selected is not null && _marks.Partner is not null && _marks.Buried is { } buried)
+            _key.Children.Add(Item(C(ConflictMarks.BuriedColour), false, buried.Words, buried.Tip));
         var words = ResultRules.Groups.ToDictionary(g => g.Value.Mark, g => g.Value.Words);
         foreach (var style in _resultMarks.Enabled ? _resultMarks.StylesShown.OrderBy(x => x) : Enumerable.Empty<MarkStyle>())
         {
@@ -1050,7 +1052,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             walkedRefs = _opt.RefOutcomes?.Count,
             walkOutcomes = _opt.RefOutcomes?.GroupBy(x => x.Value.Outcome).ToDictionary(g => g.Key, g => g.Count()),
             layers = _layers.State(),
-            marks = new { enabled = _marks.Enabled, selected = _marks.Selected?.Ref.RefKey.ToString(), partner = _marks.Partner?.Ref.RefKey.ToString(), partnerNote = PartnerNote, legend = ConflictMarks.Legend },
+            marks = new { enabled = _marks.Enabled, selected = _marks.Selected?.Ref.RefKey.ToString(), partner = _marks.Partner?.Ref.RefKey.ToString(), partnerNote = PartnerNote, legend = ConflictMarks.Legend,
+                             buried = _marks.Buried is { } bu ? new { words = bu.Words, detail = bu.Tip, triangles = _marks.BuriedTriangles, seconds = _marks.BuriedSeconds } : null },
             drawnRefKeys = DrawnAll().Select(r => r.Ref.RefKey.ToString()).OrderBy(k => k, StringComparer.Ordinal),
             selected = _session.Selected?.ToString(), staged = _session.Pending.Count,
             camera = new { eye = new[] { _eye.X, _eye.Y, _eye.Z }, yaw = _yaw, pitch = _pitch, fov = _fov, framebuffer = new[] { W, H } },

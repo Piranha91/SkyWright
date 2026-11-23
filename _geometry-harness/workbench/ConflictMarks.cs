@@ -18,10 +18,12 @@ internal sealed class ConflictMarks : IRenderOverlay
     internal static readonly GlVec3 SelectedColour = new(0f, 1f, 1f);     // cyan
     internal static readonly GlVec3 PartnerColour = new(1f, 0f, 1f);      // magenta
     internal static readonly GlVec3 OverlapColour = new(1f, 0.9f, 0.05f); // yellow
-    internal const string Legend = "cyan tint: the selected object; magenta tint: the other object of the open clash; yellow: where the two meet "
-                                 + "(Outlines draws their outlines and the line where they cross through anything in front)";
+    internal static readonly GlVec3 BuriedColour = new(1f, 0.45f, 0.05f); // orange
+    internal const string Legend = "cyan tint: the selected object; magenta tint: the other object of the open clash; yellow: where the two meet; "
+                                 + "orange: the part of each buried inside the other, drawn through it (Outlines draws their outlines and the line where "
+                                 + "they cross through anything in front)";
     internal const int MaxEdges = 40000;                                  // per reference; a whole building stays readable
-    const float TintAlpha = 0.45f, OverlapAlpha = 0.9f, OutlineDim = 0.55f;
+    const float TintAlpha = 0.45f, OverlapAlpha = 0.9f, OutlineDim = 0.55f, BuriedAlpha = 0.55f;
     const double CreaseCos = 0.77;                                        // an edge between faces more than about 40° apart is drawn
 
     internal RefOcclusion? Selected, Partner;
@@ -40,15 +42,18 @@ internal sealed class ConflictMarks : IRenderOverlay
     internal Action? Changed;
 
     RefOcclusion? _builtSel, _builtPartner;
-    List<float> _selTris = new(), _partnerTris = new(), _overlapTris = new();
+    List<float> _selTris = new(), _partnerTris = new(), _overlapTris = new(), _buriedTris = new();
     readonly List<OverlayLineSegment> _lines = new();
     List<(Vector3 A, Vector3 B)> _crossing = new();
     int _generation;
-    CancellationTokenSource? _measuring;
+    CancellationTokenSource? _measuring, _burying;
 
     /// <summary>What the crossing measure said for the pair shown: null while measuring or with no pair.</summary>
     internal string? Overlap { get; private set; }
     internal int CrossingSegments => _crossing.Count;
+    /// <summary>What was found buried, for the key: words, and the detail for its tooltip. Null while measuring or with no pair.</summary>
+    internal (string Words, string Tip)? Buried { get; private set; }
+    internal int BuriedTriangles => _buriedTris.Count / 18;
 
     /// <summary>Every triangle edge of a reference, once each (the pick shapes, Y-up).</summary>
     internal static IEnumerable<(Vector3 A, Vector3 B)> Edges(RefOcclusion ro)
@@ -150,12 +155,14 @@ internal sealed class ConflictMarks : IRenderOverlay
     {
         _builtSel = Selected; _builtPartner = Partner;
         _selTris = Triangles(Selected); _partnerTris = Triangles(Partner);
-        _overlapTris = new(); _crossing = new(); Overlap = null;
-        _measuring?.Cancel();
+        _overlapTris = new(); _buriedTris = new(); _crossing = new(); Overlap = null; Buried = null;
+        _measuring?.Cancel(); _burying?.Cancel();
         if (Selected is not { } a || Partner is not { } b) return;
         int gen = ++_generation;
         var cts = _measuring = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var (sa, cutA) = Soup(a); var (sb, cutB) = Soup(b);
+        TriangleSoup ma = Model(a), mb = Model(b);
+        string nameA = Name(a), nameB = Name(b);
         Task.Run(() =>
         {
             var (contact, pieces) = SurfaceVisibility.MeasureWithPieces(sa, null, sb, null, VolumeGeometry.Render, new SurfaceOptions(MaxTrianglePairs: 20_000_000), cts.Token);
@@ -168,14 +175,93 @@ internal sealed class ConflictMarks : IRenderOverlay
             Band(tris, sb, pieces.SelectMany(p => p.TrianglesB.Where(t => !cutB[t]).Select(t => (t, p))), width, cts.Token);
             string said = contact.Status != "measured" ? $"where they cross was not measured ({contact.Reason ?? contact.Status})"
                         : segs.Count == 0 ? "their surfaces do not cross" : $"their surfaces cross along {segs.Count:N0} segment(s)";
-            return (tris, segs, said);
+            return (tris, segs, said, width);
         }, cts.Token).ContinueWith(t =>
         {
             if (gen != _generation) return;
-            if (t.IsCompletedSuccessfully) { (_overlapTris, _crossing, Overlap) = t.Result; }
+            if (t.IsCompletedSuccessfully) { (_overlapTris, _crossing, Overlap, _) = t.Result; }
             else Overlap = t.IsCanceled ? "where they cross was not measured in 20 s" : $"where they cross could not be measured: {t.Exception?.GetBaseException().Message}";
             Changed?.Invoke();
+            if (t.IsCompletedSuccessfully) MeasureBuried(gen, ma, nameA, mb, nameB, t.Result.width);
+            else Buried = ("what each buries in the other was not measured", Overlap);
         }, TaskScheduler.Default);
+    }
+
+    /// <summary>What each object buries in the other, measured after the crossing (so the band is not held up by it):
+    /// houseCARL's surface inside a solid, at about half the band's width.</summary>
+    void MeasureBuried(int gen, TriangleSoup ma, string nameA, TriangleSoup mb, string nameB, float width)
+    {
+        var cts = _burying = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        Task.Run(() =>
+        {
+            float resolution = MathF.Max(1.5f, width / 2);
+            var aInB = MeshVolume.SurfaceInside(ma, mb, resolution, BuriedWork, cts.Token);
+            var bInA = MeshVolume.SurfaceInside(mb, ma, resolution, BuriedWork, cts.Token);
+            var buried = new List<float>();
+            AddSoup(buried, aInB.Inside); AddSoup(buried, bInA.Inside);
+            return (buried, BuriedWords(nameA, aInB, nameB, bInA, buried.Count / 18));
+        }, cts.Token).ContinueWith(t =>
+        {
+            if (gen != _generation) return;
+            BuriedSeconds = watch.Elapsed.TotalSeconds;
+            if (t.IsCompletedSuccessfully) (_buriedTris, Buried) = t.Result;
+            else Buried = ("what each buries in the other was not measured",
+                           t.IsCanceled ? "it took longer than 20 s" : $"it failed: {t.Exception?.GetBaseException().Message}");
+            Changed?.Invoke();
+        }, TaskScheduler.Default);
+    }
+
+    /// <summary>How long the last buried measure took, for the state tool.</summary>
+    internal double? BuriedSeconds { get; private set; }
+
+    /// <summary>The work allowed each way for what one object buries in the other (houseCARL's triangle tests).</summary>
+    internal const long BuriedWork = 30_000_000;
+
+    static string Name(RefOcclusion ro) => ro.Ref.BaseEditorId is { Length: > 0 } b ? b : ro.Ref.RefKey.ToString();
+
+    /// <summary>A reference's drawn, solid-textured shapes as one soup (Y-up): what can be a closed solid and what can be
+    /// buried. Leaf and grass cards are left out (a card has no inside), and so is a shape the view hides.</summary>
+    static TriangleSoup Model(RefOcclusion ro)
+    {
+        var verts = new List<Vector3>(); var idx = new List<int>();
+        foreach (var sh in ro.Shapes.Where(x => !CutOut(x) && x.Mesh is not { IsHiddenByHost: true }))
+        {
+            int at = verts.Count;
+            verts.AddRange(sh.Verts);
+            foreach (var i in sh.Tris) idx.Add(at + i);
+        }
+        return new TriangleSoup(verts.ToArray(), idx.ToArray());
+    }
+
+    static void AddSoup(List<float> into, TriangleSoup? s)
+    {
+        if (s is null) return;
+        for (int t = 0; t < s.TriangleCount; t++) AddTriangle(into, s.Vertices[s.Indices[3 * t]], s.Vertices[s.Indices[3 * t + 1]], s.Vertices[s.Indices[3 * t + 2]]);
+    }
+
+    /// <summary>The key's words for what each object buries in the other, and the detail behind them.</summary>
+    internal static (string Words, string Tip) BuriedWords(string nameA, SurfaceInsideResult aInB, string nameB, SurfaceInsideResult bInA, int triangles)
+    {
+        static string Side(string inner, string outer, SurfaceInsideResult r) => r.Status switch
+        {
+            "measured" => r.Inside is { TriangleCount: > 0 } ? $"part of {inner} is inside {outer}" : $"nothing of {inner} is inside {outer}",
+            "refused" when r.Reason == "solid: empty_mesh" => $"{outer} is drawn only with leaf or grass cards, which have no inside",
+            "refused" when r.Reason == "surface: empty_mesh" => $"{inner} is drawn only with leaf or grass cards, so nothing of it is buried",
+            "refused" when r.Reason?.StartsWith("solid: ") == true => $"{outer}'s model is not one closed solid, so what is inside it cannot be told ({r.Reason[7..]})",
+            "refused" => $"{inner}'s model could not be read for this ({r.Reason})",
+            _ => $"what of {inner} is inside {outer} was not finished ({r.Reason}); the part shown is what was decided",
+        };
+        string tip = string.Join("; ", new[] { Side(nameA, nameB, aInB), Side(nameB, nameA, bInA) }.Distinct()) + ".";
+#if !SKYRENDER_CUTOUT_TINT
+        tip += " This build cannot draw it through the outer object (that needs SkyRender 4.1): switch the outer object off for this object to see it.";
+#endif
+        bool refusedBoth = aInB.Status == "refused" && bInA.Status == "refused";
+        bool cardsOnly = new[] { aInB.Reason, bInA.Reason }.Any(x => x is "solid: empty_mesh" or "surface: empty_mesh");
+        string words = triangles > 0 ? "buried inside the other"
+                     : refusedBoth && cardsOnly ? "nothing buried: leaf or grass cards have no inside"
+                     : refusedBoth ? "what is buried cannot be shown" : "nothing buried in the other";
+        return (words, tip);
     }
 
 #if SKYRENDER_CUTOUT_TINT
@@ -266,6 +352,13 @@ internal sealed class ConflictMarks : IRenderOverlay
 #endif
             var overlap = _overlapTris;
             if (overlap.Count >= 18) renderer.DrawOverlayTranslucentTint(overlap, OverlapColour, OverlapAlpha, none);
+            var buried = _buriedTris;
+#if SKYRENDER_CUTOUT_TINT
+            // through the object it is buried in: it is inside, so behind that object's own surface
+            if (buried.Count >= 18) renderer.DrawOverlayTranslucentTint(buried, BuriedColour, BuriedAlpha, none, depthTested: false);
+#else
+            if (buried.Count >= 18) renderer.DrawOverlayTranslucentTint(buried, BuriedColour, BuriedAlpha, none);
+#endif
             renderer.EndOverlaySurfacePass(st);
         }
         // the outlines, dimmed, and where they cross, bright: both through anything in front
