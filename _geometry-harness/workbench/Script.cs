@@ -52,6 +52,7 @@ namespace Workbench;
 /// layer NAME on|off              a layer of the view (ViewLayers): navmesh, borders, markers, planes, terrain, water, grass, trees, clutter, statics, marks
 /// borders through|fence on|off   an option of the cell borders, as their arrow's menu: the outline drawn through objects; the fence
 /// grids N                        the Loaded cells choice: a square N cells wide around the scene's cell, cells added and dropped live
+/// fargrid on|off                 the Far grid toggle: the large references beyond the loaded cells, out to uLargeRefLODGridSize
 /// expect landed [FORMKEY]        pass or fail: that reference (default: the selected one) selected, the screen-centre ray crossing its shapes
 /// expect inview FORMKEY          pass or fail: the reference's box centre is drawn inside the view and the screen-centre ray crosses it
 /// waitfile PATH [MAXSEC]         wait (drawing nothing) until PATH exists, or MAXSEC seconds (default 900): an MCP client drives the window meanwhile
@@ -303,6 +304,12 @@ internal sealed class Script
             {
                 var (step, why) = ViewLayers.ParseStep(a);
                 if (step is { } st) _h.SetLayer(st.Layer, st.On); else WorkbenchHost.Say("step refused: " + why);
+                _wait = 3; break;
+            }
+            case "fargrid":
+            {
+                if (a.Length != 2 || ViewLayers.OnOff(a[1]) is not { } on) { WorkbenchHost.Say("step refused: the fargrid step is 'fargrid on|off'."); _wait = 2; break; }
+                try { _h.SetFar(on); } catch (InvalidOperationException ex) { WorkbenchHost.Say("step refused: " + ex.Message); }
                 _wait = 3; break;
             }
             case "grids":

@@ -88,15 +88,15 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             var square = LiveCells.Square(home, opt.GridsToLoad).Where(opt.Loaded.Contains).ToList();
             if (square.Contains(home))
             {
-                try { opt.PrefetchCell?.Invoke(home, true, CancellationToken.None); }   // read in parallel first; the build then uploads
+                try { opt.PrefetchCell?.Invoke(home, false, true, CancellationToken.None); }   // read in parallel first; the build then uploads
                 catch (Exception ex) { Say($"the scene's cell could not be read ahead ({ex.Message}); it is built without"); }
-                _live.Add(home);
-                _prefetched[home] = true;
+                _live.Add(home, false);
+                _prefetched[(home, false)] = true;
             }
-            foreach (var c in square.Where(c => !_live.Holds(c))) _queue.Enqueue(c);
+            foreach (var w in LiveCells.Plan(home, opt.GridsToLoad, _live.FarWidth, _live.Kinds, opt.Reach).Add) _queue.Enqueue(w);
             _queueClock.Restart(); _queueBuilt = 0;
             StartPrefetch();
-            Say(FormattableString.Invariant($"loaded cells: {_live.Held.Count} built in {sw.Elapsed.TotalSeconds:0.0} s before the window shows; {_queue.Count} more of the {opt.GridsToLoad}x{opt.GridsToLoad} square ({opt.GridsToLoadSource}) follow"));
+            Say(FormattableString.Invariant($"loaded cells: {_live.Held.Count} built in {sw.Elapsed.TotalSeconds:0.0} s before the window shows; {_queue.Count} more follow: the {opt.GridsToLoad}x{opt.GridsToLoad} square ({opt.GridsToLoadSource}) and the large references out to {_live.FarWidth}x{_live.FarWidth} ({opt.LargeGridSource})"));
         }
         _session = new EditSession(opt.Occlusion?.Refs ?? (IEnumerable<RefOcclusion>)Array.Empty<RefOcclusion>());
         // an edit of the object shown as another version: it is drawn as the scene has it again first, so the edit starts from what is drawn
@@ -640,7 +640,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             // a reference this scene does not draw has nothing to land on: say so, and show the cell instead of the placeholder pose
             if (!Land(FormKey.Factory(land)) && !_session.IsDrawn(FormKey.Factory(land)) && SceneDirector.Showing is not null) FrameScene();
         }
-        else if (_queue.Count > 0 && (_opt.PrefetchCell is null || _prefetched.ContainsKey(_queue.Peek())))
+        else if (_queue.Count > 0 && (_opt.PrefetchCell is null || _prefetched.ContainsKey(_queue.Peek())))   // (cell, kind)
         {
             BuildNextCell();   // one loaded cell per frame, once the worker has read it; its AfterCellsChanged asks for the next frame
         }
@@ -1076,7 +1076,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     internal object? LiveState() => _live.Available ? new
     {
         grids = _live.Grids, maxGrids = _live.MaxGrids, source = _opt.GridsToLoadSource, centre = _opt.Grid is { } lg ? new[] { lg.X, lg.Y } : null,
-        held = _live.Held.Count,
+        held = _live.Held.Count, far = _live.FarOn ? _live.FarWidth : 0, farHeld = _live.FarHeld, farSource = _opt.LargeGridSource,
         cells = _opt.CellGrids.Where(kv => _live.Holds(kv.Value)).Select(kv => new { cell = kv.Key.ToString(), x = kv.Value.X, y = kv.Value.Y }).ToList(),
     } : null;
 
@@ -1131,19 +1131,35 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     internal string SetGrids(int grids)
     {
         if (_live.Refuse(grids) is { } why) throw new InvalidOperationException("Loaded cells: " + why);
-        var (add, drop) = LiveCells.Plan(_opt.Grid!.Value, grids, _live.Held, _opt.Reach);
+        _live.SetGrids(grids);
+        return Replan($"Loaded cells {grids}x{grids}");
+    }
+
+    /// <summary>Show or hide the far grid: the large references beyond the loaded cells, out to uLargeRefLODGridSize.</summary>
+    internal string SetFar(bool on)
+    {
+        if (!_live.Available) throw new InvalidOperationException("Far grid: this scene cannot load cells around its own.");
+        _live.SetFar(on);
+        return Replan(on ? $"Far grid {_live.FarWidth}x{_live.FarWidth} shown ({_opt.LargeGridSource})" : "Far grid hidden");
+    }
+
+    /// <summary>Bring the held cells to the squares the choices ask for: free what goes out (a cell holding the selection or
+    /// an edit is kept as it is), queue what comes in. One sentence back, starting with <paramref name="what"/>.</summary>
+    string Replan(string what)
+    {
+        var (add, drop) = LiveCells.Plan(_opt.Grid!.Value, _live.Grids, _live.FarWidth, _live.Kinds, _opt.Reach);
         var kept = drop.Where(c => _live.All.First(l => l.Grid == c).Refs.Any(r => _session.Holds(r.Ref.RefKey))).ToList();
         drop = drop.Except(kept).ToList();
+        add = add.Where(a => !kept.Contains(a.Cell)).ToList();
         if (_window is not null) _view.MakeCurrent();
         foreach (var c in drop)
             if (_live.Drop(c, _renderer) is { } lc) _session.Remove(lc.Refs);
-        _live.SetGrids(grids);
         // the cells that come in are built one at a time, nearest first, with the view drawing between them
-        _queue.Clear(); foreach (var c in add) _queue.Enqueue(c);
+        _queue.Clear(); foreach (var a in add) _queue.Enqueue(a);
         _queueClock.Restart(); _queueBuilt = 0;
         StartPrefetch();
         AfterCellsChanged();
-        var said = $"Loaded cells {grids}x{grids}: " + (add.Count > 0 ? $"building {add.Count} cell(s), nearest first" : "nothing to build")
+        var said = $"{what}: " + (add.Count > 0 ? $"building {add.Count} cell(s), nearest first" : "nothing to build")
                  + $", {drop.Count} freed, {_live.Held.Count} held"
                  + (kept.Count > 0 ? $"; {kept.Count} cell(s) outside the square kept because they hold the selection or an edit" : "");
         Say(said);
@@ -1153,7 +1169,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
 
     // ---- the cells still to build: one at the start of each frame, so the view keeps drawing while they come in ---------
     // (a dispatcher job below Render priority starves while anything asks for frames continuously, such as flying)
-    readonly Queue<(int X, int Y)> _queue = new();
+    readonly Queue<((int X, int Y) Cell, bool LargeOnly)> _queue = new();
     readonly System.Diagnostics.Stopwatch _queueClock = new();
     int _queueBuilt;
     /// <summary>Loaded cells are still being built.</summary>
@@ -1162,7 +1178,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     CancellationTokenSource? _prefetch;
     Task _prefetchTask = Task.CompletedTask;
     // cells whose meshes and textures the worker has read: the window builds a queued cell only once it is here
-    readonly System.Collections.Concurrent.ConcurrentDictionary<(int X, int Y), bool> _prefetched = new();
+    readonly System.Collections.Concurrent.ConcurrentDictionary<((int X, int Y) Cell, bool LargeOnly), bool> _prefetched = new();
     /// <summary>Read the queued cells' meshes and decode their textures on a worker, in the queue's order, so each cell's
     /// build on the window's thread is mostly upload. A new queue cancels the old prefetch.</summary>
     void StartPrefetch()
@@ -1175,12 +1191,12 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _prefetchTask = Task.Run(() =>
         {
             before.Wait();   // one prefetch at a time: the cancelled one finishes its current mesh first
-            foreach (var c in cells)
+            foreach (var w in cells)
             {
                 if (cts.IsCancellationRequested) return;
-                try { prefetch(c, false, cts.Token); }
-                catch (Exception ex) { Console.WriteLine($"   [wb] prefetch of cell {c.X},{c.Y} stopped: {ex.Message} (the cell is built on the window's thread instead)"); }
-                _prefetched[c] = true;
+                try { prefetch(w.Cell, w.LargeOnly, false, cts.Token); }
+                catch (Exception ex) { Console.WriteLine($"   [wb] prefetch of cell {w.Cell.X},{w.Cell.Y} stopped: {ex.Message} (the cell is built on the window's thread instead)"); }
+                _prefetched[w] = true;
                 _window?.Dispatcher.BeginInvoke(() => ScheduleCell());   // the window builds it on its next frame
             }
         });
@@ -1193,15 +1209,16 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     void BuildNextCell()
     {
         if (_queue.Count == 0) return;
-        var c = _queue.Dequeue();
+        var (c, largeOnly) = _queue.Dequeue();
         var cellSw = System.Diagnostics.Stopwatch.StartNew();
-        if (_live.Add(c) is { } lc) { _session.Add(lc.Refs); _queueBuilt++; }
-        Console.WriteLine(FormattableString.Invariant($"   [wb] cell {c.X},{c.Y} built on the window's thread in {cellSw.Elapsed.TotalMilliseconds:0} ms"));
+        if (_live.Add(c, largeOnly) is { } lc) { _session.Add(lc.Refs); _queueBuilt++; }
+        Console.WriteLine(FormattableString.Invariant($"   [wb] cell {c.X},{c.Y}{(largeOnly ? " (large references)" : "")} built on the window's thread in {cellSw.Elapsed.TotalMilliseconds:0} ms"));
         bool done = _queue.Count == 0;
         AfterCellsChanged(tree: done);
         if (done)
         {
-            var said = FormattableString.Invariant($"loaded cells: {_queueBuilt} cell(s) built in {_queueClock.Elapsed.TotalSeconds:0.0} s; {_live.Held.Count} held ({_live.Grids}x{_live.Grids})");
+            var said = FormattableString.Invariant($"loaded cells: {_queueBuilt} cell(s) built in {_queueClock.Elapsed.TotalSeconds:0.0} s; {_live.Held.Count - _live.FarHeld} whole ({_live.Grids}x{_live.Grids}), {_live.FarHeld} with their large references only")
+                + (_live.FarOn ? FormattableString.Invariant($" (far grid {_live.FarWidth}x{_live.FarWidth})") : "");
             Say(said); Shell.SetBanner(said);
             UpdateMarks();
         }
@@ -1263,6 +1280,17 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); FillGrids(); }
         };
         row.Children.Add(_gridsBox);
+        // the far grid: the large references beyond the loaded cells, as the game draws them out to uLargeRefLODGridSize
+        var far = new System.Windows.Controls.Primitives.ToggleButton { Content = $"Far grid {Math.Min(_live.Far, _live.MaxGrids)}×{Math.Min(_live.Far, _live.MaxGrids)}", IsChecked = _live.FarOn, Margin = new Thickness(4, 2, 2, 2),
+            Padding = new Thickness(6, 1, 6, 1), Focusable = false,
+            ToolTip = $"The large references beyond the loaded cells (buildings, cliffs and other objects the worldspace lists as large), drawn out to a "
+                    + $"square {_live.Far} cells wide as the game does: {_opt.LargeGridSource}. Off draws the loaded cells only." };
+        far.Click += (_, _) =>
+        {
+            try { Shell.SetBanner(SetFar(far.IsChecked == true)); }
+            catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); far.IsChecked = _live.FarOn; }
+        };
+        row.Children.Add(far);
         return row;
     }
 
@@ -1303,7 +1331,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         // a plane is a marker too, and the planes layer draws it as what it is
         var planes = _opt.PickShapes.Where(s => s.Kind == PickKind.Plane && s.Plane is not null).Select(s => s.Plane!.Key).ToHashSet();
         var places = (_opt.UndrawnAt ?? new Dictionary<FormKey, (Vec3, Vec3)>()).Where(kv => !planes.Contains(kv.Key))
-            .Where(kv => !_live.Available || _live.Holds(LiveSlicer.CellOf(kv.Value.Item1.X, kv.Value.Item1.Y)))   // markers of the loaded cells
+            .Where(kv => !_live.Available || _live.HoldsWhole(LiveSlicer.CellOf(kv.Value.Item1.X, kv.Value.Item1.Y)))   // markers of the loaded cells
             .Select(kv => (kv.Key, kv.Value.Position, kv.Value.Rotation, _opt.RefOutcomes is { } ro && ro.TryGetValue(kv.Key, out var o) && o.Outcome == "marker")).ToList();
         _markerGizmos = new MarkerGizmos(places);
         renderer.Overlays.Add(_markerGizmos);

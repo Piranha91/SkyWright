@@ -5501,7 +5501,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 int half = grids / 2;
                 var loaded = reach.Where(c => Math.Abs(c.X - liveGrid.X) <= half && Math.Abs(c.Y - liveGrid.Y) <= half).ToHashSet();
                 var allGrass = ViewProbe.GrassLayer.Cells.ToList();
-                var live = new ViewProbe.LiveSlicer(scene, terrainPatches, terrainLayers, waterPlanes);
+                var live = new ViewProbe.LiveSlicer(scene, terrainPatches, terrainLayers, waterPlanes, winWalk.LargeListedKeys(largeChildUnion));
+                int largeGrid = ViewProbe.ProfileIni.Int("TerrainManager", "uLargeRefLODGridSize", 9, out var largeWhy);
+                if (largeGrid < 1 || largeGrid % 2 == 0) { largeWhy += $"; the game loads an odd square, so {largeGrid} is read as {Math.Max(1, largeGrid | 1)}"; largeGrid = Math.Max(1, largeGrid | 1); }
+                iopt.LargeGrid = largeGrid; iopt.LargeGridSource = largeWhy;
                 // The first build draws no cell: every cell is a slice the host adds (and can drop again), the loaded square first.
                 (firstScene, firstPatches, firstLayers, firstWater) = live.For(Array.Empty<(int X, int Y)>());
                 ViewProbe.GrassLayer.Cells.Clear();
@@ -5517,14 +5520,17 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 if (cellKey is { } ck) ((Dictionary<FormKey, (int X, int Y)>)iopt.CellGrids)[ck] = liveGrid;
                 iopt.LandCells = new List<(int X, int Y)>();
                 Console.WriteLine($"   live scene: {reach.Count} cell(s) prepared; the host loads {grids}x{grids} of them ({gridsWhy}) and adds or drops cells live");
-                iopt.PrefetchCell = (cell, parallel, ct) => iopt.Live is { } ps && reach.Contains(cell)
-                    ? ViewProbe.TexturedScene.Prefetch(ps, live.For(new[] { cell }).Refs, parallel, ct) : 0;
-                iopt.BuildCell = cell =>
+                iopt.PrefetchCell = (cell, largeOnly, parallel, ct) => iopt.Live is { } ps && reach.Contains(cell)
+                    ? ViewProbe.TexturedScene.Prefetch(ps, largeOnly ? live.LargeOf(cell) : live.For(new[] { cell }).Refs, parallel, ct) : 0;
+                iopt.BuildCell = (cell, largeOnly) =>
                 {
                     if (!reach.Contains(cell) || iopt.Live is not { } session) return null;
                     var one = new HashSet<(int X, int Y)> { cell };
                     var (cScene, cPatches, cLayers, cWater) = live.For(one);
-                    ViewProbe.GrassLayer.Cells.Clear(); ViewProbe.GrassLayer.Cells.AddRange(allGrass.Where(c => c.GridX == cell.X && c.GridY == cell.Y));
+                    // a far-grid cell: its large references only, as the game loads them beyond the loaded cells
+                    if (largeOnly) { cScene = live.LargeOf(cell); cPatches = new(); cLayers = new(); cWater = new(); }
+                    ViewProbe.GrassLayer.Cells.Clear();
+                    if (!largeOnly) ViewProbe.GrassLayer.Cells.AddRange(allGrass.Where(c => c.GridX == cell.X && c.GridY == cell.Y));
                     var collect = new ViewProbe.InteractiveOptions { Window = iopt.Window, RuntimeId = iopt.RuntimeId, CellLabel = iopt.CellLabel, OutDir = iopt.OutDir, SafeName = iopt.SafeName };
                     var added = new List<SkyRender.GlMesh>();
                     var cellSw = System.Diagnostics.Stopwatch.StartNew();
@@ -5543,7 +5549,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     var made = new ViewProbe.LiveCell
                     {
                         Grid = cell, PickShapes = collect.PickShapes, Refs = collect.Occlusion?.Refs.ToList() ?? new(),
-                        LayerMeshes = collect.LayerMeshes, HasLand = landHeights.ContainsKey(cell), Seconds = cellSw.Elapsed.TotalSeconds,
+                        LayerMeshes = collect.LayerMeshes, HasLand = !largeOnly && landHeights.ContainsKey(cell), Seconds = cellSw.Elapsed.TotalSeconds, LargeOnly = largeOnly,
                     };
                     made.Meshes.AddRange(added);
                     return made;

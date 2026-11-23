@@ -25,20 +25,46 @@ public class LiveCellsTests
         Assert.Equal(25, sq.Distinct().Count());
     }
 
+    static Dictionary<(int X, int Y), bool> Whole(IEnumerable<(int X, int Y)> cells) => cells.ToDictionary(c => c, _ => false);
+
     [Fact]
     public void Widening_builds_only_the_new_ring_and_narrowing_frees_only_the_outer_cells()
     {
         var reach = Reach((0, 0), 5);
-        var held = LiveCells.Square((0, 0), 5);
-        var (add, drop) = LiveCells.Plan((0, 0), 7, held, reach);
+        var held = Whole(LiveCells.Square((0, 0), 5));
+        var (add, drop) = LiveCells.Plan((0, 0), 7, 0, held, reach);
         Assert.Empty(drop);
         Assert.Equal(24, add.Count);
-        Assert.All(add, c => Assert.Equal(3, Math.Max(Math.Abs(c.X), Math.Abs(c.Y))));
+        Assert.All(add, a => { Assert.Equal(3, Math.Max(Math.Abs(a.Cell.X), Math.Abs(a.Cell.Y))); Assert.False(a.LargeOnly); });
 
-        (add, drop) = LiveCells.Plan((0, 0), 3, held, reach);
+        (add, drop) = LiveCells.Plan((0, 0), 3, 0, held, reach);
         Assert.Empty(add);
         Assert.Equal(16, drop.Count);
         Assert.All(drop, c => Assert.Equal(2, Math.Max(Math.Abs(c.X), Math.Abs(c.Y))));
+    }
+
+    [Fact]
+    public void The_far_grid_holds_large_references_beyond_the_loaded_square_and_a_cell_that_crosses_is_swapped()
+    {
+        var reach = Reach((0, 0), 5);
+        var (add, drop) = LiveCells.Plan((0, 0), 5, 9, new Dictionary<(int X, int Y), bool>(), reach);
+        Assert.Empty(drop);
+        Assert.Equal(25, add.Count(a => !a.LargeOnly));
+        Assert.Equal(81 - 25, add.Count(a => a.LargeOnly));
+        Assert.All(add.Take(25), a => Assert.False(a.LargeOnly));      // the loaded cells come first
+        var held = add.ToDictionary(a => a.Cell, a => a.LargeOnly);
+
+        // widening the loaded square turns the far ring at distance 3 into whole cells: freed, then built whole
+        (add, drop) = LiveCells.Plan((0, 0), 7, 9, held, reach);
+        Assert.Equal(24, drop.Count);
+        Assert.Equal(24, add.Count);
+        Assert.All(add, a => Assert.False(a.LargeOnly));
+
+        // switching the far grid off frees only the large-only cells
+        (add, drop) = LiveCells.Plan((0, 0), 5, 0, held, reach);
+        Assert.Empty(add);
+        Assert.Equal(56, drop.Count);
+        Assert.All(drop, c => Assert.True(held[c]));
     }
 
     [Fact]
@@ -48,8 +74,8 @@ public class LiveCellsTests
         var holed = Reach((0, 0), 5); holed.Remove((3, -3));
         Assert.Equal(5, LiveCells.MaxSquare((0, 0), holed));
         // cells outside what was prepared are not planned, so a hole is never "built"
-        var (add, _) = LiveCells.Plan((0, 0), 7, Array.Empty<(int, int)>(), holed);
-        Assert.DoesNotContain((3, -3), add);
+        var (add, _) = LiveCells.Plan((0, 0), 7, 0, new Dictionary<(int X, int Y), bool>(), holed);
+        Assert.DoesNotContain(add, a => a.Cell == (3, -3));
         Assert.Equal(48, add.Count);
     }
 

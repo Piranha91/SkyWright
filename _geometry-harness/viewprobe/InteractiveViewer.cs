@@ -201,12 +201,14 @@ sealed class InteractiveOptions
 
     // ---- the live scene (LiveScene.cs): cells a host adds to and drops from the scene it shows, without a rebuild ----------
     public LiveSession? Live;                              // set by the build just before the host's loop; dead after it
-    public Func<(int X, int Y), LiveCell?>? BuildCell;     // build one cell of Reach into the live scene; null when it is not in Reach
-    public Func<(int X, int Y), bool, CancellationToken, int>? PrefetchCell;   // read a cell's meshes and decode its textures (in parallel or not), off the window's thread
+    public Func<(int X, int Y), bool, LiveCell?>? BuildCell;   // build one cell of Reach (whole, or its large references only) into the live scene; null when it is not in Reach
+    public Func<(int X, int Y), bool, bool, CancellationToken, int>? PrefetchCell;   // (cell, large only, in parallel): read its meshes and decode its textures, off the window's thread
     public IReadOnlySet<(int X, int Y)> Reach = new HashSet<(int X, int Y)>();   // the cells the walk prepared: what BuildCell can add
     public IReadOnlySet<(int X, int Y)> Loaded = new HashSet<(int X, int Y)>();  // the cells the first build drew
     public IReadOnlyDictionary<FormKey, (int X, int Y)> CellGrids = new Dictionary<FormKey, (int X, int Y)>();   // each walked cell's square (from its references)
-    public int GridsToLoad = 3;                            // the profile's uGridsToLoad (or the game default), the loaded square's width
+    public int GridsToLoad = 3;
+    public int LargeGrid = 9;                              // the profile's uLargeRefLODGridSize (or the game default): the far grid's width
+    public string LargeGridSource = "";                            // the profile's uGridsToLoad (or the game default), the loaded square's width
     public string GridsToLoadSource = "";                  // where that number came from, in words
     public Func<float, float, float?>? TerrainHeightAt;    // ground height at Skyrim X,Y on the drawn terrain; null off the land
     public IReadOnlyCollection<(int X, int Y)> LandCells = Array.Empty<(int, int)>();   // grid cells whose land the scene read

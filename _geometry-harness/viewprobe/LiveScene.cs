@@ -44,6 +44,8 @@ internal sealed class LiveCell
     /// <summary>"terrain", "water", "grass": this cell's meshes of each layer.</summary>
     internal Dictionary<string, List<GlMesh>> LayerMeshes { get; init; } = new();
     internal bool HasLand { get; init; }
+    /// <summary>Only the cell's large references (the far grid beyond the loaded cells): no terrain, water or grass.</summary>
+    internal bool LargeOnly { get; init; }
     internal double Seconds { get; set; }
 
     /// <summary>Take the cell out of the renderer and free its meshes. The textures stay in the session's cache.</summary>
@@ -63,14 +65,16 @@ internal sealed class LiveSlicer
     readonly Dictionary<(int X, int Y), Dictionary<string, List<(V3, V3, V3)>>> _patches = new();
     readonly Dictionary<(int X, int Y), List<(string Diffuse, List<(V3 A, V3 B, V3 C, float Oa, float Ob, float Oc)> Tris)>> _layers = new();
     readonly Dictionary<(int X, int Y), List<WaterPlane>> _water = new();
+    readonly IReadOnlySet<Mutagen.Bethesda.Plugins.FormKey> _large;
 
     internal static (int X, int Y) CellOf(float x, float y) => ((int)MathF.Floor(x / 4096f), (int)MathF.Floor(y / 4096f));
 
     internal LiveSlicer(IReadOnlyList<SceneRef> refs,
         IReadOnlyDictionary<string, List<(V3, V3, V3)>> patches,
         IReadOnlyList<(string Diffuse, List<(V3 A, V3 B, V3 C, float Oa, float Ob, float Oc)> Tris)> layers,
-        IReadOnlyList<WaterPlane> water)
+        IReadOnlyList<WaterPlane> water, IReadOnlySet<Mutagen.Bethesda.Plugins.FormKey>? large = null)
     {
+        _large = large ?? new HashSet<Mutagen.Bethesda.Plugins.FormKey>();
         foreach (var r in refs) Bucket(_refs, CellOf(r.Position.X, r.Position.Y)).Add(r);
         foreach (var (diffuse, tris) in patches)
             foreach (var t in tris)
@@ -89,6 +93,10 @@ internal sealed class LiveSlicer
     }
 
     static List<T> Bucket<K, T>(Dictionary<K, List<T>> d, K k) where K : notnull => d.TryGetValue(k, out var l) ? l : d[k] = new List<T>();
+
+    /// <summary>The large references placed in <paramref name="cell"/> (the far grid's share of it).</summary>
+    internal List<SceneRef> LargeOf((int X, int Y) cell) =>
+        _refs.TryGetValue(cell, out var r) ? r.Where(x => _large.Contains(x.RefKey)).ToList() : new List<SceneRef>();
 
     /// <summary>The inputs of <paramref name="cells"/>, in the shapes <see cref="TexturedScene.RenderToPng"/> takes.</summary>
     internal (List<SceneRef> Refs, Dictionary<string, List<(V3, V3, V3)>> Patches,

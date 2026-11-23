@@ -260,6 +260,8 @@ internal sealed class WinningRefWalk
     internal bool LargeIsChild => _lists.IsChild;
     /// <summary>How many references the selected list names.</summary>
     internal int LargeListed(bool childUnion) => _lists.Selected(childUnion, RootUsesUnion).Count;
+    /// <summary>The references the selected large-reference list names (the live scene's far grid draws them).</summary>
+    internal IReadOnlySet<FormKey> LargeListedKeys(bool childUnion) => _lists.Selected(childUnion, RootUsesUnion);
 
     /// <summary>The far set and the lists, for the retained cell walk (CellWalkFacts) to carry to the next shot.</summary>
     internal object LargeSnapshot() => new LargeState(
