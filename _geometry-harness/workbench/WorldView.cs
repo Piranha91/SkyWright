@@ -79,7 +79,9 @@ internal static class WorldView
         var mapBar = new DockPanel { Margin = new Thickness(6, 2, 6, 2) };
         var mapLabel = new TextBlock { Text = "Map", Width = 60, VerticalAlignment = VerticalAlignment.Center };
         DockPanel.SetDock(mapLabel, Dock.Left); DockPanel.SetDock(MapWorld, Dock.Left); DockPanel.SetDock(MapTextured, Dock.Left);
-        mapBar.Children.Add(mapLabel); mapBar.Children.Add(MapWorld); mapBar.Children.Add(MapTextured); mapBar.Children.Add(MapSays);
+        mapBar.Children.Add(mapLabel); mapBar.Children.Add(MapWorld); mapBar.Children.Add(MapTextured);
+        // the map's own line on a row of its own, so it wraps across the pane's width instead of being cut
+        MapSays.Margin = new Thickness(66, 0, 6, 2);
         // the tiles' own line under the bar, so the pointer's cell name does not hide it
         MapTextured.IsChecked = MapSettings.Textured;
         Map.Tiles.SetEnabled(MapTextured.IsChecked == true);
@@ -115,8 +117,8 @@ internal static class WorldView
         body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(3, GridUnitType.Star), MinHeight = 80 });
         var bar = new GridSplitter { Height = 5, HorizontalAlignment = HorizontalAlignment.Stretch, Background = Theme.Brush("#2C3036") };
         var mapPanel = new DockPanel();
-        DockPanel.SetDock(mapBar, Dock.Top); DockPanel.SetDock(tileLine, Dock.Top);
-        mapPanel.Children.Add(mapBar); mapPanel.Children.Add(tileLine); mapPanel.Children.Add(Map.View);
+        DockPanel.SetDock(mapBar, Dock.Top); DockPanel.SetDock(MapSays, Dock.Top); DockPanel.SetDock(tileLine, Dock.Top);
+        mapPanel.Children.Add(mapBar); mapPanel.Children.Add(MapSays); mapPanel.Children.Add(tileLine); mapPanel.Children.Add(Map.View);
         Grid.SetRow(mapPanel, 0); Grid.SetRow(bar, 1); Grid.SetRow(Tree, 2);
         body.Children.Add(mapPanel); body.Children.Add(bar); body.Children.Add(Tree);
         var panel = new DockPanel();
