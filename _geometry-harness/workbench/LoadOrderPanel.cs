@@ -140,8 +140,9 @@ internal static class LoadOrderPanel
         OnlyEditing.Click += (_, _) => Fill();
         AllBack.Click += (_, _) => { Off.Clear(); Ask(); };
         VirtualizingPanel.SetIsVirtualizing(List, true);
+        ScrollViewer.SetHorizontalScrollBarVisibility(List, ScrollBarVisibility.Disabled);   // names wrap, never clip
         Title.Text = "Load order";
-        Said.Text = "Open a row or a cell to list the load order its scene is built on.";
+        Said.Text = "Open a row or a cell to list the load order its scene is built on. A tag marks the plugins that edit the selected object (cyan), the clash's other object (magenta) or both.";
         var panel = new DockPanel();
         foreach (var top in new UIElement[] { Title, Said, bar, AllBack }) { DockPanel.SetDock(top, Dock.Top); panel.Children.Add(top); }
         panel.Children.Add(List);
@@ -267,13 +268,13 @@ internal static class LoadOrderPanel
             {
                 Background = new SolidColorBrush(edit == "other" ? Color.FromRgb(0x8A, 0x1F, 0x8A) : edit == "both" ? Color.FromRgb(0x55, 0x55, 0xAA) : Color.FromRgb(0x10, 0x70, 0x78)),
                 CornerRadius = new CornerRadius(3), Padding = new Thickness(4, 0, 4, 0), Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
-                Child = new TextBlock { Text = edit == "other" ? "edits the other object" : edit == "both" ? "edits both objects" : "edits the selected object", FontSize = 11, Foreground = Brushes.White },
+                Child = new TextBlock { Text = edit == "other" ? "other object" : edit == "both" ? "both" : "selected", FontSize = 11, Foreground = Brushes.White },
                 ToolTip = edit == "other" ? "this plugin has a version of the clash's other object (magenta in the view)" : edit == "both" ? "this plugin has a version of both objects" : "this plugin has a version of the selected object (cyan in the view)",
             };
             DockPanel.SetDock(tag, Dock.Right);
             sp.Children.Add(tag);
         }
-        var label = new TextBlock { Text = e.Name, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = e.Name };
+        var label = new TextBlock { Text = e.Name, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap, ToolTip = e.Name };
         if (edit is not null) label.FontWeight = FontWeights.SemiBold;
         if (Off.Contains(e.Name) || goesWith) { label.Foreground = Theme.Brush(Theme.Dim); label.TextDecorations = TextDecorations.Strikethrough; }
         else if (_patchLike.TryGetValue(e.Name, out var why))

@@ -176,15 +176,13 @@ internal static class ResultsView
         // the open row's values fill the tab; the rows themselves are the table the window shows across its full width
         // under the view (Table), while this tab is in front
         // under them, the open row's values and the load order its scene is built on share the pane, the load order the larger
-        var split = new Grid();
-        split.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 80 });
-        split.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        split.RowDefinitions.Add(new RowDefinition { Height = new GridLength(3, GridUnitType.Star), MinHeight = 120 });
-        var between = new GridSplitter { Height = 5, HorizontalAlignment = HorizontalAlignment.Stretch, Background = Theme.Brush(Theme.Line), ToolTip = "drag to give the values or the load order more room" };
-        var order = LoadOrderPanel.Build();
-        Grid.SetRow(Detail, 0); Grid.SetRow(between, 1); Grid.SetRow(order, 2);
-        split.Children.Add(Detail); split.Children.Add(between); split.Children.Add(order);
-        panel.Children.Add(split);
+        // the values fold away above it, so the load order has the pane's height; opened, they take what they need, up to a third
+        Detail.MaxHeight = 320;
+        var values = new Expander { Header = "The open row's values", IsExpanded = false, Content = Detail, Margin = new Thickness(6, 2, 6, 2),
+                                    ToolTip = "what the open row's object is, what the result means, and the values side by side" };
+        DockPanel.SetDock(values, Dock.Top);
+        panel.Children.Add(values);
+        panel.Children.Add(LoadOrderPanel.Build());
         return panel;
     }
 
