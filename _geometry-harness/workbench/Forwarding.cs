@@ -186,7 +186,7 @@ internal static class ForwardCatalog
         {
             if (_tools is not null) return _tools;
             _tools = new Dictionary<string, Tool>(StringComparer.Ordinal);
-            if (!File.Exists(serverExe)) { Problem = $"the houseCARL server is not built at '{serverExe}'"; return _tools; }
+            if (!File.Exists(serverExe)) { Problem = $"the houseCARL server is not at '{serverExe}'"; return _tools; }
             var data = Path.Combine(Path.GetTempPath(), "hc-wb-catalog-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(data);
             try

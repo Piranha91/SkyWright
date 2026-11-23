@@ -42,6 +42,11 @@ internal static class Program
             return Publish(rev, Path.GetFullPath(to), Path.GetFullPath(src), keep);
         }
         catch (Refused r) { Console.Error.WriteLine("skywright-publish: " + r.Message); return 2; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidDataException)
+        {
+            Console.Error.WriteLine($"skywright-publish: the publish stopped on {ex.GetType().Name}: {ex.Message}; nothing was installed, so fix that and publish again.");
+            return 2;
+        }
     }
 
     static int VerifyCommand(string dir)
@@ -67,11 +72,13 @@ internal static class Program
         var checkout = CheckoutLayout.FindRoot()
             ?? throw new Refused($"this publisher is not inside a SkyWright checkout (no {CheckoutLayout.Marker} above {Fwd(AppContext.BaseDirectory)}); run it with dotnet run --project _geometry-harness/publish from the checkout to publish.");
         var sub = CheckoutLayout.Housecarl(checkout);
+        if (!Directory.Exists(Path.Combine(sub, "src")))
+            throw new Refused($"the pinned houseCARL {Fwd(sub)} is not checked out; run git submodule update --init, then publish.");
 
         // 1. a clean tree, a commit that resolves, a destination not yet there
         if (Git(checkout, "status", "--porcelain") is { Length: > 0 } dirty)
             throw new Refused($"the checkout {Fwd(checkout)} has uncommitted changes ({Lines(dirty).Length} path(s), first: {Lines(dirty)[0].Trim()}); commit or set them aside, then publish.");
-        if (Directory.Exists(sub) && Git(sub, "status", "--porcelain") is { Length: > 0 } subDirty)
+        if (Git(sub, "status", "--porcelain") is { Length: > 0 } subDirty)
             throw new Refused($"the pinned houseCARL {Fwd(sub)} has uncommitted changes (first: {Lines(subDirty)[0].Trim()}); a publish takes the pin exactly, so clean it first.");
         string commit;
         try { commit = Git(checkout, "rev-parse", "--verify", rev + "^{commit}").Trim(); }
@@ -86,7 +93,7 @@ internal static class Program
         Say($"publishing {commit} (houseCARL pin {pin[..12]}) into {Fwd(dest)}");
 
         // 2. the commit and its pin, exported off the checkout: nothing the checkout's bin holds is used or touched
-        var src = Path.Combine(srcRoot, commit);
+        var src = Path.Combine(srcRoot, commit[..12]);   // short: the export's deepest paths stay under 260 characters
         if (Directory.Exists(src)) Directory.Delete(src, recursive: true);
         Directory.CreateDirectory(src);
         Export(checkout, commit, src);
@@ -95,7 +102,7 @@ internal static class Program
         Export(sub, pin, srcSub);
 
         // 3. build the export, and the pin's generator for the rulebook
-        Run(src, "dotnet", "build", "SkyWright.sln", "-c", "Release", "-nologo", "-v", "q");
+        Run(src, "dotnet", "build", "SkyWright.sln", "-c", "Release", "-nologo", "-v", "q", "-nodeReuse:false");
         Run(src, "dotnet", "run", "--project", Path.Combine(srcSub, "src", "housecarl-generator"), "-c", "Release", "--no-build", "--",
             Path.Combine(srcSub, "generated"), Path.Combine(srcSub, "generated", "reference"));
 
@@ -104,6 +111,27 @@ internal static class Program
         var temp = dest + ".partial";
         if (Directory.Exists(temp)) Directory.Delete(temp, recursive: true);
         Directory.CreateDirectory(temp);
+        try { Fill(src, srcSub, temp, dest, commit, pin); }
+        catch
+        {
+            // a failed publish leaves nothing that looks like an install
+            try { Directory.Delete(temp, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            throw;
+        }
+        if (!keepSrc)
+            try { Directory.Delete(src, recursive: true); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            { Say($"note: the build folder {Fwd(src)} could not be deleted ({ex.Message}); the install is complete, delete it by hand."); }
+        long bytes = Directory.EnumerateFiles(dest, "*", SearchOption.AllDirectories).Sum(f => new FileInfo(f).Length);
+        var m = CheckoutLayout.Manifest.Read(Path.Combine(dest, CheckoutLayout.ManifestName));
+        Say($"published {commit} to {Fwd(dest)}: {m.Pieces.Count(kv => kv.Key.StartsWith("program:") || kv.Key is "workbench" or "runcontrol")} programs, "
+            + $"{m.Files.Count} files, {bytes / 1048576.0:0} MiB, in {sw.Elapsed.TotalMinutes:0.0} min");
+        return 0;
+    }
+
+    /// <summary>Publish the built export into <paramref name="temp"/>, write and verify its manifest, rename it to <paramref name="dest"/>.</summary>
+    static void Fill(string src, string srcSub, string temp, string dest, string commit, string pin)
+    {
         var pieces = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (name, csproj) in Programs(src))
         {
@@ -142,11 +170,6 @@ internal static class Program
         if (problems.Count > 0 || unlisted.Count > 0)
             throw new Refused($"the new install did not verify ({string.Join("; ", problems.Concat(unlisted.Select(u => u + " is not listed")).Take(3))}); nothing was installed.");
         Directory.Move(temp, dest);
-        if (!keepSrc) Directory.Delete(src, recursive: true);
-        long bytes = Directory.EnumerateFiles(dest, "*", SearchOption.AllDirectories).Sum(f => new FileInfo(f).Length);
-        Say($"published {commit} to {Fwd(dest)}: {pieces.Count(kv => kv.Key.StartsWith("program:") || kv.Key is "workbench" or "runcontrol")} programs, "
-            + $"{files.Count} files, {bytes / 1048576.0:0} MiB, in {sw.Elapsed.TotalMinutes:0.0} min");
-        return 0;
     }
 
     /// <summary>The install's programs: every project under _geometry-harness in the solution whose OutputType is Exe
@@ -191,7 +214,10 @@ internal static class Program
     {
         var psi = new ProcessStartInfo(exe) { WorkingDirectory = cwd, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
         foreach (var a in args) psi.ArgumentList.Add(a);
-        using var p = Process.Start(psi) ?? throw new Refused($"{exe} could not be started; is it on PATH?");
+        Process p;
+        try { p = Process.Start(psi) ?? throw new Refused($"{exe} could not be started; is it on PATH?"); }
+        catch (System.ComponentModel.Win32Exception ex) { throw new Refused($"{exe} could not be started in {Fwd(cwd)} ({ex.Message}); is it on PATH?"); }
+        using var _ = p;
         var err = p.StandardError.ReadToEndAsync();
         var output = p.StandardOutput.ReadToEnd();
         p.WaitForExit();

@@ -8,8 +8,8 @@ namespace Workbench;
 /// This is the one place that knows its command lines: the run, the bundle check, a probe build's digest, and a patch's
 /// population.
 ///
-/// Variables: <c>WB_RUNCONTROL</c> names runcontrol.exe (default: this checkout's _geometry-harness/runcontrol/bin/Release/net9.0).
-/// <c>WB_HARNESS</c> names the harness folder the probes are built under (default: this checkout's _geometry-harness).
+/// Variables: <c>WB_RUNCONTROL</c> names runcontrol.exe, and <c>WB_HARNESS</c> the folder the programs sit under; by
+/// default both come from the layout the workbench sits in (an install, or its checkout: see HarnessShared.CheckoutLayout).
 /// <c>WB_PIPELINE_CMD</c> is the test seam for the run: it replaces the program started, which gets the same arguments,
 /// <c>run --entry … --machine … --out … --through bundle --reuse-preparation-from …</c>.</summary>
 internal sealed class RunEngine

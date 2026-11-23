@@ -80,7 +80,7 @@ public sealed class SweepArgs
 
     public static SweepArgs Parse(string[] args)
     {
-        var a = new SweepArgs { Harness = PyPath.Str(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."))) };
+        var a = new SweepArgs { Harness = PyPath.Str(HarnessShared.CheckoutLayout.HarnessOf(Path.Combine(AppContext.BaseDirectory, "runcontrol.exe"))) };
         var seen = new HashSet<string>();
         var extras = new List<string>();
         bool rest = false;

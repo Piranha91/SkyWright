@@ -13,13 +13,13 @@ public static class Checkout
     /// <summary>The layout's root: the install root, or the folder holding SkyWright.sln.</summary>
     public static string Root => PyPath.Resolve(Layout.Root);
 
-    public static string Harness => PyPath.Str(Layout.Harness);
+    public static string Harness => PyPath.Resolve(Layout.Harness);
     public static string ScopeprobeExe => Program("scopeprobe");
     public static string Registry => PyPath.Resolve(Layout.PathOf(HarnessShared.CheckoutLayout.Piece.Registry));
     public static string Corpus => PyPath.Resolve(Layout.PathOf(HarnessShared.CheckoutLayout.Piece.Corpus));
 
     /// <summary>One of SkyWright's programs in this layout.</summary>
-    public static string Program(string name) => PyPath.Str(Layout.Program(name));
+    public static string Program(string name) => PyPath.Str(HarnessShared.CheckoutLayout.ProgramExe(Harness, name));
 
     /// <summary>A Python script of the checkout's harness; an install carries no Python, so there it is refused.</summary>
     public static string Script(string name, string step) => Layout.Installed

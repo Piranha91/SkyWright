@@ -44,9 +44,9 @@ internal sealed class PatchWriter : IAsyncDisposable
         if (OutputFolderRule.Check(target.PatchRoot, target.Instance, target.Profile, target.Game) is { } why)
             throw new InvalidOperationException($"writes to {target} are refused: {why}");
         if (!File.Exists(serverExe))
-            throw new InvalidOperationException($"the houseCARL server is not built at '{serverExe}'; build external/houseCARL's src/housecarl-mcp in this checkout first.");
+            throw new InvalidOperationException($"the houseCARL server is not at '{serverExe}'; in a checkout build external/houseCARL's src/housecarl-mcp, in an install publish it again, or set WB_SERVER.");
         if (!File.Exists(corpusPath))
-            throw new InvalidOperationException($"the houseCARL rulebook is not at '{corpusPath}'; run external/houseCARL's generator (src/housecarl-generator) to make corpus.json.");
+            throw new InvalidOperationException($"the houseCARL rulebook is not at '{corpusPath}'; in a checkout run external/houseCARL's generator (src/housecarl-generator), in an install publish it again, or set WB_CORPUS.");
         if (!Directory.Exists(target.ProfileDir))
             throw new InvalidOperationException($"the profile folder '{target.ProfileDir}' does not exist; name a profile of that instance.");
         string sha;

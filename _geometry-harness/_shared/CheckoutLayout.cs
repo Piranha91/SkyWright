@@ -44,6 +44,10 @@ internal static class CheckoutLayout
         _ => throw new ArgumentOutOfRangeException(nameof(p)),
     };
 
+    /// <summary>The variables that name one program, or folders of programs, in place of the layout's (the workbench's
+    /// re-check and navmesh repair read them); named with the pieces' overrides when a program starts.</summary>
+    public static readonly string[] ProgramOverrides = ["WB_NAVOWNPROBE", "WB_CONFLICTDIFF", "WB_PROBE_DIRS"];
+
     /// <summary>The manifest's name for a piece (its <c>pieces</c> key).</summary>
     public static string PieceKey(Piece p) => p switch
     {
@@ -94,7 +98,7 @@ internal static class CheckoutLayout
 
         /// <summary>The overrides set now, in piece order.</summary>
         public static IReadOnlyList<(string Variable, string Path)> Overrides() =>
-            Enum.GetValues<Piece>().Select(p => (v: OverrideVariable(p), x: Environment.GetEnvironmentVariable(OverrideVariable(p))))
+            Enum.GetValues<Piece>().Select(OverrideVariable).Concat(ProgramOverrides).Select(v => (v, x: Environment.GetEnvironmentVariable(v)))
                 .Where(t => t.x is { Length: > 0 } && !string.IsNullOrWhiteSpace(t.x)).Select(t => (t.v, t.x!)).ToList();
     }
 
@@ -126,7 +130,9 @@ internal static class CheckoutLayout
     // ---- the probe path rule
 
     /// <summary>The folder a program is built or installed in under <paramref name="harness"/>: <c>&lt;harness&gt;/&lt;name&gt;</c>
-    /// when the harness is an install root (it holds the manifest), else the checkout's <c>&lt;harness&gt;/&lt;name&gt;/bin/Release/net9.0</c>.</summary>
+    /// when the harness is an install root (it holds the manifest), else the checkout's <c>&lt;harness&gt;/&lt;name&gt;/bin/Release/net9.0</c>.
+    /// The checkout shape holds for the net9.0 programs runcontrol and the workbench launch; the Windows-targeted
+    /// builds (viewprobe, winrt-tts, the workbench itself) sit under net9.0-windows… and are never looked up here.</summary>
     public static string ProgramFolder(string harness, string name) =>
         File.Exists(Path.Combine(harness, ManifestName)) ? Path.Combine(harness, name) : Path.Combine(harness, name, "bin", "Release", "net9.0");
 
@@ -183,7 +189,9 @@ internal static class CheckoutLayout
         { m = null; why = $"the SkyWright install at {Fwd(root)} has an unreadable manifest ({ex.Message}); publish it again"; }
         if (m is not null)
         {
-            why = !m.Pieces.Values.Any(rel => string.Equals(Path.GetDirectoryName(Native(rel)), programFolder, StringComparison.OrdinalIgnoreCase))
+            // a program's folder: the folder of a listed program (the app, runcontrol, a probe, the server), not a data folder
+            why = !m.Pieces.Where(kv => kv.Key.StartsWith("program:", StringComparison.Ordinal) || kv.Key is "workbench" or "runcontrol" or "server")
+                    .Any(kv => string.Equals(Path.GetDirectoryName(Native(kv.Value)), programFolder, StringComparison.OrdinalIgnoreCase))
                 ? $"the folder {Fwd(Path.Combine(root, programFolder))} sits in the SkyWright install at {Fwd(root)} but is not one of its programs; run the install's own copy, or publish again"
                 : Complete(root, m);
             if (why is null) layout = new Layout(Kind.Installed, root, m);
@@ -206,9 +214,18 @@ internal static class CheckoutLayout
     public sealed record Manifest(string Commit, string HousecarlPin, string PublishedUtc,
                                   IReadOnlyDictionary<string, string> Pieces, IReadOnlyDictionary<string, string> Files)
     {
+        /// <summary>The manifest at <paramref name="path"/>; any shape it should not have is an <see cref="InvalidDataException"/>.</summary>
         public static Manifest Read(string path)
         {
-            var o = JsonNode.Parse(File.ReadAllText(path)) as JsonObject ?? throw new InvalidDataException("not a JSON object");
+            var text = File.ReadAllText(path);
+            try { return Parse(text); }
+            catch (Exception ex) when (ex is InvalidOperationException or FormatException or ArgumentException or JsonException or InvalidCastException)
+            { throw new InvalidDataException(ex.Message, ex); }
+        }
+
+        static Manifest Parse(string text)
+        {
+            var o = JsonNode.Parse(text) as JsonObject ?? throw new InvalidDataException("not a JSON object");
             if ((string?)o["kind"] != ManifestKind) throw new InvalidDataException($"its kind is not {ManifestKind}");
             if ((int?)o["schema"] != ManifestSchema) throw new InvalidDataException($"its schema is not {ManifestSchema}");
             static Dictionary<string, string> Map(JsonNode? n, string what) =>

@@ -145,10 +145,18 @@ public sealed class InstallLayoutTests : IDisposable
         Assert.Null(L.Locate(stray, out var strayWhy));
         Assert.Contains("is not one of its programs", strayWhy);
 
-        // an unreadable manifest
+        // a data folder is not a program's folder
+        Assert.Null(L.Locate(Path.Combine(root, "data"), out var dataWhy));
+        Assert.Contains("is not one of its programs", dataWhy);
+
+        // an unreadable manifest: another kind, and a field of the wrong type (a sentence, not an exception)
         File.WriteAllText(Path.Combine(root, L.ManifestName), "{ \"kind\": \"something-else\" }");
         Assert.Null(L.Locate(Path.Combine(root, "runcontrol"), out var badWhy));
         Assert.Contains("unreadable manifest", badWhy);
+        File.WriteAllText(Path.Combine(root, L.ManifestName), "{ \"kind\": \"skywright-install\", \"schema\": \"1\", \"pieces\": {}, \"files\": {} }");
+        Assert.Null(L.Locate(Path.Combine(root, "runcontrol"), out var typedWhy));
+        Assert.Contains("unreadable manifest", typedWhy);
+        Assert.Contains("unreadable", L.Verify(root).Problems.Single().Replace("cannot be read", "unreadable"));
     }
 
     [Fact]
