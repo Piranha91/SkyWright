@@ -116,6 +116,10 @@ internal static class Program
             throw new InvalidOperationException("a bundle's rows are shown on the load order they were measured on: open that profile on the Start tab first, then open the bundle.");
         if (Shell.Current is { } h && h.Session.Pending.Count > 0)
             throw new InvalidOperationException($"opening another bundle would drop {h.Session.Pending.Count} staged edit(s); write or undo them first.");
+        // the launcher's profile is the bundle's order, and so its write target too: the navmesh repair reads the order and
+        // writes under the launcher's Output Folder, as a run the launcher made does
+        if (l.Instance is not null && l.Profile is not null && l.Game is not null)
+            WorkbenchHost.ManualTarget = new WriteTarget(l.Instance, l.Profile, Path.Combine(l.Game, "Data"), l.Output);
         var opened = OpenBundle(new[] { "--bundle", dir, "--instance", inst, "--profile", prof, "--game", game });
         Shell.ShowTab("Conflicts");
         if (opened is null) return Shell.BannerText;
