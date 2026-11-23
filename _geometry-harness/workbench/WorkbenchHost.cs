@@ -404,6 +404,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         else _window.Dispatcher.BeginInvoke(Start, DispatcherPriority.Loaded);
         if (!Shell.Closed) Dispatcher.PushFrame(_frameLoop);
         _alive = false;
+        try { _preloadProcess?.Kill(); } catch (InvalidOperationException) { }   // a preload for a scene that is gone
         // the scene's asset owners are disposed when this loop returns: the prefetch stops reading through them first
         _prefetch?.Cancel();
         try { _prefetchTask.Wait(TimeSpan.FromSeconds(30)); } catch (AggregateException) { }
@@ -1081,7 +1082,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     internal object? LiveState() => _live.Available ? new
     {
         grids = _live.Grids, maxGrids = _live.MaxGrids, source = _opt.GridsToLoadSource, centre = _live.Centre is { } lg ? new[] { lg.X, lg.Y } : null,
-        sceneCell = _opt.Grid is { } sg ? new[] { sg.X, sg.Y } : null, follow = _follow,
+        sceneCell = _opt.Grid is { } sg ? new[] { sg.X, sg.Y } : null, follow = _follow, preload = _preloadOn,
+        preloading = _preloading is { } pl ? new[] { pl.X, pl.Y } : null, prepared = _opt.Reach.Count,
         held = _live.Held.Count, far = _live.FarOn ? _live.FarWidth : 0, farHeld = _live.FarHeld, farSource = _opt.LargeGridSource,
         lod = new { on = ViewLayers.LodOn && _lod is not null, why = _lodWhy, source = _lod?.Source, residentBlocks = _lod?.Blocks.Resident, pendingBlocks = _lod?.Blocks.Pending,
                     kinds = ViewLayers.LodKinds.ToDictionary(k => k.Name, k => ViewLayers.IsOn(k.Kind)) },
@@ -1181,7 +1183,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     readonly System.Diagnostics.Stopwatch _queueClock = new();
     int _queueBuilt;
     /// <summary>Loaded cells are still being built.</summary>
-    internal bool CellsBuilding => _queue.Count > 0;
+    internal bool CellsBuilding => _queue.Count > 0 || _preloading is not null;   // (a script step waits for a preload too)
 
     CancellationTokenSource? _prefetch;
     Task _prefetchTask = Task.CompletedTask;
@@ -1340,16 +1342,122 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         if (LiveCells.Follow(c, _eye.X, _eye.Y, 512f) is not { } to) { _beyondSaid = false; return; }
         if (LiveCells.MaxSquare(to, _opt.Reach) < _live.Grids)
         {
+            MaybePreload(to);
             if (!_beyondSaid)
             {
                 _beyondSaid = true;
-                var why = $"the camera is in cell {to.X},{to.Y}, past the cells this scene prepared, so the loaded cells stay around {c.X},{c.Y}; open a cell there to load around it";
+                var why = _preloading is { } p
+                    ? $"the camera is in cell {to.X},{to.Y}, past the cells this scene prepared; the cells around {p.X},{p.Y} are being prepared in the background, and the loaded cells follow once they are"
+                    : $"the camera is in cell {to.X},{to.Y}, past the cells this scene prepared, so the loaded cells stay around {c.X},{c.Y}; "
+                      + (_preloadOn ? "open a cell there to load around it" : "switch Preload cells on, or open a cell there, to load around it");
                 Say(why); Shell.SetBanner(why);
             }
             return;
         }
         _live.Centre = to;
         Shell.SetBanner(Replan($"the camera moved to cell {to.X},{to.Y}: loaded cells follow"));
+        MaybePreload(to);
+    }
+
+    // ---- preloading (viewprobe's LiveArea.cs): when the camera nears the edge of what the scene prepared, another viewprobe
+    // process prepares the area around it in the background, and its cells join the scene when it is done ------------------
+    bool _preloadOn = true;
+    (int X, int Y)? _preloading;
+    (int X, int Y)? _preloadFailedAt;
+    System.Diagnostics.Process? _preloadProcess;
+    /// <summary>Cells of room the prepared square keeps beyond the loaded and far squares before a preload starts.</summary>
+    internal const int PreloadMargin = 2;
+
+    /// <summary>Start preparing the area around <paramref name="at"/> when the prepared square leaves less than
+    /// <see cref="PreloadMargin"/> cells beyond the loaded square there, and none is being prepared.</summary>
+    void MaybePreload((int X, int Y) at)
+    {
+        if (!_preloadOn || _preloading is not null || _opt.MergeArea is null || SceneDirector.Order is not { } order || _window is null) return;
+        if (_preloadFailedAt == at) return;   // not again for the same cell: the camera moving on, or the toggle, tries again
+        // room for the loaded square and the margin, as much as one prepared area can give (the far grid takes what is left)
+        if (LiveCells.MaxSquare(at, _opt.Reach) >= Math.Min(_live.Grids + 2 * PreloadMargin, 2 * SceneDirector.LiveReach + 1)) return;
+        _preloading = at;
+        var dir = Path.Combine(_outDir, "preload");
+        Directory.CreateDirectory(dir);
+        var file = Path.Combine(dir, FormattableString.Invariant($"area_{at.X}_{at.Y}.bin"));
+        var psi = new System.Diagnostics.ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "viewprobe.exe"))
+        { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = dir };
+        foreach (var a in new[] { FormattableString.Invariant($"grid:{at.X},{at.Y}@{_opt.Worldspace}"), "--ring", SceneDirector.LiveReach.ToString(CultureInfo.InvariantCulture) }
+                     .Concat(order.Args()).Concat(new[] { "--prepare-out", file, "--no-nav", "--no-weather", "--size", "64", "--out", dir,
+                     "--eye", FormattableString.Invariant($"{at.X * 4096 + 2048},{at.Y * 4096 + 2048},20000"), "--look", FormattableString.Invariant($"{at.X * 4096 + 2048},{at.Y * 4096 + 2058},0") }))
+            psi.ArgumentList.Add(a);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var ui = _window.Dispatcher;
+        Say($"preloading the cells around {at.X},{at.Y} in the background (another viewprobe process)");
+        Task.Run(() =>
+        {
+            string? failed = null;
+            try
+            {
+                using var p = System.Diagnostics.Process.Start(psi)!;
+                _preloadProcess = p;
+                var err = p.StandardError.ReadToEndAsync();
+                var output = p.StandardOutput.ReadToEnd();
+                p.WaitForExit();
+                // the run's own words, kept beside the area: what it prepared, or why it did not
+                var log = Path.ChangeExtension(file, ".log");
+                File.WriteAllText(log, output + err.Result);
+                string Last(string text) => text.Split('\n').Select(l => l.Trim()).LastOrDefault(l => l.Length > 0) ?? "";
+                if (p.ExitCode != 0 || !File.Exists(file))
+                    failed = $"viewprobe stopped with exit code {p.ExitCode} without writing the area"
+                           + (Last(err.Result.Length > 0 ? err.Result : output) is { Length: > 0 } e ? $": {e}" : "") + $"; its output is in {log}";
+            }
+            catch (Exception ex) { failed = ex.Message; }
+            _preloadProcess = null;
+            ui.BeginInvoke(() => PreloadDone(at, file, failed, clock.Elapsed.TotalSeconds));
+        });
+    }
+
+    void PreloadDone((int X, int Y) at, string file, string? failed, double seconds)
+    {
+        _preloading = null;
+        if (!_alive) return;
+        _preloadFailedAt = failed is null ? null : at;
+        if (failed is not null)
+        {
+            var why = $"the cells around {at.X},{at.Y} could not be preloaded ({failed}); open a cell there to load around it";
+            Say(why); Shell.SetBanner(why);
+            return;
+        }
+        try
+        {
+            int joined = _opt.MergeArea!(file);
+            // keep the prepared cells near the camera and every cell drawn; the rest of the old area's memory goes
+            var centre = _live.Centre ?? at;
+            int keepOut = SceneDirector.LiveReach + PreloadMargin;
+            static int Ring((int X, int Y) a, (int X, int Y) b) => Math.Max(Math.Abs(a.X - b.X), Math.Abs(a.Y - b.Y));
+            // near the loaded square's centre or the new area's: the camera is between the two
+            int freed = _opt.ForgetCells?.Invoke(c => _live.Holds(c) || Ring(c, centre) <= keepOut || Ring(c, at) <= keepOut) ?? 0;
+            var said = FormattableString.Invariant($"preloaded {joined} cell(s) around {at.X},{at.Y} in {seconds:0.0} s in the background; {freed} far cell(s) released");
+            Say(said);
+            // the squares can be wider now (the far grid is cut to what is prepared): plan them again, building only what comes in
+            Shell.SetBanner(Replan(said));
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException)
+        {
+            var why = $"the preloaded cells around {at.X},{at.Y} could not be read ({ex.Message}); open a cell there to load around it";
+            Say(why); Shell.SetBanner(why);
+        }
+        finally { try { File.Delete(file); } catch (IOException) { } }
+        _beyondSaid = false;
+        FillGrids();
+        Invalidate("preload");   // the next frame's follow check moves the square if the camera is waiting past the old edge
+    }
+
+    /// <summary>Preload cells around the camera in the background, or not (each preloaded area holds a few hundred MB).</summary>
+    internal string SetPreload(bool on)
+    {
+        _preloadOn = on; _preloadFailedAt = null;
+        var said = on ? "Preload cells on: the cells around the camera are prepared in the background as it nears the edge of the prepared area"
+                      : "Preload cells off: the scene keeps the cells it prepared when it opened";
+        Say(said);
+        if (on && _live.Centre is { } c) MaybePreload(c);
+        return said;
     }
 
     /// <summary>Let the loaded square follow the camera, or hold it where it is. One sentence back.</summary>
@@ -1425,6 +1533,12 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                     + "cell builds the cells that come in and frees the ones that go out. Off holds them where they are." };
         follow.Click += (_, _) => Shell.SetBanner(SetFollow(follow.IsChecked == true));
         row.Children.Add(follow);
+        var preload = new System.Windows.Controls.Primitives.ToggleButton { Content = "Preload cells", IsChecked = _preloadOn, Margin = new Thickness(4, 2, 2, 2),
+            Padding = new Thickness(6, 1, 6, 1), Focusable = false,
+            ToolTip = "When the camera nears the edge of the area this scene prepared, prepare the area around it in the background (another viewprobe "
+                    + "process, about 10 to 15 s of CPU), so the loaded cells keep following. Each prepared area holds a few hundred MB; switch it off to keep memory down." };
+        preload.Click += (_, _) => Shell.SetBanner(SetPreload(preload.IsChecked == true));
+        row.Children.Add(preload);
         row.Children.Add(LodControl());
         return row;
     }

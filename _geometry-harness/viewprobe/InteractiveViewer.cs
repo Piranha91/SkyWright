@@ -203,6 +203,8 @@ sealed class InteractiveOptions
     public LiveSession? Live;                              // set by the build just before the host's loop; dead after it
     public Func<(int X, int Y), bool, LiveCell?>? BuildCell;   // build one cell of Reach (whole, or its large references only) into the live scene; null when it is not in Reach
     public Func<(int X, int Y), bool, bool, CancellationToken, int>? PrefetchCell;   // (cell, large only, in parallel): read its meshes and decode its textures, off the window's thread
+    public Func<string, int>? MergeArea;
+    public Func<Func<(int X, int Y), bool>, int>? ForgetCells;   // free the prepared inputs of the cells the predicate does not keep; returns how many                  // add a preloaded area's cells (LiveArea.cs) to Reach; returns how many joined
     public IReadOnlySet<(int X, int Y)> Reach = new HashSet<(int X, int Y)>();   // the cells the walk prepared: what BuildCell can add
     public IReadOnlySet<(int X, int Y)> Loaded = new HashSet<(int X, int Y)>();  // the cells the first build drew
     public IReadOnlyDictionary<FormKey, (int X, int Y)> CellGrids = new Dictionary<FormKey, (int X, int Y)>();   // each walked cell's square (from its references)

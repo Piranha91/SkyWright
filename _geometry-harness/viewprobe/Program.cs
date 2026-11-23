@@ -412,7 +412,8 @@ bool ringRefs = true;
 // most --ring-cap cells, the target's 3x3 always included. Terrain, water and full references are loaded in all of them,
 // beyond the game's ±2 grid too (the game draws LOD there); the console says how many cells and why any were cut.
 string ringMode = "1";
-bool liveScene = false;   // --live: a host adds and drops cells of the --ring square live (LiveScene.cs)
+bool liveScene = false;
+string? prepareOut = null;   // --prepare-out PATH: write the prepared --ring square as a live-scene area and stop (LiveArea.cs)   // --live: a host adds and drops cells of the --ring square live (LiveScene.cs)
 int ringReach = ViewProbe.VisibleCells.DefaultReach, ringCap = ViewProbe.VisibleCells.DefaultCap;
 HashSet<(int X, int Y)>? visibleSet = null;   // per shot: null = the ±1 ring
 // --large-refs-child union|none: which large-reference list a CHILD worldspace (a city) uses (WinningRefs.cs). union,
@@ -694,6 +695,7 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--no-cell-outline") cellOutline = false;
     else if (args[i] == "--no-ring-refs") ringRefs = false;
     else if (args[i] == "--lod") ViewProbe.DistantLodLayer.Requested = true;
+    else if (args[i] == "--prepare-out" && i + 1 < args.Length) { prepareOut = args[++i]; textured = true; ViewProbe.DistantLodLayer.Live = true; }   // the area is the textured build's preparation
     else if (args[i] == "--live") { liveScene = true; ViewProbe.DistantLodLayer.Live = true; }
     else if (args[i] == "--no-grass") ViewProbe.GrassLayer.Requested = false;
     else if (args[i] == "--grass") ViewProbe.GrassLayer.Requested = true;
@@ -1978,7 +1980,13 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     // earlier in the same plugin. Walks the load order with the same first-match semantics the
     // main walk used, and stops at the first hit (the defining master, usually plugin one).
     // ---------------------------------------------------------------------------------------
+    // a live scene's preloaded area names its centre as a square of a worldspace: grid:X,Y@WORLDSPACE (LiveArea.cs)
+    (int X, int Y, FormKey Ws)? gridTarget = null;
+    if (cellTarget.StartsWith("grid:", StringComparison.OrdinalIgnoreCase) && cellTarget[5..].Split('@') is [var gxy, var gws]
+        && gxy.Split(',') is [var gxs, var gys] && int.TryParse(gxs, out var gtx) && int.TryParse(gys, out var gty) && FormKey.TryFactory(gws, out var gwk))
+        gridTarget = (gtx, gty, gwk);
     bool TargetMatches(CellPlacements cp) =>
+        gridTarget is { } gt ? !cp.Interior && cp.Worldspace == gt.Ws && cp.Grid is { } cg && cg.X == gt.X && cg.Y == gt.Y :
         string.Equals(cp.CellEditorId, cellTarget, StringComparison.OrdinalIgnoreCase)
         || cp.Cell.ToString().Equals(cellTarget, StringComparison.OrdinalIgnoreCase)
         || cp.Cell.ID.ToString("X6").Equals(cellTarget.TrimStart('0'), StringComparison.OrdinalIgnoreCase);
@@ -3121,6 +3129,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         // What the native terrain reads beyond the sheets: LAND normals / colours per square and
         // each landscape diffuse's TXST normal map.
         var terrainExtras = new ViewProbe.NativeTerrainExtras();
+        // a live scene's way to build the grass ground of a preloaded area's cells (set in the terrain block)
+        Func<int, int, float[,], List<(int Quadrant, int Layer, bool Alpha, FormKey? Tex, int Painted, float MaxOpacity, float[]? Opacity)>, SkyRender.World.TerrainCell>? grassCellOf = null;
+        Dictionary<(int X, int Y), List<(int Quadrant, int Layer, bool Alpha, FormKey? Tex, int Painted, float MaxOpacity, float[]? Opacity)>>? liveCensus = null;
         // --interactive: hovering bare ground answers with the quadrant's painted layers. Assigned
         // inside the terrain block (it captures the walked LAND census); null on interiors.
         Func<float, float, string?>? terrainDescribeAt = null;
@@ -3387,10 +3398,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             // default; none for a cell without water).
             ViewProbe.GrassLayer.Cells.Clear();
             ViewProbe.GrassLayer.WaterHeights.Clear();
-            if (ViewProbe.GrassLayer.Requested && drawTerrain)
-                foreach (var ((gx, gy), _) in landWin.OrderBy(k => k.Key.Y).ThenBy(k => k.Key.X))
-                {
-                    var hgt = landHeights[(gx, gy)];
+            // one cell's grass ground; kept for a live scene, which builds the cells of a preloaded area with it (LiveArea.cs)
+            SkyRender.World.TerrainCell GrassCellOf(int gx, int gy, float[,] hgt,
+                List<(int Quadrant, int Layer, bool Alpha, FormKey? Tex, int Painted, float MaxOpacity, float[]? Opacity)> census)
+            {
                     var flat = new float[SkyRender.World.TerrainCell.Side * SkyRender.World.TerrainCell.Side];
                     for (int y = 0; y < SkyRender.World.TerrainCell.Side; y++)
                         for (int x = 0; x < SkyRender.World.TerrainCell.Side; x++)
@@ -3400,7 +3411,6 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                         Normals = terrainExtras.Normals.TryGetValue((gx, gy), out var gn) ? gn : null,
                         Colors = terrainExtras.Colors.TryGetValue((gx, gy), out var gc) ? gc : null,
                     };
-                    var census = landLayers.TryGetValue((gx, gy), out var cl) ? cl : new();
                     for (int q = 0; q < 4; q++)
                     {
                         var baseLayer = census.Where(l => !l.Alpha && l.Quadrant == q).Select(l => l.Tex).FirstOrDefault();
@@ -3415,7 +3425,13 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                             Layers = alpha,
                         };
                     }
-                    ViewProbe.GrassLayer.Cells.Add(gcell);
+                    return gcell;
+            }
+            grassCellOf = GrassCellOf; liveCensus = landLayers;
+            if (ViewProbe.GrassLayer.Requested && drawTerrain)
+                foreach (var ((gx, gy), _) in landWin.OrderBy(k => k.Key.Y).ThenBy(k => k.Key.X))
+                {
+                    ViewProbe.GrassLayer.Cells.Add(GrassCellOf(gx, gy, landHeights[(gx, gy)], landLayers.TryGetValue((gx, gy), out var cl) ? cl : new()));
                     if (cellWater.TryGetValue((gx, gy), out var cw) && cw.Has)
                     {
                         float wh = cw.Height != float.MaxValue ? cw.Height : wsDefaultWaterHeight;
@@ -5410,6 +5426,30 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         if (bosLayer is not null && bosSwapped > 0) fpCap.Add($"BOS {bosMode}: {bosSwapped} swapped ref(s), {bosRandomCount} random{(bosMode == "diff" ? " - tinted TEAL" : "")}");
         if (stateArm is not null) fpCap.Add($"STATE {stateArm.Name} {stateView}: {stateArrived} arrive, {stateDeparted} depart{(stateView == "diff" ? " - GREEN in, RED out" : "")}");
 
+        // --prepare-out (LiveArea.cs): this run prepares an area for a live scene running elsewhere; it writes the area and stops
+        if (prepareOut is not null)
+        {
+            if (interior || targetGrid is not { } areaCentre || visibleSet is not { } areaCells)
+            { Console.Error.WriteLine("--prepare-out prepares an exterior area: give an exterior cell (or grid:X,Y@WORLDSPACE) and --ring N."); return 2; }
+            var area = new ViewProbe.LiveArea { Centre = areaCentre, Worldspace = targetWorldspace, Cells = areaCells.ToHashSet(), Refs = scene.ToList() };
+            foreach (var (tex, tris) in terrainPatches) area.Patches[tex] = tris;
+            area.Layers.AddRange(terrainLayers);
+            area.Water.AddRange(waterPlanes);
+            foreach (var (g, h) in landHeights) area.LandHeights[g] = h;
+            foreach (var (g, n) in terrainExtras.Normals) area.Normals[g] = n;
+            foreach (var (g, c) in terrainExtras.Colors) area.Colors[g] = c;
+            if (liveCensus is not null) foreach (var (g, c) in liveCensus) area.Census[g] = c;
+            foreach (var (g, h) in ViewProbe.GrassLayer.WaterHeights) area.WaterHeights[g] = h;
+            area.Large.UnionWith(winWalk.LargeListedKeys(largeChildUnion));
+            foreach (var (k, c) in refCellOf) area.RefCells[k] = c;
+            foreach (var (k, g) in ViewProbe.LiveSlicer.CellGridsOf(refCellOf, winRef)) area.CellGrids[k] = g;
+            foreach (var (k, o) in refOutcome) area.Outcomes[k] = o;
+            foreach (var (k, t) in baseType) area.BaseTypes[k] = t;
+            foreach (var (k, u) in refUndrawnAt) area.Undrawn[k] = u;
+            area.Write(prepareOut);
+            Console.WriteLine($"   prepared area: {area.Cells.Count} cell(s) around {areaCentre.X},{areaCentre.Y}, {area.Refs.Count:N0} reference(s), {area.LandHeights.Count} cell(s) of land, written to {prepareOut}");
+            return 0;
+        }
         if (interactiveMode)
         {
             // Same build, different ending: the scene stays resident and the window opens. The
@@ -5512,14 +5552,50 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 // which square each walked cell is: where its references stand. A cell is named only when at least 80% of them
                 // stand in one square, which leaves out the worldspace's persistent cell (its references are everywhere) and
                 // a cell placing nothing.
-                iopt.CellGrids = refCellOf.Where(kv => winRef.ContainsKey(kv.Key))
-                    .GroupBy(kv => kv.Value, kv => ViewProbe.LiveSlicer.CellOf(winRef[kv.Key].Position.X, winRef[kv.Key].Position.Y))
-                    .Select(g => (Cell: g.Key, Total: g.Count(), Top: g.GroupBy(c => c).OrderByDescending(c => c.Count()).First()))
-                    .Where(x => x.Top.Count() >= 0.8 * x.Total)
-                    .ToDictionary(x => x.Cell, x => x.Top.Key);
+                iopt.CellGrids = ViewProbe.LiveSlicer.CellGridsOf(refCellOf, winRef);
                 if (cellKey is { } ck) ((Dictionary<FormKey, (int X, int Y)>)iopt.CellGrids)[ck] = liveGrid;
                 iopt.LandCells = new List<(int X, int Y)>();
                 Console.WriteLine($"   live scene: {reach.Count} cell(s) prepared; the host loads {grids}x{grids} of them ({gridsWhy}) and adds or drops cells live");
+                // a preloaded area (LiveArea.cs, prepared by another viewprobe process): its cells this scene did not prepare join
+                // the square BuildCell can add, with their land, grass ground and the walk's facts. Returns how many joined.
+                iopt.MergeArea = path =>
+                {
+                    var area = ViewProbe.LiveArea.Read(path);
+                    if (area.Worldspace != targetWorldspace)
+                        throw new InvalidDataException($"the prepared area is of worldspace {area.Worldspace}, not this scene's {targetWorldspace}.");
+                    var fresh = area.Cells.Where(c => !reach.Contains(c)).ToHashSet();
+                    live.Merge(area, fresh);
+                    foreach (var g in fresh)
+                    {
+                        if (area.LandHeights.TryGetValue(g, out var h)) landHeights[g] = h;
+                        if (area.Normals.TryGetValue(g, out var n)) terrainExtras.Normals[g] = n;
+                        if (area.Colors.TryGetValue(g, out var c)) terrainExtras.Colors[g] = c;
+                        if (area.WaterHeights.TryGetValue(g, out var wh)) ViewProbe.GrassLayer.WaterHeights[g] = wh;
+                        if (ViewProbe.GrassLayer.Requested && grassCellOf is not null && h is not null)
+                            allGrass.Add(grassCellOf(g.X, g.Y, h, area.Census.TryGetValue(g, out var cs) ? cs : new()));
+                        reach.Add(g);
+                    }
+                    foreach (var (k, o) in area.Outcomes) refOutcome.TryAdd(k, o);
+                    foreach (var (k, cl) in area.RefCells) refCellOf.TryAdd(k, cl);
+                    foreach (var (k, t) in area.BaseTypes) baseType.TryAdd(k, t);
+                    foreach (var (k, u) in area.Undrawn) refUndrawnAt.TryAdd(k, u);
+                    var grids = (Dictionary<FormKey, (int X, int Y)>)iopt.CellGrids;
+                    foreach (var (k, g) in area.CellGrids) if (fresh.Contains(g)) grids.TryAdd(k, g);
+                    return fresh.Count;
+                };
+                iopt.ForgetCells = keep =>
+                {
+                    var gone = reach.Where(c => !keep(c)).ToList();
+                    live.Forget(gone);
+                    foreach (var g in gone)
+                    {
+                        landHeights.Remove(g); terrainExtras.Normals.Remove(g); terrainExtras.Colors.Remove(g);
+                        ViewProbe.GrassLayer.WaterHeights.Remove(g); reach.Remove(g);
+                    }
+                    var goneSet = gone.ToHashSet();
+                    allGrass.RemoveAll(c => goneSet.Contains((c.GridX, c.GridY)));
+                    return gone.Count;
+                };
                 iopt.PrefetchCell = (cell, largeOnly, parallel, ct) => iopt.Live is { } ps && reach.Contains(cell)
                     ? ViewProbe.TexturedScene.Prefetch(ps, largeOnly ? live.LargeOf(cell) : live.For(new[] { cell }).Refs, parallel, ct) : 0;
                 iopt.BuildCell = (cell, largeOnly) =>

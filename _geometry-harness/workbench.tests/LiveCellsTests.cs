@@ -92,6 +92,45 @@ public class LiveCellsTests
         Assert.Equal((0, 0), LiveCells.Follow((1, 0), 4096 - 600, 2000, 512));
     }
 
+    [Fact]
+    public void A_prepared_area_reads_back_as_it_was_written_and_a_wrong_file_is_refused()
+    {
+        var dir = Directory.CreateTempSubdirectory("live-area").FullName;
+        try
+        {
+            var a = new LiveArea { Centre = (3, -2), Worldspace = new FormKey(ModKey.FromNameAndExtension("Skyrim.esm"), 0x3C) };
+            a.Cells.UnionWith(LiveCells.Square((3, -2), 3));
+            a.Refs.Add(At(7, 12500, -8000) with { BaseEditorId = "Rock01", StateChange = -1 });
+            a.Patches["t.dds"] = new() { (new(1, 2, 3), new(4, 5, 6), new(7, 8, 9)) };
+            a.Layers.Add(("l.dds", new() { (new(1, 1, 1), new(2, 2, 2), new(3, 3, 3), 0.25f, 0.5f, 0.75f) }));
+            var hs = new float[33, 33]; hs[4, 5] = 123.5f; a.LandHeights[(3, -2)] = hs;
+            a.Census[(3, -2)] = new() { (1, 0, true, a.Worldspace, 10, 0.8f, new[] { 0.1f, 0.2f }) };
+            a.WaterHeights[(3, -2)] = -14000f;
+            a.Large.Add(a.Refs[0].RefKey);
+            a.Outcomes[a.Refs[0].RefKey] = ("drawn", "Rock01");
+            a.Undrawn[a.Refs[0].RefKey] = (new Vec3(1, 2, 3), new Vec3(0, 0, 1));
+            var path = Path.Combine(dir, "area.bin");
+            a.Write(path);
+
+            var b = LiveArea.Read(path);
+            Assert.Equal(a.Centre, b.Centre);
+            Assert.Equal(a.Worldspace, b.Worldspace);
+            Assert.Equal(9, b.Cells.Count);
+            Assert.Equal(a.Refs[0], b.Refs[0]);
+            Assert.Equal(a.Patches["t.dds"], b.Patches["t.dds"]);
+            Assert.Equal(a.Layers[0].Tris, b.Layers[0].Tris);
+            Assert.Equal(123.5f, b.LandHeights[(3, -2)][4, 5]);
+            Assert.Equal(new[] { 0.1f, 0.2f }, b.Census[(3, -2)][0].Opacity);
+            Assert.Equal(-14000f, b.WaterHeights[(3, -2)]);
+            Assert.Contains(a.Refs[0].RefKey, b.Large);
+            Assert.Equal(("drawn", (string?)"Rock01"), b.Outcomes[a.Refs[0].RefKey]);
+
+            File.WriteAllText(Path.Combine(dir, "other.bin"), "not an area");
+            Assert.Throws<InvalidDataException>(() => LiveArea.Read(Path.Combine(dir, "other.bin")));
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
     static SceneRef At(uint id, float x, float y) =>
         new("meshes\\test.nif", new Vec3(x, y, 0), new Vec3(0, 0, 0), 1f, false, RefKey: new FormKey(ModKey.FromNameAndExtension("Test.esp"), id));
 

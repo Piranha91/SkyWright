@@ -65,7 +65,7 @@ internal sealed class LiveSlicer
     readonly Dictionary<(int X, int Y), Dictionary<string, List<(V3, V3, V3)>>> _patches = new();
     readonly Dictionary<(int X, int Y), List<(string Diffuse, List<(V3 A, V3 B, V3 C, float Oa, float Ob, float Oc)> Tris)>> _layers = new();
     readonly Dictionary<(int X, int Y), List<WaterPlane>> _water = new();
-    readonly IReadOnlySet<Mutagen.Bethesda.Plugins.FormKey> _large;
+    readonly HashSet<Mutagen.Bethesda.Plugins.FormKey> _large;
 
     internal static (int X, int Y) CellOf(float x, float y) => ((int)MathF.Floor(x / 4096f), (int)MathF.Floor(y / 4096f));
 
@@ -74,7 +74,7 @@ internal sealed class LiveSlicer
         IReadOnlyList<(string Diffuse, List<(V3 A, V3 B, V3 C, float Oa, float Ob, float Oc)> Tris)> layers,
         IReadOnlyList<WaterPlane> water, IReadOnlySet<Mutagen.Bethesda.Plugins.FormKey>? large = null)
     {
-        _large = large ?? new HashSet<Mutagen.Bethesda.Plugins.FormKey>();
+        _large = large is null ? new() : new(large);
         foreach (var r in refs) Bucket(_refs, CellOf(r.Position.X, r.Position.Y)).Add(r);
         foreach (var (diffuse, tris) in patches)
             foreach (var t in tris)
@@ -93,6 +93,38 @@ internal sealed class LiveSlicer
     }
 
     static List<T> Bucket<K, T>(Dictionary<K, List<T>> d, K k) where K : notnull => d.TryGetValue(k, out var l) ? l : d[k] = new List<T>();
+
+    /// <summary>A preloaded area's cells (LiveArea.cs) join: only <paramref name="cells"/>, the ones this slicer did not have.</summary>
+    internal void Merge(LiveArea area, IReadOnlySet<(int X, int Y)> cells)
+    {
+        var other = new LiveSlicer(area.Refs, area.Patches, area.Layers, area.Water);
+        foreach (var c in cells)
+        {
+            if (other._refs.TryGetValue(c, out var r)) _refs[c] = r;
+            if (other._patches.TryGetValue(c, out var p)) _patches[c] = p;
+            if (other._layers.TryGetValue(c, out var l)) _layers[c] = l;
+            if (other._water.TryGetValue(c, out var w)) _water[c] = w;
+        }
+        _large.UnionWith(area.Large);
+    }
+
+    /// <summary>Forget the prepared inputs of <paramref name="cells"/> (a preloaded area's memory, once the camera has gone).</summary>
+    internal void Forget(IEnumerable<(int X, int Y)> cells)
+    {
+        foreach (var c in cells) { _refs.Remove(c); _patches.Remove(c); _layers.Remove(c); _water.Remove(c); }
+    }
+
+    /// <summary>Which square each walked cell is: where its references stand. A cell is named only when at least 80% of them
+    /// stand in one square, which leaves out the worldspace's persistent cell (its references are everywhere) and a cell
+    /// placing nothing.</summary>
+    internal static Dictionary<Mutagen.Bethesda.Plugins.FormKey, (int X, int Y)> CellGridsOf(
+        IReadOnlyDictionary<Mutagen.Bethesda.Plugins.FormKey, Mutagen.Bethesda.Plugins.FormKey> refCells,
+        IReadOnlyDictionary<Mutagen.Bethesda.Plugins.FormKey, HousecarlCore.PlacedRef> placed) =>
+        refCells.Where(kv => placed.ContainsKey(kv.Key))
+            .GroupBy(kv => kv.Value, kv => CellOf(placed[kv.Key].Position.X, placed[kv.Key].Position.Y))
+            .Select(g => (Cell: g.Key, Total: g.Count(), Top: g.GroupBy(c => c).OrderByDescending(c => c.Count()).First()))
+            .Where(x => x.Top.Count() >= 0.8 * x.Total)
+            .ToDictionary(x => x.Cell, x => x.Top.Key);
 
     /// <summary>The large references placed in <paramref name="cell"/> (the far grid's share of it).</summary>
     internal List<SceneRef> LargeOf((int X, int Y) cell) =>
