@@ -102,13 +102,21 @@ internal static class LoadOrderRules
 /// order file under the Work Folder, and the scene is rebuilt on it.</summary>
 internal static class LoadOrderPanel
 {
-    static readonly TextBlock Title = new() { FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(6, 6, 6, 0) };
-    static readonly TextBlock Said = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(6, 2, 6, 2), Foreground = Theme.Brush(Theme.Dim) };
-    static readonly TextBox Find = new() { MinWidth = 120, ToolTip = "list only plugins whose name holds this (any case)" };
-    static readonly CheckBox OnlyEditing = new() { Content = "only plugins that edit the selection", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
-    static readonly Button AllBack = new() { Content = "Switch all back on", Margin = new Thickness(6, 2, 6, 2), HorizontalAlignment = HorizontalAlignment.Left, IsEnabled = false,
+    static TextBlock? _title;
+    static TextBlock Title => _title ??= new() { FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(6, 6, 6, 0) };
+    static TextBlock? _said;
+    static TextBlock Said => _said ??= new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(6, 2, 6, 2), Foreground = Theme.Brush(Theme.Dim) };
+    static TextBox? _find;
+    static TextBox Find => _find ??= new() { MinWidth = 120, ToolTip = "list only plugins whose name holds this (any case)" };
+    static CheckBox? _onlyediting;
+    static CheckBox OnlyEditing => _onlyediting ??= new() { Content = "only plugins that edit the selection", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
+    static Button? _allback;
+    static Button AllBack => _allback ??= new() { Content = "Switch all back on", Margin = new Thickness(6, 2, 6, 2), HorizontalAlignment = HorizontalAlignment.Left, IsEnabled = false,
                                              ToolTip = "show the scene on the whole load order again" };
-    static readonly ListBox List = new() { BorderThickness = new Thickness(0), Margin = new Thickness(2, 2, 2, 2) };
+    static ListBox? _list;
+    static ListBox List => _list ??= new() { BorderThickness = new Thickness(0), Margin = new Thickness(2, 2, 2, 2) };
+    // the controls are made when first used, by Build on the window's thread: a static field made at the class's first
+    // touch would belong to whatever thread touched it first (a selection's mark update)
     static UIElement? _built;
 
     static SceneRequest? _base;                     // the request the scene was asked with, on its whole load order
