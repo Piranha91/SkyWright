@@ -332,7 +332,7 @@ internal static class Shell
     internal static string? ScenePolicyRefusal => _scenePolicy.Value.Refusal;
     static readonly Lazy<(SceneKeyPolicy? Policy, string? Refusal)> _scenePolicy = new(() =>
     {
-        // WB_SCENE_POLICY, else the install's housecarl/ or the checkout's pinned houseCARL, whose reporting skill owns the policy
+        // WB_SCENE_POLICY, else the build's Data\\scene-policy.json, copied from the pinned houseCARL's reporting skill, which owns it
         string? path;
         try { path = Program.Piece(HarnessShared.CheckoutLayout.Piece.ScenePolicy, "reporting skill's scene-policy.json"); }
         catch (InvalidOperationException ex) { return (null, ex.Message); }

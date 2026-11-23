@@ -8,8 +8,8 @@ namespace Workbench;
 /// This is the one place that knows its command lines: the run, the bundle check, a probe build's digest, and a patch's
 /// population.
 ///
-/// Variables: <c>WB_RUNCONTROL</c> names runcontrol.exe, and <c>WB_HARNESS</c> the folder the programs sit under; by
-/// default both come from the layout the workbench sits in (an install, or its checkout: see HarnessShared.CheckoutLayout).
+/// Variables: <c>WB_RUNCONTROL</c> names runcontrol.exe, and <c>WB_HARNESS</c> the build folder the programs sit under;
+/// by default both come from the build the workbench sits in (see HarnessShared.CheckoutLayout).
 /// <c>WB_PIPELINE_CMD</c> is the test seam for the run: it replaces the program started, which gets the same arguments,
 /// <c>run --entry … --machine … --out … --through bundle --reuse-preparation-from …</c>.</summary>
 internal sealed class RunEngine
@@ -29,7 +29,7 @@ internal sealed class RunEngine
     {
         var exe = _exe ?? Program.Piece(HarnessShared.CheckoutLayout.Piece.Runcontrol, "built-in run engine runcontrol.exe");
         if (!File.Exists(exe))
-            throw new InvalidOperationException($"the built-in run engine is not at '{exe}'; build it (dotnet build _geometry-harness/runcontrol -c Release) or publish an install, or set WB_RUNCONTROL to runcontrol.exe.");
+            throw new InvalidOperationException($"the built-in run engine is not at '{exe}'; build the solution (scripts\\build.ps1), or set WB_RUNCONTROL to runcontrol.exe.");
         return exe;
     }
 
@@ -44,7 +44,7 @@ internal sealed class RunEngine
     {
         if (Environment.GetEnvironmentVariable(HarnessShared.CheckoutLayout.OverrideVariable(HarnessShared.CheckoutLayout.Piece.Harness)) is { Length: > 0 } h) return h;
         return _exe is not null ? HarnessShared.CheckoutLayout.HarnessOf(_exe)
-            : Program.Piece(HarnessShared.CheckoutLayout.Piece.Harness, "folder the programs sit under (an install, or a checkout's _geometry-harness)");
+            : Program.Piece(HarnessShared.CheckoutLayout.Piece.Harness, "build folder the programs sit under (bin\\<Configuration>\\<.NET version>)");
     }
 
     /// <summary>The engine's own command: it writes UTF-8, and its run records go where the caller keeps them.</summary>

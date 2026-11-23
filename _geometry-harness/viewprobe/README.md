@@ -619,8 +619,8 @@ run produces should land back in it.
 1. the probe's own flags — `--instance`, `--profile`, `--game`, `--roots`;
 2. environment — `HOUSECARL_MO2_INSTANCE`, `HOUSECARL_MO2_PROFILE`, `HOUSECARL_GAME_PATH`,
    `HOUSECARL_DOWNLOAD_POOL`, `HOUSECARL_SEVENZIP`, `HOUSECARL_SEARCH_ROOTS`;
-3. a JSON config — `HOUSECARL_HARNESS_CONFIG` names it outright, otherwise `harness.local.json`
-   found by walking up from the running binary. Copy `harness.local.example.json` to start.
+3. a JSON config, which `HOUSECARL_HARNESS_CONFIG` names (there is no search for one: the probes run from a
+   build folder, `bin\<Configuration>\...`, and never look around it). Copy `harness.local.example.json` to start.
 4. nothing → exit 2, naming every way to set it.
 
 **The instance is never a default.** The config's `instance` is not used when a run names none: a
@@ -634,8 +634,7 @@ User or Machine level refuses with `instance-env-persistent`.
 
 **Keep the config outside this checkout.** A file naming your MO2 instance, profile and drive
 layout is a fact about your mod setup, not about the tool; `HOUSECARL_HARNESS_CONFIG` exists so it
-can live with that setup. `harness.local.json` beside the harness works too and is gitignored, but
-it is the fallback, not the intent.
+can live with that setup.
 
 Windows paths in that JSON want **forward slashes** — a lone backslash is an invalid JSON escape,
 and the parser error for it is unhelpful enough that the loader adds its own hint.

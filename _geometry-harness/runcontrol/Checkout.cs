@@ -1,16 +1,16 @@
 namespace RunControl;
 
-/// <summary>The SkyWright layout this program sits in (an install, or the checkout it was built in), and the tools and
+/// <summary>The SkyWright build this program sits in (bin\\<Configuration>\\<.NET version>), and the tools and
 /// data the stages take from it. Where each piece is belongs to <see cref="HarnessShared.CheckoutLayout"/>; this class
 /// only asks it. runcontrol's own flags (--registry, --harness, --reader-cmd) are its overrides.</summary>
 public static class Checkout
 {
     static HarnessShared.CheckoutLayout.Layout? _layout;
 
-    /// <summary>The layout: the install beside this program's folder, else the checkout above it.</summary>
+    /// <summary>The build this program sits in (Tools\\runcontrol, two folders below the build's root).</summary>
     internal static HarnessShared.CheckoutLayout.Layout Layout => _layout ??= Find();
 
-    /// <summary>The layout's root: the install root, or the folder holding SkyWright.sln.</summary>
+    /// <summary>The build's root: bin\\<Configuration>\\<.NET version>.</summary>
     public static string Root => PyPath.Resolve(Layout.Root);
 
     public static string Harness => PyPath.Resolve(Layout.Harness);

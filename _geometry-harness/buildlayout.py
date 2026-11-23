@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import os
-from functools import lru_cache
 from pathlib import Path
 
 CHECKOUT = Path(__file__).resolve().parent.parent
@@ -23,22 +22,45 @@ def configuration(config: str | None = None) -> str:
     return config or os.environ.get("SKYWRIGHT_CONFIG") or "Release"
 
 
-@lru_cache(maxsize=None)
+_hits: dict[str, tuple[Path, dict]] = {}
+
+
 def _found(config: str) -> tuple[Path, dict] | None:
+    """The one build of a configuration and its marker, or None. Found builds are remembered; a miss is looked
+    for again next time, so a build made later in the same process is seen. Never raises: a caller's own
+    "not built at <path>" sentence says what is wrong, through the placeholder folder names below."""
+    if config in _hits:
+        return _hits[config]
     hits = sorted((CHECKOUT / "bin" / config).glob(f"*/{MARKER}"))
-    if not hits:
+    if len(hits) != 1:
         return None
+    try:
+        spec = json.loads(hits[0].read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    _hits[config] = (hits[0].parent, spec)
+    return _hits[config]
+
+
+def why_no_build(config: str | None = None) -> str | None:
+    """One sentence when a configuration has no usable build, else None."""
+    cfg = configuration(config)
+    if _found(cfg):
+        return None
+    hits = sorted((CHECKOUT / "bin" / cfg).glob(f"*/{MARKER}"))
     if len(hits) > 1:
-        raise RuntimeError(f"more than one SkyWright {config} build under {CHECKOUT / 'bin' / config} "
-                           f"({', '.join(str(h.parent) for h in hits)}); delete the stale one.")
-    return hits[0].parent, json.loads(hits[0].read_text(encoding="utf-8"))
+        return (f"there is more than one SkyWright {cfg} build under {CHECKOUT / 'bin' / cfg} "
+                f"({', '.join(h.parent.name for h in hits)}); delete the stale one.")
+    if hits:
+        return f"the marker {hits[0]} cannot be read; build the solution again (scripts/build.ps1)."
+    return f"there is no SkyWright {cfg} build under {CHECKOUT / 'bin' / cfg}; build the solution (scripts/build.ps1)."
 
 
 def root(config: str | None = None) -> Path:
-    """The build folder (SkyWright.exe's folder) of a configuration."""
+    """The build folder (SkyWright.exe's folder) of a configuration; without one, a folder whose name says so."""
     cfg = configuration(config)
     found = _found(cfg)
-    return found[0] if found else CHECKOUT / "bin" / cfg / f"(no {cfg} build: run scripts/build.ps1)"
+    return found[0] if found else CHECKOUT / "bin" / cfg / f"no-usable-{cfg}-build-run-scripts-build.ps1"
 
 
 def _spec(config: str | None) -> dict | None:
@@ -95,7 +117,7 @@ def piece_under(build_root: Path | str, key: str) -> Path:
 # The marker a test writes into a fake build folder when no real build exists to copy it from. Directory.Build.props
 # owns the real one; this copy only stands in so tests can plant programs without a build.
 _FALLBACK_MARKER = {
-    "kind": "skywright-build", "app": "SkyWright.exe", "program": "Probes/{name}/{name}.exe",
+    "kind": "skywright-build", "configuration": "Release", "framework": "net9.0-windows10.0.19041.0", "app": "SkyWright.exe", "program": "Probes/{name}/{name}.exe",
     "tool": "Tools/{name}/{name}.exe", "tools": ["runcontrol", "housecarl-mcp"],
     "server": "Tools/housecarl-mcp/housecarl-mcp.exe", "corpus": "Tools/housecarl-mcp/corpus.json",
     "registry": "Data/check-registry.json", "severity": "Data/workbench-severity.json",

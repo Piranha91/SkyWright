@@ -95,7 +95,7 @@ internal static class HarnessTarget
         if (flag is not null)
             Console.Error.WriteLine($"  * pass {flag} \"D:\\one;E:\\two\" on the command line");
         Console.Error.WriteLine("  * set HOUSECARL_SEARCH_ROOTS to a semicolon-separated list");
-        Console.Error.WriteLine($"  * add to {ConfigName}:  {{ \"searchRoots\": [\"D:\\\\one\", \"E:\\\\two\"] }}");
+        Console.Error.WriteLine($"  * add to the config HOUSECARL_HARNESS_CONFIG names:  {{ \"searchRoots\": [\"D:\\\\one\", \"E:\\\\two\"] }}");
         Console.Error.WriteLine($"    looked in: {SearchedDescription()}");
         Environment.Exit(2);
         return value;   // unreachable
@@ -161,7 +161,7 @@ internal static class HarnessTarget
         if (flag is not null)
             Console.Error.WriteLine($"  * pass {flag} <value> on the command line");
         Console.Error.WriteLine($"  * set the {env} environment variable");
-        Console.Error.WriteLine($"  * create {ConfigName} beside the harness (searched upward from the binary):");
+        Console.Error.WriteLine($"  * put it in a JSON config (copy {ConfigName.Replace(".json", ".example.json")}) and point HOUSECARL_HARNESS_CONFIG at that file:");
         Console.Error.WriteLine($"        {{ \"{key}\": \"...\" }}");
         Console.Error.WriteLine($"    looked in: {SearchedDescription()}");
         Environment.Exit(2);
@@ -315,8 +315,8 @@ internal static class HarnessTarget
         // HOUSECARL_HARNESS_CONFIG names the file outright, and is the way to keep it OUTSIDE this
         // repo entirely. That matters: this repo is the TOOL and is meant to be shared, while a
         // config naming your MO2 instance, profile and drive layout is a fact about your own mod
-        // setup and belongs with it. The upward walk below is only a convenience for a checkout
-        // being used on its own.
+        // setup and belongs with it. It is the only way: programs run from a build folder and never
+        // search the checkout around it (CheckoutLayout), so there is no file found by walking up.
         var explicitPath = Environment.GetEnvironmentVariable("HOUSECARL_HARNESS_CONFIG");
         if (!string.IsNullOrWhiteSpace(explicitPath))
         {
@@ -332,23 +332,7 @@ internal static class HarnessTarget
             return;
         }
 
-        // Walk up from the running binary: a probe executes out of
-        // <probe>\bin\<cfg>\<tfm>\, so the harness root is a few levels above.
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        var looked = new System.Collections.Generic.List<string>();
-        while (dir is not null)
-        {
-            var candidate = Path.Combine(dir.FullName, ConfigName);
-            looked.Add(dir.FullName);
-            if (File.Exists(candidate))
-            {
-                _searched = candidate;
-                ReadConfigFile(candidate);
-                return;
-            }
-            dir = dir.Parent;
-        }
-        _searched = string.Join(", ", looked);
+        _searched = "HOUSECARL_HARNESS_CONFIG, which is not set";
     }
 
     static void ReadConfigFile(string path)

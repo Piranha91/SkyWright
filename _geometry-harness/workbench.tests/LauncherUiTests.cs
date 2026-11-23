@@ -277,7 +277,7 @@ public sealed class LauncherUiTests : IDisposable
                                            () => RunEngine.OfBuiltIn(gone).PackageDigest(_root, _root), () => RunEngine.OfBuiltIn(gone).ControllerExe() })
         {
             var ex = Assert.Throws<InvalidOperationException>(act);
-            Assert.Equal($"the built-in run engine is not at '{gone}'; build it (dotnet build _geometry-harness/runcontrol -c Release) or publish an install, or set WB_RUNCONTROL to runcontrol.exe.", ex.Message);
+            Assert.Equal($"the built-in run engine is not at '{gone}'; build the solution (scripts\\build.ps1), or set WB_RUNCONTROL to runcontrol.exe.", ex.Message);
         }
     }
 

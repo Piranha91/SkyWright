@@ -30,7 +30,7 @@ navedit --selftest
     changed keeps its winner's grid and box;
   - the patch carries no other navmesh, and every carried record equals its winner.
 
-The profile comes from the flags, then the environment and `harness.local.json`, as for the other probes.
+The profile comes from the flags, then the environment and the config `HOUSECARL_HARNESS_CONFIG` names, as for the other probes.
 
 EDITS.json holds one edit per navmesh, each of one kind:
 

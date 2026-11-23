@@ -179,7 +179,7 @@ internal sealed class WorldIndex : IDisposable
     {
         var full = Path.GetFullPath(corpusPath);
         if (!File.Exists(full))
-            throw new InvalidOperationException($"the houseCARL rulebook is not at '{full}', so record types cannot be named; run the generator (src/housecarl-generator) or set WB_CORPUS to corpus.json.");
+            throw new InvalidOperationException($"the houseCARL rulebook is not at '{full}', so record types cannot be named; run scripts\\build.ps1 -Rulebook, or set WB_CORPUS to corpus.json.");
         var written = File.GetLastWriteTimeUtc(full);
         lock (SignatureGate)
         {

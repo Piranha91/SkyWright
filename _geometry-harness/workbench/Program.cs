@@ -7,14 +7,14 @@ namespace Workbench;
 /// <c>viewprobe --interactive</c> takes), then hands it to the workbench window instead of the fly-through.</summary>
 internal static class Program
 {
-    /// <summary>A piece this workbench takes from its layout: its WB_* override, else the install beside the workbench,
+    /// <summary>A piece this workbench takes from its layout: its WB_* override, else the build the workbench sits in,
     /// else the checkout it was built in (<see cref="HarnessShared.CheckoutLayout"/> owns where). One sentence when none.</summary>
     internal static string Piece(HarnessShared.CheckoutLayout.Piece p, string what) => HarnessShared.CheckoutLayout.Resolve(p, what);
 
-    /// <summary>houseCARL's server: WB_SERVER, else the install's housecarl-mcp, else the one built in the checkout's pinned houseCARL.</summary>
+    /// <summary>houseCARL's server: WB_SERVER, else the build's Tools\\housecarl-mcp (built from the pinned houseCARL).</summary>
     internal static string ServerExe() => Piece(HarnessShared.CheckoutLayout.Piece.Server, "housecarl-mcp.exe it should use");
 
-    /// <summary>The rulebook the server reads: WB_CORPUS, else the install's (beside its server), else the checkout's generated/corpus.json.</summary>
+    /// <summary>The rulebook the server reads: WB_CORPUS, else the build's (beside its server in Tools\\housecarl-mcp).</summary>
     internal static string Corpus() => Piece(HarnessShared.CheckoutLayout.Piece.Corpus, "rulebook corpus.json");
 
     /// <summary>--bundle DIR [--arm A]: verify and read the bundle, rank its rows, and turn the cells its rows sit in into

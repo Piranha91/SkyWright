@@ -35,18 +35,25 @@
        the marker that names the layout. The app's project references the server project so it is built first. -->
   <Target Name="SkyWrightLayout" AfterTargets="Build" Condition="'$(MSBuildProjectName)' == 'workbench'">
     <PropertyGroup>
-      <_SwServerOut>$(HousecarlSrc)housecarl-mcp\bin\$(SkyWrightConfiguration)\net9.0\</_SwServerOut>
       <_SwCorpus>$(HousecarlRoot)generated\corpus.json</_SwCorpus>
       <_SwScenePolicy>$(HousecarlRoot).claude\skills\evaluation-reporting\references\scene-policy.json</_SwScenePolicy>
       <_SwJson>{ "kind": "skywright-build", "configuration": "$(SkyWrightConfiguration)", "framework": "$(SkyWrightFramework)", "app": "SkyWright.exe", "program": "$(SkyWrightProbes)/{name}/{name}.exe", "tool": "$(SkyWrightTools)/{name}/{name}.exe", "tools": ["runcontrol", "housecarl-mcp"], "server": "$(SkyWrightTools)/housecarl-mcp/housecarl-mcp.exe", "corpus": "$(SkyWrightTools)/housecarl-mcp/corpus.json", "registry": "$(SkyWrightData)/check-registry.json", "severity": "$(SkyWrightData)/workbench-severity.json", "scenePolicy": "$(SkyWrightData)/scene-policy.json" }</_SwJson>
+    </PropertyGroup>
+    <MSBuild Projects="$(HousecarlSrc)housecarl-mcp\housecarl-mcp.csproj" Targets="GetTargetPath" Properties="Configuration=$(SkyWrightConfiguration)">
+      <Output TaskParameter="TargetOutputs" PropertyName="_SwServerDll" />
+    </MSBuild>
+    <PropertyGroup>
+      <_SwServerOut>$([System.IO.Path]::GetDirectoryName($(_SwServerDll)))\</_SwServerOut>
     </PropertyGroup>
     <ItemGroup>
       <_SwServerFiles Include="$(_SwServerOut)**\*" />
       <_SwDataFiles Include="$(MSBuildThisFileDirectory)data\*" />
     </ItemGroup>
+    <Error Condition="'$([System.IO.Path]::GetFullPath($(OutDir)))' != '$([System.IO.Path]::GetFullPath($(SkyWrightLayoutRoot)))'" Text="the app was built to $(OutDir), but SkyWright's layout is $(SkyWrightLayoutRoot); build without -o or OutputPath (scripts\build.ps1), so the app, its programs and its marker stay together." />
     <Error Condition="'@(_SwServerFiles)' == ''" Text="houseCARL's server is not built at $(_SwServerOut); build the solution (it builds the server first)." />
     <Copy SourceFiles="@(_SwServerFiles)" DestinationFiles="@(_SwServerFiles->'$(SkyWrightLayoutRoot)$(SkyWrightTools)\housecarl-mcp\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
     <Warning Condition="!Exists('$(_SwCorpus)')" Text="the rulebook $(_SwCorpus) is missing, so SkyWright cannot write patches; run scripts\build.ps1, which makes it." />
+    <Delete Condition="!Exists('$(_SwCorpus)')" Files="$(SkyWrightLayoutRoot)$(SkyWrightTools)\housecarl-mcp\corpus.json" />
     <Copy Condition="Exists('$(_SwCorpus)')" SourceFiles="$(_SwCorpus)" DestinationFolder="$(SkyWrightLayoutRoot)$(SkyWrightTools)\housecarl-mcp\" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_SwDataFiles)" DestinationFolder="$(SkyWrightLayoutRoot)$(SkyWrightData)\" SkipUnchangedFiles="true" />
     <Copy Condition="Exists('$(_SwScenePolicy)')" SourceFiles="$(_SwScenePolicy)" DestinationFolder="$(SkyWrightLayoutRoot)$(SkyWrightData)\" SkipUnchangedFiles="true" />
