@@ -1432,7 +1432,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var dataDir = Path.Combine(_outDir, "housecarl-data");
         var corpus = Environment.GetEnvironmentVariable("WB_CORPUS") is { Length: > 0 } cp ? cp : Program.DefaultCorpus();
         _writer = await PatchWriter.StartAsync(exe, target, dataDir, corpus, Say);
-        UpdateStatus();
+        // the await may resume off the window's thread (the context read waits on this task from the pool), and the status
+        // line belongs to the window: it is updated there
+        if (_window?.Dispatcher is { } d && !d.CheckAccess()) _ = d.BeginInvoke(UpdateStatus); else UpdateStatus();
         return _writer;
     }
 
