@@ -28,20 +28,33 @@ public static partial class SelfTestFinalize
         return t.Mask(PyJson.Dumps(doc, indent: 1, ensureAscii: false));
     }
 
+    static Action<string, string> Skip = (_, _) => { };
+
     const double ImportT0 = 1767225600.0;   // the generator's time of writing for every capture file
 
-    public static void RunImport(Action<string, Func<string?>> @case)
+    public static void RunImport(Action<string, Func<string?>> @case, Action<string, string> skip)
     {
         Case = @case;
+        Skip = skip;
         PyDict ka;
         using (var s = Assembly.GetExecutingAssembly().GetManifestResourceStream("import.json")!)
         using (var r = new StreamReader(s, Encoding.UTF8))
             ka = D(PyJson.Loads(r.ReadToEnd()));
         ImportTables(ka);
         foreach (var folder in L(ka["imports"]).Select(D)) ImportFolder(folder);
-        foreach (var stage in L(ka["recordsStage"]).Select(D)) RecordsStageCase(stage);
-        RecordsPythonCases();
-        RecordsSuiteCases();
+        // the record capture is a Python step, refused in an install (Checkout.Script): its cases are a checkout's
+        if (HarnessShared.CheckoutLayout.Locate(null, out _)?.Installed == true)
+        {
+            const string why = "the record capture is a Python step, which an install does not run";
+            foreach (var stage in L(ka["recordsStage"]).Select(D)) Skip($"records stage: {S(stage["name"])}", why);
+            Skip("records stage: the capture's Python, and the suite's cases 58 and after", why);
+        }
+        else
+        {
+            foreach (var stage in L(ka["recordsStage"]).Select(D)) RecordsStageCase(stage);
+            RecordsPythonCases();
+            RecordsSuiteCases();
+        }
     }
 
     // The capture's stand-in: the canned summary with the capture folder written into its paths.
