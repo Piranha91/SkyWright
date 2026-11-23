@@ -115,7 +115,8 @@ internal sealed class ConflictMarks : IRenderOverlay
     {
         var list = new List<float>();
         if (ro is null) return list;
-        foreach (var sh in ro.Shapes.Where(x => !CutOut(x)))
+        // a shape the view hides (a hidden object, or one the load-order panel shows as not there) is not marked
+        foreach (var sh in ro.Shapes.Where(x => !CutOut(x) && x.Mesh is not { IsHiddenByHost: true }))
             for (int t = 0; t + 2 < sh.Tris.Length; t += 3) AddTriangle(list, sh.Verts[sh.Tris[t]], sh.Verts[sh.Tris[t + 1]], sh.Verts[sh.Tris[t + 2]]);
         return list;
     }

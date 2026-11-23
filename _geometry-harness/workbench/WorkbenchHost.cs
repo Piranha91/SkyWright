@@ -873,6 +873,61 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         return true;
     }
 
+    // ---- one object as the load order without some plugins has it (the load-order panel with an object selected) ------
+    FormKey? _versionKey;
+    /// <summary>The object the view shows as another version than the scene's, or null.</summary>
+    internal FormKey? VersionShown => _versionKey;
+
+    /// <summary>Draw <paramref name="key"/> as <paramref name="v"/> has it, the rest of the cell untouched: moved, turned and
+    /// scaled to that version's placement, or hidden when that load order does not have it. View only: nothing is staged.
+    /// A different base object cannot be swapped in without building the cell again, which is said.</summary>
+    internal string ShowVersion(FormKey key, VersionWithout v, string without)
+    {
+        if (!_session.IsDrawn(key)) throw new InvalidOperationException($"{key} is not drawn in this scene, so it cannot be shown without {without}.");
+        if (_session.Edited().Contains(key)) throw new InvalidOperationException($"{key} has an edit of yours staged or written; undo it first to compare plugins on it.");
+        if (_versionKey is { } old && old != key) ClearVersion();
+        var ro = _session.RefOf(key);
+        string name = ro.Ref.BaseEditorId ?? key.ToString();
+        string said;
+        bool gone = v.Plugin is null || v.Placed is { Deleted: true } or { InitiallyDisabled: true };
+        if (gone)
+        {
+            _viewState.SetVersionHidden(ro.Meshes, true);
+            _session.Preview(key, _session.Current(key));
+            said = v.Plugin is null ? $"without {without}, no plugin has {name}: it is not there (hidden in the view)"
+                 : $"without {without}, {name} is {(v.Placed!.Deleted ? "deleted" : "initially disabled")} as {v.Plugin} has it (hidden in the view)";
+        }
+        else
+        {
+            _viewState.SetVersionHidden(ro.Meshes, false);
+            if (v.Placed is not { } p) throw new InvalidOperationException($"{key} in {v.Plugin} is not a placed object, so it has no placement to show.");
+            var pose = new RefPlacementEdit.Pose(p.Position, p.Rotation, p.Scale);
+            _session.Preview(key, pose);
+            var now = RefPlacementEdit.BakedPose(ro.Ref);
+            bool same = pose == now;
+            said = $"without {without}, {name} is as {v.Plugin} has it" + (same ? ": the same placement as with every plugin" : FormattableString.Invariant(
+                $": at {p.Position.X:0.#}, {p.Position.Y:0.#}, {p.Position.Z:0.#}, scale {p.Scale:0.##} (with every plugin: {now.Position.X:0.#}, {now.Position.Y:0.#}, {now.Position.Z:0.#}, scale {now.Scale:0.##})"));
+            if (p.Base is { } b && !ro.Ref.BaseKey.IsNull && b != ro.Ref.BaseKey)
+                said += $"; its base object there is {b}, not the drawn {ro.Ref.BaseKey}, and the view cannot swap the model without building the cell again (Ctrl+click the plugin to rebuild it)";
+        }
+        _versionKey = key;
+        UpdateMarks(); Invalidate("version");
+        return said + ". The rest of the cell is unchanged.";
+    }
+
+    /// <summary>Draw the object shown as another version as the scene has it again.</summary>
+    internal void ClearVersion()
+    {
+        if (_versionKey is not { } k) return;
+        _versionKey = null;
+        if (_session.IsDrawn(k))
+        {
+            _viewState.SetVersionHidden(_session.RefOf(k).Meshes, false);
+            _session.Preview(k, _session.Current(k));
+        }
+        UpdateMarks(); Invalidate("version");
+    }
+
     /// <summary>The walk's one-word outcome for a reference it did not draw, in a few plain words.</summary>
     internal static string NotDrawnWords(string outcome) => outcome switch
     {

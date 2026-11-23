@@ -65,6 +65,10 @@ internal sealed record MapBuilding(string Mesh, Vec3 Position, Vec3 Rotation, fl
 /// <summary>Where a record is: its cell and worldspace, and its winning position when it is a placed object.</summary>
 internal sealed record Located(string Key, string RecordType, string? Cell, string? Worldspace, bool IsCell, float[]? Position);
 
+/// <summary>A placed object as a load order without some plugins has it: the plugin whose version wins then (null when no
+/// remaining plugin has the record, so the object is not there), and that version's placement.</summary>
+internal sealed record VersionWithout(string? Plugin, PlacedRef? Placed, IReadOnlyList<string> Touching);
+
 /// <summary>The data behind the read-only World tree: worldspaces, cells and a cell's records over one load order. Winners
 /// and containment come from housecarl-core's resolver index; nothing here decides them.</summary>
 internal sealed class WorldIndex : IDisposable
@@ -596,6 +600,20 @@ internal sealed class WorldIndex : IDisposable
         if (view.ParentOf(fk) is { } pk && held.Cells.TryGetValue(pk, out var holder)) { cell = holder.Key; world = holder.Worldspace; }
         else if (body is IWorldspaceGetter) world = FormIdToken.Of(fk);
         return new Located(FormIdToken.Of(fk), TypeOf(body), cell, world, false, PositionOf(body));
+    }
+
+    /// <summary>The version of a placed object that wins when the plugins in <paramref name="off"/> are not loaded: the last
+    /// plugin, in load order, that holds the record and is not switched off. Reads one record body, so call it off the UI thread.</summary>
+    public VersionWithout VersionWithout(string formKeyText, IReadOnlySet<string> off)
+    {
+        var view = Live().Resolver.Capture(null);
+        if (ParseKey(formKeyText) is not { } fk) throw new InvalidOperationException($"'{formKeyText}' is not a FormKey.");
+        var touching = view.TouchingPlugins(fk) ?? throw new InvalidOperationException($"{formKeyText} is not a record of this load order.");
+        var plugin = touching.LastOrDefault(p => !off.Contains(p));
+        if (plugin is null) return new VersionWithout(null, null, touching);
+        using var session = view.OpenSession();
+        var body = WinnerBody(view, session, plugin, fk);
+        return new VersionWithout(plugin, body is IPlacedGetter placed ? PlacementExtract.RefOf(placed) : null, touching);
     }
 
     /// <summary>The plugins that hold a version of the record, in load order (the winner last), or null when the load order

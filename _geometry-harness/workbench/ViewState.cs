@@ -21,6 +21,7 @@ internal sealed class ViewState
     readonly List<FormKey> _seeThrough = new();
     readonly HashSet<GlMesh> _meshesHidden = new();          // every mesh this state switched off, so restore switches back only those
     readonly HashSet<GlMesh> _layerHidden = new();           // meshes the toolbar's layer switches hold off, whatever restore does
+    readonly HashSet<GlMesh> _versionHidden = new();         // an object the load-order panel shows as not there without a plugin
     List<float>? _tint;
 
     /// <summary>Bumped on every change the overlays draw from, so a drawer rebuilds only when it changed.</summary>
@@ -98,7 +99,19 @@ internal sealed class ViewState
     void HideMeshes(IEnumerable<GlMesh> meshes) { foreach (var m in meshes) if (_meshesHidden.Add(m)) m.IsHiddenByHost = true; }
 
     /// <summary>Show a mesh again unless the other owner of the host switch (a hide here, or a layer switched off) still holds it.</summary>
-    void Unhide(GlMesh m) => m.IsHiddenByHost = _meshesHidden.Contains(m) || _layerHidden.Contains(m);
+    void Unhide(GlMesh m) => m.IsHiddenByHost = _meshesHidden.Contains(m) || _layerHidden.Contains(m) || _versionHidden.Contains(m);
+
+    /// <summary>The load-order panel's one-object switch: these meshes stay hidden while the object is shown as a load order
+    /// without some plugins has it, and that load order does not have it (no plugin left has it, or it is deleted or disabled).</summary>
+    internal void SetVersionHidden(IEnumerable<GlMesh> meshes, bool hidden)
+    {
+        foreach (var m in meshes)
+        {
+            if (hidden) { _versionHidden.Add(m); m.IsHiddenByHost = true; }
+            else if (_versionHidden.Remove(m)) Unhide(m);
+        }
+        Version++;
+    }
 
     /// <summary>The toolbar's layer switch: these meshes stay hidden while their layer is off, and restore does not show them.</summary>
     internal void SetLayerHidden(IEnumerable<GlMesh> meshes, bool hidden)

@@ -165,7 +165,7 @@ internal sealed class StateTools
         [Description("view: show_original, show_edited, ghost_on, ghost_off, hide, hide_part, hide_in_front, see_through, isolate or restore.")] string? op = null,
         [Description("view hide_part: which part of the reference, counting its drawn shapes from 0.")] int? part = null,
         [Description("view see_through: a mod folder, as the launcher lists it; the references its plugins win are drawn see-through.")] string? mod = null,
-        [Description("view see_through: a plugin file name; the references it wins are drawn see-through. load_order: the plugin to switch off (show false) or on (show true), or all with show true.")] string? plugin = null,
+        [Description("view see_through: a plugin file name; the references it wins are drawn see-through. load_order: the plugin to switch off (show false) or on (show true), or all with show true; with `ref`, for that drawn object only.")] string? plugin = null,
         [Description("decide: real problem, intentional or unsure.")] string? verdict = null,
         [Description("decide: a few words saying why.")] string? reason = null,
         [Description("select: a scene by its number, as workbench_state's scenes list them; it opens the scene's best row.")] int? scene = null,
@@ -190,7 +190,12 @@ internal sealed class StateTools
             if (v is "results" or "world") return OpenInputsTools.Act(v, pair, groups, categories, setup, search, row, cell, @ref);
             if (v == "load_order")
             {
-                try { return Answer(new { said = LoadOrderPanel.Switch(plugin, show), loadOrder = LoadOrderPanel.State() }); }
+                try
+                {
+                    // with `ref`, the plugin is switched for that object only (the cell is not built again), as a click with it selected does
+                    string said = @ref is { Length: > 0 } one && plugin is { } pl && show is { } on ? LoadOrderPanel.SwitchForObject(one, pl, on) : LoadOrderPanel.Switch(plugin, show);
+                    return Answer(new { said, loadOrder = LoadOrderPanel.State() });
+                }
                 catch (InvalidOperationException ex) { return Refuse(ex.Message); }
             }
             if (v == "map") return OpenInputsTools.Map(worldspace, map_centre, pixels_per_cell, textured);

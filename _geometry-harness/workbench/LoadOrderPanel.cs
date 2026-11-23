@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using HarnessShared;
@@ -122,6 +123,11 @@ internal static class LoadOrderPanel
     static SceneRequest? _base;                     // the request the scene was asked with, on its whole load order
     static IReadOnlyList<OrderEntry> _entries = Array.Empty<OrderEntry>();
     static readonly HashSet<string> Off = new(StringComparer.OrdinalIgnoreCase);
+    // plugins switched off for the selected object only: the object is drawn as the load order without them has it,
+    // the cell is not built again (Piranha 2026-11-23: quick A/B on one object)
+    static readonly HashSet<string> ObjectOff = new(StringComparer.OrdinalIgnoreCase);
+    static IReadOnlyList<string> _objectAlsoOff = Array.Empty<string>();
+    static int _versionGeneration;
     static IReadOnlyList<string> _alsoOff = Array.Empty<string>();
     static IReadOnlyDictionary<string, string> _patchLike = new Dictionary<string, string>();
     static string? _variantKey;                     // the key of the order the panel asked for, while one is asked for
@@ -133,6 +139,7 @@ internal static class LoadOrderPanel
     /// <summary>The plugins listed, in order; the state tools read them.</summary>
     internal static IReadOnlyList<OrderEntry> Entries => _entries;
     internal static IReadOnlyCollection<string> SwitchedOff => Off;
+    internal static IReadOnlyCollection<string> SwitchedOffForObject => ObjectOff;
     internal static IReadOnlyList<string> AlsoOff => _alsoOff;
     internal static LoadOrderSpec? BaseOrder => _base?.Order;
 
@@ -165,6 +172,7 @@ internal static class LoadOrderPanel
     static void Requested(SceneRequest req)
     {
         if (_asking) return;
+        if (ObjectOff.Count > 0) { ObjectOff.Clear(); _objectAlsoOff = Array.Empty<string>(); ++_versionGeneration; Shell.Current?.ClearVersion(); }
         bool sameOrder = _base is not null && _base.Order.Key == req.Order.Key;
         _base = req; _variantKey = null;
         if (Off.Count > 0 || !sameOrder) { Off.Clear(); _alsoOff = Array.Empty<string>(); _patchLike = new Dictionary<string, string>(); }
@@ -197,6 +205,7 @@ internal static class LoadOrderPanel
               + (_alsoOff.Count > 0 ? $" and the {_alsoOff.Count} plugin(s) that need it as a master ({Names(_alsoOff)})" : "")
               + (_patchLike.Count > 0 ? $". {_patchLike.Count} plugin(s) that look like patches for it but do not list it as a master stay loaded, in bold red" : "")
               + ". Each switch rebuilds the scene, about 20 s.")
+            + (ObjectOff.Count > 0 ? $" The selected object is drawn as it is without {Names(ObjectOff.ToList())}; the rest of the cell is unchanged." : "")
             + " Highest priority at the bottom.";
         AllBack.IsEnabled = Off.Count > 0;
     }
@@ -207,7 +216,15 @@ internal static class LoadOrderPanel
     internal static void Selection(string? selected, string? partner)
     {
         if (string.Equals(selected, _selected, StringComparison.OrdinalIgnoreCase) && string.Equals(partner, _partner, StringComparison.OrdinalIgnoreCase)) return;
+        bool moved = !string.Equals(selected, _selected, StringComparison.OrdinalIgnoreCase);
         _selected = selected; _partner = partner;
+        if (moved && ObjectOff.Count > 0)
+        {
+            // another object selected: the last one is drawn as the scene has it again, and its switches are forgotten
+            ObjectOff.Clear(); _objectAlsoOff = Array.Empty<string>(); ++_versionGeneration;
+            Shell.Current?.ClearVersion();
+            SayOrder();
+        }
         ReadEdits();
     }
 
@@ -258,14 +275,22 @@ internal static class LoadOrderPanel
 
     static UIElement Row(OrderEntry e, string? edit, bool goesWith)
     {
-        var box = new CheckBox { IsChecked = !Off.Contains(e.Name) && !goesWith, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0),
-                                 IsEnabled = !goesWith,
-                                 ToolTip = goesWith ? "off because it needs a plugin you switched off as a master" : "untick to see the scene without this plugin and the plugins that need it" };
+        bool objectOff = ObjectOff.Contains(e.Name) || _objectAlsoOff.Contains(e.Name, StringComparer.OrdinalIgnoreCase);
+        var box = new CheckBox { IsChecked = !Off.Contains(e.Name) && !goesWith && !objectOff, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0),
+                                 IsEnabled = !goesWith && !_objectAlsoOff.Contains(e.Name, StringComparer.OrdinalIgnoreCase),
+                                 ToolTip = goesWith ? "off because it needs a plugin you switched off as a master"
+                                         : "untick: with an object selected, see that object without this plugin (the cell stays as it is); with nothing selected, "
+                                           + "build the cell again without it and the plugins that need it (asks first). Ctrl+click builds the cell again without asking." };
         string name = e.Name;
         box.Click += (_, _) =>
         {
             if (_filling) return;
-            if (box.IsChecked == true) Off.Remove(name); else Off.Add(name);
+            bool on = box.IsChecked == true;
+            bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
+            // a plugin the cell was built without goes back the same way; else, with an object selected, the object alone
+            if (!ctrl && !Off.Contains(name) && _selected is { } sel) { SwitchForObject(sel, name, on); return; }
+            if (!ctrl && !ConfirmRebuild(name, on)) { _filling = true; try { box.IsChecked = !on; } finally { _filling = false; } return; }
+            if (on) Off.Remove(name); else Off.Add(name);
             Ask();
         };
         var sp = new DockPanel { LastChildFill = true };
@@ -287,6 +312,11 @@ internal static class LoadOrderPanel
         var label = new TextBlock { Text = e.Name, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap, ToolTip = e.Name };
         if (edit is not null) label.FontWeight = FontWeights.SemiBold;
         if (Off.Contains(e.Name) || goesWith) { label.Foreground = Theme.Brush(Theme.Dim); label.TextDecorations = TextDecorations.Strikethrough; }
+        else if (objectOff)
+        {
+            label.Foreground = Theme.Brush(Theme.Dim); label.TextDecorations = TextDecorations.Strikethrough; label.FontStyle = FontStyles.Italic;
+            label.ToolTip = "switched off for the selected object only; the rest of the cell keeps it";
+        }
         else if (_patchLike.TryGetValue(e.Name, out var why))
         {
             label.FontWeight = FontWeights.Bold; label.Foreground = new SolidColorBrush(Color.FromRgb(0xFF, 0x55, 0x55)); label.ToolTip = why;
@@ -294,6 +324,61 @@ internal static class LoadOrderPanel
         }
         sp.Children.Add(label);
         return sp;
+    }
+
+    /// <summary>With nothing selected, a switch builds the whole cell again (about 20 s): asked first, so a stray click does
+    /// not start it. Ctrl+click skips the question.</summary>
+    static bool ConfirmRebuild(string plugin, bool on)
+    {
+        if (_base is null) return true;
+        string text = on
+            ? $"Build the cell again with {plugin} switched back on?"
+            : $"Build the cell again without {plugin}" + (LoadOrderRules.Without(_entries, new HashSet<string>(Off.Append(plugin), StringComparer.OrdinalIgnoreCase)).AlsoOff is { Count: > 0 } also
+                ? $" and the {also.Count} plugin(s) that need it as a master" : "") + "?";
+        text += Environment.NewLine + Environment.NewLine + "Nothing is selected, so the whole cell is built again on that load order (about 20 seconds). "
+              + "To compare one object instead, select it first: the plugin is then switched for that object only." + Environment.NewLine
+              + "Ctrl+click a plugin to build the cell again without this question.";
+        return MessageBox.Show(text, "Build the cell again?", MessageBoxButton.OKCancel, MessageBoxImage.Question, MessageBoxResult.OK) == MessageBoxResult.OK;
+    }
+
+    /// <summary>Switch a plugin off or on for the selected object only: the object is drawn as the load order without the
+    /// object's switched-off plugins (and the plugins that need them as a master) has it; the cell is not built again.</summary>
+    internal static string SwitchForObject(string selected, string plugin, bool on)
+    {
+        if (_base is not { } b) throw new InvalidOperationException("no scene's load order is listed yet; open a row or a cell first.");
+        if (Shell.Current is not { } h) throw new InvalidOperationException("no scene is shown.");
+        if (!Mutagen.Bethesda.Plugins.FormKey.TryFactory(selected, out var key)) throw new InvalidOperationException($"'{selected}' is not a FormKey.");
+        if (on) ObjectOff.Remove(plugin); else ObjectOff.Add(plugin);
+        int gen = ++_versionGeneration;
+        if (ObjectOff.Count == 0)
+        {
+            _objectAlsoOff = Array.Empty<string>();
+            h.ClearVersion();
+            SayOrder(); Fill();
+            var back = $"{selected} is drawn with every plugin again.";
+            Shell.SetBanner(back);
+            return back;
+        }
+        var (_, also) = LoadOrderRules.Without(_entries, ObjectOff);
+        _objectAlsoOff = also;
+        var without = new HashSet<string>(ObjectOff.Concat(also).Concat(Off).Concat(_alsoOff), StringComparer.OrdinalIgnoreCase);
+        string words = Names(ObjectOff.ToList()) + (also.Count > 0 ? $" (and the {also.Count} plugin(s) that need it)" : "");
+        SayOrder(); Fill();
+        var ui = Dispatcher.CurrentDispatcher;
+        LoadOrderIndexes.For(b.Order).ContinueWith(t => t.IsCompletedSuccessfully ? t.Result.VersionWithout(selected, without) : throw t.Exception!.GetBaseException(), TaskScheduler.Default)
+            .ContinueWith(t => ui.BeginInvoke(() =>
+            {
+                if (gen != _versionGeneration) return;
+                try
+                {
+                    if (t.IsFaulted) throw new InvalidOperationException($"the version of {selected} without {words} could not be read: {t.Exception!.GetBaseException().Message}");
+                    Shell.SetBanner(h.ShowVersion(key, t.Result, words));
+                }
+                catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); }
+            }), TaskScheduler.Default);
+        var said = $"reading {selected} as the load order without {words} has it";
+        Shell.SetBanner(said);
+        return said;
     }
 
     /// <summary>Ask for the scene on the whole load order without the switched-off plugins; the whole load order again when none is.</summary>
@@ -347,7 +432,7 @@ internal static class LoadOrderPanel
     internal static object State() => new
     {
         order = _base?.Order.Label, orderFile = _base?.Order.OrderFile, plugins = _entries.Select(e => e.Name).ToList(),
-        switchedOff = Off.ToList(), alsoOff = _alsoOff, looksLikePatches = _patchLike, shownOn = _variantKey is null ? "the whole load order" : "the load order without the plugins switched off",
+        switchedOff = Off.ToList(), alsoOff = _alsoOff, switchedOffForObject = ObjectOff.ToList(), objectAlsoOff = _objectAlsoOff, looksLikePatches = _patchLike, shownOn = _variantKey is null ? "the whole load order" : "the load order without the plugins switched off",
         edits = _edits, said = Said.Text,
     };
 }
