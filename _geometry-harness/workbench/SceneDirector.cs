@@ -97,6 +97,15 @@ internal static class SceneDirector
             LastRebuildWhy = shown ? null : !same ? "another load order" : req.Reload ? "a layer it was built without was asked for"
                            : h.ReadOnly != req.ReadOnly ? "the scene's read-only state differs" : h.WhyNotShown(req.Cell, req.LandOn, partner);
             bool beside = !shown && LastRebuildWhy is null;
+            // a cell of the live scene's prepared square: the scene recentres on it, building only the cells that come in
+            if (same && !shown && !req.Reload && h.ReadOnly == req.ReadOnly && h.RecentreGrid(req.Cell) is { } grid)
+            {
+                Showing = req; Reused++; LastRebuildWhy = null;
+                var moved = h.Recentre(req.Cell, null, grid);
+                if (req.LandOn is { } k0 && Mutagen.Bethesda.Plugins.FormKey.TryFactory(k0, out var key0)) h.Land(key0);
+                req.Shown?.Invoke();
+                return moved + (req.LandOn is null ? "" : $"; {Shell.BannerText}");
+            }
             if (same && !req.Reload && h.ReadOnly == req.ReadOnly && (shown || beside))
             {
                 Showing = req; Reused++;

@@ -204,6 +204,7 @@ sealed class InteractiveOptions
     public Func<(int X, int Y), LiveCell?>? BuildCell;     // build one cell of Reach into the live scene; null when it is not in Reach
     public IReadOnlySet<(int X, int Y)> Reach = new HashSet<(int X, int Y)>();   // the cells the walk prepared: what BuildCell can add
     public IReadOnlySet<(int X, int Y)> Loaded = new HashSet<(int X, int Y)>();  // the cells the first build drew
+    public IReadOnlyDictionary<FormKey, (int X, int Y)> CellGrids = new Dictionary<FormKey, (int X, int Y)>();   // each walked cell's square (from its references)
     public int GridsToLoad = 3;                            // the profile's uGridsToLoad (or the game default), the loaded square's width
     public string GridsToLoadSource = "";                  // where that number came from, in words
     public Func<float, float, float?>? TerrainHeightAt;    // ground height at Skyrim X,Y on the drawn terrain; null off the land

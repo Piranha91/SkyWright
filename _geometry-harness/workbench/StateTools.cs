@@ -25,7 +25,7 @@ internal sealed class StateTools
         "runs again on the patch's cell and says whether the open conflict is resolved and whether a new one appeared. " +
         "Positions are Skyrim units (about 70 units to a metre); +X is east, +Y is north, +Z is up.";
 
-    static readonly string[] Parts = { "bundle", "conflicts", "findings", "selection", "pending", "recheck", "repair", "launcher", "view", "decisions", "scenes", "context", "placements", "scene", "results", "world", "layers", "load_order" };
+    static readonly string[] Parts = { "bundle", "conflicts", "findings", "selection", "pending", "recheck", "repair", "launcher", "view", "decisions", "scenes", "context", "placements", "scene", "results", "world", "layers", "load_order", "live" };
     static readonly string[] DefaultParts = { "selection", "pending", "recheck" };
     /// <summary>The verbs that stage or write an edit: refused on a read-only scene.</summary>
     static readonly string[] EditVerbs = { "stage", "undo", "commit", "recheck", "revert", "drop", "move_with", "find_clear", "choose" };
@@ -102,6 +102,7 @@ internal sealed class StateTools
             if (parts.Contains("results")) d["results"] = ResultsView.State(limit, offset);
             if (parts.Contains("load_order")) d["load_order"] = LoadOrderPanel.State();
             if (parts.Contains("world")) d["world"] = WorldView.State(cell, limit, offset);
+            if (parts.Contains("live")) d["live"] = Shell.Current?.LiveState() ?? new { available = false, why = "no scene is open, or it cannot add and drop cells" };
             if (parts.Contains("layers")) d["layers"] = Shell.Current is { } lh ? lh.Layers.State() : new { available = false, why = "no scene is open" };
             return Answer(d);
         });

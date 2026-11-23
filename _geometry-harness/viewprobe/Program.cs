@@ -5506,6 +5506,15 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 (firstScene, firstPatches, firstLayers, firstWater) = live.For(Array.Empty<(int X, int Y)>());
                 ViewProbe.GrassLayer.Cells.Clear();
                 iopt.Reach = reach; iopt.Loaded = loaded; iopt.GridsToLoad = grids; iopt.GridsToLoadSource = gridsWhy;
+                // which square each walked cell is: where its references stand. A cell is named only when at least 80% of them
+                // stand in one square, which leaves out the worldspace's persistent cell (its references are everywhere) and
+                // a cell placing nothing.
+                iopt.CellGrids = refCellOf.Where(kv => winRef.ContainsKey(kv.Key))
+                    .GroupBy(kv => kv.Value, kv => ViewProbe.LiveSlicer.CellOf(winRef[kv.Key].Position.X, winRef[kv.Key].Position.Y))
+                    .Select(g => (Cell: g.Key, Total: g.Count(), Top: g.GroupBy(c => c).OrderByDescending(c => c.Count()).First()))
+                    .Where(x => x.Top.Count() >= 0.8 * x.Total)
+                    .ToDictionary(x => x.Cell, x => x.Top.Key);
+                if (cellKey is { } ck) ((Dictionary<FormKey, (int X, int Y)>)iopt.CellGrids)[ck] = liveGrid;
                 iopt.LandCells = new List<(int X, int Y)>();
                 Console.WriteLine($"   live scene: {reach.Count} cell(s) prepared; the host loads {grids}x{grids} of them ({gridsWhy}) and adds or drops cells live");
                 iopt.BuildCell = cell =>

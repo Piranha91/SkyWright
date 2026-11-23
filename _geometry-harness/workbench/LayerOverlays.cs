@@ -3,6 +3,7 @@ using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using SkyRender;
 using ViewProbe;
+using OpenTK.Graphics.OpenGL4;
 using GlVec3 = OpenTK.Mathematics.Vector3;
 
 namespace Workbench;
@@ -15,13 +16,42 @@ internal sealed class CellBorders : IRenderOverlay
     internal const float Cell = 4096f, Step = 128f, Height = 192f, Below = 8f;
     internal static readonly GlVec3 OwnColour = new(1f, 0.78f, 0.2f), RingColour = new(0.55f, 0.75f, 1f);
     internal bool Enabled;
+    /// <summary>The white dashed outline of the scene's own cell, riding the ground; <see cref="Through"/> draws it through
+    /// whatever stands in front of it, otherwise it is hidden behind it like the scene.</summary>
+    internal bool Outline, Through;
+    readonly List<OverlayLineSegment> _outline = new();
     readonly IReadOnlyCollection<(int X, int Y)> _cells;
     readonly (int X, int Y)? _own;
     readonly Func<float, float, float?> _height;
     List<float>? _ownTris, _ringTris;
 
     internal CellBorders(IReadOnlyCollection<(int X, int Y)> cells, (int X, int Y)? own, Func<float, float, float?> height)
-    { _cells = cells; _own = own; _height = height; }
+    {
+        _cells = cells; _own = own; _height = height;
+        if (own is { } o) OutlineOf(o);
+    }
+
+    /// <summary>The own cell's edges as dashes 64 units long with 64-unit gaps, 6 units above the ground (viewprobe's
+    /// outline, which a live scene cannot recentre).</summary>
+    void OutlineOf((int X, int Y) o)
+    {
+        float x0 = o.X * Cell, y0 = o.Y * Cell, x1 = x0 + Cell, y1 = y0 + Cell;
+        void Edge(float ax, float ay, float bx, float by)
+        {
+            const int n = (int)(Cell / 64f);
+            for (int i = 0; i < n; i += 2)
+            {
+                float fa = (float)i / n, fb = (float)(i + 1) / n;
+                float xa = ax + (bx - ax) * fa, ya = ay + (by - ay) * fa, xb = ax + (bx - ax) * fb, yb = ay + (by - ay) * fb;
+                if (Ground(xa, ya) is not { } za || Ground(xb, yb) is not { } zb) continue;
+                var pa = TexturedScene.YUp(new Vector3(xa, ya, za + 6f)); var pb = TexturedScene.YUp(new Vector3(xb, yb, zb + 6f));
+                _outline.Add(new OverlayLineSegment { A = new GlVec3(pa.X, pa.Y, pa.Z), B = new GlVec3(pb.X, pb.Y, pb.Z), Color = new GlVec3(1f, 1f, 1f) });
+            }
+        }
+        Edge(x0, y0, x1, y0); Edge(x1, y0, x1, y1); Edge(x1, y1, x0, y1); Edge(x0, y1, x0, y0);
+    }
+
+    internal int OutlineDashes => _outline.Count;
 
     /// <summary>Each cell edge once, as (start, end) on the grid, with whether it borders the scene's own cell.</summary>
     internal static List<((int X, int Y) A, (int X, int Y) B, bool Own)> Edges(IReadOnlyCollection<(int X, int Y)> cells, (int X, int Y)? own)
@@ -76,6 +106,13 @@ internal sealed class CellBorders : IRenderOverlay
 
     public void Draw(GlRenderer renderer, in OverlayContext context)
     {
+        if (Outline && _outline.Count > 0 && renderer.BeginOverlayLinePass(context, out var lines))
+        {
+            // the line pass turns the depth test off; behind-objects turns it back on (the pass restores what it saved)
+            if (!Through) { GL.Enable(EnableCap.DepthTest); GL.DepthFunc(DepthFunction.Lequal); }
+            renderer.DrawOverlayLines(_outline, 3f, context);
+            renderer.EndOverlayLinePass(lines);
+        }
         if (!Enabled) return;
         if (_ownTris is null) Build();
         if (_ownTris!.Count < 18 && _ringTris!.Count < 18) return;

@@ -1053,6 +1053,14 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         return ScenePick.Pick(_session.RefOf(key).Shapes, new Vector3(o.X, o.Y, o.Z), new Vector3(d.X, d.Y, d.Z), _ => true);
     }
 
+    /// <summary>The live scene's cells for a state readout: the square, its centre, and each held cell named by the walk.</summary>
+    internal object? LiveState() => _live.Available ? new
+    {
+        grids = _live.Grids, maxGrids = _live.MaxGrids, source = _opt.GridsToLoadSource, centre = _opt.Grid is { } lg ? new[] { lg.X, lg.Y } : null,
+        held = _live.Held.Count,
+        cells = _opt.CellGrids.Where(kv => _live.Holds(kv.Value)).Select(kv => new { cell = kv.Key.ToString(), x = kv.Value.X, y = kv.Value.Y }).ToList(),
+    } : null;
+
     internal object SceneState()
     {
         var centre = PickAt(new Vector2(W * 0.5f, H * 0.5f));
@@ -1063,6 +1071,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             walkedRefs = _opt.RefOutcomes?.Count,
             walkOutcomes = _opt.RefOutcomes?.GroupBy(x => x.Value.Outcome).ToDictionary(g => g.Key, g => g.Count()),
             layers = _layers.State(),
+            live = LiveState(),
             marks = new { enabled = _marks.Enabled, selected = _marks.Selected?.Ref.RefKey.ToString(), partner = _marks.Partner?.Ref.RefKey.ToString(), partnerNote = PartnerNote, legend = ConflictMarks.Legend,
                              buried = _marks.Buried is { } bu ? new { words = bu.Words, detail = bu.Tip, triangles = _marks.BuriedTriangles, seconds = _marks.BuriedSeconds } : null },
             drawnRefKeys = DrawnAll().Select(r => r.Ref.RefKey.ToString()).OrderBy(k => k, StringComparer.Ordinal),
@@ -1121,6 +1130,28 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         return said;
     }
 
+    /// <summary>The cell of the prepared square a request names (by FormKey), or null when it is not one this scene can
+    /// recentre on: the square around it must lie inside what the walk prepared, at the current width.</summary>
+    internal (int X, int Y)? RecentreGrid(string cell)
+    {
+        if (!_live.Available || !FormKey.TryFactory(cell, out var key) || !_opt.CellGrids.TryGetValue(key, out var g)) return null;
+        return LiveCells.MaxSquare(g, _opt.Reach) >= _live.Grids ? g : null;
+    }
+
+    /// <summary>Make <paramref name="cell"/> the scene's cell without a rebuild: the loaded square moves to it, building the
+    /// cells that come in and freeing the cells that go out. The navmesh and the occlusion planes stay those of the cell
+    /// the scene was built for (they are built once, for it). One sentence back.</summary>
+    internal string Recentre(string cell, string? label, (int X, int Y) grid)
+    {
+        var was = _opt.CellLabel;
+        _opt.Grid = grid;
+        _opt.CellKey = FormKey.Factory(cell);
+        _opt.CellLabel = label ?? cell;
+        var said = SetGrids(_live.Grids);
+        if (_window is not null) _window.Title = $"SkyWright — {_opt.CellLabel}";
+        return $"cell {_opt.CellLabel} is now the scene's cell (it was {was}): " + said;
+    }
+
     /// <summary>What reads the drawn cells is read again: the layers (and their hidden state on the new meshes), the cell
     /// borders, the markers, the tree and the key.</summary>
     void AfterCellsChanged()
@@ -1130,7 +1161,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _borders = null;
         BuildLayers(_renderer);
         _layerBar?.Refresh();
-        if (_gridsBox is not null) _gridsBox.SelectedItem = _live.Grids;
+        FillGrids();
         if (_window is not null) { Shell.FillTree(BuildTree()); UpdateKey(); UpdateStatus(); Invalidate("cells"); }
     }
 
@@ -1143,17 +1174,31 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _gridsBox = new ComboBox { Margin = new Thickness(0, 2, 2, 2), Padding = new Thickness(6, 1, 6, 1), Focusable = false,
             ToolTip = $"How many cells around this one are loaded, as the game's uGridsToLoad: a square this many cells wide. It starts at {_opt.GridsToLoadSource}. "
                     + "A change builds only the cells that come in and frees the cells that go out." };
-        for (int g = 1; g <= _live.MaxGrids; g += 2) _gridsBox.Items.Add(g);
-        _gridsBox.ItemStringFormat = "{0}\u00d7{0}";
-        _gridsBox.SelectedItem = _live.Grids;
+        FillGrids();
         _gridsBox.SelectionChanged += (_, _) =>
         {
-            if (_gridsBox.SelectedItem is not int g || g == _live.Grids) return;
+            if (_fillingGrids || _gridsBox.SelectedItem is not ComboBoxItem { Tag: int g } || g == _live.Grids) return;
             try { Shell.SetBanner(SetGrids(g)); }
-            catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); _gridsBox.SelectedItem = _live.Grids; }
+            catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); FillGrids(); }
         };
         row.Children.Add(_gridsBox);
         return row;
+    }
+
+    bool _fillingGrids;
+    /// <summary>The choice's widths, up to what the prepared cells allow around the current centre, with the current one chosen.</summary>
+    void FillGrids()
+    {
+        if (_gridsBox is null) return;
+        _fillingGrids = true;
+        _gridsBox.Items.Clear();
+        for (int g = 1; g <= _live.MaxGrids; g += 2)
+        {
+            var item = new ComboBoxItem { Content = $"{g}\u00d7{g}", Tag = g };
+            _gridsBox.Items.Add(item);
+            if (g == _live.Grids) _gridsBox.SelectedItem = item;
+        }
+        _fillingGrids = false;
     }
 
     // ---- the view's layers (ViewLayers.cs): what this scene can draw, set to the window's choice ---------------------
@@ -1202,9 +1247,15 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     /// hidden behind it, and the fence standing on it.</summary>
     void ApplyBorders()
     {
-        _opt.ShowCellOutline = _bordersOn;
+        // the outline is the borders' own (it follows the scene's cell when the view recentres); viewprobe's draws only
+        // when the scene has no borders overlay
+        _opt.ShowCellOutline = _bordersOn && _borders is null;
         _opt.CellOutlineThrough = ViewLayers.IsOn(BorderOption.Through);
-        if (_borders is not null) _borders.Enabled = _bordersOn && ViewLayers.IsOn(BorderOption.Fence);
+        if (_borders is not null)
+        {
+            _borders.Enabled = _bordersOn && ViewLayers.IsOn(BorderOption.Fence);
+            _borders.Outline = _bordersOn; _borders.Through = ViewLayers.IsOn(BorderOption.Through);
+        }
     }
 
     /// <summary>Switch one of the cell borders' options for the window (the arrow's menu, the script's borders step, the
