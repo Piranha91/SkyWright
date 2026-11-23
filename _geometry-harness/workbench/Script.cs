@@ -54,6 +54,8 @@ namespace Workbench;
 /// grids N                        the Loaded cells choice: a square N cells wide around the scene's cell, cells added and dropped live
 /// fargrid on|off                 the Far grid toggle: the large references beyond the loaded cells, out to uLargeRefLODGridSize
 /// follow on|off                  the Follow camera toggle: the loaded cells move with the camera
+/// lod on|off                     the LOD button: distant LOD beyond the loaded cells
+/// lodkind terrain|objects|trees|water on|off   one kind of distant LOD, as the LOD button's menu
 /// expect landed [FORMKEY]        pass or fail: that reference (default: the selected one) selected, the screen-centre ray crossing its shapes
 /// expect inview FORMKEY          pass or fail: the reference's box centre is drawn inside the view and the screen-centre ray crosses it
 /// waitfile PATH [MAXSEC]         wait (drawing nothing) until PATH exists, or MAXSEC seconds (default 900): an MCP client drives the window meanwhile
@@ -306,6 +308,17 @@ internal sealed class Script
                 var (step, why) = ViewLayers.ParseStep(a);
                 if (step is { } st) _h.SetLayer(st.Layer, st.On); else WorkbenchHost.Say("step refused: " + why);
                 _wait = 3; break;
+            }
+            case "lod":
+            {
+                if (a.Length != 2 || ViewLayers.OnOff(a[1]) is not { } on) { WorkbenchHost.Say("step refused: the lod step is 'lod on|off'."); _wait = 2; break; }
+                _h.SetLod(on); _wait = 3; break;
+            }
+            case "lodkind":
+            {
+                if (a.Length != 3 || ViewLayers.LodKindNamed(a[1]) is not { } k || ViewLayers.OnOff(a[2]) is not { } on)
+                { WorkbenchHost.Say("step refused: the lodkind step is 'lodkind terrain|objects|trees|water on|off'."); _wait = 2; break; }
+                _h.SetLodKind(k, on); _wait = 3; break;
             }
             case "follow":
             {

@@ -1989,15 +1989,7 @@ static class TexturedScene
                     int lodTexBefore = textures.MissingTexturePaths.Count;
                     // LOD water: the worldspace's LOD water type through SkyRender's LOD water technique
                     // (opaque, sky reflection, sun specular, fog; no depth or refraction).
-                    WaterMaterial? lodWaterMat = DistantLodLayer.LodWater is { } lw
-                        ? new WaterMaterial(lw.ShallowColor, lw.DeepColor, lw.ReflectionColor, lw.Reflectivity, lw.Fresnel)
-                        {
-                            NoiseTexturePath = depthMeasurement is null ? lw.NoiseTexture : null, NoiseUvScale = lw.NoiseUvScale,
-                            ReflectsSky = Environment.GetEnvironmentVariable("VP_WATER_LEGACY") != "1",
-                            NoiseFalloff = lw.NoiseFalloff,
-                            SunSpecularPower = lw.Spec.X, SunSpecularMagnitude = lw.Spec.Y,
-                        }
-                        : null;
+                    WaterMaterial? lodWaterMat = DistantLodLayer.LodWaterMaterial(withNoise: depthMeasurement is null);
                     var glLod = GlWorldFactory.CreateDistantLod(lodData, path =>
                     {
                         int h = LoadObservedTexture(path == lodWaterMat?.NoiseTexturePath ? "dynamic-water-normal" : "dynamic-lod", path);

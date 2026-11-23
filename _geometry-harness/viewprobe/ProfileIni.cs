@@ -28,6 +28,16 @@ internal static class ProfileIni
         return found;
     }
 
+    /// <summary>A number setting, or <paramref name="gameDefault"/> when no file sets it; <paramref name="source"/> names the
+    /// file it came from, or nothing.</summary>
+    internal static float Float(string section, string key, float gameDefault, out string? source)
+    {
+        if (Read(section, key) is { } v && float.TryParse(v.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var f))
+        { source = $"{key}={f} from {v.File}"; return f; }
+        source = null;
+        return gameDefault;
+    }
+
     /// <summary>A whole-number setting, or <paramref name="gameDefault"/> when no file sets it (or sets something that is not
     /// a whole number); <paramref name="source"/> says which, in words.</summary>
     internal static int Int(string section, string key, int gameDefault, out string source)

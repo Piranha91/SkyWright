@@ -82,7 +82,28 @@ internal static class ViewLayers
     internal const string NavAskedMode = "both";
 
     /// <summary>Back to the defaults (a new window; the tests).</summary>
-    internal static void Reset() { foreach (var i in All) On[i.Layer] = i.Default; foreach (var o in BorderOptions) Options[o.Option] = false; WantsNavmesh = false; _pose = null; }
+    internal static void Reset()
+    {
+        foreach (var i in All) On[i.Layer] = i.Default; foreach (var o in BorderOptions) Options[o.Option] = false; WantsNavmesh = false; _pose = null;
+        LodOn = true; foreach (var k in LodKinds) LodKindOn[k.Kind] = true;
+    }
+
+    // ---- distant LOD beyond the loaded cells (the LOD button and its menu), the window's choice like the layers --------
+    internal enum LodKind { Terrain, Objects, Trees, Water }
+    internal sealed record LodKindInfo(LodKind Kind, string Name, string Label);
+    internal static readonly IReadOnlyList<LodKindInfo> LodKinds = new LodKindInfo[]
+    {
+        new(LodKind.Terrain, "terrain", "Terrain LOD"), new(LodKind.Objects, "objects", "Object LOD"),
+        new(LodKind.Trees, "trees", "Tree LOD"), new(LodKind.Water, "water", "Water LOD"),
+    };
+    /// <summary>Distant LOD is drawn beyond the loaded cells (on by default, as the game draws it).</summary>
+    internal static bool LodOn { get; set; } = true;
+    static readonly Dictionary<LodKind, bool> LodKindOn = LodKinds.ToDictionary(k => k.Kind, _ => true);
+    internal static bool IsOn(LodKind k) => LodKindOn[k];
+    internal static void Choose(LodKind k, bool on) => LodKindOn[k] = on;
+    /// <summary>A LOD kind by the name a script or a state tool uses, or null.</summary>
+    internal static LodKind? LodKindNamed(string? name) =>
+        LodKinds.FirstOrDefault(k => string.Equals(k.Name, (name ?? "").Trim(), StringComparison.OrdinalIgnoreCase))?.Kind;
 
     /// <summary>A layer by the name a script or a state tool uses (any case, or its label), or the sentence refusing it.</summary>
     internal static (Layer? Layer, string? Why) Parse(string? name)

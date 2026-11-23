@@ -28,6 +28,9 @@ internal static class DistantLodLayer
 {
     /// <summary>--lod.</summary>
     internal static bool Requested;
+    /// <summary>--live: the walk keeps the LOD facts (worldspace parents, LOD water) for a host's live LOD.</summary>
+    internal static bool Live;
+    internal static bool Noting => Requested || Live;
     /// <summary>The camera's far plane and the LOD reach with --lod: about 100 cells, the render
     /// distance the DynDOLOD documentation gives for everything in the game.</summary>
     internal const float FarPlane = 409600f;
@@ -48,7 +51,7 @@ internal static class DistantLodLayer
     /// <summary>The walk's sighting of a WRLD record (later plugins replace earlier ones).</summary>
     internal static void Note(IWorldspaceGetter w)
     {
-        if (!Requested) return;
+        if (!Noting) return;
         var parent = w.Parent;
         bool useParent = parent is not null && parent.Flags.HasFlag(WorldspaceParent.Flag.UseLodData)
                          && !parent.Worldspace.IsNull;
@@ -93,6 +96,18 @@ internal static class DistantLodLayer
         why = "parent LOD chain too deep";
         return null;
     }
+
+    /// <summary>The LOD water type as SkyRender's water material, or null when LOD water is not drawn. One owner for the
+    /// one-shot LOD and the live one.</summary>
+    internal static WaterMaterial? LodWaterMaterial(bool withNoise) => LodWater is { } lw
+        ? new WaterMaterial(lw.ShallowColor, lw.DeepColor, lw.ReflectionColor, lw.Reflectivity, lw.Fresnel)
+        {
+            NoiseTexturePath = withNoise ? lw.NoiseTexture : null, NoiseUvScale = lw.NoiseUvScale,
+            ReflectsSky = Environment.GetEnvironmentVariable("VP_WATER_LEGACY") != "1",
+            NoiseFalloff = lw.NoiseFalloff,
+            SunSpecularPower = lw.Spec.X, SunSpecularMagnitude = lw.Spec.Y,
+        }
+        : null;
 
     internal static LodKinds Kinds()
     {

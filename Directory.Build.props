@@ -8,6 +8,9 @@
     <SkyRenderVersion Condition="'$(SkyRenderVersion)' == ''">4.0.0</SkyRenderVersion>
     <!-- The see-through fill and the tint that follows a leaf card's cut-out exist from SkyRender 4.1. -->
     <DefineConstants Condition="$([MSBuild]::VersionGreaterThanOrEquals('$(SkyRenderVersion.Split(`-`)[0])', '4.1'))">$(DefineConstants);SKYRENDER_CUTOUT_TINT</DefineConstants>
+    <!-- Distant LOD on a live scene (LiveDistantLod, a draw-time cut) exists from SkyRender 4.1, but not in the 4.1
+         prerelease made for the tint alone. -->
+    <DefineConstants Condition="$([MSBuild]::VersionGreaterThanOrEquals('$(SkyRenderVersion.Split(`-`)[0])', '4.1')) and !$(SkyRenderVersion.Contains('cutouttint'))">$(DefineConstants);SKYRENDER_LIVE_LOD</DefineConstants>
   </PropertyGroup>
 
   <!-- The build layout, one folder per configuration: bin\<Configuration>\<the app's .NET version>\ holds SkyWright.exe,

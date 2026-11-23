@@ -394,6 +394,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             else if (ViewLayers.TakePose(SceneDirector.Showing?.Cell) is { } kept) SetPose(kept.Eye, kept.Yaw, kept.Pitch);   // the same cell again, for a layer
             else if (SceneDirector.Showing is not null) FrameScene();   // a cell asked for with no reference to land on
             ScheduleCell();   // the rest of the loaded square, once the window draws
+            ApplyLod();       // distant LOD streams around the camera from the first frames
         }
         SyncCamera();
         UpdateStatus();
@@ -421,6 +422,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         // Hand the context back to its own (hidden) window: viewprobe's teardown clears it through GLFW, which fails
         // while it is current on the destroyed view.
         _opt.Window.MakeCurrent();
+        // the LOD's meshes belong to the scene's renderer, which is disposed when this loop returns
+        _lod?.Dispose(); _lod = null;
         Say(Shell.Closed ? "window closed" : "scene closed for a cell switch");
     }
 
@@ -641,6 +644,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             if (!Land(FormKey.Factory(land)) && !_session.IsDrawn(FormKey.Factory(land)) && SceneDirector.Showing is not null) FrameScene();
         }
         else FollowCamera();   // after the first frame's landing, so the placeholder pose never moves the square
+        if (_lod is not null && ViewLayers.LodOn && _lod.Update(_eye)) Invalidate("lod");   // more blocks to stream: draw on
         if (_landOnFirstFrame is null && _queue.Count > 0 && (_opt.PrefetchCell is null || _prefetched.ContainsKey(_queue.Peek())))   // (cell, kind)
         {
             BuildNextCell();   // one loaded cell per frame, once the worker has read it; its AfterCellsChanged asks for the next frame
@@ -1079,6 +1083,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         grids = _live.Grids, maxGrids = _live.MaxGrids, source = _opt.GridsToLoadSource, centre = _live.Centre is { } lg ? new[] { lg.X, lg.Y } : null,
         sceneCell = _opt.Grid is { } sg ? new[] { sg.X, sg.Y } : null, follow = _follow,
         held = _live.Held.Count, far = _live.FarOn ? _live.FarWidth : 0, farHeld = _live.FarHeld, farSource = _opt.LargeGridSource,
+        lod = new { on = ViewLayers.LodOn && _lod is not null, why = _lodWhy, source = _lod?.Source, residentBlocks = _lod?.Blocks.Resident, pendingBlocks = _lod?.Blocks.Pending,
+                    kinds = ViewLayers.LodKinds.ToDictionary(k => k.Name, k => ViewLayers.IsOn(k.Kind)) },
         cells = _opt.CellGrids.Where(kv => _live.Holds(kv.Value)).Select(kv => new { cell = kv.Key.ToString(), x = kv.Value.X, y = kv.Value.Y }).ToList(),
     } : null;
 
@@ -1238,6 +1244,91 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         return LiveCells.MaxSquare(g, _opt.Reach) >= _live.Grids ? g : null;
     }
 
+    // ---- distant LOD beyond the loaded cells (viewprobe's LiveLod.cs): streamed around the camera, hidden under every whole
+    // cell, each kind switched at draw time; nothing is rebuilt when the cells or the camera move ----------------------------
+    LiveLod? _lod;
+    string? _lodWhy;
+    System.Windows.Controls.Primitives.ToggleButton? _lodButton;
+    readonly Dictionary<ViewLayers.LodKind, MenuItem> _lodItems = new();
+
+    /// <summary>Apply the LOD choices: make the live LOD the first time it is shown, hide it under the whole cells held, switch
+    /// its kinds, and set the far plane it needs.</summary>
+    void ApplyLod()
+    {
+        if (ViewLayers.LodOn && _lod is null && _lodWhy is null && _live.Available && _opt.Live is { } session)
+        {
+            _lod = LiveLod.Create(session, out var why);
+            if (_lod is null) { _lodWhy = why; Say("distant LOD: " + why); }
+            else Say("distant LOD: " + _lod.Source);
+        }
+        bool on = ViewLayers.LodOn && _lod is not null;
+        _camera.FarPlane = on ? 409600f : 131072f;   // viewprobe's LOD reach (DistantLodLayer.FarPlane)
+        if (_lod is not null)
+        {
+            _lod.SetLoaded(_live.All.Where(c => !c.LargeOnly && c.HasLand).Select(c => c.Grid).ToList());
+            _lod.Show(on && ViewLayers.IsOn(ViewLayers.LodKind.Terrain), on && ViewLayers.IsOn(ViewLayers.LodKind.Objects),
+                      on && ViewLayers.IsOn(ViewLayers.LodKind.Trees), on && ViewLayers.IsOn(ViewLayers.LodKind.Water));
+        }
+        RefreshLodControl();
+        if (_window is not null) Invalidate("lod");
+    }
+
+    /// <summary>Show or hide distant LOD. One sentence back.</summary>
+    internal string SetLod(bool on)
+    {
+        ViewLayers.LodOn = on;
+        ApplyLod();
+        var said = !on ? "Distant LOD hidden (what it streamed stays, so showing it again is immediate)"
+                 : _lod is null ? $"Distant LOD cannot be shown: {_lodWhy ?? "this scene has no cells around it"}"
+                 : $"Distant LOD shown beyond the loaded cells ({_lod.Source})";
+        Say(said);
+        return said;
+    }
+
+    /// <summary>Show or hide one kind of LOD. One sentence back.</summary>
+    internal string SetLodKind(ViewLayers.LodKind kind, bool on)
+    {
+        ViewLayers.Choose(kind, on);
+        ApplyLod();
+        var said = $"{ViewLayers.LodKinds.First(k => k.Kind == kind).Label} {(on ? "shown" : "hidden")}" + (ViewLayers.LodOn ? "" : "; distant LOD is hidden, so it shows when LOD is shown");
+        Say(said);
+        return said;
+    }
+
+    UIElement LodControl()
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        _lodButton = new System.Windows.Controls.Primitives.ToggleButton { Content = "LOD", Margin = new Thickness(4, 2, 0, 2), Padding = new Thickness(6, 1, 6, 1), Focusable = false };
+        ToolTipService.SetShowOnDisabled(_lodButton, true);
+        _lodButton.Click += (_, _) => Shell.SetBanner(SetLod(_lodButton.IsChecked == true));
+        var menu = new ContextMenu();
+        foreach (var k in ViewLayers.LodKinds)
+        {
+            var item = new MenuItem { Header = k.Label, IsCheckable = true, StaysOpenOnClick = true };
+            var kind = k.Kind;
+            item.Click += (_, _) => Shell.SetBanner(SetLodKind(kind, item.IsChecked));
+            _lodItems[kind] = item; menu.Items.Add(item);
+        }
+        var arrow = new Button { Content = "\u25BE", Margin = new Thickness(0, 2, 2, 2), Padding = new Thickness(3, 1, 3, 1), Focusable = false, ContextMenu = menu,
+            ToolTip = "Which kinds of distant LOD draw: terrain, objects, trees, water." };
+        menu.PlacementTarget = arrow; menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        arrow.Click += (_, _) => menu.IsOpen = true;
+        row.Children.Add(_lodButton); row.Children.Add(arrow);
+        RefreshLodControl();
+        return row;
+    }
+
+    void RefreshLodControl()
+    {
+        if (_lodButton is null) return;
+        _lodButton.IsChecked = ViewLayers.LodOn && _lod is not null;
+        _lodButton.IsEnabled = _lodWhy is null && _live.Available;
+        _lodButton.ToolTip = _lodWhy is { } w ? $"Distant LOD: {w}."
+            : "Distant LOD beyond the loaded cells, as the game draws it: terrain, object, tree and water LOD blocks streamed around the camera, "
+              + "hidden under every loaded cell" + (_lod is null ? "." : $"; {_lod.Source}.");
+        foreach (var (k, item) in _lodItems) item.IsChecked = ViewLayers.IsOn(k);
+    }
+
     // ---- the loaded square follows the camera (the Follow camera toggle) --------------------------------------------------
     bool _follow = true;
     bool _beyondSaid;
@@ -1296,6 +1387,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         BuildLayers(_renderer);
         _layerBar?.Refresh();
         FillGrids();
+        ApplyLod();
         if (_window is not null) { if (tree) Shell.FillTree(BuildTree()); UpdateKey(); UpdateStatus(); Invalidate("cells"); }
     }
 
@@ -1333,6 +1425,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                     + "cell builds the cells that come in and frees the ones that go out. Off holds them where they are." };
         follow.Click += (_, _) => Shell.SetBanner(SetFollow(follow.IsChecked == true));
         row.Children.Add(follow);
+        row.Children.Add(LodControl());
         return row;
     }
 

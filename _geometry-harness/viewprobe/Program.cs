@@ -694,7 +694,7 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--no-cell-outline") cellOutline = false;
     else if (args[i] == "--no-ring-refs") ringRefs = false;
     else if (args[i] == "--lod") ViewProbe.DistantLodLayer.Requested = true;
-    else if (args[i] == "--live") liveScene = true;
+    else if (args[i] == "--live") { liveScene = true; ViewProbe.DistantLodLayer.Live = true; }
     else if (args[i] == "--no-grass") ViewProbe.GrassLayer.Requested = false;
     else if (args[i] == "--grass") ViewProbe.GrassLayer.Requested = true;
     else if (args[i] == "--ring" && i + 1 < args.Length)
@@ -4792,7 +4792,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
 
         // --lod: the worldspace's LOD water type (WRLD NAM3) for the terrain LOD blocks' WATER quads
         // (DistantLodLayer.cs). The quads carry their own heights; only the material comes from here.
-        if (ViewProbe.DistantLodLayer.Requested && !interior)
+        if (ViewProbe.DistantLodLayer.Noting && !interior)
         {
             ViewProbe.DistantLodLayer.LodWater = null;
             if (!drawWater) ViewProbe.DistantLodLayer.LodWaterWhy = "--no-water";
