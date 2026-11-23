@@ -127,7 +127,18 @@ internal static class LoadOrderPanel
     // the cell is not built again (Piranha 2026-11-23: quick A/B on one object)
     static readonly HashSet<string> ObjectOff = new(StringComparer.OrdinalIgnoreCase);
     static IReadOnlyList<string> _objectAlsoOff = Array.Empty<string>();
+    static string? _objectKey;                      // the object ObjectOff is for
     static int _versionGeneration;
+
+    /// <summary>Forget the one-object switches and draw that object as the scene has it again (a new scene, another
+    /// object, an edit of it, or a rebuild of the cell).</summary>
+    internal static void ForgetObjectSwitches()
+    {
+        if (ObjectOff.Count == 0 && _objectKey is null) return;
+        ObjectOff.Clear(); _objectAlsoOff = Array.Empty<string>(); _objectKey = null; ++_versionGeneration;
+        Shell.Current?.ClearVersion();
+        if (_built is not null) { SayOrder(); Fill(); }
+    }
     static IReadOnlyList<string> _alsoOff = Array.Empty<string>();
     static IReadOnlyDictionary<string, string> _patchLike = new Dictionary<string, string>();
     static string? _variantKey;                     // the key of the order the panel asked for, while one is asked for
@@ -172,7 +183,7 @@ internal static class LoadOrderPanel
     static void Requested(SceneRequest req)
     {
         if (_asking) return;
-        if (ObjectOff.Count > 0) { ObjectOff.Clear(); _objectAlsoOff = Array.Empty<string>(); ++_versionGeneration; Shell.Current?.ClearVersion(); }
+        ForgetObjectSwitches();
         bool sameOrder = _base is not null && _base.Order.Key == req.Order.Key;
         _base = req; _variantKey = null;
         if (Off.Count > 0 || !sameOrder) { Off.Clear(); _alsoOff = Array.Empty<string>(); _patchLike = new Dictionary<string, string>(); }
@@ -218,13 +229,8 @@ internal static class LoadOrderPanel
         if (string.Equals(selected, _selected, StringComparison.OrdinalIgnoreCase) && string.Equals(partner, _partner, StringComparison.OrdinalIgnoreCase)) return;
         bool moved = !string.Equals(selected, _selected, StringComparison.OrdinalIgnoreCase);
         _selected = selected; _partner = partner;
-        if (moved && ObjectOff.Count > 0)
-        {
-            // another object selected: the last one is drawn as the scene has it again, and its switches are forgotten
-            ObjectOff.Clear(); _objectAlsoOff = Array.Empty<string>(); ++_versionGeneration;
-            Shell.Current?.ClearVersion();
-            SayOrder();
-        }
+        // another object selected: the last one is drawn as the scene has it again, and its switches are forgotten
+        if (moved) ForgetObjectSwitches();
         ReadEdits();
     }
 
@@ -288,7 +294,12 @@ internal static class LoadOrderPanel
             bool on = box.IsChecked == true;
             bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
             // a plugin the cell was built without goes back the same way; else, with an object selected, the object alone
-            if (!ctrl && !Off.Contains(name) && _selected is { } sel) { SwitchForObject(sel, name, on); return; }
+            if (!ctrl && !Off.Contains(name) && _selected is { } sel && Shell.Current is not null)
+            {
+                try { SwitchForObject(sel, name, on); }
+                catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); Fill(); }   // Fill puts the box back as it was
+                return;
+            }
             if (!ctrl && !ConfirmRebuild(name, on)) { _filling = true; try { box.IsChecked = !on; } finally { _filling = false; } return; }
             if (on) Off.Remove(name); else Off.Add(name);
             Ask();
@@ -335,8 +346,9 @@ internal static class LoadOrderPanel
             ? $"Build the cell again with {plugin} switched back on?"
             : $"Build the cell again without {plugin}" + (LoadOrderRules.Without(_entries, new HashSet<string>(Off.Append(plugin), StringComparer.OrdinalIgnoreCase)).AlsoOff is { Count: > 0 } also
                 ? $" and the {also.Count} plugin(s) that need it as a master" : "") + "?";
-        text += Environment.NewLine + Environment.NewLine + "Nothing is selected, so the whole cell is built again on that load order (about 20 seconds). "
-              + "To compare one object instead, select it first: the plugin is then switched for that object only." + Environment.NewLine
+        text += Environment.NewLine + Environment.NewLine + (_selected is null
+                  ? "Nothing is selected, so the whole cell is built again on that load order (about 20 seconds). To compare one object instead, select it first: the plugin is then switched for that object only."
+                  : "The cell was built without this plugin, so it is switched back for the whole cell, which builds it again (about 20 seconds).") + Environment.NewLine
               + "Ctrl+click a plugin to build the cell again without this question.";
         return MessageBox.Show(text, "Build the cell again?", MessageBoxButton.OKCancel, MessageBoxImage.Question, MessageBoxResult.OK) == MessageBoxResult.OK;
     }
@@ -346,15 +358,19 @@ internal static class LoadOrderPanel
     internal static string SwitchForObject(string selected, string plugin, bool on)
     {
         if (_base is not { } b) throw new InvalidOperationException("no scene's load order is listed yet; open a row or a cell first.");
-        if (Shell.Current is not { } h) throw new InvalidOperationException("no scene is shown.");
-        if (!Mutagen.Bethesda.Plugins.FormKey.TryFactory(selected, out var key)) throw new InvalidOperationException($"'{selected}' is not a FormKey.");
+        if (Shell.Current is not { } h) throw new InvalidOperationException("no scene is shown yet; wait for the cell to finish loading and try again.");
+        if (!Mutagen.Bethesda.Plugins.FormKey.TryFactory(selected, out var key)) throw new InvalidOperationException($"'{selected}' is not a FormKey; name a drawn object as XXXXXX:Plugin.esp.");
+        if (_entries.All(e => !e.Name.Equals(plugin, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException($"'{plugin}' is not a plugin of {b.Order.Label}; name one the panel lists.");
+        h.CheckVersionable(key);                     // refused in one sentence before anything changes
+        if (!string.Equals(_objectKey, selected, StringComparison.OrdinalIgnoreCase)) ForgetObjectSwitches();
+        _objectKey = selected;
+        var before = ObjectOff.ToList();
         if (on) ObjectOff.Remove(plugin); else ObjectOff.Add(plugin);
         int gen = ++_versionGeneration;
         if (ObjectOff.Count == 0)
         {
-            _objectAlsoOff = Array.Empty<string>();
-            h.ClearVersion();
-            SayOrder(); Fill();
+            ForgetObjectSwitches();
             var back = $"{selected} is drawn with every plugin again.";
             Shell.SetBanner(back);
             return back;
@@ -368,13 +384,20 @@ internal static class LoadOrderPanel
         LoadOrderIndexes.For(b.Order).ContinueWith(t => t.IsCompletedSuccessfully ? t.Result.VersionWithout(selected, without) : throw t.Exception!.GetBaseException(), TaskScheduler.Default)
             .ContinueWith(t => ui.BeginInvoke(() =>
             {
-                if (gen != _versionGeneration) return;
+                if (gen != _versionGeneration || !ReferenceEquals(Shell.Current, h)) return;
                 try
                 {
                     if (t.IsFaulted) throw new InvalidOperationException($"the version of {selected} without {words} could not be read: {t.Exception!.GetBaseException().Message}");
                     Shell.SetBanner(h.ShowVersion(key, t.Result, words));
                 }
-                catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); }
+                catch (InvalidOperationException ex)
+                {
+                    // refused: the switch did not happen, so the panel goes back to what the view shows
+                    ObjectOff.Clear(); foreach (var p in before) ObjectOff.Add(p);
+                    _objectAlsoOff = ObjectOff.Count > 0 ? LoadOrderRules.Without(_entries, ObjectOff).AlsoOff : Array.Empty<string>();
+                    if (ObjectOff.Count == 0) ForgetObjectSwitches(); else { SayOrder(); Fill(); }
+                    Shell.SetBanner(ex.Message);
+                }
             }), TaskScheduler.Default);
         var said = $"reading {selected} as the load order without {words} has it";
         Shell.SetBanner(said);
@@ -385,6 +408,7 @@ internal static class LoadOrderPanel
     static void Ask()
     {
         if (_base is not { } b) return;
+        ForgetObjectSwitches();                     // the cell is built again: no object stays switched on its own
         try
         {
             SceneRequest req;

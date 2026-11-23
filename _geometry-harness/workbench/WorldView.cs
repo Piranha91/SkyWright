@@ -542,7 +542,8 @@ internal static class WorldView
     /// the tree opened down to the cell and the cell selected, without loading it again.</summary>
     internal static void Follow(LoadOrderSpec order, string cellKey)
     {
-        if (_order is null || _order.Key != order.Key) { _followCell = cellKey; Open(order with { Navmesh = false }, Array.Empty<string>()); return; }
+        var navless = order with { Navmesh = false };   // the World tab reads a load order without its navmesh
+        if (_order is null || _order.Key != navless.Key) { _followCell = cellKey; Open(navless, Array.Empty<string>()); return; }
         if (_index is null) { _followCell = cellKey; return; }        // still reading: revealed when the tree fills
         Reveal(cellKey);
     }

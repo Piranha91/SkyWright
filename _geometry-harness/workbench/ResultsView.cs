@@ -164,14 +164,25 @@ internal static class ResultsView
         var zoom = new MenuItem { Header = "Zoom to", ToolTip = "move the camera to this row's object" };
         var copy = new MenuItem { Header = "Copy FormKey" };
         Rows.ContextMenu = new ContextMenu { Items = { zoom, copy } };
-        ResultTableRow? Clicked() => Rows.SelectedItem as ResultTableRow;
+        // the row under the mouse is the one the menu acts on; it is marked without being opened (opening is the menu's to do)
+        ResultTableRow? clicked = null;
         Rows.PreviewMouseRightButtonDown += (_, e) =>
         {
-            // the row under the mouse becomes the selected one, as a left click would make it
-            if (e.OriginalSource is DependencyObject d && ItemsControl.ContainerFromElement(Rows, d) is ListViewItem li) li.IsSelected = true;
+            clicked = e.OriginalSource is DependencyObject d && ItemsControl.ContainerFromElement(Rows, d) is ListViewItem { Content: ResultTableRow r } li ? r : null;
+            zoom.IsEnabled = copy.IsEnabled = clicked is not null;
+            if (clicked is not null && ItemsControl.ContainerFromElement(Rows, (DependencyObject)e.OriginalSource) is ListViewItem item)
+            {
+                bool was = _filling; _filling = true;
+                try { item.IsSelected = true; } finally { _filling = was; }
+            }
         };
-        zoom.Click += (_, _) => { if (Clicked() is { } item) Say(() => ZoomTo(item.Row)); };
-        copy.Click += (_, _) => { if (Clicked() is { } item) Clipboard.SetText(item.ObjectTip); };
+        zoom.Click += (_, _) => { if (clicked is { } item) Say(() => ZoomTo(item.Row)); };
+        copy.Click += (_, _) =>
+        {
+            if (clicked is not { } item) return;
+            try { Clipboard.SetText(item.ObjectTip); Shell.SetBanner($"copied {item.ObjectTip}"); }
+            catch (System.Runtime.InteropServices.COMException) { Shell.SetBanner("the clipboard is in use by another program; try Copy FormKey again."); }
+        };
         Legend.Text = "In the scene: " + ResultMarks.Legend(Groups.Select(g => (g.Value.Mark, g.Value.Words)))
                     + "; cyan: the row's object, magenta: its other object. " + NotScoredMeans;
         // the finer filters, the notes and the marks' legend fold away, so the rows keep the height
@@ -470,6 +481,7 @@ internal static class ResultsView
     {
         var key = r.Place.RefKey ?? r.FormKey;
         if (ReferenceEquals(Open, r) && OpenCell is not null && Shell.Current is { } h && SceneDirector.Showing is not null
+            && (string.Equals(h.SceneCell, OpenCell, StringComparison.OrdinalIgnoreCase) || string.Equals(SceneDirector.Showing.Cell, OpenCell, StringComparison.OrdinalIgnoreCase))
             && Mutagen.Bethesda.Plugins.FormKey.TryFactory(key, out var fk))
         {
             h.Land(fk);

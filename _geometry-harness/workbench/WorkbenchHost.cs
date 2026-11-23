@@ -80,6 +80,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _fov = cam.FovDeg;
         _camera.FieldOfView = _fov;
         _session = new EditSession(opt.Occlusion?.Refs ?? (IEnumerable<RefOcclusion>)Array.Empty<RefOcclusion>());
+        // an edit of the object shown as another version: it is drawn as the scene has it again first, so the edit starts from what is drawn
+        _session.Replacing += () => { if (_versionKey is not null) LoadOrderPanel.ForgetObjectSwitches(); };
         _session.Changed += s => { Say(s); UpdateMarks(); UpdateStatus(); if (_window is not null) Invalidate("edit"); if (!ReadOnly) SaveSession(); };
         _viewState = new ViewState(_session, () => DrawnRefs(), _gizmo);
         _viewState.Changed += s => { Say(s); UpdateStatus(); if (_window is not null) Invalidate("view"); };
@@ -489,13 +491,14 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var (_, dir) = RayAt(px);
         float toHit = PickAt(px) is { } hit ? hit.T : 0f;
         bool shift = (GetKeyState(0x10) & 0x8000) != 0;
-        float step = WheelStep(toHit, notches) * (shift ? 5f : 1f);
+        float step = WheelStep(toHit, notches * (shift ? 5f : 1f));
         _eye += Vector3.Normalize(dir) * step;
         SyncCamera();
     }
 
     /// <summary>How far one wheel turn moves the eye along the mouse's ray: in, a fifth of the distance to what is under
-    /// the mouse (never through it, at least 8 units); out, a quarter of it; 256 units a notch when nothing is under it.</summary>
+    /// the mouse (never through it, at least 8 units); out, a quarter of it; 256 units a notch when nothing is under it.
+    /// Shift's fivefold notches are passed in, so the cap holds for them too.</summary>
     internal static float WheelStep(float toHit, float notches)
     {
         if (toHit <= 0f) return 256f * notches;
@@ -850,11 +853,31 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     {
         if (SceneDirector.Order is not { } order) return false;
         var index = LoadOrderIndexes.For(order);
-        if (!index.IsCompletedSuccessfully) return false;
+        if (!index.IsCompletedSuccessfully)
+        {
+            Shell.SetBanner($"{key} is not drawn in this scene ({why}), and the load order is still being read, so where its record places it is not known yet; try Zoom to again in a moment.");
+            Shell.LastLanding = $"{key}: not drawn ({why}); its place not known yet";
+            return true;
+        }
         Located? at;
+        // one record body: short enough for the window's thread (a click waits on it as on a cell's tree)
         try { at = index.Result.Locate(key.ToString()); }
-        catch (Exception ex) when (ex is InvalidOperationException or IOException) { return false; }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Shell.SetBanner($"{key} is not drawn in this scene ({why}), and its record could not be read: {ex.Message}");
+            return true;
+        }
         if (at?.Position is not { Length: >= 3 } pos) return false;
+        // a place is only this scene's when the record is in this scene's worldspace (an interior: in this very cell)
+        bool here = _opt.Interior ? string.Equals(at.Cell, SceneCell, StringComparison.OrdinalIgnoreCase)
+                                  : string.Equals(at.Worldspace, HousecarlCore.FormIdToken.Of(_opt.Worldspace), StringComparison.OrdinalIgnoreCase);
+        if (!here)
+        {
+            Select(null);
+            Shell.SetBanner($"{key} is not in this scene ({why}): its record places it in {(at.Cell is { } c ? "cell " + c : "worldspace " + at.Worldspace)}, so open that cell to see it.");
+            Shell.LastLanding = $"{key}: in another cell ({at.Cell ?? at.Worldspace})";
+            return true;
+        }
         var p = new Vector3(pos[0], pos[1], pos[2]);
         Select(null);
         var tris = new List<float>();
@@ -881,19 +904,27 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     /// <summary>Draw <paramref name="key"/> as <paramref name="v"/> has it, the rest of the cell untouched: moved, turned and
     /// scaled to that version's placement, or hidden when that load order does not have it. View only: nothing is staged.
     /// A different base object cannot be swapped in without building the cell again, which is said.</summary>
+    /// <summary>Refuse, in one sentence, an object that cannot be drawn as another plugin's version.</summary>
+    internal void CheckVersionable(FormKey key)
+    {
+        if (!_session.IsDrawn(key)) throw new InvalidOperationException($"{key} is not drawn in this scene, so it cannot be compared plugin by plugin; select a drawn object.");
+        if (_session.Edited().Contains(key)) throw new InvalidOperationException($"{key} has an edit of yours staged or written; undo it first to compare plugins on it.");
+        if (_session.RefOf(key).Ref.BosSwapped) throw new InvalidOperationException($"{key} is drawn with the Base Object Swapper's base and placement, so the view cannot show a plugin's version of it; untick with Ctrl+click to build the cell again instead.");
+    }
+
     internal string ShowVersion(FormKey key, VersionWithout v, string without)
     {
-        if (!_session.IsDrawn(key)) throw new InvalidOperationException($"{key} is not drawn in this scene, so it cannot be shown without {without}.");
-        if (_session.Edited().Contains(key)) throw new InvalidOperationException($"{key} has an edit of yours staged or written; undo it first to compare plugins on it.");
+        CheckVersionable(key);
         if (_versionKey is { } old && old != key) ClearVersion();
         var ro = _session.RefOf(key);
+        _versionKey = key;                                    // set first, so ClearVersion can always undo what follows
         string name = ro.Ref.BaseEditorId ?? key.ToString();
         string said;
         bool gone = v.Plugin is null || v.Placed is { Deleted: true } or { InitiallyDisabled: true };
         if (gone)
         {
-            _viewState.SetVersionHidden(ro.Meshes, true);
             _session.Preview(key, _session.Current(key));
+            _viewState.SetVersionHidden(ro.Meshes, true);
             said = v.Plugin is null ? $"without {without}, no plugin has {name}: it is not there (hidden in the view)"
                  : $"without {without}, {name} is {(v.Placed!.Deleted ? "deleted" : "initially disabled")} as {v.Plugin} has it (hidden in the view)";
         }
@@ -910,7 +941,6 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             if (p.Base is { } b && !ro.Ref.BaseKey.IsNull && b != ro.Ref.BaseKey)
                 said += $"; its base object there is {b}, not the drawn {ro.Ref.BaseKey}, and the view cannot swap the model without building the cell again (Ctrl+click the plugin to rebuild it)";
         }
-        _versionKey = key;
         UpdateMarks(); Invalidate("version");
         return said + ". The rest of the cell is unchanged.";
     }
