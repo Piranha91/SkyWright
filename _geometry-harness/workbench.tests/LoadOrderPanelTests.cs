@@ -33,6 +33,9 @@ public sealed class LoadOrderPanelTests : IDisposable
         var bb = Plugin(data, new ModKey("B", ModType.Plugin), b, a);
         var c = Plugin(data, new ModKey("C", ModType.Plugin), b);
         var e = Plugin(data, new ModKey("E", ModType.Plugin), b, bb);
+        var town = Plugin(data, new ModKey("Town", ModType.Plugin), b);
+        Plugin(data, new ModKey("Town Extra", ModType.Plugin), b, town);
+        Plugin(data, new ModKey("Town - Patch", ModType.Plugin), b);
         _ = (d, c, e);
         File.WriteAllLines(Path.Combine(prof, "plugins.txt"), new[] { "*Base.esm", "*D.esl", "*A.esp", "*B.esp", "*C.esp", "*E.esp" });
         File.WriteAllLines(Path.Combine(prof, "loadorder.txt"), new[] { "Base.esm", "D.esl", "A.esp", "B.esp", "C.esp", "E.esp" });
@@ -84,6 +87,22 @@ public sealed class LoadOrderPanelTests : IDisposable
         var (kept2, also2) = LoadOrderRules.Without(list, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "C.esp" });
         Assert.Empty(also2);
         Assert.Equal(new[] { "Base.esm", "D.esl", "A.esp", "B.esp", "E.esp" }, kept2);
+    }
+
+    [Fact]
+    public void A_plugin_named_for_a_switched_off_plugin_that_does_not_master_it_stays_and_is_named_with_why()
+    {
+        // Town Extra masters Town and goes with it; Town - Patch only carries the name, so it stays and is marked
+        var list = LoadOrderRules.Entries(Spec(Candidate("Base.esm", "Town.esp", "Town Extra.esp", "Town - Patch.esp", "A.esp")));
+        var off = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Town.esp" };
+        var (kept, also) = LoadOrderRules.Without(list, off);
+        Assert.Equal(new[] { "Town Extra.esp" }, also);
+        Assert.Contains("Town - Patch.esp", kept);
+        var marked = LoadOrderRules.LooksLikePatches(list, off, also);
+        Assert.Equal(new[] { "Town - Patch.esp" }, marked.Keys);
+        Assert.Contains("does not list Town.esp as a master", marked["Town - Patch.esp"]);
+        // a name that does not hold the switched-off plugin's name is not marked, and nothing is marked when nothing is off
+        Assert.Empty(LoadOrderRules.LooksLikePatches(list, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "A.esp" }, Array.Empty<string>()));
     }
 
     [Fact]

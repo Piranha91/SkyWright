@@ -54,6 +54,32 @@ internal static class LoadOrderRules
         return (kept.Select(e => e.Name).ToList(), order.Where(e => also.Contains(e.Name)).Select(e => e.Name).ToList());
     }
 
+    /// <summary>The plugins that look like patches for a switched-off plugin but do not list it as a master, so they stay
+    /// loaded (Piranha, 2026-11-22: "only plugins that list it as a master" go with it; the others are shown in bold red).
+    /// Nothing in a plugin says what it was made for, so the rule is its name: a plugin that loads after the switched-off
+    /// one and whose file name holds that plugin's name (four letters or more, without the extension), and that does not
+    /// master it. Each comes with the sentence its tooltip says. Nothing is removed by this.</summary>
+    internal static IReadOnlyDictionary<string, string> LooksLikePatches(IReadOnlyList<OrderEntry> order, IReadOnlySet<string> off, IReadOnlyCollection<string> alsoOff)
+    {
+        var found = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var gone = new HashSet<string>(off.Concat(alsoOff), StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < order.Count; i++)
+        {
+            if (!off.Contains(order[i].Name)) continue;
+            var stem = Path.GetFileNameWithoutExtension(order[i].Name);
+            if (stem.Length < 4) continue;
+            for (int j = i + 1; j < order.Count; j++)
+            {
+                var p = order[j];
+                if (gone.Contains(p.Name) || found.ContainsKey(p.Name)) continue;
+                if (!Path.GetFileNameWithoutExtension(p.Name).Contains(stem, StringComparison.OrdinalIgnoreCase)) continue;
+                if (p.Masters?.Contains(order[i].Name, StringComparer.OrdinalIgnoreCase) == true) continue;
+                found[p.Name] = $"Its name holds '{stem}', so it may be a patch for {order[i].Name}, but it does not list {order[i].Name} as a master, so it stays loaded. Untick it too to see the cell without it.";
+            }
+        }
+        return found;
+    }
+
     /// <summary>The order file for <paramref name="baseOrder"/> without some plugins: the kept plugins in their order, the
     /// base order file's mod list as it is (the meshes and textures stay the same), written under <paramref name="folder"/>
     /// with a name taken from its plugins, so the same choice is the same file.</summary>
@@ -89,6 +115,7 @@ internal static class LoadOrderPanel
     static IReadOnlyList<OrderEntry> _entries = Array.Empty<OrderEntry>();
     static readonly HashSet<string> Off = new(StringComparer.OrdinalIgnoreCase);
     static IReadOnlyList<string> _alsoOff = Array.Empty<string>();
+    static IReadOnlyDictionary<string, string> _patchLike = new Dictionary<string, string>();
     static string? _variantKey;                     // the key of the order the panel asked for, while one is asked for
     static bool _asking, _filling;
     static string? _selected, _partner;
@@ -129,7 +156,7 @@ internal static class LoadOrderPanel
         if (_asking) return;
         bool sameOrder = _base is not null && _base.Order.Key == req.Order.Key;
         _base = req; _variantKey = null;
-        if (Off.Count > 0 || !sameOrder) { Off.Clear(); _alsoOff = Array.Empty<string>(); }
+        if (Off.Count > 0 || !sameOrder) { Off.Clear(); _alsoOff = Array.Empty<string>(); _patchLike = new Dictionary<string, string>(); }
         if (sameOrder && _entries.Count > 0) { SayOrder(); Fill(); ReadEdits(); return; }
         _entries = Array.Empty<OrderEntry>();
         Title.Text = "Load order: " + req.Order.Label;
@@ -157,7 +184,8 @@ internal static class LoadOrderPanel
             ? $"The scene is built on all {what}. Untick a plugin to see the cell without it and the plugins that need it as a master."
             : $"The scene is built on {_entries.Count - Off.Count - _alsoOff.Count:N0} of the {what}: without {Names(Off.ToList())}"
               + (_alsoOff.Count > 0 ? $" and the {_alsoOff.Count} plugin(s) that need it as a master ({Names(_alsoOff)})" : "")
-              + ". Patches made for it that do not list it as a master stay on. Each switch rebuilds the scene, about 20 s.")
+              + (_patchLike.Count > 0 ? $". {_patchLike.Count} plugin(s) that look like patches for it but do not list it as a master stay loaded, in bold red" : "")
+              + ". Each switch rebuilds the scene, about 20 s.")
             + " Highest priority at the bottom.";
         AllBack.IsEnabled = Off.Count > 0;
     }
@@ -209,7 +237,7 @@ internal static class LoadOrderPanel
                 if (text.Length > 0 && !e.Name.Contains(text, StringComparison.OrdinalIgnoreCase)) continue;
                 var row = Row(e, edit, also.Contains(e.Name));
                 List.Items.Add(row);
-                if (edit is not null || Off.Contains(e.Name) || also.Contains(e.Name)) last = row;
+                if (edit is not null || Off.Contains(e.Name) || also.Contains(e.Name) || _patchLike.ContainsKey(e.Name)) last = row;
             }
             // the last plugin that edits the selection or is switched off stays in view (the highest priority one)
             if (last is not null) List.ScrollIntoView(last);
@@ -248,6 +276,11 @@ internal static class LoadOrderPanel
         var label = new TextBlock { Text = e.Name, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = e.Name };
         if (edit is not null) label.FontWeight = FontWeights.SemiBold;
         if (Off.Contains(e.Name) || goesWith) { label.Foreground = Theme.Brush(Theme.Dim); label.TextDecorations = TextDecorations.Strikethrough; }
+        else if (_patchLike.TryGetValue(e.Name, out var why))
+        {
+            label.FontWeight = FontWeights.Bold; label.Foreground = new SolidColorBrush(Color.FromRgb(0xFF, 0x55, 0x55)); label.ToolTip = why;
+            box.ToolTip = why;
+        }
         sp.Children.Add(label);
         return sp;
     }
@@ -259,11 +292,13 @@ internal static class LoadOrderPanel
         try
         {
             SceneRequest req;
+            _patchLike = new Dictionary<string, string>();
             if (Off.Count == 0) { _alsoOff = Array.Empty<string>(); _variantKey = null; req = b with { Reload = false }; }
             else
             {
                 var (kept, also) = LoadOrderRules.Without(_entries, Off);
                 _alsoOff = also;
+                _patchLike = LoadOrderRules.LooksLikePatches(_entries, Off, also);
                 var folder = Path.Combine(Program.RequestWork(), "load-order-without");
                 var file = LoadOrderRules.WriteWithout(b.Order, kept, _entries.Where(e => Off.Contains(e.Name)).Select(e => e.Name).ToList(), also, folder);
                 var order = b.Order with { OrderFile = file, Label = $"{b.Order.Label} without {Names(Off.ToList())}" + (also.Count > 0 ? $" and {also.Count} that need it" : "") };
@@ -301,7 +336,7 @@ internal static class LoadOrderPanel
     internal static object State() => new
     {
         order = _base?.Order.Label, orderFile = _base?.Order.OrderFile, plugins = _entries.Select(e => e.Name).ToList(),
-        switchedOff = Off.ToList(), alsoOff = _alsoOff, shownOn = _variantKey is null ? "the whole load order" : "the load order without the plugins switched off",
+        switchedOff = Off.ToList(), alsoOff = _alsoOff, looksLikePatches = _patchLike, shownOn = _variantKey is null ? "the whole load order" : "the load order without the plugins switched off",
         edits = _edits, said = Said.Text,
     };
 }
