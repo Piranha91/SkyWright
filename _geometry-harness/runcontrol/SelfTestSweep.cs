@@ -207,7 +207,7 @@ public static class SelfTestSweep
         Case("sweep: program_key of a Release folder", () => Rows(L(ka["folders"]).Select(D).Select((row, i) => (row, i)).Select(x =>
         {
             foreach (var f in L(x.row["files"]).Select(D))
-                t.Write($"keys/{x.i}/fakeprobe/bin/Release/net9.0/{S(f["path"])}", Convert.FromBase64String(S(f["bytes"])));
+                t.Write($"keys/{x.i}/Probes/fakeprobe/{S(f["path"])}", Convert.FromBase64String(S(f["bytes"])));
             x.row["harness"] = t.At($"keys/{x.i}");
             return x.row;
         }), row => Same("digest", OrderSweep.ProgramKey(S(row["harness"]), "fakeprobe", none), S(row["want"]))));

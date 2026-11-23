@@ -7,14 +7,14 @@ public static class BundleSteps
     /// <summary>The environment variable naming the record reader when --reader-cmd names none.</summary>
     public const string ReaderVariable = "HOUSECARL_RECORD_READER_CMD";
 
-    /// <summary>houseCARL's server in this program's layout: the install's housecarl-mcp, or the server built in the
-    /// checkout's pinned houseCARL (external/houseCARL). Outside both, the name beside this program, which is never there.</summary>
+    /// <summary>houseCARL's server in this program's build (Tools\housecarl-mcp). Outside a build, the name beside this
+    /// program, which is never there.</summary>
     public static string CheckoutReader() =>
         PyPath.Str(HarnessShared.CheckoutLayout.Locate(null, out _)?.PathOf(HarnessShared.CheckoutLayout.Piece.Server)
                    ?? Path.Combine(AppContext.BaseDirectory, "housecarl-mcp.exe"));
 
     /// <summary>Where <see cref="CheckoutReader"/> comes from, for the names step's source.</summary>
-    public static string ReaderSource() => HarnessShared.CheckoutLayout.Locate(null, out _)?.Installed == true ? "install" : "checkout";
+    public static string ReaderSource() => "build";
 
     /// <summary>The record reader the names enrichment starts: --reader-cmd, else the environment variable, else this
     /// checkout's built server. (command, where it came from), or (null, one sentence why there is none).</summary>

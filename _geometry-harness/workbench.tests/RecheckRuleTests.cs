@@ -91,13 +91,8 @@ public class RecheckRuleTests
         var dir = Dir();
         var (b, c) = Emits(dir);
         var exe = Environment.GetEnvironmentVariable("WB_CONFLICTDIFF");
-        if (string.IsNullOrEmpty(exe))
-        {
-            var root = new DirectoryInfo(AppContext.BaseDirectory);
-            while (root is not null && !File.Exists(Path.Combine(root.FullName, HarnessShared.CheckoutLayout.Marker))) root = root.Parent;
-            exe = Path.Combine(root!.FullName, "_geometry-harness", "conflictdiff", "bin", "Release", "net9.0", "conflictdiff.exe");
-        }
-        Assert.True(File.Exists(exe), $"conflictdiff is not built at {exe}; build it first (dotnet build _geometry-harness/conflictdiff -c Release).");
+        if (string.IsNullOrEmpty(exe)) exe = TestBuild.Program("conflictdiff");
+        Assert.True(File.Exists(exe), $"conflictdiff is not built at {exe}; build the solution first.");
         var psi = new ProcessStartInfo(exe) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
         psi.ArgumentList.Add(Path.Combine(dir, "base.json")); psi.ArgumentList.Add(Path.Combine(dir, "changed.json"));
         using var p = Process.Start(psi)!;

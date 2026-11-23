@@ -244,7 +244,7 @@ public sealed class LauncherUiTests : IDisposable
     /// <summary>An empty file where runcontrol.exe would be built, for commands that are composed and not started.</summary>
     string PlacedExe()
     {
-        var exe = Path.Combine(_root, "harness", "runcontrol", "bin", "Release", "net9.0", "runcontrol.exe");
+        var exe = Path.Combine(_root, "harness", "Tools", "runcontrol", "runcontrol.exe");
         Directory.CreateDirectory(Path.GetDirectoryName(exe)!); File.WriteAllText(exe, "");
         return exe;
     }

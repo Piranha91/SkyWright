@@ -60,9 +60,8 @@ public static partial class SelfTestFinalize
                     : $" no record reader was given (--reader-cmd or {BundleSteps.ReaderVariable}) and this {BundleSteps.ReaderSource()}'s houseCARL server is not at {exe}.";
                 return Same("the flag first", $"{flag.command} {flag.source}", "F:/flag-reader.exe --reader-cmd")
                        ?? Same("then the environment, stripped", $"{env.command} {env.source}", $"E:/env-reader.exe --stdio {BundleSteps.ReaderVariable}")
-                       ?? Same("then the checkout's build, or one sentence", $"{built.command} {built.source}", want)
-                       ?? (Checkout.Layout.Installed ? Same("the install's reader", exe, PyPath.Str(Path.Combine(Checkout.Layout.Root, "housecarl-mcp", "housecarl-mcp.exe")))
-                           : exe.EndsWith(PyPath.Join("src", "housecarl-mcp", "bin", "Release", "net9.0", "housecarl-mcp.exe"), StringComparison.Ordinal) ? null : $"the checkout's reader is {exe}");
+                       ?? Same("then the build's server, or one sentence", $"{built.command} {built.source}", want)
+                       ?? Same("the build's reader", exe, PyPath.Str(Checkout.Layout.PathOf(HarnessShared.CheckoutLayout.Piece.Server)));
             }
             finally { Environment.SetEnvironmentVariable(BundleSteps.ReaderVariable, before); }
         });

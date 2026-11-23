@@ -42,10 +42,10 @@ public static partial class SelfTestFinalize
             ka = D(PyJson.Loads(r.ReadToEnd()));
         ImportTables(ka);
         foreach (var folder in L(ka["imports"]).Select(D)) ImportFolder(folder);
-        // the record capture is a Python step, refused in an install (Checkout.Script): its cases are a checkout's
-        if (HarnessShared.CheckoutLayout.Locate(null, out _)?.Installed == true)
+        // the record capture is a Python step of the checkout the build sits in (Checkout.Script): its cases need one
+        if (HarnessShared.CheckoutLayout.Locate(null, out _)?.Checkout is null)
         {
-            const string why = "the record capture is a Python step, which an install does not run";
+            const string why = "the record capture is a Python step of a checkout, and this build sits in none";
             foreach (var stage in L(ka["recordsStage"]).Select(D)) Skip($"records stage: {S(stage["name"])}", why);
             Skip("records stage: the capture's Python, and the suite's cases 58 and after", why);
         }

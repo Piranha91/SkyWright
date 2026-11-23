@@ -24,6 +24,8 @@
     <Compile Include="..\_shared\CheckoutLayout.cs" Link="CheckoutLayout.cs" />
     <ProjectReference Include="..\viewprobe\viewprobe.csproj" />
     <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
+    <!-- built first, not referenced: the SkyWrightLayout target (Directory.Build.props) copies it into Tools\housecarl-mcp -->
+    <ProjectReference Include="$(HousecarlSrc)housecarl-mcp\housecarl-mcp.csproj" ReferenceOutputAssembly="false" Private="false" />
     <PackageReference Include="ModelContextProtocol.Core" Version="2.2.0" />
     <!-- The MCP state tools: a localhost Streamable HTTP server inside the app (DESIGN.md section 7). -->
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />

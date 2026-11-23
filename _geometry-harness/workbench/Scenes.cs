@@ -10,7 +10,7 @@ internal sealed record SceneKeyPolicy(IReadOnlyList<string> Keys, IReadOnlyDicti
     internal static readonly string[] Known = { "type", "pair", "cell", "field" };
 
     /// <summary>The skill's file, relative to a checkout or a plugin root.</summary>
-    internal static readonly string RelativePath = HarnessShared.CheckoutLayout.ScenePolicyRelative;
+    internal static readonly string RelativePath = Path.Combine(".claude", "skills", "evaluation-reporting", "references", "scene-policy.json");
 
     /// <summary>Read the skill's scene policy; a key name the workbench does not map is refused.</summary>
     internal static SceneKeyPolicy Load(string path)

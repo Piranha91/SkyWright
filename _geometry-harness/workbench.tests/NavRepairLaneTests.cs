@@ -31,14 +31,14 @@ public sealed class NavRepairWorld : IDisposable
         while (dir is not null && !File.Exists(Path.Combine(dir.FullName, HarnessShared.CheckoutLayout.Marker))) dir = dir.Parent;
         return dir?.FullName ?? throw new InvalidOperationException("no SkyWright.sln above the test's folder");
     }
-    internal static string Probe => NavRepairLane.ProbeExe(Path.Combine(RepoRoot(), "_geometry-harness"));
-    internal static string Server => HarnessShared.CheckoutLayout.ServerExe(RepoRoot());
+    internal static string Probe => NavRepairLane.ProbeExe(TestBuild.Layout.Root);
+    internal static string Server => TestBuild.Server;
 
     public NavRepairWorld()
     {
         Root = Path.Combine(Path.GetTempPath(), "hc-wb-navrepair-" + Guid.NewGuid().ToString("N"));
         var fixture = Path.Combine(Root, "fixture");
-        if (!File.Exists(Probe)) throw new InvalidOperationException($"build _geometry-harness/navownprobe in Release first: {Probe}");
+        if (!File.Exists(Probe)) throw new InvalidOperationException($"navownprobe is not in the build at {Probe}; build the solution first.");
         var (exit, text) = Recheck.Run(Probe, new[] { "--write-navrepair-fixture", fixture }, null);
         if (exit != 0 || !Plugins.All(p => File.Exists(Path.Combine(fixture, p)))) throw new InvalidOperationException($"the fixture was not written (exit {exit}): {text}");
         var profile = Path.Combine(Instance, "profiles", "P");

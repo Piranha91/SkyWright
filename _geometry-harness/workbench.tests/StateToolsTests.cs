@@ -611,8 +611,8 @@ public sealed class StateToolsTests : IAsyncLifetime
     /// <summary>A copy of the server this checkout builds, so a config can sit beside it without touching the build.</summary>
     static string ServerCopy(string dir)
     {
-        var src = Path.Combine(HarnessShared.CheckoutLayout.Housecarl(R3Bundle.Checkout()), "src", "housecarl-mcp", "bin", "Release", "net9.0");
-        Assert.True(File.Exists(Path.Combine(src, "housecarl-mcp.exe")), "build src/housecarl-mcp in Release first");
+        var src = Path.GetDirectoryName(TestBuild.Server)!;
+        Assert.True(File.Exists(TestBuild.Server), "build the solution first: the build's Tools/housecarl-mcp is missing");
         foreach (var f in Directory.EnumerateFiles(src, "*", SearchOption.AllDirectories))
         {
             var t = Path.Combine(dir, Path.GetRelativePath(src, f));

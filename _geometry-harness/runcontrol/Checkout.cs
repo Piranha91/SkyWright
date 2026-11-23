@@ -21,11 +21,12 @@ public static class Checkout
     /// <summary>One of SkyWright's programs in this layout.</summary>
     public static string Program(string name) => PyPath.Str(HarnessShared.CheckoutLayout.ProgramExe(Harness, name));
 
-    /// <summary>A Python script of the checkout's harness; an install carries no Python, so there it is refused.</summary>
-    public static string Script(string name, string step) => Layout.Installed
-        ? throw new Refusal($"{step} is a Python step that runs only from a SkyWright checkout, and this runcontrol is installed at {PyOrder.Fwd(Layout.Root)}; run it from a checkout's runcontrol.")
-        : PyPath.Join(Harness, name);
+    /// <summary>A Python script of the checkout this build was made in (its _geometry-harness); refused in one sentence
+    /// when the build sits in no checkout.</summary>
+    public static string Script(string name, string step) => Layout.Checkout is { } checkout
+        ? PyPath.Join(PyPath.Resolve(checkout), "_geometry-harness", name)
+        : throw new Refusal($"{step} is a Python step of a SkyWright checkout, and this runcontrol's build at {PyOrder.Fwd(Layout.Root)} is in none; run it from a build inside a checkout.");
 
     static HarnessShared.CheckoutLayout.Layout Find() =>
-        HarnessShared.CheckoutLayout.Locate(null, out var why) ?? throw new Refusal(why + "; run the runcontrol of an install or of the checkout whose probes it should run.");
+        HarnessShared.CheckoutLayout.Locate(null, out var why) ?? throw new Refusal(why + ".");
 }

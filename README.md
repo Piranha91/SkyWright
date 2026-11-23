@@ -10,42 +10,30 @@ Requirements: Windows, the .NET 9 SDK, and git.
 
 ```
 git clone --recurse-submodules <this repository>
-dotnet build SkyWright.sln -c Release
-dotnet run --project external/houseCARL/src/housecarl-generator -c Release --no-build -- external/houseCARL/generated external/houseCARL/generated/reference
+powershell -File scripts\build.ps1
 ```
 
-The last line makes the record rulebook (`corpus.json`) that houseCARL's server and the run controller read. Then start the app:
+`scripts\build.ps1` makes houseCARL's record rulebook (`corpus.json`) when it is missing (`-Rulebook` remakes it), then builds the Debug and the Release configuration. Each build is one folder at the top of the checkout:
 
 ```
-_geometry-harness/workbench/bin/Release/net9.0-windows10.0.19041.0/SkyWright.exe
+bin\Debug\net9.0-windows10.0.19041.0\SkyWright.exe        (and bin\Release\... the same)
 ```
+
+| Path in the build folder | What |
+|---|---|
+| `SkyWright.exe` | The app |
+| `Probes\<name>\<name>.exe` | Every probe, and conflictdiff, navedit, ordermap and viewprobe |
+| `Tools\runcontrol\runcontrol.exe` | The run controller |
+| `Tools\housecarl-mcp\` | houseCARL's server, built from the pin, with the rulebook `corpus.json` beside it |
+| `Data\` | The check registry, the severity table, the rest of `data\`, and houseCARL's scene policy |
+| `Tests\workbench.tests\` | The app's tests, which run against this build |
+| `skywright-layout.json` | The marker: which configuration, and where each piece is |
+
+Debug is for working on the app; Release is optimized, so evaluations and anything timed use it. `dotnet build SkyWright.sln -c Debug` (or `-c Release`) builds one configuration.
+
+**How each program finds its pieces.** First a `WB_*` override (`WB_SERVER`, `WB_CORPUS`, `WB_REGISTRY`, `WB_SEVERITY`, `WB_RUNCONTROL`, `WB_HARNESS`, `WB_SCENE_POLICY`, and `WB_NAVOWNPROBE`, `WB_CONFLICTDIFF`, `WB_PROBE_DIRS`), which the app names in its log when it starts. Then the build the program sits in: its own folder (the app) or two folders up (a probe, a tool), where `skywright-layout.json` is. There is no other search, so pieces of two builds never mix unless an override names one. A rebuild replaces the programs of that build, so do not rebuild a checkout while it runs an evaluation; parallel work uses its own git worktree, which has its own `bin\`.
 
 Set `WB_MCP_PORT` to a port number to serve the app's state tools (`workbench_state`, `workbench_act`) on `http://127.0.0.1:<port>/`.
-
-## Install a commit
-
-The checkout is for development: a build there replaces the programs in its own `bin` folders. To run evaluations, or to use the app while you keep building, publish a commit into its own folder:
-
-```
-dotnet run --project _geometry-harness/publish -c Release -- [--commit REV] [--to DIR]
-```
-
-It refuses a checkout with uncommitted changes. It exports the commit and its pinned houseCARL with `git archive`, builds that copy in `artifacts/install-src/` (deleted afterwards), and publishes into `DIR/<commit>/`, by default `artifacts/install/<commit>/` in the checkout. `artifacts/` is ignored by git, and a build of the solution never writes there. `git clean -x` deletes it, installs included.
-
-| Path in the install | What |
-|---|---|
-| `skywright-install.json` | The manifest: the commit, the houseCARL pin, the named pieces and every file's sha256 |
-| `SkyWright/SkyWright.exe` | The app, with the same `viewprobe.exe` the install's `viewprobe/` holds |
-| `runcontrol/`, `<probe>/` | The run controller and every probe, each in its own folder |
-| `housecarl-mcp/` | houseCARL's server, built from the pin, with the rulebook `corpus.json` beside it |
-| `housecarl/` | houseCARL's other data the app reads (the reporting skill's scene policy) |
-| `data/` | The check registry, the severity table and the rest of `data/` |
-
-Check an install against its manifest with `dotnet run --project _geometry-harness/publish -c Release -- --verify DIR/<commit>`.
-
-The install needs the .NET 9 runtime (Desktop Runtime for the app). It needs no SDK, no Python and no houseCARL.
-
-**How each program finds its pieces.** First a `WB_*` override (`WB_SERVER`, `WB_CORPUS`, `WB_REGISTRY`, `WB_SEVERITY`, `WB_RUNCONTROL`, `WB_HARNESS`, `WB_SCENE_POLICY`), which the app names in its log when it starts. Then the install the program sits in, when its folder's parent holds `skywright-install.json`. Last, the checkout above it (the folder holding `SkyWright.sln`). A program in an install never falls back to a checkout. A damaged install (a listed piece missing, or the folder not one of its programs) is refused in one sentence. The lab entry's record capture is a Python step, so it runs only from a checkout's runcontrol.
 
 ## Layout
 
@@ -55,22 +43,22 @@ The install needs the .NET 9 runtime (Desktop Runtime for the app). It needs no 
 | `_geometry-harness/runcontrol/` | The run controller: census through bundle |
 | `_geometry-harness/*probe/`, `_shared/` | The probes and the code they share |
 | `_geometry-harness/viewprobe/` | The renderer host the 3D view uses (on SkyRender) |
-| `_geometry-harness/publish/` | `skywright-publish`: builds an install from a commit (not itself installed) |
-| `_geometry-harness/*.py`, `tests/`, `planeassess/` | Pipeline, reporting and video tools and their tests; not shipped in the app |
+| `_geometry-harness/*.py`, `tests/`, `planeassess/` | Pipeline, reporting and video tools and their tests; not shipped in the app. They find built programs through `buildlayout.py` |
 | `data/` | The check registry, the severity table, the record field scope and the overlap triage policy |
 | `external/houseCARL/` | houseCARL, pinned as a git submodule: its core, server (which writes patches) and generator |
+| `scripts/build.ps1` | Builds the rulebook when missing, then Debug and Release |
 | `scripts/runlog.py` | Loads houseCARL's run log from the submodule |
 | `docs/clash-list-format.md` | The clash list format: clashes an AI, a script or a person writes for SkyWright to list and show |
 
 ## Checks
 
 ```
-dotnet build SkyWright.sln -c Release
-_geometry-harness/runcontrol/bin/Release/net9.0/runcontrol.exe --self-test
-dotnet test _geometry-harness/workbench.tests -c Release --no-build
+powershell -File scripts\build.ps1
+bin\Release\net9.0-windows10.0.19041.0\Tools\runcontrol\runcontrol.exe --self-test
+dotnet test bin\Release\net9.0-windows10.0.19041.0\Tests\workbench.tests\workbench.tests.dll
 ```
 
-Eleven workbench tests read real evaluation output and fail without the environment variables that point at it.
+Twelve workbench tests read real evaluation output and fail without the environment variables that point at it.
 
 ## Credits and license
 

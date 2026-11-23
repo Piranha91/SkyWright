@@ -24,7 +24,7 @@ public sealed class R3Bundle : IDisposable
         return d!.FullName;
     }
     public static string Runcontrol => Environment.GetEnvironmentVariable("WB_RUNCONTROL") is { Length: > 0 } e ? e
-        : Path.Combine(Checkout(), "_geometry-harness", "runcontrol", "bin", "Release", "net9.0", "runcontrol.exe");
+        : TestBuild.Runcontrol;
 
     public R3Bundle()
     {

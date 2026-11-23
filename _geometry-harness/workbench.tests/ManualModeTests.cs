@@ -117,7 +117,7 @@ public sealed class OutputWriteTests : IClassFixture<TiltedRefWorld>
 
     static string ServerExe()
     {
-        var exe = HarnessShared.CheckoutLayout.ServerExe(R3Bundle.Checkout());
+        var exe = TestBuild.Server;
         Assert.True(File.Exists(exe), $"build src/housecarl-mcp in Release first: {exe}");
         return exe;
     }
@@ -533,7 +533,7 @@ public sealed class LauncherProcessTests
     static string WorkbenchExe()
     {
         var here = Path.Combine(AppContext.BaseDirectory, "SkyWright.exe");
-        return File.Exists(here) ? here : Path.Combine(R3Bundle.Checkout(), "_geometry-harness", "workbench", "bin", "Release", "net9.0-windows10.0.19041.0", "SkyWright.exe");
+        return File.Exists(here) ? here : Path.Combine(TestBuild.Layout.Root, "SkyWright.exe");
     }
 
     [Fact]
@@ -789,7 +789,7 @@ public sealed class InPlaceRunTests
         var machine = Path.Combine(w.Root, "machine.json");
         File.WriteAllText(machine, JsonSerializer.Serialize(new
         {
-            readerCmd = "\"" + HarnessShared.CheckoutLayout.ServerExe(R3Bundle.Checkout()) + "\"",
+            readerCmd = "\"" + TestBuild.Server + "\"",
         }));
         var decoy = Path.Combine(w.Root, "decoy-runlog"); Directory.CreateDirectory(decoy);
         var before = Listing(w.Root);                                 // the whole world root, not only instance and game
@@ -839,11 +839,10 @@ public sealed class InPlaceRunTests
         // a real instance is too large to list whole: its profile folder and the chosen mod's folder are watched
         var watched = real is null ? new[] { instance, game } : new[] { Path.Combine(instance, "profiles", profile), Path.Combine(instance, "mods", mod) };
         var minutes = int.TryParse(Environment.GetEnvironmentVariable("WB_TEST_RUN_MINUTES"), out var m) ? m : 20;
-        var gh = Path.Combine(R3Bundle.Checkout(), "_geometry-harness");
         var exe = Environment.GetEnvironmentVariable("WB_TEST_WORKBENCH") is { Length: > 0 } we ? we
-            : Directory.GetFiles(Path.Combine(gh, "workbench", "bin", "Release"), "SkyWright.exe", SearchOption.AllDirectories).Single();
+            : Path.Combine(TestBuild.Layout.Root, "SkyWright.exe");
         var engine = Environment.GetEnvironmentVariable("WB_RUNCONTROL") is { Length: > 0 } rc ? rc
-            : Path.Combine(gh, "runcontrol", "bin", "Release", "net9.0", "runcontrol.exe");
+            : TestBuild.Runcontrol;
         Assert.True(File.Exists(engine), $"the built-in run engine is not built at {engine}");
 
         // a PATH with every folder that holds a python*.exe taken out, and proof that it starts no Python
@@ -1011,7 +1010,7 @@ public sealed class OutputFolderLayoutTests : IDisposable
 public sealed class ManualWriteTests
 {
     static string Checkout() => R3Bundle.Checkout();
-    static string ServerExe() => HarnessShared.CheckoutLayout.ServerExe(Checkout());
+    static string ServerExe() => TestBuild.Server;
 
     static Dictionary<string, (long, DateTime)> Listing(params string[] roots) =>
         roots.Where(Directory.Exists).SelectMany(r => Directory.EnumerateFileSystemEntries(r, "*", SearchOption.AllDirectories))
@@ -1105,7 +1104,7 @@ public sealed class ManualWriteTests
             """{"adapter":{"kind":"ordersweep-probe","exe":"overlapprobe","args":["--order","{order}","--emit","{emit}","--base","{base}"],"populationFlag":"--population","commonFlags":true}}""");
         var row = new ConflictRow("overlap|" + TiltedRefWorld.Ref + "|x", "geometry.object-overlap", "OVERLAP", "HcWbWorld.esm", "HcWbWorld.esm", "",
                                   TiltedRefWorld.Ref.ToString(), null, null, "000802:HcWbWorld.esm", null, null, null, null, "calibrated-inference", null);
-        var harness = Path.Combine(Checkout(), "_geometry-harness");
+        var harness = TestBuild.Layout.Root;
         var work = Path.Combine(w.Root, "work", "recheck");
         var m = typeof(Recheck).GetMethod("RunAll", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)!;
         var args = m.GetParameters().Select(p => p.Name switch
@@ -1114,7 +1113,7 @@ public sealed class ManualWriteTests
             "patchFolder" => folder,                                 // the patch's folder by its full path
             "patchMod" => Path.GetFileName(folder),                  // the base: the folder's name, which the window found under the instance's mods
             "instance" => w.Instance, "profile" => "Default", "game" => game, "workDir" => work,
-            "engine" => RunEngine.OfBuiltIn(Path.Combine(harness, "runcontrol", "bin", "Release", "net9.0", "runcontrol.exe")), "conflictdiffExe" => Path.Combine(harness, "conflictdiff", "bin", "Release", "net9.0", "conflictdiff.exe"),
+            "engine" => RunEngine.OfBuiltIn(TestBuild.Runcontrol), "conflictdiffExe" => TestBuild.Program("conflictdiff"),
             "buildDirs" => Array.Empty<string>(), "localProbesRoot" => harness, "say" => (Action<string>)(_ => { }),
             _ => throw new Xunit.Sdk.XunitException($"Recheck.RunAll has a parameter {p.Name} this test does not know"),
         }).ToArray();

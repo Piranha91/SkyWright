@@ -15,22 +15,14 @@ SkyWright finds where Skyrim mods clash in the 3D world, shows each clash, and w
 
 ```
 git submodule update --init
-dotnet build SkyWright.sln -c Release
-dotnet run --project external/houseCARL/src/housecarl-generator -c Release --no-build -- external/houseCARL/generated external/houseCARL/generated/reference
-_geometry-harness/runcontrol/bin/Release/net9.0/runcontrol.exe --self-test
-dotnet test _geometry-harness/workbench.tests -c Release --no-build
+powershell -File scripts\build.ps1
+bin\Release\net9.0-windows10.0.19041.0\Tools\runcontrol\runcontrol.exe --self-test
+dotnet test bin\Release\net9.0-windows10.0.19041.0\Tests\workbench.tests\workbench.tests.dll
 ```
 
-Every program finds its pieces through one owner, `_geometry-harness/_shared/CheckoutLayout.cs`: a `WB_*` override, else the install beside it, else the checkout above it. Never spell a probe's path (`<probe>/bin/Release/...`) anywhere else; ask `CheckoutLayout.ProgramExe`.
+`scripts\build.ps1` builds both configurations; build both after every change. Each is one folder, `bin\<Configuration>\net9.0-windows10.0.19041.0\`: `SkyWright.exe`, `Probes\<name>\`, `Tools\runcontrol\`, `Tools\housecarl-mcp\` (with the rulebook), `Data\`, `Tests\` and the marker `skywright-layout.json`. `Directory.Build.props` owns that layout and writes the marker; programs read it through `_geometry-harness/_shared/CheckoutLayout.cs` and the Python tools through `_geometry-harness/buildlayout.py`. Never spell a program's path anywhere else.
 
-Evaluations run from an install, never from the checkout's `bin`. Publish one (it refuses uncommitted changes) and check it:
-
-```
-dotnet run --project _geometry-harness/publish -c Release -- --commit HEAD
-dotnet run --project _geometry-harness/publish -c Release -- --verify artifacts/install/<commit>
-```
-
-The install is `artifacts/install/<commit>/` in the checkout (ignored by git; `--to` picks another folder), with the app at `SkyWright/SkyWright.exe`, each program in its own folder and `skywright-install.json` at its root. README.md, "Install a commit", has the layout.
+Debug is the build to use by default; Release is for evaluations and anything timed. A rebuild replaces what a running SkyWright or evaluation in that checkout uses, so parallel sessions each work in their own git worktree (its own `bin\`), and merge `main` into their branch at each step unless that would interfere with their task, so the sessions do not drift apart.
 
 ## Commits
 

@@ -86,7 +86,7 @@ public class PatchWriteTests : IClassFixture<TiltedRefWorld>
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !File.Exists(Path.Combine(dir.FullName, HarnessShared.CheckoutLayout.Marker))) dir = dir.Parent;
         Assert.NotNull(dir);
-        var exe = HarnessShared.CheckoutLayout.ServerExe(dir!.FullName);
+        var exe = TestBuild.Server;
         Assert.True(File.Exists(exe), $"build src/housecarl-mcp in Release first: {exe}");
         return exe;
     }

@@ -696,7 +696,7 @@ public static partial class SelfTest
     static void PipelineLiveCases()
     {
         const string name = "live: the Python pipeline reuses the census, prepare and scope this program accepted";
-        string? root = HarnessShared.CheckoutLayout.BuiltInCheckout();
+        string? root = HarnessShared.CheckoutLayout.Locate(null, out _)?.Checkout;
         string harness = root == null ? "" : Path.Combine(root, "_geometry-harness");
         string? reason = !File.Exists(Path.Combine(harness, "evalpipeline.py")) ? "this build is not inside a SkyWright checkout with the Python controller"
             : Python(harness, "--version") is not { exit: 0 } ? "python is not on PATH" : null;

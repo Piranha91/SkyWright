@@ -7,14 +7,14 @@ namespace RunControl;
 /// Exit 0, or 2 on a refusal or a program that changed.</summary>
 public static class EvaluateRun
 {
-    /// <summary>One line when the plan's probes are not this runcontrol's own layout's (an install running a checkout's
-    /// plan, the reverse, or an explicit --harness): where they are and where this program is. Null when they match.</summary>
+    /// <summary>One line when the plan's probes are not this runcontrol's own build's (another build's plan, Debug and
+    /// Release, or an explicit --harness): where they are and where this program is. Null when they match.</summary>
     public static string? LayoutNote(PyDict plan)
     {
         string harness = PyPath.Str(Ev.Str(PyValue.Dict(plan["options"])["harness"]));
         var own = HarnessShared.CheckoutLayout.Locate(null, out _);
         if (own is not null && string.Equals(Path.GetFullPath(harness).TrimEnd('\\', '/'), Path.GetFullPath(own.Harness).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase)) return null;
-        return $"note: this plan's probes are at {PyOrder.Fwd(harness)} (its --harness), not in this runcontrol's {(own?.Installed == true ? "install" : "checkout")} "
+        return $"note: this plan's probes are at {PyOrder.Fwd(harness)} (its --harness), not in this runcontrol's build "
                + $"{(own is null ? "(none found)" : PyOrder.Fwd(own.Root))}; they run as the plan recorded them, and their identities are checked by content.";
     }
 

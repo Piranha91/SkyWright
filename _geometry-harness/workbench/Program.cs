@@ -128,9 +128,8 @@ internal static class Program
             Console.Error.WriteLine("workbench: " + said + Environment.NewLine + e.ExceptionObject);
             Tell(said + (SessionLog.FilePath is { } p ? $" The details are in {p}." : ""));
         };
-        // where the pieces come from, overrides named; a broken install beside the workbench is refused before anything opens
+        // which build the pieces come from, overrides named; outside a build only the WB_* overrides can name them
         if (HarnessShared.CheckoutLayout.Locate(null, out var noLayout) is { } layout) WorkbenchHost.Say(layout.Describe());
-        else if (HarnessShared.CheckoutLayout.BesideInstall()) { Console.Error.WriteLine("workbench: " + noLayout); Tell(noLayout + "."); return 2; }
         else WorkbenchHost.Say(noLayout + "; only the WB_* overrides name its pieces.");
         args = FrameSwitches(args);
         InteractiveViewer.Host = WorkbenchHost.Run;

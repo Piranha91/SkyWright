@@ -4,4 +4,52 @@
     <HousecarlRoot>$(MSBuildThisFileDirectory)external\houseCARL\</HousecarlRoot>
     <HousecarlSrc>$(HousecarlRoot)src\</HousecarlSrc>
   </PropertyGroup>
+
+  <!-- The build layout, one folder per configuration: bin\<Configuration>\<the app's .NET version>\ holds SkyWright.exe,
+       Probes\<name>\ (every program SkyWright runs), Tools\<name>\ (runcontrol, houseCARL's server and its rulebook),
+       Data\ and Tests\. This file is the ONE owner of where each program goes; the SkyWrightLayout target below writes
+       the same names into skywright-layout.json, which the programs (CheckoutLayout.cs) and the Python tools
+       (_geometry-harness/buildlayout.py) read instead of spelling a path. houseCARL's own projects keep their output. -->
+  <PropertyGroup>
+    <SkyWrightConfiguration>$(Configuration)</SkyWrightConfiguration>
+    <SkyWrightConfiguration Condition="'$(SkyWrightConfiguration)' == ''">Debug</SkyWrightConfiguration>
+    <SkyWrightFramework>net9.0-windows10.0.19041.0</SkyWrightFramework>
+    <SkyWrightLayoutRoot>$(MSBuildThisFileDirectory)bin\$(SkyWrightConfiguration)\$(SkyWrightFramework)\</SkyWrightLayoutRoot>
+    <SkyWrightProbes>Probes</SkyWrightProbes>
+    <SkyWrightTools>Tools</SkyWrightTools>
+    <SkyWrightData>Data</SkyWrightData>
+    <SkyWrightLayoutMarker>skywright-layout.json</SkyWrightLayoutMarker>
+    <_SwHarness>$(MSBuildThisFileDirectory)_geometry-harness\</_SwHarness>
+    <_SwInHarness>$([System.String]::Copy('$(MSBuildProjectDirectory)\').ToUpperInvariant().StartsWith($(_SwHarness.ToUpperInvariant())))</_SwInHarness>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(_SwInHarness)' == 'True'">
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <_SwFolder>$(SkyWrightProbes)\$(MSBuildProjectName)\</_SwFolder>
+    <_SwFolder Condition="'$(MSBuildProjectName)' == 'workbench'"></_SwFolder>
+    <_SwFolder Condition="'$(MSBuildProjectName)' == 'runcontrol'">$(SkyWrightTools)\runcontrol\</_SwFolder>
+    <_SwFolder Condition="'$(MSBuildProjectName)' == 'workbench.tests'">Tests\workbench.tests\</_SwFolder>
+    <OutputPath>$(SkyWrightLayoutRoot)$(_SwFolder)</OutputPath>
+  </PropertyGroup>
+
+  <!-- After the app builds: houseCARL's server and its rulebook into Tools\housecarl-mcp\, the app data into Data\, and
+       the marker that names the layout. The app's project references the server project so it is built first. -->
+  <Target Name="SkyWrightLayout" AfterTargets="Build" Condition="'$(MSBuildProjectName)' == 'workbench'">
+    <PropertyGroup>
+      <_SwServerOut>$(HousecarlSrc)housecarl-mcp\bin\$(SkyWrightConfiguration)\net9.0\</_SwServerOut>
+      <_SwCorpus>$(HousecarlRoot)generated\corpus.json</_SwCorpus>
+      <_SwScenePolicy>$(HousecarlRoot).claude\skills\evaluation-reporting\references\scene-policy.json</_SwScenePolicy>
+      <_SwJson>{ "kind": "skywright-build", "configuration": "$(SkyWrightConfiguration)", "framework": "$(SkyWrightFramework)", "app": "SkyWright.exe", "program": "$(SkyWrightProbes)/{name}/{name}.exe", "tool": "$(SkyWrightTools)/{name}/{name}.exe", "tools": ["runcontrol", "housecarl-mcp"], "server": "$(SkyWrightTools)/housecarl-mcp/housecarl-mcp.exe", "corpus": "$(SkyWrightTools)/housecarl-mcp/corpus.json", "registry": "$(SkyWrightData)/check-registry.json", "severity": "$(SkyWrightData)/workbench-severity.json", "scenePolicy": "$(SkyWrightData)/scene-policy.json" }</_SwJson>
+    </PropertyGroup>
+    <ItemGroup>
+      <_SwServerFiles Include="$(_SwServerOut)**\*" />
+      <_SwDataFiles Include="$(MSBuildThisFileDirectory)data\*" />
+    </ItemGroup>
+    <Error Condition="'@(_SwServerFiles)' == ''" Text="houseCARL's server is not built at $(_SwServerOut); build the solution (it builds the server first)." />
+    <Copy SourceFiles="@(_SwServerFiles)" DestinationFiles="@(_SwServerFiles->'$(SkyWrightLayoutRoot)$(SkyWrightTools)\housecarl-mcp\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Warning Condition="!Exists('$(_SwCorpus)')" Text="the rulebook $(_SwCorpus) is missing, so SkyWright cannot write patches; run scripts\build.ps1, which makes it." />
+    <Copy Condition="Exists('$(_SwCorpus)')" SourceFiles="$(_SwCorpus)" DestinationFolder="$(SkyWrightLayoutRoot)$(SkyWrightTools)\housecarl-mcp\" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_SwDataFiles)" DestinationFolder="$(SkyWrightLayoutRoot)$(SkyWrightData)\" SkipUnchangedFiles="true" />
+    <Copy Condition="Exists('$(_SwScenePolicy)')" SourceFiles="$(_SwScenePolicy)" DestinationFolder="$(SkyWrightLayoutRoot)$(SkyWrightData)\" SkipUnchangedFiles="true" />
+    <WriteLinesToFile File="$(SkyWrightLayoutRoot)$(SkyWrightLayoutMarker)" Lines="$(_SwJson)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
 </Project>
