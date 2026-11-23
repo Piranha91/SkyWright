@@ -79,6 +79,19 @@ public class LiveCellsTests
         Assert.Equal(48, add.Count);
     }
 
+    [Fact]
+    public void The_square_follows_the_eye_only_once_it_is_well_past_the_centre_cells_edge()
+    {
+        // cell (0,0) spans 0..4096 on both axes; the margin is 512
+        Assert.Null(LiveCells.Follow((0, 0), 2000, 2000, 512));
+        Assert.Null(LiveCells.Follow((0, 0), 4096 + 500, 2000, 512));     // just over the edge: stays
+        Assert.Equal((1, 0), LiveCells.Follow((0, 0), 4096 + 600, 2000, 512));
+        Assert.Equal((-1, -1), LiveCells.Follow((0, 0), -600, -600, 512));
+        // coming back: from (1,0) the eye must be 512 past its west edge before the square returns
+        Assert.Null(LiveCells.Follow((1, 0), 4096 - 500, 2000, 512));
+        Assert.Equal((0, 0), LiveCells.Follow((1, 0), 4096 - 600, 2000, 512));
+    }
+
     static SceneRef At(uint id, float x, float y) =>
         new("meshes\\test.nif", new Vec3(x, y, 0), new Vec3(0, 0, 0), 1f, false, RefKey: new FormKey(ModKey.FromNameAndExtension("Test.esp"), id));
 

@@ -11,7 +11,11 @@ internal sealed class LiveCells
     readonly InteractiveOptions _opt;
     readonly Dictionary<(int X, int Y), LiveCell> _cells = new();
 
-    internal LiveCells(InteractiveOptions opt) { _opt = opt; Grids = opt.GridsToLoad; Far = opt.LargeGrid; }
+    internal LiveCells(InteractiveOptions opt) { _opt = opt; Grids = opt.GridsToLoad; Far = opt.LargeGrid; Centre = opt.Grid; }
+
+    /// <summary>The cell the loaded square is centred on: the scene's cell when it opens, then wherever the camera goes
+    /// (as the game's grid follows the player). The scene's own cell (its outline, its navmesh) stays where it was asked for.</summary>
+    internal (int X, int Y)? Centre { get; set; }
 
     /// <summary>The scene can add and drop cells: an exterior built with a prepared square.</summary>
     internal bool Available => _opt.BuildCell is not null && _opt.Grid is not null && _opt.Reach.Count > 0;
@@ -29,7 +33,18 @@ internal sealed class LiveCells
     internal int FarHeld => _cells.Values.Count(c => c.LargeOnly);
 
     /// <summary>The widest square the prepared cells allow around the scene's cell.</summary>
-    internal int MaxGrids => _opt.Grid is { } g ? MaxSquare(g, _opt.Reach) : 1;
+    internal int MaxGrids => Centre is { } g ? MaxSquare(g, _opt.Reach) : 1;
+
+    /// <summary>The cell the eye at <paramref name="x"/>, <paramref name="y"/> asks the square to move to, or null while it
+    /// stays: the eye must be <paramref name="margin"/> units past the centre cell's edge, so hovering on an edge does not
+    /// swap cells back and forth.</summary>
+    internal static (int X, int Y)? Follow((int X, int Y) centre, float x, float y, float margin)
+    {
+        const float cell = 4096f;
+        if (x >= centre.X * cell - margin && x < (centre.X + 1) * cell + margin && y >= centre.Y * cell - margin && y < (centre.Y + 1) * cell + margin)
+            return null;
+        return LiveSlicer.CellOf(x, y);
+    }
 
     internal static int MaxSquare((int X, int Y) centre, IReadOnlySet<(int X, int Y)> reach)
     {

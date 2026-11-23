@@ -640,7 +640,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             // a reference this scene does not draw has nothing to land on: say so, and show the cell instead of the placeholder pose
             if (!Land(FormKey.Factory(land)) && !_session.IsDrawn(FormKey.Factory(land)) && SceneDirector.Showing is not null) FrameScene();
         }
-        else if (_queue.Count > 0 && (_opt.PrefetchCell is null || _prefetched.ContainsKey(_queue.Peek())))   // (cell, kind)
+        else FollowCamera();   // after the first frame's landing, so the placeholder pose never moves the square
+        if (_landOnFirstFrame is null && _queue.Count > 0 && (_opt.PrefetchCell is null || _prefetched.ContainsKey(_queue.Peek())))   // (cell, kind)
         {
             BuildNextCell();   // one loaded cell per frame, once the worker has read it; its AfterCellsChanged asks for the next frame
         }
@@ -1075,7 +1076,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     /// <summary>The live scene's cells for a state readout: the square, its centre, and each held cell named by the walk.</summary>
     internal object? LiveState() => _live.Available ? new
     {
-        grids = _live.Grids, maxGrids = _live.MaxGrids, source = _opt.GridsToLoadSource, centre = _opt.Grid is { } lg ? new[] { lg.X, lg.Y } : null,
+        grids = _live.Grids, maxGrids = _live.MaxGrids, source = _opt.GridsToLoadSource, centre = _live.Centre is { } lg ? new[] { lg.X, lg.Y } : null,
+        sceneCell = _opt.Grid is { } sg ? new[] { sg.X, sg.Y } : null, follow = _follow,
         held = _live.Held.Count, far = _live.FarOn ? _live.FarWidth : 0, farHeld = _live.FarHeld, farSource = _opt.LargeGridSource,
         cells = _opt.CellGrids.Where(kv => _live.Holds(kv.Value)).Select(kv => new { cell = kv.Key.ToString(), x = kv.Value.X, y = kv.Value.Y }).ToList(),
     } : null;
@@ -1147,7 +1149,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     /// an edit is kept as it is), queue what comes in. One sentence back, starting with <paramref name="what"/>.</summary>
     string Replan(string what)
     {
-        var (add, drop) = LiveCells.Plan(_opt.Grid!.Value, _live.Grids, _live.FarWidth, _live.Kinds, _opt.Reach);
+        var (add, drop) = LiveCells.Plan(_live.Centre!.Value, _live.Grids, _live.FarWidth, _live.Kinds, _opt.Reach);
         var kept = drop.Where(c => _live.All.First(l => l.Grid == c).Refs.Any(r => _session.Holds(r.Ref.RefKey))).ToList();
         drop = drop.Except(kept).ToList();
         add = add.Where(a => !kept.Contains(a.Cell)).ToList();
@@ -1236,13 +1238,47 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         return LiveCells.MaxSquare(g, _opt.Reach) >= _live.Grids ? g : null;
     }
 
+    // ---- the loaded square follows the camera (the Follow camera toggle) --------------------------------------------------
+    bool _follow = true;
+    bool _beyondSaid;
+    /// <summary>The eye has left the loaded square's centre cell (by more than 512 units): the square moves to the eye's cell,
+    /// building the cells that come in and freeing the ones that go out. Past what the scene prepared, it says so once.</summary>
+    void FollowCamera()
+    {
+        if (!_follow || !_live.Available || _live.Centre is not { } c) return;
+        if (LiveCells.Follow(c, _eye.X, _eye.Y, 512f) is not { } to) { _beyondSaid = false; return; }
+        if (LiveCells.MaxSquare(to, _opt.Reach) < _live.Grids)
+        {
+            if (!_beyondSaid)
+            {
+                _beyondSaid = true;
+                var why = $"the camera is in cell {to.X},{to.Y}, past the cells this scene prepared, so the loaded cells stay around {c.X},{c.Y}; open a cell there to load around it";
+                Say(why); Shell.SetBanner(why);
+            }
+            return;
+        }
+        _live.Centre = to;
+        Shell.SetBanner(Replan($"the camera moved to cell {to.X},{to.Y}: loaded cells follow"));
+    }
+
+    /// <summary>Let the loaded square follow the camera, or hold it where it is. One sentence back.</summary>
+    internal string SetFollow(bool on)
+    {
+        _follow = on; _beyondSaid = false;
+        var said = on ? "Follow camera on: the loaded cells move with the camera, as the game's do with the player"
+                      : $"Follow camera off: the loaded cells stay around cell {_live.Centre?.X},{_live.Centre?.Y}";
+        Say(said);
+        if (on) Invalidate("follow");
+        return said;
+    }
+
     /// <summary>Make <paramref name="cell"/> the scene's cell without a rebuild: the loaded square moves to it, building the
     /// cells that come in and freeing the cells that go out. The navmesh and the occlusion planes stay those of the cell
     /// the scene was built for (they are built once, for it). One sentence back.</summary>
     internal string Recentre(string cell, string? label, (int X, int Y) grid)
     {
         var was = _opt.CellLabel;
-        _opt.Grid = grid;
+        _opt.Grid = grid; _live.Centre = grid;
         _opt.CellKey = FormKey.Factory(cell);
         _opt.CellLabel = label ?? cell;
         var said = SetGrids(_live.Grids);
@@ -1291,6 +1327,12 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); far.IsChecked = _live.FarOn; }
         };
         row.Children.Add(far);
+        var follow = new System.Windows.Controls.Primitives.ToggleButton { Content = "Follow camera", IsChecked = _follow, Margin = new Thickness(4, 2, 2, 2),
+            Padding = new Thickness(6, 1, 6, 1), Focusable = false,
+            ToolTip = "The loaded cells and the far grid move with the camera, as the game's move with the player: crossing into a neighbouring "
+                    + "cell builds the cells that come in and frees the ones that go out. Off holds them where they are." };
+        follow.Click += (_, _) => Shell.SetBanner(SetFollow(follow.IsChecked == true));
+        row.Children.Add(follow);
         return row;
     }
 
