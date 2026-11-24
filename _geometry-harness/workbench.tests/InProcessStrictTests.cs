@@ -1,7 +1,9 @@
 using System.Text.Json.Nodes;
 using HousecarlCore;
+using Mutagen.Bethesda;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using Noggog;
 using ViewProbe;
 using Workbench;
 using Xunit;
@@ -95,6 +97,30 @@ public sealed class InProcessStrictTests
         Assert.Contains(Path.Combine(w.Instance, "mods", "stray.esp"), Changed(mark, Listing(w.Instance, game, o)), StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>The equivalence fixture's oversized answer (Gate B): every field of 600 references, an answer of several
+    /// MiB, reads whole in process: it is JSON, it holds every record, and the winners of all of them read in chunks.
+    /// Rejects the server path's reading, which broke such an answer with a line break at every 1 MiB.</summary>
+    [Fact]
+    public async Task An_answer_over_one_MiB_reads_whole_and_every_reference_has_its_row()
+    {
+        using var w = new CrowdWorld(600);
+        await using var p = PatchWriter.OpenInProcess(new WriteTarget(w.Instance, "Default", w.DataDir, NewOut(w.Root)), Path.Combine(w.Root, "hc-big"), TestCorpus.Path, _ => { });
+        var text = await p.CallAsync("housecarl_records", new()
+        {
+            ["formids"] = w.Refs.Select(r => r.ToString()).ToArray(), ["project"] = new Dictionary<string, object?> { ["form"] = "everything", ["depth"] = 2 },
+            ["format"] = "json", ["limit"] = w.Refs.Count + 10, ["max_chars"] = 20_000_000,
+        });
+        Assert.True(text.Length > 3 * (1 << 20), $"the answer is {text.Length} chars, not past three 1 MiB blocks");
+        using var doc = System.Text.Json.JsonDocument.Parse(text);
+        var ids = doc.RootElement.GetProperty("records").EnumerateArray().Select(r => r.GetProperty("formid").GetString()).ToHashSet();
+        Assert.True(w.Refs.All(r => ids.Contains(r.ToString())), "a reference has no row in the answer");
+        var (winners, mismatched) = await p.WinnersAsync(w.Refs.Select(r => (r, (RefPlacementEdit.Pose?)null)).ToList());
+        Assert.Equal(w.Refs.Count, winners.Count);
+        Assert.Empty(mismatched);
+        // the check rejects the old reading: the same text with a line break at the first block boundary is not one JSON answer
+        Assert.ThrowsAny<System.Text.Json.JsonException>(() => System.Text.Json.JsonDocument.Parse(text.Insert(1 << 20, "\n").Replace("\"(absent)\"", "\"(ab\nsent)\"")));
+    }
+
     /// <summary>A dry run, through the app's commit and through the raw tool with and without an Output Folder, writes
     /// nothing anywhere (instance, game, Output Folder, data folder aside), and still answers what it would write.
     /// Rejects a dry run that writes (the plant the Gate B review used: the binding dropping dry_run).</summary>
@@ -183,4 +209,44 @@ public sealed class InProcessStrictTests
         var (exit, _) = Recheck.Run(NavRepairWorld.Probe, new[] { "--repair-readback", preview.Plan, Path.Combine(copy, "WbStrictRepairCopy.esp"), outFile }, Path.Combine(work, "readback-copy.log"));
         Assert.True(exit != 0 || !(bool)JsonNode.Parse(File.ReadAllText(outFile))!["holds"]!, "the read-back held on a patch without the repair");
     }
+}
+
+/// <summary>One master whose interior cell holds <c>count</c> placed references of one static, as an MO2 instance.</summary>
+public sealed class CrowdWorld : IDisposable
+{
+    internal static readonly ModKey Master = new("HcWbCrowd", ModType.Master);
+    public string Root { get; } = Path.Combine(Path.GetTempPath(), "hc-wb-crowd-" + Guid.NewGuid().ToString("N"));
+    public string Instance => Path.Combine(Root, "instance");
+    public string DataDir => Path.Combine(Root, "game", "Data");
+    internal readonly List<FormKey> Refs = new();
+
+    public CrowdWorld(int count)
+    {
+        var profile = Path.Combine(Instance, "profiles", "Default");
+        Directory.CreateDirectory(profile); Directory.CreateDirectory(DataDir);
+        var m = new SkyrimMod(Master, SkyrimRelease.SkyrimSE);
+        var stat = new Static(new FormKey(Master, 0x801), SkyrimRelease.SkyrimSE) { EditorID = "HcWbCrowdStatic" };
+        m.Statics.Add(stat);
+        var cell = new Cell(new FormKey(Master, 0x802), SkyrimRelease.SkyrimSE) { EditorID = "HcWbCrowdCell", Flags = Cell.Flag.IsInteriorCell };
+        for (int i = 0; i < count; i++)
+        {
+            var k = new FormKey(Master, 0x900 + (uint)i);
+            Refs.Add(k);
+            cell.Temporary.Add(new PlacedObject(k, SkyrimRelease.SkyrimSE)
+            {
+                EditorID = $"HcWbCrowdRef{i:D4}", Base = stat.ToNullableLink<IPlaceableObjectGetter>(),
+                Placement = new Placement { Position = new P3Float(i * 10, 0, 0), Rotation = new P3Float(0, 0, i * 0.01f) },
+            });
+        }
+        var block = new CellBlock { BlockNumber = 2, GroupType = GroupTypeEnum.InteriorCellBlock };
+        var sub = new CellSubBlock { BlockNumber = 0, GroupType = GroupTypeEnum.InteriorCellSubBlock };
+        sub.Cells.Add(cell); block.SubBlocks.Add(sub); m.Cells.Records.Add(block);
+        var dir = Path.Combine(Instance, "mods", "CrowdMod"); Directory.CreateDirectory(dir);
+        m.BeginWrite.ToPath(Path.Combine(dir, Master.FileName.String)).WithLoadOrder(Array.Empty<ISkyrimModGetter>()).Write();
+        File.WriteAllText(Path.Combine(profile, "loadorder.txt"), "# header\r\n" + Master.FileName + "\r\n");
+        File.WriteAllText(Path.Combine(profile, "plugins.txt"), "*" + Master.FileName + "\r\n");
+        File.WriteAllText(Path.Combine(profile, "modlist.txt"), "+CrowdMod\r\n");
+    }
+
+    public void Dispose() { try { Directory.Delete(Root, true); } catch { /* best effort */ } }
 }

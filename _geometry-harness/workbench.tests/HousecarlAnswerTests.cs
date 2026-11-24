@@ -72,4 +72,21 @@ public sealed class HousecarlAnswerTests : IClassFixture<TiltedRefWorld>
         var undo = await Assert.ThrowsAsync<InvalidOperationException>(() => p.RevertWrittenAsync(TiltedRefWorld.Ref, foreign));
         Assert.StartsWith("houseCARL refused the undo: ", undo.Message);
     }
+
+    /// <summary>The equivalence fixture's "undo again" (Gate B): the second undo of the same written edit is houseCARL's
+    /// refusal (the patch no longer carries the reference), never a second "removed". Rejects the old reading, where it
+    /// came back as "removed ... (error: refused ...)".</summary>
+    [Fact]
+    public async Task A_second_undo_of_the_same_edit_is_refused_naming_what_the_patch_no_longer_carries()
+    {
+        var o = Path.Combine(_w.Root, "ans3-" + Guid.NewGuid().ToString("N")[..6]); Directory.CreateDirectory(o);
+        await using var p = PatchWriter.OpenInProcess(new WriteTarget(_w.Instance, "Default", _w.DataDir, o), Path.Combine(_w.Root, "hc-ans3"), TestCorpus.Path, _ => { });
+        var drawn = new ViewProbe.RefPlacementEdit.Pose(TiltedRefWorld.Pos, TiltedRefWorld.Rot, 1f);
+        await p.CommitAsync(new[] { new PendingEdit(TiltedRefWorld.Ref, drawn, drawn with { Position = new HousecarlCore.Vec3(640, -256, 64) }) }, "WbTwiceUndo", dryRun: false);
+        var folder = Path.Combine(o, "houseCARL - WbTwiceUndo");
+        Assert.StartsWith("removed ", await p.RevertWrittenAsync(TiltedRefWorld.Ref, folder));
+        var again = await Assert.ThrowsAsync<InvalidOperationException>(() => p.RevertWrittenAsync(TiltedRefWorld.Ref, folder));
+        Assert.StartsWith("houseCARL refused the undo: ", again.Message);
+        Assert.Contains("not carried by the patch", again.Message);
+    }
 }
