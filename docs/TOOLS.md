@@ -78,6 +78,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does extraction scratch preserve other files and refuse failures consistently?](#tool-_geometry-harness-tests-test_extraction_scratch.py) — `_geometry-harness/tests/test_extraction_scratch.py`
 - [Does flipping a mod's script-driven enable switches crash or stall the game under this load order?](#tool-switchflip) — `switchflip`
 - [Does hiding these objects remove anything a clashing object touches or rests on?](#tool-viewprobe.protect) — `viewprobe.protect`
+- [Does houseCARL's server program, from the module's build, write navownprobe's navmesh repair plan into one patch that reads back as the winner plus the plan (its carried cell forwarded from its winner, its NAVI changed only where planned), and does the re-check credit relinked, cut and refused links truly?](#tool-integration-housecarl-tests-test_navmesh_repair_write.py) — `integration/housecarl/tests/test_navmesh_repair_write.py`
 - [Does mask deduplication preserve exact output bytes and distinguish different masks?](#tool-_geometry-harness-tests-test_mask_evidence.py) — `_geometry-harness/tests/test_mask_evidence.py`
 - [Does miss diagnosis cluster edits and preserve unknown reasons correctly?](#tool-_geometry-harness-tests-test_missdiag.py) — `_geometry-harness/tests/test_missdiag.py`
 - [Does narration preparation enforce its contracts without model weights or network access?](#tool-integration-housecarl-tests-test_evalspeech.py) — `integration/housecarl/tests/test_evalspeech.py`
@@ -3747,6 +3748,21 @@ Inputs: A hand-built Clockwork-shaped presentation, the shipped skill data, test
 Outputs: One GREEN, RED or CRASH line per case (C1970-C1978).
 
 Source: [integration/housecarl/tests/test_navmesh_reel.py](../integration/housecarl/tests/test_navmesh_reel.py) — `Known answers for a navmesh clash pictured in the review reel`
+
+
+<a id="tool-integration-housecarl-tests-test_navmesh_repair_write.py"></a>
+
+### integration/housecarl/tests/test_navmesh_repair_write.py
+
+**Does houseCARL's server program, from the module's build, write navownprobe's navmesh repair plan into one patch that reads back as the winner plus the plan (its carried cell forwarded from its winner, its NAVI changed only where planned), and does the re-check credit relinked, cut and refused links truly?**
+
+Qualify a change to the module's server layout (skywright_paths.server), navownprobe's --repair-readback or --recheck-plan, or the relink plan's ops as the server writes them (C2494-C2499, C2504-C2505, C2650).
+
+Inputs: The Release navownprobe, test_navmesh_repair_rules.py's NavRepairFixture lab, houseCARL's server in the module's build and the pin's rulebook generator.
+
+Outputs: One ok or FAIL line per case (C2494-C2499, C2504-C2505, C2650).
+
+Source: [integration/housecarl/tests/test_navmesh_repair_write.py](../integration/housecarl/tests/test_navmesh_repair_write.py) — `Known answers for the navmesh repair's write, read-back and re-check through houseCARL's server program`
 
 
 <a id="tool-integration-housecarl-tests-test_navown_edge_identity.py"></a>

@@ -10045,6 +10045,27 @@
       ]
     },
     {
+      "id": "integration/housecarl/tests/test_navmesh_repair_write.py",
+      "path": "integration/housecarl/tests/test_navmesh_repair_write.py",
+      "kind": "script",
+      "answers": [
+        "Does houseCARL's server program, from the module's build, write navownprobe's navmesh repair plan into one patch that reads back as the winner plus the plan (its carried cell forwarded from its winner, its NAVI changed only where planned), and does the re-check credit relinked, cut and refused links truly?"
+      ],
+      "useWhen": "Qualify a change to the module's server layout (skywright_paths.server), navownprobe's --repair-readback or --recheck-plan, or the relink plan's ops as the server writes them (C2494-C2499, C2504-C2505, C2650).",
+      "evidence": [
+        {
+          "path": "integration/housecarl/tests/test_navmesh_repair_write.py",
+          "anchor": "Known answers for the navmesh repair's write, read-back and re-check through houseCARL's server program"
+        }
+      ],
+      "inputs": [
+        "The Release navownprobe, test_navmesh_repair_rules.py's NavRepairFixture lab, houseCARL's server in the module's build and the pin's rulebook generator."
+      ],
+      "outputs": [
+        "One ok or FAIL line per case (C2494-C2499, C2504-C2505, C2650)."
+      ]
+    },
+    {
       "id": "_geometry-harness/tests/test_evalrun_population_verb.py",
       "path": "_geometry-harness/tests/test_evalrun_population_verb.py",
       "kind": "script",
