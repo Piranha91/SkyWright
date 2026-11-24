@@ -2,9 +2,13 @@ using SkyWright.Guards;
 
 // SkyWright.Guards <guard> [options]: one guard per run, exit 0 when it passes.
 //   harness-suites [--full] [--self-check]   the Python suites and the probes' self-tests (HarnessSuitesGuard)
+//   run-coverage                             every entry point has a row in docs/run-coverage.json (RegistryGuards)
+//   tool-index [--write]                     docs/TOOLS.md is what that manifest renders to (RegistryGuards)
 var guards = new Dictionary<string, Func<string[], int>>(StringComparer.Ordinal)
 {
     ["harness-suites"] = HarnessSuitesGuard.RunGuard,
+    ["run-coverage"] = RegistryGuards.RunCoverage,
+    ["tool-index"] = RegistryGuards.ToolIndex,
 };
 if (args.Length == 0 || !guards.TryGetValue(args[0], out var run))
 {

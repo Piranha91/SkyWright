@@ -45,7 +45,7 @@ Set `WB_MCP_PORT` to a port number to serve the app's state tools (`workbench_st
 | `_geometry-harness/viewprobe/` | The renderer host the 3D view uses (on SkyRender) |
 | `_geometry-harness/*.py`, `tests/`, `planeassess/` | Pipeline, reporting and video tools and their tests; not shipped in the app. They find built programs through `buildlayout.py` |
 | `src/SkyWright.Engine/`, `src/SkyWright.Engine.Tests/` | The engine the probes share (geometry, contact, navmesh, Havok, reach), on houseCARL's core, and its tests |
-| `src/SkyWright.Guards/` | Checks a build and the unit tests do not reach: `harness-suites` runs the Python suites and the probes' self-tests |
+| `src/SkyWright.Guards/` | Checks a build and the unit tests do not reach: `harness-suites` runs the Python suites and the probes' self-tests; `run-coverage` and `tool-index` check `docs/run-coverage.json` and `docs/TOOLS.md` through houseCARL's generator |
 | `data/` | The check registry, the severity table, the record field scope and the overlap triage policy |
 | `external/houseCARL/` | houseCARL, pinned as a git submodule: its core, server (which writes patches) and generator |
 | `scripts/build.ps1` | Builds the rulebook when missing, then Debug and Release |
@@ -60,6 +60,8 @@ bin\Release\net9.0-windows10.0.19041.0\Tools\runcontrol\runcontrol.exe --self-te
 dotnet test bin\Release\net9.0-windows10.0.19041.0\Tests\workbench.tests\workbench.tests.dll
 dotnet test bin\Release\net9.0-windows10.0.19041.0\Tests\SkyWright.Engine.Tests\SkyWright.Engine.Tests.dll
 bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.exe harness-suites
+bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.exe run-coverage
+bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.exe tool-index
 ```
 
 Twelve workbench tests read real evaluation output and fail without the environment variables that point at it.
