@@ -20,6 +20,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Can this report request obtain a verified camera and binding receipt?](#tool-capture-acquire.acquire) — `capture-acquire.acquire`
 - [Did two renderer runs produce the same frames, masks, reports and other declared artifacts?](#tool-renderequiv) — `renderequiv`
 - [Do SkyWright's known-answer suites pass, and do its run-coverage manifest and tool index match the tree?](#tool-skywright.guards) — `SkyWright.Guards`
+- [Do a whole-order pass's leads name the records stage unassessed until the module's record pass reads it, and hold its rows after?](#tool-integration-housecarl-tests-test_orderpass_records.py) — `integration/housecarl/tests/test_orderpass_records.py`
 - [Do adjacent cells disagree at their landscape height or texture boundary?](#tool-seamprobe) — `seamprobe`
 - [Do contactprobe's anchor, surface, volume and motion outputs name the solid rule their results depend on, and say none when no solid rule applied?](#tool-_geometry-harness-tests-test_contact_solid_rule.py) — `_geometry-harness/tests/test_contact_solid_rule.py`
 - [Do motionprobe sweep and lightprobe outputs name the solid rule their results depend on, and say none when no solid rule applied?](#tool-_geometry-harness-tests-test_solid_rule_named.py) — `_geometry-harness/tests/test_solid_rule_named.py`
@@ -242,6 +243,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [How do I plan, write and read back a navmesh edit or a navownprobe repair plan as a new patch plugin?](#tool-navedit) — `navedit`
 - [How do I prepare local narration audio for the diagnostic reel?](#tool-evalspeech) — `evalspeech`
 - [How do I produce Markdown, HTML, PDF, and an evidence index from the presentation plan?](#tool-evalreport.report) — `evalreport.report`
+- [How do I read a whole-order pass's record stage (the lost edits between its mods) with houseCARL's record reader, and get the leads again?](#tool-orderpass_records) — `orderpass_records`
 - [How do I record a Nexus patch search for one plugin pair, with every request and response kept, in the shape the review reel and report read?](#tool-patchsearch) — `patchsearch`
 - [How do I render a plane-patch group's kept gazes in one arm under the campaign memory caps, one process at a time?](#tool-planeassess.render) — `planeassess.render`
 - [How do I render a review-reel vignette's without, with and highlight frames at its acquired camera?](#tool-capture-acquire.capture) — `capture-acquire.capture`
@@ -3781,6 +3783,21 @@ Outputs: Assertion results for: Does a placed-object geometry row that holds in 
 Source: [integration/housecarl/tests/test_order_geometry.py](../integration/housecarl/tests/test_order_geometry.py) — `Known answers: a geometry row that holds in one order of a free pair and not in the other is said as a load-order risk`
 
 
+<a id="tool-integration-housecarl-tests-test_orderpass_records.py"></a>
+
+### integration/housecarl/tests/test_orderpass_records.py
+
+**Do a whole-order pass's leads name the records stage unassessed until the module's record pass reads it, and hold its rows after?**
+
+Qualify a change to orderpass_records.py or to how orderpass and orderleads treat the records stage.
+
+Inputs: Controlled fixtures for test_orderpass_records.
+
+Outputs: Assertion results or generated fixture data for: Do a whole-order pass's leads name the records stage unassessed until the module's record pass reads it, and hold its rows after?
+
+Source: [integration/housecarl/tests/test_orderpass_records.py](../integration/housecarl/tests/test_orderpass_records.py) — `Known answers for orderpass_records.py`
+
+
 <a id="tool-integration-housecarl-tests-test_overlap_triage.py"></a>
 
 ### integration/housecarl/tests/test_overlap_triage.py
@@ -4543,11 +4560,11 @@ Modifiers (do not select a separate mode):
 
 Screen a whole order (or the order plus a mod you are adding) without picking pairs first; read the result with orderleads.py.
 
-Inputs: An MO2 instance, profile and game folder (or a --order file), the built probes, and the houseCARL MCP server for the record stage.
+Inputs: An MO2 instance, profile and game folder (or a --order file) and the built probes.
 
-Outputs: A pass folder: map.json, each check's output, records.json, stages.json, pass.json, and orderleads' index.json, LEADS.md and LEADS-whole.md.
+Outputs: A pass folder: map.json, each check's output, stages.json (the records stage named unassessed until the integration module's record pass reads it), pass.json, and orderleads' index.json, LEADS.md and LEADS-whole.md.
 
-Source: [_geometry-harness/orderpass.py](../_geometry-harness/orderpass.py) — `One whole-order pass: the order's map, every check over the whole order, the record stage, then the leads.`
+Source: [_geometry-harness/orderpass.py](../_geometry-harness/orderpass.py) — `One whole-order pass: the order's map, every check over the whole order, then the leads.`
 
 
 Modifiers (do not select a separate mode):
@@ -4559,10 +4576,34 @@ Modifiers (do not select a separate mode):
 - `--order` — A candidate order file.
 - `--out` — The pass folder to write.
 - `--profile` — The MO2 profile name.
-- `--reader` — The houseCARL MCP server for the record stage (or HOUSECARL_READER).
 - `--route-cap-targets` — 0: every plugin with cells is a route target.
 - `--sample-memory` — Sample probe memory every 10 s into memory.csv (Windows).
 - `--skip` — A stage to leave out; it is named unassessed.
+
+<a id="tool-orderpass_records"></a>
+
+### orderpass_records
+
+**How do I read a whole-order pass's record stage (the lost edits between its mods) with houseCARL's record reader, and get the leads again?**
+
+After orderpass.py has finished a pass folder, when its leads should hold the records rows it names unassessed.
+
+Inputs: A pass folder orderpass.py finished, its MO2 instance, profile and game folder, and the houseCARL MCP server (--reader).
+
+Outputs: records.json and the records stage in stages.json and pass.json, then orderleads' index.json, LEADS.md and LEADS-whole.md again.
+
+Source: [integration/housecarl/orderpass_records.py](../integration/housecarl/orderpass_records.py) — `orderpass_records - the records stage of a whole-order pass, over a pass folder orderpass.py has finished.`
+
+
+Modifiers (do not select a separate mode):
+
+- `--deadline-min` — The read's time limit.
+- `--game` — The game folder.
+- `--instance` — The MO2 instance folder.
+- `--order` — The candidate order file the pass read, if it read one.
+- `--pass` — The pass folder orderpass.py wrote.
+- `--profile` — The MO2 profile name.
+- `--reader` — The houseCARL MCP server (or HOUSECARL_READER).
 
 <a id="tool-orderprobe"></a>
 

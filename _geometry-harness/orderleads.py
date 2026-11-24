@@ -318,7 +318,7 @@ def stage_record(d, pj):
         elif v.get("status") == "unknown":
             out[s] = {"status": "unknown", "outputPresent": present, "why": v.get("why") or "the pass's stage record does not cover it"}
         elif v.get("skipped"):
-            out[s] = {"status": "skipped", "outputPresent": present, "why": "skipped"}
+            out[s] = {"status": "skipped", "outputPresent": present, "why": v.get("why") or "skipped"}
         elif v.get("refused"):
             out[s] = {"status": "refused", "outputPresent": present, "why": v["refused"]}
         elif v.get("exit") not in (0, None) or v.get("stopped"):

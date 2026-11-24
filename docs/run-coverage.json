@@ -1322,6 +1322,44 @@
       }
     },
     {
+      "id": "orderpass_records",
+      "kind": "script",
+      "lang": "python",
+      "path": "integration/housecarl/orderpass_records.py",
+      "adapter": "none",
+      "stageSource": "unknown",
+      "exempt": "One reader session over a finished pass folder, inside the houseCARL integration module; the record capture it calls (evalrecords.capture_arm) records its own reader session, and orderleads, which it runs after, is its own entry point.",
+      "answers": [
+        "How do I read a whole-order pass's record stage (the lost edits between its mods) with houseCARL's record reader, and get the leads again?"
+      ],
+      "useWhen": "After orderpass.py has finished a pass folder, when its leads should hold the records rows it names unassessed.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/orderpass_records.py",
+          "anchor": "orderpass_records - the records stage of a whole-order pass, over a pass folder orderpass.py has finished."
+        }
+      ],
+      "inputs": [
+        "A pass folder orderpass.py finished, its MO2 instance, profile and game folder, and the houseCARL MCP server (--reader)."
+      ],
+      "outputs": [
+        "records.json and the records stage in stages.json and pass.json, then orderleads' index.json, LEADS.md and LEADS-whole.md again."
+      ],
+      "flagCoverage": {
+        "parser": "argparse",
+        "path": "integration/housecarl/orderpass_records.py"
+      },
+      "modifiers": {
+        "--pass": "The pass folder orderpass.py wrote.",
+        "--instance": "The MO2 instance folder.",
+        "--profile": "The MO2 profile name.",
+        "--game": "The game folder.",
+        "--order": "The candidate order file the pass read, if it read one.",
+        "--reader": "The houseCARL MCP server (or HOUSECARL_READER).",
+        "--deadline-min": "The read's time limit."
+      }
+    },
+    {
       "id": "orderpass",
       "kind": "script",
       "lang": "python",
@@ -1336,14 +1374,14 @@
       "evidence": [
         {
           "path": "_geometry-harness/orderpass.py",
-          "anchor": "One whole-order pass: the order's map, every check over the whole order, the record stage, then the leads."
+          "anchor": "One whole-order pass: the order's map, every check over the whole order, then the leads."
         }
       ],
       "inputs": [
-        "An MO2 instance, profile and game folder (or a --order file), the built probes, and the houseCARL MCP server for the record stage."
+        "An MO2 instance, profile and game folder (or a --order file) and the built probes."
       ],
       "outputs": [
-        "A pass folder: map.json, each check's output, records.json, stages.json, pass.json, and orderleads' index.json, LEADS.md and LEADS-whole.md."
+        "A pass folder: map.json, each check's output, stages.json (the records stage named unassessed until the integration module's record pass reads it), pass.json, and orderleads' index.json, LEADS.md and LEADS-whole.md."
       ],
       "flagCoverage": {
         "parser": "argparse",
@@ -1357,7 +1395,6 @@
         "--order": "A candidate order file.",
         "--out": "The pass folder to write.",
         "--profile": "The MO2 profile name.",
-        "--reader": "The houseCARL MCP server for the record stage (or HOUSECARL_READER).",
         "--route-cap-targets": "0: every plugin with cells is a route target.",
         "--sample-memory": "Sample probe memory every 10 s into memory.csv (Windows).",
         "--skip": "A stage to leave out; it is named unassessed."
@@ -8722,6 +8759,27 @@
       ],
       "outputs": [
         "Assertion results or generated fixture data for: Does a lab run's record capture read the open arms, take the machine slot, import only rows that were open, and refuse in one sentence?"
+      ]
+    },
+    {
+      "id": "integration/housecarl/tests/test_orderpass_records.py",
+      "path": "integration/housecarl/tests/test_orderpass_records.py",
+      "kind": "script",
+      "answers": [
+        "Do a whole-order pass's leads name the records stage unassessed until the module's record pass reads it, and hold its rows after?"
+      ],
+      "useWhen": "Qualify a change to orderpass_records.py or to how orderpass and orderleads treat the records stage.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/tests/test_orderpass_records.py",
+          "anchor": "Known answers for orderpass_records.py"
+        }
+      ],
+      "inputs": [
+        "Controlled fixtures for test_orderpass_records."
+      ],
+      "outputs": [
+        "Assertion results or generated fixture data for: Do a whole-order pass's leads name the records stage unassessed until the module's record pass reads it, and hold its rows after?"
       ]
     },
     {
