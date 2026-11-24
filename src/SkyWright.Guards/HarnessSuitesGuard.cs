@@ -21,12 +21,12 @@ internal static class HarnessSuitesGuard
 {
     internal sealed record Config(string[] PythonFolders, string[] PythonSingles, string[] SelfTestFlags,
                                   string[] SuiteProbes, (string Path, string Why)[] Excluded, (string Path, string Why)[] FullOnly,
-                                  (string Path, string[] Args, string Why)[]? WithArgs = null);
+                                  (string Path, string[] Args, string Why)[]? WithArgs = null, string[]? ProbeRoots = null);
 
     internal sealed record Runner(string Name, string Exe, string[] Args, bool FullOnly);
 
     internal static readonly Config SkyWright = new(
-        PythonFolders: new[] { "_geometry-harness/tests", "_geometry-harness/viewprobe/tools", "_geometry-harness/planeassess" },
+        PythonFolders: new[] { "_geometry-harness/tests", "_geometry-harness/viewprobe/tools", "_geometry-harness/planeassess", "integration/housecarl/tests" },
         PythonSingles: Array.Empty<string>(),
         SelfTestFlags: new[] { "--self-test", "--moved-ref-selftest" },
         SuiteProbes: new[] { "crossprobe", "proofprobe" },
@@ -36,7 +36,7 @@ internal static class HarnessSuitesGuard
             ("_geometry-harness/tests/test_run_records.py", "reads a run store given by --store, or renders a fixture given by --render: not a self-contained runner"),
             ("_geometry-harness/tests/test_effect_shapes.py", "renders the capture fixture over a Skyrim SE game folder's own archives (HOUSECARL_FIXTURE_GAME or fixtureGame in the harness config); without them it reports NOT RUN and exits 3 by design, never 0"),
             ("_geometry-harness/tests/test_effects_path_rule.py", "renders the capture fixture over a Skyrim SE game folder's own archives (HOUSECARL_FIXTURE_GAME or fixtureGame in the harness config); without them it reports NOT RUN and exits 3 by design, never 0"),
-            ("_geometry-harness/tests/test_eye_inside_solid.py", "renders the capture fixture over a Skyrim SE game folder's own archives (HOUSECARL_FIXTURE_GAME or fixtureGame in the harness config); without them it reports NOT RUN and exits 3 by design, never 0"),
+            ("integration/housecarl/tests/test_eye_inside_solid.py", "renders the capture fixture over a Skyrim SE game folder's own archives (HOUSECARL_FIXTURE_GAME or fixtureGame in the harness config); without them it reports NOT RUN and exits 3 by design, never 0"),
             ("_geometry-harness/tests/test_point_queries_answer_or_refuse.py", "renders the capture fixture over a Skyrim SE game folder's own archives (HOUSECARL_FIXTURE_GAME or fixtureGame in the harness config); without them it reports NOT RUN and exits 3 by design, never 0"),
             ("_geometry-harness/tests/test_ledge_link_counts.py", "renders the capture fixture over a Skyrim SE game folder's own archives (HOUSECARL_FIXTURE_GAME or fixtureGame in the harness config); without them it reports NOT RUN and exits 3 by design, never 0"),
             ("_geometry-harness/tests/test_route_solve_ledge_drop.py", "renders the capture fixture over a Skyrim SE game folder's own archives (HOUSECARL_FIXTURE_GAME or fixtureGame in the harness config); without them it reports NOT RUN and exits 3 by design, never 0"),
@@ -50,8 +50,10 @@ internal static class HarnessSuitesGuard
         },
         WithArgs: new[]
         {
-            ("_geometry-harness/tests/test_capture_fallbacks.py", new[] { "--code-only" }, "its render cases need a Skyrim SE game folder's own archives; its code cases (CF13, CF20-CF24 and on) run here"),
-        });
+            ("integration/housecarl/tests/test_capture_fallbacks.py", new[] { "--code-only" }, "its render cases need a Skyrim SE game folder's own archives; its code cases (CF13, CF20-CF24 and on) run here"),
+        },
+        // the probes: SkyWright's, and the houseCARL integration module's (lookprobe), each run from its own build
+        ProbeRoots: new[] { "_geometry-harness", "integration/housecarl" });
 
     public static int RunGuard(string[] args)
     {
@@ -79,7 +81,9 @@ internal static class HarnessSuitesGuard
             return 1;
         }
         Console.WriteLine($"  build     {build.Root}");
-        var (runners, problems) = Plan(repo, SkyWright, build.Root);
+        var moduleBuild = IntegrationLayout.Root(repo);
+        Console.WriteLine($"  module    {moduleBuild}");
+        var (runners, problems) = Plan(repo, SkyWright, build.Root, moduleBuild);
         foreach (var p in problems) Check(false, p);
         foreach (var (path, reason) in SkyWright.Excluded) Console.WriteLine($"  excluded  {path} — {reason}");
         foreach (var (path, a, reason) in SkyWright.WithArgs ?? Array.Empty<(string, string[], string)>()) Console.WriteLine($"  with args {path} {string.Join(" ", a)} — {reason}");
@@ -96,7 +100,7 @@ internal static class HarnessSuitesGuard
     }
 
     /// <summary>The runners a tree holds under a configuration, and every reason the plan itself is unsound.</summary>
-    internal static (List<Runner> Runners, List<string> Problems) Plan(string root, Config cfg, string? build = null)
+    internal static (List<Runner> Runners, List<string> Problems) Plan(string root, Config cfg, string? build = null, string? moduleBuild = null)
     {
         var runners = new List<Runner>();
         var problems = new List<string>();
@@ -111,7 +115,7 @@ internal static class HarnessSuitesGuard
             if (!File.Exists(Path.Combine(root, path)))
                 problems.Add($"the argument row {path} names no file: a moved or renamed runner would hide behind it");
         foreach (var (path, _) in cfg.FullOnly)
-            if (!File.Exists(Path.Combine(root, path)) && !Directory.Exists(Path.Combine(root, "_geometry-harness", path)))
+            if (!File.Exists(Path.Combine(root, path)) && !(cfg.ProbeRoots ?? new[] { "_geometry-harness" }).Any(pr => Directory.Exists(Path.Combine(root, pr, path))))
                 problems.Add($"the --full runner {path} names nothing in this tree");
 
         foreach (var folder in cfg.PythonFolders)
@@ -133,21 +137,27 @@ internal static class HarnessSuitesGuard
             runners.Add(new Runner(single, "python", new[] { single }, fullOnly.Contains(Norm(single))));
         }
 
-        var harness = Path.Combine(root, "_geometry-harness");
+        // probe folders, in root order: the first root is SkyWright's (its build), any other the module's (its own build)
+        var probeRoots = cfg.ProbeRoots ?? new[] { "_geometry-harness" };
+        var probeDirs = new List<(string Dir, bool Module)>();
+        for (int k = 0; k < probeRoots.Length; k++)
+        {
+            var pr = Path.Combine(root, probeRoots[k]);
+            var dirs = Directory.Exists(pr) ? Directory.GetDirectories(pr).OrderBy(d => d, StringComparer.Ordinal).Where(d => File.Exists(Path.Combine(d, "Program.cs"))).ToList() : new List<string>();
+            if (dirs.Count == 0) { problems.Add($"no probe (a folder with a Program.cs) found under {probeRoots[k]}"); continue; }
+            probeDirs.AddRange(dirs.Select(d => (d, k > 0)));
+        }
         foreach (var flag in cfg.SelfTestFlags)
         {
-            var hits = Directory.Exists(harness)
-                ? Directory.GetDirectories(harness).OrderBy(d => d, StringComparer.Ordinal)
-                    .Where(d => File.Exists(Path.Combine(d, "Program.cs")) && File.ReadAllText(Path.Combine(d, "Program.cs")).Contains($"\"{flag}\""))
-                    .ToList()
-                : new List<string>();
+            var hits = probeDirs.Where(p => File.ReadAllText(Path.Combine(p.Dir, "Program.cs")).Contains($"\"{flag}\"")).ToList();
             if (hits.Count == 0) { problems.Add($"no probe carries the self-test flag {flag}"); continue; }
-            foreach (var d in hits)
+            foreach (var (d, module) in hits)
             {
                 var probe = Path.GetFileName(d);
-                runners.Add(new Runner($"{probe} {flag}", ProbeExe(build, probe), new[] { flag }, fullOnly.Contains(probe)));
+                runners.Add(new Runner($"{probe} {flag}", module ? ModuleProbeExe(moduleBuild, probe) : ProbeExe(build, probe), new[] { flag }, fullOnly.Contains(probe)));
             }
         }
+        var harness = Path.Combine(root, "_geometry-harness");
         foreach (var probe in cfg.SuiteProbes)
         {
             var d = Path.Combine(harness, probe);
@@ -160,6 +170,10 @@ internal static class HarnessSuitesGuard
     /// <summary>The probe's exe in the build, where the build's layout puts it (the run then fails, named, when it is not built).</summary>
     static string ProbeExe(string? build, string probe) =>
         build is null ? Path.Combine("(no build)", probe + ".exe") : CheckoutLayout.ProgramExe(build, probe);
+
+    /// <summary>A module probe's exe in the module's build, where its marker puts it.</summary>
+    static string ModuleProbeExe(string? moduleBuild, string probe) =>
+        moduleBuild is null ? Path.Combine("(no module build)", probe + ".exe") : IntegrationLayout.ProgramExe(moduleBuild, probe);
 
     static (int Code, double Secs, List<string> Tail) Run(string repo, Runner r)
     {
@@ -218,6 +232,15 @@ internal static class HarnessSuitesGuard
             var (_, staleArgProblems) = Plan(root, cfg with { WithArgs = new[] { ("t/test_gone.py", new[] { "--code-only" }, "fixture") } });
             yield return (staleArgProblems.Any(p => p.Contains("t/test_gone.py names no file")),
                           "an argument row that names no file fails the plan: " + string.Join("; ", staleArgProblems));
+
+            Touch("mod/probe2/Program.cs", "if (args[0] == \"--self-test\") {}");
+            var (two, twoProblems) = Plan(root, cfg with { ProbeRoots = new[] { "_geometry-harness", "mod" } }, "B", "M");
+            var p2 = two.FirstOrDefault(r => r.Name == "probe2 --self-test");
+            yield return (twoProblems.Count == 0 && p2 is not null && p2.Exe.StartsWith("M", StringComparison.Ordinal) && two.Any(r => r.Name == "probe1 --self-test" && r.Exe.StartsWith("B", StringComparison.Ordinal)),
+                          "a probe under a second root runs from the module's build, the first root's from SkyWright's: " + string.Join(", ", two.Select(r => r.Name + "=" + r.Exe)) + (twoProblems.Count > 0 ? " | " + string.Join("; ", twoProblems) : ""));
+            var (_, noRootProblems) = Plan(root, cfg with { ProbeRoots = new[] { "_geometry-harness", "empty" } });
+            yield return (noRootProblems.Any(p => p.Contains("no probe (a folder with a Program.cs) found under empty")),
+                          "a probe root that holds no probe fails the plan: " + string.Join("; ", noRootProblems));
 
             var (_, flagProblems) = Plan(root, cfg with { SelfTestFlags = new[] { "--no-such-selftest" } });
             yield return (flagProblems.Any(p => p.Contains("no probe carries the self-test flag --no-such-selftest")),

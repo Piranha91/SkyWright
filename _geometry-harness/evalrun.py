@@ -55,10 +55,10 @@ def configuration_fingerprints(configs: list[dict]) -> list[str]:
     """The fingerprint of each configuration ({plugins, providers, overlays, population, state, schemaVersion}), from
     the rule's one owner, `runcontrol fingerprint` (ConfigurationIdentity.Compute), in one child for the whole list.
     Raises RuntimeError with one sentence when the controller cannot be started or refuses a configuration."""
-    import evalpipeline
+    import evalbase
     try:
-        exe = evalpipeline.runcontrol_exe(None)
-    except evalpipeline.Refusal as ex:
+        exe = evalbase.runcontrol_exe(None)
+    except evalbase.Refusal as ex:
         raise RuntimeError(f"the configuration fingerprint could not be computed: {ex}") from None
     try:
         r = subprocess.run([str(exe), "fingerprint"], input=json.dumps(configs), capture_output=True, text=True,
@@ -219,10 +219,10 @@ def cmd_enrich(a) -> int:
 def verify_quiet(d: Path) -> tuple[int | None, str | None]:
     """`runcontrol verify-bundle d`, the bundle check's one owner, which writes d/verify.json: (exit code, None), or
     (None, one sentence) when the controller could not be started."""
-    import evalpipeline
+    import evalbase
     try:
-        argv = evalpipeline.verify_bundle_argv(None, d)
-    except evalpipeline.Refusal as ex:
+        argv = evalbase.verify_bundle_argv(None, d)
+    except evalbase.Refusal as ex:
         return None, str(ex).rstrip(".")
     try:
         return subprocess.run(argv, capture_output=True, text=True, timeout=900).returncode, None

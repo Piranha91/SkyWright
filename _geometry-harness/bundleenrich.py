@@ -212,7 +212,7 @@ def pair_headers(d: Path, manifest: dict, plan: dict, pair: list) -> dict:
     """{plugin lower: {name, sha256, masters, master, light, source}} for the evaluated pair, as the setup with both
     loads them: the master lists and flags the bundle's emits recorded for those bytes, else the file's header read at
     the recorded bytes, else absent."""
-    import evalpipeline
+    import evalbase
     recorded = recorded_plugin_headers(d, manifest)
     want = {}
     # the plan's setups first, then the record imports' own configurations (the bytes they read)
@@ -232,10 +232,10 @@ def pair_headers(d: Path, manifest: dict, plan: dict, pair: list) -> dict:
         path = q.get("path")
         try:
             if path and Path(path).is_file() and sha(Path(path)) == sha_:
-                h = evalpipeline.plugin_header(path)
+                h = evalbase.plugin_header(path)
                 out[low_] = {"name": q["name"], "sha256": sha_, "masters": h["masters"], "master": h["esm"],
                              "light": h["esl"], "source": "header at the recorded bytes"}
-        except (OSError, ValueError, evalpipeline.Refusal):
+        except (OSError, ValueError, evalbase.Refusal):
             continue
     return out
 

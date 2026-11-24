@@ -13,7 +13,7 @@ git clone --recurse-submodules <this repository>
 powershell -File scripts\build.ps1
 ```
 
-`scripts\build.ps1` makes houseCARL's record rulebook (`corpus.json`) when it is missing (`-Rulebook` remakes it), then builds the Debug and the Release configuration. Each build is one folder at the top of the checkout:
+`scripts\build.ps1` makes houseCARL's record rulebook (`corpus.json`) when it is missing (`-Rulebook` remakes it), then builds the Debug and the Release configuration, each followed by the houseCARL integration module (below). Each build of the app is one folder at the top of the checkout:
 
 ```
 bin\Debug\net9.0-windows10.0.19041.0\SkyWright.exe        (and bin\Release\... the same)
@@ -29,7 +29,7 @@ bin\Debug\net9.0-windows10.0.19041.0\SkyWright.exe        (and bin\Release\... t
 | `Tests\workbench.tests\` | The app's tests, which run against this build |
 | `skywright-layout.json` | The marker: which configuration, and where each piece is |
 
-Debug is for working on the app; Release is optimized, so evaluations and anything timed use it. `dotnet build SkyWright.sln -c Debug` (or `-c Release`) builds one configuration.
+Debug is for working on the app; Release is optimized, so evaluations and anything timed use it. `dotnet build SkyWright.sln -c Debug` (or `-c Release`) builds one configuration of the app alone.
 
 **How each program finds its pieces.** First a `WB_*` override (`WB_SERVER`, `WB_CORPUS`, `WB_REGISTRY`, `WB_SEVERITY`, `WB_RUNCONTROL`, `WB_HARNESS`, `WB_SCENE_POLICY`, and `WB_NAVOWNPROBE`, `WB_CONFLICTDIFF`, `WB_PROBE_DIRS`), which the app names in its log when it starts. Then the build the program sits in: its own folder (the app) or two folders up (a probe, a tool), where `skywright-layout.json` is. There is no other search, so pieces of two builds never mix unless an override names one. A rebuild replaces the programs of that build, so do not rebuild a checkout while it runs an evaluation; parallel work uses its own git worktree, which has its own `bin\`.
 
@@ -43,12 +43,13 @@ Set `WB_MCP_PORT` to a port number to serve the app's state tools (`workbench_st
 | `_geometry-harness/runcontrol/` | The run controller: census through bundle |
 | `_geometry-harness/*probe/`, `_shared/` | The probes and the code they share |
 | `_geometry-harness/viewprobe/` | The renderer host the 3D view uses (on SkyRender) |
-| `_geometry-harness/*.py`, `tests/`, `planeassess/` | Pipeline, reporting and video tools and their tests; not shipped in the app. They find built programs through `buildlayout.py` |
+| `_geometry-harness/*.py`, `tests/`, `planeassess/` | Detector development tools, the record capture and bundle enrichment, and their tests; not shipped in the app. They find built programs through `buildlayout.py` |
+| `integration/housecarl/` | The houseCARL integration module: tools for an AI that drives SkyWright (the report, reel, narration and capture Python, the in-game switch flips, `lookprobe`) and their tests. It uses SkyWright; nothing outside it refers into it (the `fence` guard). Its own solution builds to `integration\housecarl\bin\<Configuration>\`, never into the app's build folder, and its Python finds SkyWright through `skywright_paths.py` |
 | `src/SkyWright.Engine/`, `src/SkyWright.Engine.Tests/` | The engine the probes share (geometry, contact, navmesh, Havok, reach), on houseCARL's core, and its tests |
-| `src/SkyWright.Guards/` | Checks a build and the unit tests do not reach: `harness-suites` runs the Python suites and the probes' self-tests; `run-coverage` and `tool-index` check `docs/run-coverage.json` and `docs/TOOLS.md` through houseCARL's generator |
+| `src/SkyWright.Guards/` | Checks a build and the unit tests do not reach: `harness-suites` runs the Python suites and the probes' self-tests (the module's too); `run-coverage` and `tool-index` check `docs/run-coverage.json` and `docs/TOOLS.md` through houseCARL's generator; `fence` checks that nothing outside `integration/housecarl/` refers into it |
 | `data/` | The check registry, the severity table, the record field scope and the overlap triage policy |
 | `external/houseCARL/` | houseCARL, pinned as a git submodule: its core, server (which writes patches) and generator |
-| `scripts/build.ps1` | Builds the rulebook when missing, then Debug and Release |
+| `scripts/build.ps1` | Builds the rulebook when missing, then Debug and Release, each with the integration module |
 | `scripts/runlog.py` | Loads houseCARL's run log from the submodule |
 | `docs/clash-list-format.md` | The clash list format: clashes an AI, a script or a person writes for SkyWright to list and show |
 
@@ -62,6 +63,8 @@ dotnet test bin\Release\net9.0-windows10.0.19041.0\Tests\SkyWright.Engine.Tests\
 bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.exe harness-suites
 bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.exe run-coverage
 bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.exe tool-index
+bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.exe fence
+dotnet test integration\housecarl\bin\Release\Tests\HousecarlIntegration.Tests\HousecarlIntegration.Tests.dll
 ```
 
 Twelve workbench tests read real evaluation output and fail without the environment variables that point at it.

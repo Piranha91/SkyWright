@@ -1,5 +1,6 @@
 # Builds SkyWright: houseCARL's rulebook when it is missing, made from another pin, or asked for (-Rulebook), then the Debug and the Release build,
-# each into bin\<Configuration>\<.NET version>\ (SkyWright.exe, Probes\, Tools\, Data\). Windows PowerShell 5.1.
+# each into bin\<Configuration>\<.NET version>\ (SkyWright.exe, Probes\, Tools\, Data\), and after each the houseCARL integration
+# module into integration\housecarl\bin\<Configuration>\. Windows PowerShell 5.1.
 #   powershell -File scripts\build.ps1 [-Rulebook] [-Configuration Debug|Release]
 param(
     [switch]$Rulebook,
@@ -30,6 +31,10 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "the $c build failed; see the errors above (a running SkyWright or probe locks its files)." }
         $app = Get-ChildItem -Path "bin\$c" -Filter SkyWright.exe -Recurse -Depth 1 | Select-Object -First 1
         Write-Host "  $($app.FullName)"
+        # the houseCARL integration module: its own solution, built after the app into its own folder (Directory.Build.props)
+        Write-Host "building the houseCARL integration module, $c"
+        dotnet build integration\housecarl\housecarl-integration.sln -c $c -nologo -v q
+        if ($LASTEXITCODE -ne 0) { throw "the houseCARL integration module's $c build failed; see the errors above (a running lookprobe locks its files)." }
     }
 }
 finally { Pop-Location }

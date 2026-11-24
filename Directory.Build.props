@@ -94,4 +94,41 @@
     <Copy Condition="Exists('$(_SwScenePolicy)')" SourceFiles="$(_SwScenePolicy)" DestinationFolder="$(SkyWrightLayoutRoot)$(SkyWrightData)\" SkipUnchangedFiles="true" />
     <WriteLinesToFile File="$(SkyWrightLayoutRoot)$(SkyWrightLayoutMarker)" Lines="$(_SwJson)" Overwrite="true" WriteOnlyWhenDifferent="true" />
   </Target>
+
+  <!-- The houseCARL integration module, integration\housecarl\ (its own solution, housecarl-integration.sln, which
+       scripts\build.ps1 builds after the app's): AI-facing tools that use SkyWright and that nothing in the app, the
+       probes or the scan reads. Its programs build outside the app's build folder, one folder per configuration,
+       integration\housecarl\bin\<Configuration>\: Probes\<name>\ (lookprobe), Tools\winrt-tts\, Tests\<name>\, and the
+       marker housecarl-integration-layout.json. The guards learn that folder from here (assembly metadata), so no one
+       else spells it. -->
+  <PropertyGroup>
+    <SkyWrightHarness>$(MSBuildThisFileDirectory)_geometry-harness\</SkyWrightHarness>
+    <SkyWrightIntegration>$(MSBuildThisFileDirectory)integration\housecarl\</SkyWrightIntegration>
+    <SkyWrightIntegrationLayoutRoot>$(SkyWrightIntegration)bin\$(SkyWrightConfiguration)\</SkyWrightIntegrationLayoutRoot>
+    <SkyWrightIntegrationMarker>housecarl-integration-layout.json</SkyWrightIntegrationMarker>
+    <_SwInIntegration>$([System.String]::Copy('$(MSBuildProjectDirectory)\').ToUpperInvariant().StartsWith($(SkyWrightIntegration.ToUpperInvariant())))</_SwInIntegration>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(_SwInIntegration)' == 'True'">
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <_SwIntFolder>$(SkyWrightProbes)\$(MSBuildProjectName)\</_SwIntFolder>
+    <_SwIntFolder Condition="'$(MSBuildProjectName)' == 'winrt-tts'">$(SkyWrightTools)\winrt-tts\</_SwIntFolder>
+    <_SwIntFolder Condition="$(MSBuildProjectName.EndsWith('.Tests'))">Tests\$(MSBuildProjectName)\</_SwIntFolder>
+    <OutputPath>$(SkyWrightIntegrationLayoutRoot)$(_SwIntFolder)</OutputPath>
+  </PropertyGroup>
+  <Target Name="SkyWrightIntegrationLayout" AfterTargets="Build" Condition="'$(_SwInIntegration)' == 'True'">
+    <PropertyGroup>
+      <_SwIntJson>{ "kind": "housecarl-integration-build", "configuration": "$(SkyWrightConfiguration)", "program": "$(SkyWrightProbes)/{name}/{name}.exe", "tool": "$(SkyWrightTools)/{name}/{name}.exe", "tools": ["winrt-tts"] }</_SwIntJson>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(SkyWrightIntegrationLayoutRoot)$(SkyWrightIntegrationMarker)" Lines="$(_SwIntJson)" Overwrite="true" WriteOnlyWhenDifferent="true" ContinueOnError="WarnAndContinue" />
+  </Target>
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'SkyWright.Guards'">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>HousecarlIntegrationBuild</_Parameter1>
+      <_Parameter2>$([MSBuild]::MakeRelative('$(MSBuildThisFileDirectory)', '$(SkyWrightIntegrationLayoutRoot)').Replace('\', '/'))</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>HousecarlIntegrationMarker</_Parameter1>
+      <_Parameter2>$(SkyWrightIntegrationMarker)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
 </Project>

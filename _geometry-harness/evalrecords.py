@@ -555,7 +555,7 @@ def arm_masters(arm: dict, recorded: dict | None = None):
     closure meets a header that could not be read (no file for it in the arm, a file that is gone or not a plugin).
     `recorded` ({plugin casefold: [masters]}): master lists a measurement recorded for these very bytes, used before the
     file's header, so a file changed after the measurement does not blind its dependents."""
-    import evalpipeline
+    import evalbase
     files = {str(p.get("name")).casefold(): p.get("path") for p in (arm.get("requested") or {}).get("plugins") or []}
     direct = {}
     for name in arm["plugins"]:
@@ -564,8 +564,8 @@ def arm_masters(arm: dict, recorded: dict | None = None):
             continue
         path = files.get(name.casefold())
         try:
-            direct[name.casefold()] = [str(m).casefold() for m in evalpipeline.plugin_header(path)["masters"]] if path else None
-        except (OSError, ValueError, struct.error, evalpipeline.Refusal):
+            direct[name.casefold()] = [str(m).casefold() for m in evalbase.plugin_header(path)["masters"]] if path else None
+        except (OSError, ValueError, struct.error, evalbase.Refusal):
             direct[name.casefold()] = None
     closure = {}
     for name in direct:

@@ -33,35 +33,35 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Do simultaneous runs of the same render command produce the same output?](#tool-renderagree) — `renderagree`
 - [Do stateprobe, contactprobe and its empty-space mode leave out a light whose base record has no model, and keep a light with a model or with a model that could not be read?](#tool-_geometry-harness-tests-test_modelless_light.py) — `_geometry-harness/tests/test_modelless_light.py`
 - [Do synthetic depth arrays produce the expected projection and clearance results?](#tool-depthsurvey.selftest) — `depthsurvey.selftest`
-- [Do the capture fallbacks (cutaway, top-down, see-through marks) give their known answers on a real render, and do the reuse, reel and caption rules hold?](#tool-_geometry-harness-tests-test_capture_fallbacks.py) — `_geometry-harness/tests/test_capture_fallbacks.py`
+- [Do the capture fallbacks (cutaway, top-down, see-through marks) give their known answers on a real render, and do the reuse, reel and caption rules hold?](#tool-integration-housecarl-tests-test_capture_fallbacks.py) — `integration/housecarl/tests/test_capture_fallbacks.py`
 - [Do the depth-measurement mode's texture keep rule and mask rule give their known answers?](#tool-viewprobe.depth-measurement-selftest) — `viewprobe.depth-measurement-selftest`
 - [Do the frustum test and the occlusion rule's shape classes still give their known answers?](#tool-planeassess.selftest) — `planeassess.selftest`
 - [Do the geometry probes leave out activators and doors whose base record has no model, set editor markers aside by name, and keep a marker carrying a collision primitive unjudged?](#tool-_geometry-harness-tests-test_modelless_activators_doors.py) — `_geometry-harness/tests/test_modelless_activators_doors.py`
 - [Do the load-order and geometry rules pass their constructed known-answer cases?](#tool-proofprobe) — `proofprobe`
-- [Do the report and reel give a verdict and next step per patch, say unfinished testing first, name one patch per outcome, show every produced picture, and plan the reel's counts, labels, pages and closing in the report's terms?](#tool-_geometry-harness-tests-test_reader_rules.py) — `_geometry-harness/tests/test_reader_rules.py`
-- [Do the report and reel say a single case in the singular, one reason per unchecked check, offline renders as renders, the location list's share of the load order, places by name or grid, forward-versus-carry-both, worse patch placements, a patch's lines on its own pair only, and relative PDF links?](#tool-_geometry-harness-tests-test_report_reel_batch.py) — `_geometry-harness/tests/test_report_reel_batch.py`
-- [Do the report lane and orderleads read the shared record-flag table, do the report and reel name a mod the same way, does the patch search keep its unread listings, hub paths and build, does the author-advice count include stated clashes, and does the reel read media from every joined sibling?](#tool-_geometry-harness-tests-test_report_reel_batch_2.py) — `_geometry-harness/tests/test_report_reel_batch_2.py`
+- [Do the report and reel give a verdict and next step per patch, say unfinished testing first, name one patch per outcome, show every produced picture, and plan the reel's counts, labels, pages and closing in the report's terms?](#tool-integration-housecarl-tests-test_reader_rules.py) — `integration/housecarl/tests/test_reader_rules.py`
+- [Do the report and reel say a single case in the singular, one reason per unchecked check, offline renders as renders, the location list's share of the load order, places by name or grid, forward-versus-carry-both, worse patch placements, a patch's lines on its own pair only, and relative PDF links?](#tool-integration-housecarl-tests-test_report_reel_batch.py) — `integration/housecarl/tests/test_report_reel_batch.py`
+- [Do the report lane and orderleads read the shared record-flag table, do the report and reel name a mod the same way, does the patch search keep its unread listings, hub paths and build, does the author-advice count include stated clashes, and does the reel read media from every joined sibling?](#tool-integration-housecarl-tests-test_report_reel_batch_2.py) — `integration/housecarl/tests/test_report_reel_batch_2.py`
 - [Do the winning mesh bounds disagree with the plugin's stored bounds?](#tool-geoprobe) — `geoprobe`
 - [Do viewprobe's point queries (--nav-at, --clear-at, --inside-at, --refs-at) answer or refuse in one sentence, never print nothing, on a run without an eye or with a malformed value?](#tool-_geometry-harness-tests-test_point_queries_answer_or_refuse.py) — `_geometry-harness/tests/test_point_queries_answer_or_refuse.py`
 - [Do winning cell records lose water data or disagree at a water boundary?](#tool-waterprobe) — `waterprobe`
-- [Does a Deep evaluation judge every census state and name every one it cannot?](#tool-_geometry-harness-tests-test_stategen.py) — `_geometry-harness/tests/test_stategen.py`
-- [Does a buried clash read as buried in the reel and the report, and does a top-down hide what covers the pair from above by the cutaway's rule?](#tool-_geometry-harness-tests-test_capture_fallbacks.py) — `_geometry-harness/tests/test_capture_fallbacks.py`
-- [Does a fresh user get the settings window once, and is a saved choice honoured?](#tool-_geometry-harness-tests-test_evalsettings.py) — `_geometry-harness/tests/test_evalsettings.py`
-- [Does a navmesh comparison request get its measured top-down camera, both states and its refusals offline?](#tool-_geometry-harness-tests-test_capture_navmesh.py) — `_geometry-harness/tests/test_capture_navmesh.py`
-- [Does a navmesh vignette's earlier-version caption, on the reel strip and in the report, name the plugin the historical frame's own --nav-version draws (never the plan's re-cut history, and none when the frame names none), say which mod replaced that version, and keep a name ending in s free of an "s's" possessive, in the narration too?](#tool-_geometry-harness-tests-test_navmesh_caption.py) — `_geometry-harness/tests/test_navmesh_caption.py`
+- [Does a Deep evaluation judge every census state and name every one it cannot?](#tool-integration-housecarl-tests-test_stategen.py) — `integration/housecarl/tests/test_stategen.py`
+- [Does a buried clash read as buried in the reel and the report, and does a top-down hide what covers the pair from above by the cutaway's rule?](#tool-integration-housecarl-tests-test_capture_fallbacks.py) — `integration/housecarl/tests/test_capture_fallbacks.py`
+- [Does a fresh user get the settings window once, and is a saved choice honoured?](#tool-integration-housecarl-tests-test_evalsettings.py) — `integration/housecarl/tests/test_evalsettings.py`
+- [Does a navmesh comparison request get its measured top-down camera, both states and its refusals offline?](#tool-integration-housecarl-tests-test_capture_navmesh.py) — `integration/housecarl/tests/test_capture_navmesh.py`
+- [Does a navmesh vignette's earlier-version caption, on the reel strip and in the report, name the plugin the historical frame's own --nav-version draws (never the plan's re-cut history, and none when the frame names none), say which mod replaced that version, and keep a name ending in s free of an "s's" possessive, in the narration too?](#tool-integration-housecarl-tests-test_navmesh_caption.py) — `integration/housecarl/tests/test_navmesh_caption.py`
 - [Does a neighbour mod's page state a clash with the evaluated mod?](#tool-adviceprobe) — `adviceprobe`
 - [Does a patch edit on a light fix a lighting clash that only the combination of two mods produces (orphaned, leaking, doubled or over-limit lights)?](#tool-lightclash) — `lightclash`
 - [Does a placed light shine through an opaque surface, sit behind a wall or inside a solid, and how many lights reach each drawn shape?](#tool-lightprobe) — `lightprobe`
-- [Does a placed-object geometry row that holds in one order of a free pair and not the other reach the report as a load-order risk, with rows in both orders left out, unmeasured rows counted, drifted plugins named and mismatched orders refused?](#tool-_geometry-harness-tests-test_order_geometry.py) — `_geometry-harness/tests/test_order_geometry.py`
+- [Does a placed-object geometry row that holds in one order of a free pair and not the other reach the report as a load-order risk, with rows in both orders left out, unmeasured rows counted, drifted plugins named and mismatched orders refused?](#tool-integration-housecarl-tests-test_order_geometry.py) — `integration/housecarl/tests/test_order_geometry.py`
 - [Does a refused camera plan leave a labelled top-down fallback and keep its refusal?](#tool-_geometry-harness-viewprobe-tools-test_shotplan_fallback.py) — `_geometry-harness/viewprobe/tools/test_shotplan_fallback.py`
-- [Does a report join several separate evaluations of the same order, each lending the setups it can stand in for, and refuse one it cannot use by name?](#tool-_geometry-harness-tests-test_evalreport_siblings.py) — `_geometry-harness/tests/test_evalreport_siblings.py`
+- [Does a report join several separate evaluations of the same order, each lending the setups it can stand in for, and refuse one it cannot use by name?](#tool-integration-housecarl-tests-test_evalreport_siblings.py) — `integration/housecarl/tests/test_evalreport_siblings.py`
 - [Does a run keep each reader transcript once: does import-results link the capture's request and response (a copy across volumes), refuse a changed transcript, do the bundle and media bundle link the import's files and still verify, and does a records rerun or resume leave every byte reachable through a link unchanged?](#tool-_geometry-harness-tests-test_transcript_links.py) — `_geometry-harness/tests/test_transcript_links.py`
 - [Does a scene import skip a declared cell whose owning plugin the setup neither loads nor masters?](#tool-_geometry-harness-tests-test_declared_cell_presence.py) — `_geometry-harness/tests/test_declared_cell_presence.py`
 - [Does a shot in a batch equal the same shot rendered in a fresh process?](#tool-rendertwin) — `rendertwin`
-- [Does a vignette's capture camera pass the measured state's camera checks (inside test, the sightlines of the participants that setup places) in every other state it renders, try the next pose of the chain when one fails, refuse naming the state and the object when none passes, and keep its single camera when every state is clear?](#tool-_geometry-harness-tests-test_capture_every_state.py) — `_geometry-harness/tests/test_capture_every_state.py`
+- [Does a vignette's capture camera pass the measured state's camera checks (inside test, the sightlines of the participants that setup places) in every other state it renders, try the next pose of the chain when one fails, refuse naming the state and the object when none passes, and keep its single camera when every state is clear?](#tool-integration-housecarl-tests-test_capture_every_state.py) — `integration/housecarl/tests/test_capture_every_state.py`
 - [Does adviceprobe find a clash stated on a neighbour's page, and does the evaluation pass the neighbours and record the clash rows?](#tool-_geometry-harness-tests-test_adviceprobe.py) — `_geometry-harness/tests/test_adviceprobe.py`
 - [Does an evaluation plan run the same way from any working folder?](#tool-_geometry-harness-tests-test_plan_paths.py) — `_geometry-harness/tests/test_plan_paths.py`
-- [Does an exterior camera station stand on navmesh at its own level, eye at that level plus the eye height, while interiors keep one floor?](#tool-_geometry-harness-tests-test_exterior_stations.py) — `_geometry-harness/tests/test_exterior_stations.py`
+- [Does an exterior camera station stand on navmesh at its own level, eye at that level plus the eye height, while interiors keep one floor?](#tool-integration-housecarl-tests-test_exterior_stations.py) — `integration/housecarl/tests/test_exterior_stations.py`
 - [Does any record of a plugin file refer to a given object (its FormID through the plugin's masters, compressed records and script properties included)?](#tool-refscan) — `refscan`
 - [Does blockprobe --rows write every route-cut row its listing states, uncapped, with the passage share the rule states?](#tool-_geometry-harness-tests-test_route_cut_rows.py) — `_geometry-harness/tests/test_route_cut_rows.py`
 - [Does buildlayout.py's fallback marker equal the one the build writes, and do its paths exist in that build?](#tool-_geometry-harness-tests-test_buildlayout.py) — `_geometry-harness/tests/test_buildlayout.py`
@@ -69,8 +69,8 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does contactprobe take the fast memory route when the memory is there, lean under a limit or when other programs hold the memory (warning by name, unattended default recorded), stop with exit 5 under --memory-route ask, and leave no emit or rows behind when it refuses or runs out of memory?](#tool-_geometry-harness-tests-test_contact_memory_route.py) — `_geometry-harness/tests/test_contact_memory_route.py`
 - [Does depth-survey projection and lookup math satisfy its synthetic controls?](#tool-_geometry-harness-viewprobe-tools-test_depthsurvey.py) — `_geometry-harness/viewprobe/tools/test_depthsurvey.py`
 - [Does each frame's embedded replay command reproduce that frame?](#tool-_geometry-harness-tests-test_replay_command.py) — `_geometry-harness/tests/test_replay_command.py`
-- [Does evalreport plan verify --bundle and --sibling-bundle in place without writing a byte or mtime into either, without a copy in proportion to the bundle even when its evidence is hard-linked, leave no tree after a failure mid-verify, refuse a verify that wrote no result, does runcontrol verify-bundle --out write its result only to the named file, and does every caller check a bundle with runcontrol rather than Python?](#tool-_geometry-harness-tests-test_evalreport_verify_in_place.py) — `_geometry-harness/tests/test_evalreport_verify_in_place.py`
-- [Does evalreport's reel refuse a capture-results file it cannot read, and still plan without one?](#tool-_geometry-harness-tests-test_capture_results_unreadable.py) — `_geometry-harness/tests/test_capture_results_unreadable.py`
+- [Does evalreport plan verify --bundle and --sibling-bundle in place without writing a byte or mtime into either, without a copy in proportion to the bundle even when its evidence is hard-linked, leave no tree after a failure mid-verify, refuse a verify that wrote no result, does runcontrol verify-bundle --out write its result only to the named file, and does every caller check a bundle with runcontrol rather than Python?](#tool-integration-housecarl-tests-test_evalreport_verify_in_place.py) — `integration/housecarl/tests/test_evalreport_verify_in_place.py`
+- [Does evalreport's reel refuse a capture-results file it cannot read, and still plan without one?](#tool-integration-housecarl-tests-test_capture_results_unreadable.py) — `integration/housecarl/tests/test_capture_results_unreadable.py`
 - [Does every imported reference receive exactly one accounting disposition?](#tool-_geometry-harness-tests-test_imported_reference_accounting.py) — `_geometry-harness/tests/test_imported_reference_accounting.py`
 - [Does every probe refuse a --enable it cannot place or an --order candidate built on another profile, in one sentence?](#tool-_geometry-harness-tests-test_order_input_refusal.py) — `_geometry-harness/tests/test_order_input_refusal.py`
 - [Does every probe refuse, in one sentence, a load order whose plugin lacks a master?](#tool-_geometry-harness-tests-test_missing_master_refusal.py) — `_geometry-harness/tests/test_missing_master_refusal.py`
@@ -80,10 +80,10 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does hiding these objects remove anything a clashing object touches or rests on?](#tool-viewprobe.protect) — `viewprobe.protect`
 - [Does mask deduplication preserve exact output bytes and distinguish different masks?](#tool-_geometry-harness-tests-test_mask_evidence.py) — `_geometry-harness/tests/test_mask_evidence.py`
 - [Does miss diagnosis cluster edits and preserve unknown reasons correctly?](#tool-_geometry-harness-tests-test_missdiag.py) — `_geometry-harness/tests/test_missdiag.py`
-- [Does narration preparation enforce its contracts without model weights or network access?](#tool-_geometry-harness-tests-test_evalspeech.py) — `_geometry-harness/tests/test_evalspeech.py`
+- [Does narration preparation enforce its contracts without model weights or network access?](#tool-integration-housecarl-tests-test_evalspeech.py) — `integration/housecarl/tests/test_evalspeech.py`
 - [Does navedit plan, refuse and write navmesh edits, markers and repairs as its known answers say?](#tool-_geometry-harness-tests-test_navedit.py) — `_geometry-harness/tests/test_navedit.py`
 - [Does navownprobe count a link into a deleted navmesh, emit mod deletions, judge border links by their geometry (no matching edge, no link back, ambiguous candidates), find navmesh left on ground a later LAND moved, and plan a relink that refuses an ambiguous match?](#tool-_geometry-harness-tests-test_navmesh_repair_rules.py) — `_geometry-harness/tests/test_navmesh_repair_rules.py`
-- [Does navownprobe write one EDGE-IDX row per broken edge link, and does every identity-keyed reader (conflictdiff, ordersweep, evalreport) keep and credit each link?](#tool-_geometry-harness-tests-test_navown_edge_identity.py) — `_geometry-harness/tests/test_navown_edge_identity.py`
+- [Does navownprobe write one EDGE-IDX row per broken edge link, and does every identity-keyed reader (conflictdiff, ordersweep, evalreport) keep and credit each link?](#tool-integration-housecarl-tests-test_navown_edge_identity.py) — `integration/housecarl/tests/test_navown_edge_identity.py`
 - [Does newcomer selection give its hand-derived answers on a synthetic instance?](#tool-selectprobe.selftest) — `selectprobe.selftest`
 - [Does orderleads offer only clashes between mods, mask the compressed flag, tell dummies from the map, and reach a lead by added mod, place and pair?](#tool-_geometry-harness-tests-test_orderleads.py) — `_geometry-harness/tests/test_orderleads.py`
 - [Does orderpass record a failed or missing stage as unassessed, carry on, and make an added mod's view the pass's first read?](#tool-_geometry-harness-tests-test_orderpass.py) — `_geometry-harness/tests/test_orderpass.py`
@@ -91,7 +91,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does ordersweep still catch every refusal a probe can print, and not read a count of refused items as a refusal?](#tool-_geometry-harness-tests-test_ordersweep_refused.py) — `_geometry-harness/tests/test_ordersweep_refused.py`
 - [Does ordersweep's cache key tell two builds apart when only their dlls differ?](#tool-_geometry-harness-tests-test_ordersweep_program_key.py) — `_geometry-harness/tests/test_ordersweep_program_key.py`
 - [Does overlap attribution satisfy the independent acceptance controls?](#tool-_geometry-harness-tests-test_overlap_attribution_contract.py) — `_geometry-harness/tests/test_overlap_attribution_contract.py`
-- [Does overlap triage preserve locality, counterpart identity and incomplete reviews?](#tool-_geometry-harness-tests-test_overlap_triage.py) — `_geometry-harness/tests/test_overlap_triage.py`
+- [Does overlap triage preserve locality, counterpart identity and incomplete reviews?](#tool-integration-housecarl-tests-test_overlap_triage.py) — `integration/housecarl/tests/test_overlap_triage.py`
 - [Does overlapprobe --reverse-of give the full reverse's emit, and refuse a baseline emit that is not this run's own?](#tool-_geometry-harness-tests-test_reverse_reconcile.py) — `_geometry-harness/tests/test_reverse_reconcile.py`
 - [Does planeassess class plane edits, read placed primitives and test the frustum and rule shapes correctly?](#tool-_geometry-harness-planeassess-test_planeassess.py) — `_geometry-harness/planeassess/test_planeassess.py`
 - [Does reading a capture's arms side by side keep each arm's evidence its own, choose workers from memory, and report failure, stop and resume as one worker does?](#tool-_geometry-harness-tests-test_records_parallel.py) — `_geometry-harness/tests/test_records_parallel.py`
@@ -103,7 +103,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does state traversal retain the correct moved reference winner?](#tool-stateprobe.moved-ref-selftest) — `stateprobe.moved-ref-selftest`
 - [Does stateprobe name the primitive table it was given, judge a collision-marker box measured solid as a route obstacle, and read placed actors a state brings in from their placement without ever writing a row for one?](#tool-_geometry-harness-tests-test_state_marker_box_and_actors.py) — `_geometry-harness/tests/test_state_marker_box_and_actors.py`
 - [Does stateprobe write one row per pair of references in a state, whichever contact pass found it, and keep the deeper reading?](#tool-_geometry-harness-tests-test_state_row_identity.py) — `_geometry-harness/tests/test_state_row_identity.py`
-- [Does subject qualification refuse wrong identities, invisible features and invalid evidence?](#tool-_geometry-harness-tests-test_subject_gate.py) — `_geometry-harness/tests/test_subject_gate.py`
+- [Does subject qualification refuse wrong identities, invisible features and invalid evidence?](#tool-integration-housecarl-tests-test_subject_gate.py) — `integration/housecarl/tests/test_subject_gate.py`
 - [Does the GPU occlusion query count the same pixels as the CPU depth compare on this machine?](#tool-viewprobe.occlusion-query-selftest) — `viewprobe.occlusion-query-selftest`
 - [Does the actual overlap probe enforce the imported scene-scope contract?](#tool-_geometry-harness-tests-test_scene_scope_import.py) — `_geometry-harness/tests/test_scene_scope_import.py`
 - [Does the actual planner verify and export the camera justified by its queries?](#tool-_geometry-harness-viewprobe-tools-test_shotplan_plan.py) — `_geometry-harness/viewprobe/tools/test_shotplan_plan.py`
@@ -111,27 +111,27 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does the atomic report publication diagnostic satisfy its expected contract?](#tool-viewprobe.report-sink-selftest) — `viewprobe.report-sink-selftest`
 - [Does the basic renderer startup diagnostic satisfy its expected contract?](#tool-viewprobe.smoke) — `viewprobe.smoke`
 - [Does the batch-isolation harness pass its constructed control cases?](#tool-rendertwin.selftest) — `rendertwin.selftest`
-- [Does the capture point picker return visible faces, the right floor and plain refusals on the shapes real requests were refused on?](#tool-_geometry-harness-tests-test_capture_points.py) — `_geometry-harness/tests/test_capture_points.py`
-- [Does the capture ring stand on the navmesh storey rather than a floor high up a tall focus, does a flat partner box still find the floor, does the reel say how many camera spots a buried clash rests on, is a see-through partner never said to bury the other object, and does the reel picture a group's strongest crossing?](#tool-_geometry-harness-tests-test_capture_follow_ups.py) — `_geometry-harness/tests/test_capture_follow_ups.py`
+- [Does the capture point picker return visible faces, the right floor and plain refusals on the shapes real requests were refused on?](#tool-integration-housecarl-tests-test_capture_points.py) — `integration/housecarl/tests/test_capture_points.py`
+- [Does the capture ring stand on the navmesh storey rather than a floor high up a tall focus, does a flat partner box still find the floor, does the reel say how many camera spots a buried clash rests on, is a see-through partner never said to bury the other object, and does the reel picture a group's strongest crossing?](#tool-integration-housecarl-tests-test_capture_follow_ups.py) — `integration/housecarl/tests/test_capture_follow_ups.py`
 - [Does the cell scene resource lifetime diagnostic satisfy its expected contract?](#tool-viewprobe.cell-scene-selftest) — `viewprobe.cell-scene-selftest`
 - [Does the census report a count only from a completed read, and rank candidates by uncovered features?](#tool-_geometry-harness-tests-test_modcensus.py) — `_geometry-harness/tests/test_modcensus.py`
 - [Does the configuration fingerprint have one owner, runcontrol, that the Python tools ask?](#tool-_geometry-harness-tests-test_fingerprint_owner.py) — `_geometry-harness/tests/test_fingerprint_owner.py`
-- [Does the driver of the stages after the bundle reuse a stage only when nothing changed, continue a run folder the built-in controller carried through the bundle, and refuse one it did not?](#tool-_geometry-harness-tests-test_evalpipeline.py) — `_geometry-harness/tests/test_evalpipeline.py`
+- [Does the driver of the stages after the bundle reuse a stage only when nothing changed, continue a run folder the built-in controller carried through the bundle, and refuse one it did not?](#tool-integration-housecarl-tests-test_evalpipeline.py) — `integration/housecarl/tests/test_evalpipeline.py`
 - [Does the edit-kind classifier give one edit per record per kind, absorb the disable idiom and drop bookkeeping?](#tool-_geometry-harness-tests-test_editkinds.py) — `_geometry-harness/tests/test_editkinds.py`
 - [Does the equivalence comparator reject its deliberately unequal fixture outputs?](#tool-renderequiv.selftest) — `renderequiv.selftest`
 - [Does the evaluation controller match the oracle through its real workflow?](#tool-_geometry-harness-tests-test_evalrun.py) — `_geometry-harness/tests/test_evalrun.py`
-- [Does the flip-plan generator keep branches apart, keep source order and name every call it does not plan?](#tool-_geometry-harness-tests-test_flipplan.py) — `_geometry-harness/tests/test_flipplan.py`
-- [Does the idle gate refuse probes by command line and blockers by name?](#tool-_geometry-harness-tests-test_machineidle.py) — `_geometry-harness/tests/test_machineidle.py`
+- [Does the flip-plan generator keep branches apart, keep source order and name every call it does not plan?](#tool-integration-housecarl-tests-test_flipplan.py) — `integration/housecarl/tests/test_flipplan.py`
+- [Does the idle gate refuse probes by command line and blockers by name?](#tool-integration-housecarl-tests-test_machineidle.py) — `integration/housecarl/tests/test_machineidle.py`
 - [Does the interrupted report publication diagnostic satisfy its expected contract?](#tool-viewprobe.report-sink-kill-arm) — `viewprobe.report-sink-kill-arm`
 - [Does the light-clash fold attribute and decide orphaned, leaking, doubled and over-limit lights correctly?](#tool-_geometry-harness-tests-test_lightclash.py) — `_geometry-harness/tests/test_lightclash.py`
-- [Does the live driver keep a launch's cleanup when the reading rule's owner cannot be asked?](#tool-_geometry-harness-tests-test_switchflip_rule_unavailable.py) — `_geometry-harness/tests/test_switchflip_rule_unavailable.py`
-- [Does the live driver refuse a bad flip plan and export one arm's reading correctly?](#tool-_geometry-harness-tests-test_switchflip_plan.py) — `_geometry-harness/tests/test_switchflip_plan.py`
-- [Does the live switch check's population rule keep unknowns open and answer not-applicable only when nothing driven touches a target?](#tool-_geometry-harness-tests-test_switchflip_scope.py) — `_geometry-harness/tests/test_switchflip_scope.py`
+- [Does the live driver keep a launch's cleanup when the reading rule's owner cannot be asked?](#tool-integration-housecarl-tests-test_switchflip_rule_unavailable.py) — `integration/housecarl/tests/test_switchflip_rule_unavailable.py`
+- [Does the live driver refuse a bad flip plan and export one arm's reading correctly?](#tool-integration-housecarl-tests-test_switchflip_plan.py) — `integration/housecarl/tests/test_switchflip_plan.py`
+- [Does the live switch check's population rule keep unknowns open and answer not-applicable only when nothing driven touches a target?](#tool-integration-housecarl-tests-test_switchflip_scope.py) — `integration/housecarl/tests/test_switchflip_scope.py`
 - [Does the measured outward depth survey admit or block this candidate eye?](#tool-depthsurvey) — `depthsurvey`
 - [Does the mesh reuse ownership diagnostic satisfy its expected contract?](#tool-viewprobe.mesh-reuse-red) — `viewprobe.mesh-reuse-red`
 - [Does the moved and deleted reference selection diagnostic satisfy its expected contract?](#tool-viewprobe.moved-ref-selftest) — `viewprobe.moved-ref-selftest`
 - [Does the names read of a manual-mode bundle read the plan's review arm, not the baseline or a union of arms?](#tool-_geometry-harness-tests-test_workbench_manual_names.py) — `_geometry-harness/tests/test_workbench_manual_names.py`
-- [Does the narration packet ask for plain words and carry the glossary, does narrate-apply accept a rewrite only where a fidelity judgement made for its exact text says it keeps the meaning, and does the judge's model setting never resolve to a Fable model?](#tool-_geometry-harness-tests-test_narration_fidelity.py) — `_geometry-harness/tests/test_narration_fidelity.py`
+- [Does the narration packet ask for plain words and carry the glossary, does narrate-apply accept a rewrite only where a fidelity judgement made for its exact text says it keeps the meaning, and does the judge's model setting never resolve to a Fable model?](#tool-integration-housecarl-tests-test_narration_fidelity.py) — `integration/housecarl/tests/test_narration_fidelity.py`
 - [Does the navmesh grid rebuild reproduce the engine's divisor, bounds and cells?](#tool-_geometry-harness-tests-test_navgrid_rebuild.py) — `_geometry-harness/tests/test_navgrid_rebuild.py`
 - [Does the navmesh link query give its known answers on synthetic records?](#tool-viewprobe.nav-link-smoke) — `viewprobe.nav-link-smoke`
 - [Does the navmesh selection diagnostic satisfy its expected contract?](#tool-viewprobe.nav-selection-smoke) — `viewprobe.nav-selection-smoke`
@@ -142,32 +142,32 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does the per-plane-edit verdict decide a new hide, a fix, the plane's owner, a visibility test that did not run and a held refusal correctly?](#tool-_geometry-harness-planeassess-test_verdict.py) — `_geometry-harness/planeassess/test_verdict.py`
 - [Does the planes report candidate joins diagnostic satisfy its expected contract?](#tool-viewprobe.planes-report-selftest) — `viewprobe.planes-report-selftest`
 - [Does the planes-report reader join both schema versions correctly and refuse malformed data?](#tool-_geometry-harness-viewprobe-tools-test_planes_report_rows.py) — `_geometry-harness/viewprobe/tools/test_planes_report_rows.py`
-- [Does the planner refuse a camera eye inside a solid of any thickness on a real render, and accept one beside a thin wall?](#tool-_geometry-harness-tests-test_eye_inside_solid.py) — `_geometry-harness/tests/test_eye_inside_solid.py`
+- [Does the planner refuse a camera eye inside a solid of any thickness on a real render, and accept one beside a thin wall?](#tool-integration-housecarl-tests-test_eye_inside_solid.py) — `integration/housecarl/tests/test_eye_inside_solid.py`
 - [Does the predictive occlusion mode read ownership, the 16:9 band, the answer key and the shadow scope correctly?](#tool-_geometry-harness-planeassess-test_predict.py) — `_geometry-harness/planeassess/test_predict.py`
 - [Does the proposed narration preserve every required factual binding, and did the fidelity judge find its meaning kept?](#tool-evalreport.narrate-apply) — `evalreport.narrate-apply`
-- [Does the reader's document list only clashes between the two mods and give the right install advice?](#tool-_geometry-harness-tests-test_readerdoc.py) — `_geometry-harness/tests/test_readerdoc.py`
-- [Does the real reporting request-to-camera path satisfy its offline contract?](#tool-_geometry-harness-tests-test_capture_acquire.py) — `_geometry-harness/tests/test_capture_acquire.py`
+- [Does the reader's document list only clashes between the two mods and give the right install advice?](#tool-integration-housecarl-tests-test_readerdoc.py) — `integration/housecarl/tests/test_readerdoc.py`
+- [Does the real reporting request-to-camera path satisfy its offline contract?](#tool-integration-housecarl-tests-test_capture_acquire.py) — `integration/housecarl/tests/test_capture_acquire.py`
 - [Does the record capture read only what an evaluated plugin touches, reread when an arm's inputs change, and does a stopped sweep or a raised budget keep finished work?](#tool-_geometry-harness-tests-test_records_keep_work.py) — `_geometry-harness/tests/test_records_keep_work.py`
 - [Does the record capture's selection refuse empty and short reads and keep unjudged rows apart?](#tool-_geometry-harness-tests-test_evalrecords.py) — `_geometry-harness/tests/test_evalrecords.py`
-- [Does the record-lane comparator emit a row only for a lost change, within the schema's field scope?](#tool-_geometry-harness-tests-test_recordrows.py) — `_geometry-harness/tests/test_recordrows.py`
+- [Does the record-lane comparator emit a row only for a lost change, within the schema's field scope?](#tool-integration-housecarl-tests-test_recordrows.py) — `integration/housecarl/tests/test_recordrows.py`
 - [Does the record-lane comparator leave a field unjudged, never equal, when a read printed it without its values (an item as its type name, a list as its summary), while a field read with its values or by content hash stays judged?](#tool-_geometry-harness-tests-test_record_unexpanded_leaves.py) — `_geometry-harness/tests/test_record_unexpanded_leaves.py`
 - [Does the record-lane comparator list every field it cannot judge on a houseCARL 2.0 capture (a cut-off, unread, unnamed or depth-mismatched field, a failed read, a tree answer that could not compare a plugin in full or whose plugin list was cut off), with its reason and plugins, and never drop it?](#tool-_geometry-harness-tests-test_record_2_0_unjudged.py) — `_geometry-harness/tests/test_record_2_0_unjudged.py`
-- [Does the reel pipeline enforce media, audio, cache and clip-cut contracts?](#tool-_geometry-harness-tests-test_evalreel.py) — `_geometry-harness/tests/test_evalreel.py`
-- [Does the reel say and show a declared mod name or plugin file name as written (the round 2 subjects' patches, one with an all-capital word), still put an undeclared editor ID into words, and leave a count of 0 out of the unpictured line?](#tool-_geometry-harness-tests-test_reel_names.py) — `_geometry-harness/tests/test_reel_names.py`
+- [Does the reel pipeline enforce media, audio, cache and clip-cut contracts?](#tool-integration-housecarl-tests-test_evalreel.py) — `integration/housecarl/tests/test_evalreel.py`
+- [Does the reel say and show a declared mod name or plugin file name as written (the round 2 subjects' patches, one with an all-capital word), still put an undeclared editor ID into words, and leave a count of 0 out of the unpictured line?](#tool-integration-housecarl-tests-test_reel_names.py) — `integration/housecarl/tests/test_reel_names.py`
 - [Does the render concurrency calculation refuse absent or insufficient memory readings?](#tool-_geometry-harness-viewprobe-tools-test_renderlimit.py) — `_geometry-harness/viewprobe/tools/test_renderlimit.py`
-- [Does the report and reel say a name ending in s with a bare apostrophe ("Interesting NPCs'"), a landscape record by the ground of its cell, a patch named after the evaluated mod by the rest of its name, a long plugin file name in full once with a gloss and short after, and a buried object by its item's words?](#tool-_geometry-harness-tests-test_report_words.py) — `_geometry-harness/tests/test_report_words.py`
-- [Does the report and reel say why a clash was not captured (no camera for its kind, or the capture limit), say each patch fact in one wording, list each Nexus patch page once in What to do, keep form keys and editor IDs off still pages and report places, name both objects of a one-mark view, count navmesh links and groups in the intro, resolve evalpipeline's path arguments at parse time, and read the needs-some sentence in short sentences, and say in the reel the place the report names?](#tool-_geometry-harness-tests-test_report_reel_wording.py) — `_geometry-harness/tests/test_report_reel_wording.py`
-- [Does the report compiler match the constructed bundle oracle?](#tool-_geometry-harness-tests-test_evalreport.py) — `_geometry-harness/tests/test_evalreport.py`
-- [Does the report distinguish removing a mod from repairing a conflict?](#tool-_geometry-harness-tests-test_evalreport_comparison_kinds.py) — `_geometry-harness/tests/test_evalreport_comparison_kinds.py`
-- [Does the report lead with what adding the mods will break, then coverage, then the patch?](#tool-_geometry-harness-tests-test_evalreport_prediction.py) — `_geometry-harness/tests/test_evalreport_prediction.py`
+- [Does the report and reel say a name ending in s with a bare apostrophe ("Interesting NPCs'"), a landscape record by the ground of its cell, a patch named after the evaluated mod by the rest of its name, a long plugin file name in full once with a gloss and short after, and a buried object by its item's words?](#tool-integration-housecarl-tests-test_report_words.py) — `integration/housecarl/tests/test_report_words.py`
+- [Does the report and reel say why a clash was not captured (no camera for its kind, or the capture limit), say each patch fact in one wording, list each Nexus patch page once in What to do, keep form keys and editor IDs off still pages and report places, name both objects of a one-mark view, count navmesh links and groups in the intro, resolve evalpipeline's path arguments at parse time, and read the needs-some sentence in short sentences, and say in the reel the place the report names?](#tool-integration-housecarl-tests-test_report_reel_wording.py) — `integration/housecarl/tests/test_report_reel_wording.py`
+- [Does the report compiler match the constructed bundle oracle?](#tool-integration-housecarl-tests-test_evalreport.py) — `integration/housecarl/tests/test_evalreport.py`
+- [Does the report distinguish removing a mod from repairing a conflict?](#tool-integration-housecarl-tests-test_evalreport_comparison_kinds.py) — `integration/housecarl/tests/test_evalreport_comparison_kinds.py`
+- [Does the report lead with what adding the mods will break, then coverage, then the patch?](#tool-integration-housecarl-tests-test_evalreport_prediction.py) — `integration/housecarl/tests/test_evalreport_prediction.py`
 - [Does the report overlay policy diagnostic satisfy its expected contract?](#tool-viewprobe.report-mode-smoke) — `viewprobe.report-mode-smoke`
-- [Does the report say each record in words (a placed object by its kind and base, a name, an editor ID in words, a navmesh by its place), keep two different values apart and number records named alike, say once per check across mod pairs what to check in game, keep a patch verdict's names out of the reel, say why a cell could not be read, and say a long mod name in full once and then by its own short form?](#tool-_geometry-harness-tests-test_report_record_labels.py) — `_geometry-harness/tests/test_report_record_labels.py`
-- [Does the report show the frame that states a clash (the marked view, both halves of a split), and does the reel drop capital mod prefixes from names?](#tool-_geometry-harness-tests-test_report_figures.py) — `_geometry-harness/tests/test_report_figures.py`
+- [Does the report say each record in words (a placed object by its kind and base, a name, an editor ID in words, a navmesh by its place), keep two different values apart and number records named alike, say once per check across mod pairs what to check in game, keep a patch verdict's names out of the reel, say why a cell could not be read, and say a long mod name in full once and then by its own short form?](#tool-integration-housecarl-tests-test_report_record_labels.py) — `integration/housecarl/tests/test_report_record_labels.py`
+- [Does the report show the frame that states a clash (the marked view, both halves of a split), and does the reel drop capital mod prefixes from names?](#tool-integration-housecarl-tests-test_report_figures.py) — `integration/housecarl/tests/test_report_figures.py`
 - [Does the requested canvas aspect reach every worklist and capture path?](#tool-_geometry-harness-tests-test_worklist_aspect.py) — `_geometry-harness/tests/test_worklist_aspect.py`
-- [Does the review reel plan and render Piranha's vignette format by rule: opening still, without/with/highlight vignettes, data stills, plain words, own-pair patch sentences and a closing still?](#tool-_geometry-harness-tests-test_reel_vignettes.py) — `_geometry-harness/tests/test_reel_vignettes.py`
+- [Does the review reel plan and render Piranha's vignette format by rule: opening still, without/with/highlight vignettes, data stills, plain words, own-pair patch sentences and a closing still?](#tool-integration-housecarl-tests-test_reel_vignettes.py) — `integration/housecarl/tests/test_reel_vignettes.py`
 - [Does the route-cut check read each arm's candidate and only the targets that arm loads?](#tool-_geometry-harness-tests-test_route_cut_adapter.py) — `_geometry-harness/tests/test_route_cut_adapter.py`
 - [Does the run controller still write the JSON bytes, hashes, orderings and stage ledger its known answers record?](#tool-runcontrol) — `runcontrol`
-- [Does the runtime switch reading rule classify crashes, stalls and completions correctly?](#tool-_geometry-harness-tests-test_switchflip_outcome.py) — `_geometry-harness/tests/test_switchflip_outcome.py`
+- [Does the runtime switch reading rule classify crashes, stalls and completions correctly?](#tool-integration-housecarl-tests-test_switchflip_outcome.py) — `integration/housecarl/tests/test_switchflip_outcome.py`
 - [Does the scene preflight refuse an arm whose view lacks meshes an installed folder outside it has, and pass the controls?](#tool-_geometry-harness-tests-test_plan_view_mesh_gaps.py) — `_geometry-harness/tests/test_plan_view_mesh_gaps.py`
 - [Does the scratch refusal propagation diagnostic satisfy its expected contract?](#tool-viewprobe.extraction-scratch-fail) — `viewprobe.extraction-scratch-fail`
 - [Does the setup without the evaluated mod show the navmesh comparison's broken crossing at the same camera?](#tool-capture-acquire.navmesh-control) — `capture-acquire.navmesh-control`
@@ -218,8 +218,8 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [How can I substitute switchprobe in evaluation-controller fixture tests?](#tool-_geometry-harness-tests-fixtures-evalrun-fakeprobes-switchprobe.py) — `_geometry-harness/tests/fixtures/evalrun/fakeprobes/switchprobe.py`
 - [How can I synthesize a local WAV from text using a Windows voice?](#tool-evalreel-speech) — `evalreel-speech`
 - [How can I write the hand-derived expected evaluation outputs in a consistent schema?](#tool-_geometry-harness-tests-fixtures-evalrun-expected-make_expected.py) — `_geometry-harness/tests/fixtures/evalrun/expected/make_expected.py`
-- [How can a test stand in for the browser on the settings window?](#tool-_geometry-harness-tests-fixtures-evalsettings-stub_opener.py) — `_geometry-harness/tests/fixtures/evalsettings/stub_opener.py`
-- [How can a test stand in for the machine's slot command with a real lock holder a hard kill leaves behind?](#tool-_geometry-harness-tests-fixtures-standin_hold.py) — `_geometry-harness/tests/fixtures/standin_hold.py`
+- [How can a test stand in for the browser on the settings window?](#tool-integration-housecarl-tests-fixtures-evalsettings-stub_opener.py) — `integration/housecarl/tests/fixtures/evalsettings/stub_opener.py`
+- [How can a test stand in for the machine's slot command with a real lock holder a hard kill leaves behind?](#tool-integration-housecarl-tests-fixtures-standin_hold.py) — `integration/housecarl/tests/fixtures/standin_hold.py`
 - [How can camera planning use this profile’s actual projection?](#tool-shotplan.profile) — `shotplan.profile`
 - [How can the names enrichment be tested without a houseCARL server?](#tool-_geometry-harness-tests-fixtures-evalrun-fake_records_mcp.py) — `_geometry-harness/tests/fixtures/evalrun/fake_records_mcp.py`
 - [How can the record capture be tested without a houseCARL server?](#tool-_geometry-harness-tests-fixtures-evalrun-fake_capture_mcp.py) — `_geometry-harness/tests/fixtures/evalrun/fake_capture_mcp.py`
@@ -279,10 +279,10 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [How many pixels of which mod's content does each occlusion plane hide in one viewprobe planes report?](#tool-_geometry-harness-planeassess-occlscore.py) — `_geometry-harness/planeassess/occlscore.py`
 - [How many renders can fit side by side given measured process needs and current memory?](#tool-renderlimit) — `renderlimit`
 - [How much Havok collision can be decoded, and how does its unit scale compare with render geometry?](#tool-collprobe) — `collprobe`
-- [Is a clash that appears only with the supplied patches loaded pictured with them loaded, beside the setup without them, and said as such in the reel and the report; is one world-state check's new clashes counted once; and does a terrain station's label reach the picture's caption and reel note?](#tool-_geometry-harness-tests-test_patch_clash_pictures.py) — `_geometry-harness/tests/test_patch_clash_pictures.py`
+- [Is a clash that appears only with the supplied patches loaded pictured with them loaded, beside the setup without them, and said as such in the reel and the report; is one world-state check's new clashes counted once; and does a terrain station's label reach the picture's caption and reel note?](#tool-integration-housecarl-tests-test_patch_clash_pictures.py) — `integration/housecarl/tests/test_patch_clash_pictures.py`
 - [Is a compatibility patch installed or available elsewhere on this machine?](#tool-patchprobe) — `patchprobe`
-- [Is a navmesh clash item 24's camera can draw pictured in the review reel as a vignette of its two navmesh states, bound to its capture request, captured by the pipeline with its control in the setup without the mod, refused without a clean control at the same camera, held for its narration, shown as one report figure with its own captions, and said with the control's result and no form key?](#tool-_geometry-harness-tests-test_navmesh_reel.py) — `_geometry-harness/tests/test_navmesh_reel.py`
-- [Is a same-named plugin from another folder planned and reported as itself, not as the measured copy?](#tool-_geometry-harness-tests-test_same_name_variant.py) — `_geometry-harness/tests/test_same_name_variant.py`
+- [Is a navmesh clash item 24's camera can draw pictured in the review reel as a vignette of its two navmesh states, bound to its capture request, captured by the pipeline with its control in the setup without the mod, refused without a clean control at the same camera, held for its narration, shown as one report figure with its own captions, and said with the control's result and no form key?](#tool-integration-housecarl-tests-test_navmesh_reel.py) — `integration/housecarl/tests/test_navmesh_reel.py`
+- [Is a same-named plugin from another folder planned and reported as itself, not as the measured copy?](#tool-integration-housecarl-tests-test_same_name_variant.py) — `integration/housecarl/tests/test_same_name_variant.py`
 - [Is a selection whose only effect is its meshes evaluated in place: do object overlap and placement contact apply when a selected folder's mesh wins for a placed object and differs (with a plugin that places nothing or none), does a mesh-only mod get its new crossings, and is the scope line built from the mesh reach?](#tool-_geometry-harness-tests-test_asset_only_selection.py) — `_geometry-harness/tests/test_asset_only_selection.py`
 - [Is the machine idle enough to launch the game or time a heavy job?](#tool-machineidle) — `machineidle`
 - [Is this evaluation settings file valid?](#tool-evalsettings.validate) — `evalsettings.validate`
@@ -323,7 +323,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [What verdict does each plane edit of a plane patch get from its rendered views?](#tool-planeassess.verdicts) — `planeassess.verdicts`
 - [What walkable path connects these route endpoints?](#tool-viewprobe.route-solve) — `viewprobe.route-solve`
 - [What world position lies under this frame pixel?](#tool-viewprobe.pick) — `viewprobe.pick`
-- [When a plant made of alpha cards misses its mark at the composed camera, is the witness station's own camera tried before the top-down and kept only when the plant's point lands in its mark, is such a picture captioned as a station view, is a clash a station saw never said to be one no camera could see, does a kept image key never stand for a capture with other frames, are plugin names in capture requests compared without case, is a one-mark marked view named, does the report stage's media bundle use the frozen check registry, does the reel narration speak no form key or editor ID, do capture frames address the cell by its form key, and does every capture refusal code have its own reason?](#tool-_geometry-harness-tests-test_alpha_card_capture.py) — `_geometry-harness/tests/test_alpha_card_capture.py`
+- [When a plant made of alpha cards misses its mark at the composed camera, is the witness station's own camera tried before the top-down and kept only when the plant's point lands in its mark, is such a picture captioned as a station view, is a clash a station saw never said to be one no camera could see, does a kept image key never stand for a capture with other frames, are plugin names in capture requests compared without case, is a one-mark marked view named, does the report stage's media bundle use the frozen check registry, does the reel narration speak no form key or editor ID, do capture frames address the cell by its form key, and does every capture refusal code have its own reason?](#tool-integration-housecarl-tests-test_alpha_card_capture.py) — `integration/housecarl/tests/test_alpha_card_capture.py`
 - [When motionprobe sweep or deltacheck, or contactprobe's swept review, runs out of memory, does it say so in one sentence that says what to try, and does that advice work?](#tool-_geometry-harness-tests-test_swept_oom_sentence.py) — `_geometry-harness/tests/test_swept_oom_sentence.py`
 - [Where are the built probe, runcontrol and server programs for the Python tools?](#tool-buildlayout) — `buildlayout`
 - [Where are the occlusion primitives in this scene?](#tool-viewprobe.planes) — `viewprobe.planes`
@@ -335,9 +335,10 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Where does a see-through object (effect, blended or alpha-tested) visibly cover this frame?](#tool-viewprobe.coverage-of) — `viewprobe.coverage-of`
 - [Where does the review reel get each mod's name, and how does it say a name is not the Nexus one?](#tool-modnames) — `modnames`
 - [Where does this declared walking route cross the scene?](#tool-viewprobe.route) — `viewprobe.route`
+- [Where is SkyWright's checkout, seen from the houseCARL integration module?](#tool-skywright_paths) — `skywright_paths`
 - [Where is the evaluation settings file?](#tool-evalsettings.path) — `evalsettings.path`
 - [Where is this ground texture painted in the worldspace?](#tool-viewprobe.find-ltex) — `viewprobe.find-ltex`
-- [Where no navmesh stands an exterior camera, does it stand on bare terrain only when the LAND footprint is planar and at most the measured 43.7 degrees, with nothing beside, overhead or under it but the ground, while navmesh stations keep today's rule?](#tool-_geometry-harness-tests-test_terrain_stations.py) — `_geometry-harness/tests/test_terrain_stations.py`
+- [Where no navmesh stands an exterior camera, does it stand on bare terrain only when the LAND footprint is planar and at most the measured 43.7 degrees, with nothing beside, overhead or under it but the ground, while navmesh stations keep today's rule?](#tool-integration-housecarl-tests-test_terrain_stations.py) — `integration/housecarl/tests/test_terrain_stations.py`
 - [Where on each object of a capture request can an eye-level camera outside the pair actually see a face?](#tool-capture-points) — `capture-points`
 - [Which DATA flags (interior, has water, show sky) does a plugin's version of a cell record set?](#tool-pluginread) — `pluginread`
 - [Which Euler rotation composition agrees with the measured geometry?](#tool-eulerprobe) — `eulerprobe`
@@ -369,6 +370,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Which evidence-bound views should an evaluation report ask to capture?](#tool-report-scenes) — `report-scenes`
 - [Which findings change across every enumerated switch flip?](#tool-stateprobe.all) — `stateprobe.all`
 - [Which fixture do the capture-fallback tests render?](#tool-viewprobe.write-capture-fixture) — `viewprobe.write-capture-fixture`
+- [Which helpers do the evaluation tools on both sides of the houseCARL integration fence share?](#tool-evalbase) — `evalbase`
 - [Which installed plugins should one new mod be evaluated against, and why is each other plugin left out?](#tool-selectprobe) — `selectprobe`
 - [Which installer patch options were offered but not selected?](#tool-fomodprobe) — `fomodprobe`
 - [Which kinds of edit does a patch make to a record, in the fixed vocabulary (ADD, DISABLE, MOVE, ENABLE-PARENT, FIELD:<name> and the rest)?](#tool-editkinds) — `editkinds`
@@ -814,36 +816,6 @@ Modifiers (do not select a separate mode):
 - `--out` — where to write the generated fixtures (never the tracked tree)
 - `--registry-from` — Set registry from for this invocation; consult the linked parser for accepted values.
 
-<a id="tool-_geometry-harness-tests-fixtures-evalsettings-stub_opener.py"></a>
-
-### _geometry-harness/tests/fixtures/evalsettings/stub_opener.py
-
-**How can a test stand in for the browser on the settings window?**
-
-Drive the settings window's Save, close and refusal paths without a browser.
-
-Inputs: Controlled fixtures for stub_opener.
-
-Outputs: Assertion results or generated fixture data for: How can a test stand in for the browser on the settings window?
-
-Source: [_geometry-harness/tests/fixtures/evalsettings/stub_opener.py](../_geometry-harness/tests/fixtures/evalsettings/stub_opener.py) — `The browser stand-in for test_evalsettings.py: 'evalsettings.py ensure|window --opener THIS' runs 'python THIS URL'.`
-
-
-<a id="tool-_geometry-harness-tests-fixtures-standin_hold.py"></a>
-
-### _geometry-harness/tests/fixtures/standin_hold.py
-
-**How can a test stand in for the machine's slot command with a real lock holder a hard kill leaves behind?**
-
-Exercise evalpipeline's heavy-child stop and lock release without the machine's idle_lock.
-
-Inputs: A lock path and a job command after --; the slot command's other options are accepted and ignored.
-
-Outputs: The lock file while the job runs and idle_lock.log take and release lines beside it.
-
-Source: [_geometry-harness/tests/fixtures/standin_hold.py](../_geometry-harness/tests/fixtures/standin_hold.py) — `A stand-in for the machine's slot command in tests`
-
-
 <a id="tool-_geometry-harness-tests-test_adviceprobe.py"></a>
 
 ### _geometry-harness/tests/test_adviceprobe.py
@@ -857,21 +829,6 @@ Inputs: adviceprobe built from this checkout; a scratch MO2 instance of two mods
 Outputs: Assertion results for: Does adviceprobe find a clash stated on a neighbour's page, and does the evaluation pass the neighbours and record the clash rows?
 
 Source: [_geometry-harness/tests/test_adviceprobe.py](../_geometry-harness/tests/test_adviceprobe.py) — `Known answers for adviceprobe's neighbour pages ('--with') and the evaluation's wiring of them.`
-
-
-<a id="tool-_geometry-harness-tests-test_alpha_card_capture.py"></a>
-
-### _geometry-harness/tests/test_alpha_card_capture.py
-
-**When a plant made of alpha cards misses its mark at the composed camera, is the witness station's own camera tried before the top-down and kept only when the plant's point lands in its mark, is such a picture captioned as a station view, is a clash a station saw never said to be one no camera could see, does a kept image key never stand for a capture with other frames, are plugin names in capture requests compared without case, is a one-mark marked view named, does the report stage's media bundle use the frozen check registry, does the reel narration speak no form key or editor ID, do capture frames address the cell by its form key, and does every capture refusal code have its own reason?**
-
-Qualify changes to capture_acquire's routing after a refused composed pose (the alpha-card witness step), the station-view caption, the reel's reasons for refused clashes, the capture reuse rule for older pose refusals, the image-observations key, report_scenes' plugin-name comparisons, the marked-view and station-view captions, the report stage's media-bundle frozen inputs, a vignette's own capture request, the still pages' spoken wording, or the capture cell and its refusal reasons (C1890-C1899, C1930-C1933, C1935-C1939, C1960-C1961); offline, no game.
-
-Inputs: capture_acquire with its viewprobe call answered by a stand-in and its top-down recorded, test_reel_vignettes' synthetic evaluation, a hand-built capture folder.
-
-Outputs: One GREEN, RED or CRASH line per case (C1890-C1899, C1930-C1933, C1935-C1939, C1960-C1961).
-
-Source: [_geometry-harness/tests/test_alpha_card_capture.py](../_geometry-harness/tests/test_alpha_card_capture.py) — `Known answers for the interim alpha-card capture rule and the stale image key`
 
 
 <a id="tool-_geometry-harness-tests-test_asset_only_selection.py"></a>
@@ -902,113 +859,6 @@ Inputs: The Release build and its skywright-layout.json.
 Outputs: Assertion results for: Does buildlayout.py's fallback marker equal the one the build writes, and do its paths exist in that build?
 
 Source: [_geometry-harness/tests/test_buildlayout.py](../_geometry-harness/tests/test_buildlayout.py) — `buildlayout.py against the build the solution wrote`
-
-
-<a id="tool-_geometry-harness-tests-test_capture_acquire.py"></a>
-
-### _geometry-harness/tests/test_capture_acquire.py
-
-**Does the real reporting request-to-camera path satisfy its offline contract?**
-
-Qualify changes to reporting capture acquisition with offline binding and planner-refusal controls.
-
-Inputs: Controlled fixtures for test_capture_acquire.
-
-Outputs: Assertion results or generated fixture data for: Does the real reporting request-to-camera path satisfy its offline contract?
-
-Source: [_geometry-harness/tests/test_capture_acquire.py](../_geometry-harness/tests/test_capture_acquire.py) — `Offline contract for 'capture_acquire.py': the request-to-camera path, end to end.`
-
-
-<a id="tool-_geometry-harness-tests-test_capture_every_state.py"></a>
-
-### _geometry-harness/tests/test_capture_every_state.py
-
-**Does a vignette's capture camera pass the measured state's camera checks (inside test, the sightlines of the participants that setup places) in every other state it renders, try the next pose of the chain when one fails, refuse naming the state and the object when none passes, and keep its single camera when every state is clear?**
-
-Qualify changes to capture_acquire's state_checks, --state-order, the pose, witness and top-down fallback chain, the cell each other state is rendered by, evalpipeline's acquire arguments or the state-camera-blocked reason (C2168-C2172); offline, no game.
-
-Inputs: capture_acquire with its renderer answered per setup in viewprobe's own inside-at and pick line formats, judged by the real shotplan; hand-built order files.
-
-Outputs: One GREEN, RED or CRASH line per check (C2168-C2172).
-
-Source: [_geometry-harness/tests/test_capture_every_state.py](../_geometry-harness/tests/test_capture_every_state.py) — `Known answers for a capture camera checked in every state it renders`
-
-
-<a id="tool-_geometry-harness-tests-test_capture_fallbacks.py"></a>
-
-### _geometry-harness/tests/test_capture_fallbacks.py
-
-**Do the capture fallbacks (cutaway, top-down, see-through marks) give their known answers on a real render, and do the reuse, reel and caption rules hold?**
-
-**Does a buried clash read as buried in the reel and the report, and does a top-down hide what covers the pair from above by the cutaway's rule?**
-
-Qualify changes to capture_points, capture_acquire, shotplan --top-down-only, viewprobe --hide/--protect/--contacts-of/--occluders-of/--coverage-of, the capture reuse rule or the buried-clash words; render cases need HOUSECARL_FIXTURE_GAME (else NOT RUN, exit 3); --code-only runs the code cases alone and exits 0 when they pass.
-
-Inputs: CfFixture.esp from viewprobe --write-capture-fixture, a Skyrim SE game folder's archives.
-
-Outputs: Assertion results per case; NOT RUN without game data; NOT ATTEMPTED with --code-only.
-
-Source: [_geometry-harness/tests/test_capture_fallbacks.py](../_geometry-harness/tests/test_capture_fallbacks.py) — `Known answers for the capture fallbacks: cutaway, top-down and see-through marks`
-
-
-<a id="tool-_geometry-harness-tests-test_capture_follow_ups.py"></a>
-
-### _geometry-harness/tests/test_capture_follow_ups.py
-
-**Does the capture ring stand on the navmesh storey rather than a floor high up a tall focus, does a flat partner box still find the floor, does the reel say how many camera spots a buried clash rests on, is a see-through partner never said to bury the other object, and does the reel picture a group's strongest crossing?**
-
-Qualify changes to capture_points' ground cast or focus storey, the eye-level step's see-through field, the buried wording in the reel and report, or the reel's choice of example within a group and a buried clash in a pictured group (C1830-C1836); offline, no game.
-
-Inputs: Toy box scenes through viewprobe/tools/fake_viewprobe.py (scene key contacts), test_reel_vignettes' synthetic evaluation, test_capture_fallbacks' refused capture result.
-
-Outputs: One GREEN, RED or CRASH line per case (C1830-C1836).
-
-Source: [_geometry-harness/tests/test_capture_follow_ups.py](../_geometry-harness/tests/test_capture_follow_ups.py) — `Known answers for the capture follow-ups after item 28`
-
-
-<a id="tool-_geometry-harness-tests-test_capture_navmesh.py"></a>
-
-### _geometry-harness/tests/test_capture_navmesh.py
-
-**Does a navmesh comparison request get its measured top-down camera, both states and its refusals offline?**
-
-Qualify changes to capture_navmesh.py, capture_acquire's navmesh path or viewprobe --nav-link's row shape.
-
-Inputs: Controlled fixtures for test_capture_navmesh.
-
-Outputs: Assertion results for: Does a navmesh comparison request get its measured top-down camera?
-
-Source: [_geometry-harness/tests/test_capture_navmesh.py](../_geometry-harness/tests/test_capture_navmesh.py) — `Offline contract for a navmesh comparison's camera`
-
-
-<a id="tool-_geometry-harness-tests-test_capture_points.py"></a>
-
-### _geometry-harness/tests/test_capture_points.py
-
-**Does the capture point picker return visible faces, the right floor and plain refusals on the shapes real requests were refused on?**
-
-Qualify changes to capture_points, capture_acquire --points auto or shotplan --bearing-window; --sabotage removes the owner test and must go red.
-
-Inputs: Controlled fixtures for test_capture_points.
-
-Outputs: Assertion results for: Does the capture point picker return visible faces, the right floor and plain refusals?
-
-Source: [_geometry-harness/tests/test_capture_points.py](../_geometry-harness/tests/test_capture_points.py) — `Offline known answers for 'capture_points.py': a measured point on a face an eye-level camera can see (C700-C716).`
-
-
-<a id="tool-_geometry-harness-tests-test_capture_results_unreadable.py"></a>
-
-### _geometry-harness/tests/test_capture_results_unreadable.py
-
-**Does evalreport's reel refuse a capture-results file it cannot read, and still plan without one?**
-
-Qualify a change to how evalreport plan reads --capture-results.
-
-Inputs: Synthetic capture-results files.
-
-Outputs: Assertion results for: Does evalreport's reel refuse a capture-results file it cannot read, and still plan without one?
-
-Source: [_geometry-harness/tests/test_capture_results_unreadable.py](../_geometry-harness/tests/test_capture_results_unreadable.py) — `evalreport's reel refuses a --capture-results file it cannot read`
 
 
 <a id="tool-_geometry-harness-tests-test_contact_memory_route.py"></a>
@@ -1146,21 +996,6 @@ Outputs: Assertion results or generated fixture data for: Do opt-in live checks 
 Source: [_geometry-harness/tests/test_evallive.py](../_geometry-harness/tests/test_evallive.py) — `Known answers for the opt-in live-import lane`
 
 
-<a id="tool-_geometry-harness-tests-test_evalpipeline.py"></a>
-
-### _geometry-harness/tests/test_evalpipeline.py
-
-**Does the driver of the stages after the bundle reuse a stage only when nothing changed, continue a run folder the built-in controller carried through the bundle, and refuse one it did not?**
-
-Check changes to evalpipeline.py, the driver of the stages after the bundle.
-
-Inputs: Controlled fixtures for test_evalpipeline.
-
-Outputs: Assertion results for: Does the driver of the stages after the bundle reuse a stage only when nothing changed, continue a run folder the built-in controller carried through the bundle, and refuse one it did not?
-
-Source: [_geometry-harness/tests/test_evalpipeline.py](../_geometry-harness/tests/test_evalpipeline.py) — `Known answers for evalpipeline.py, the driver of the stages after the bundle`
-
-
 <a id="tool-_geometry-harness-tests-test_evalrecords.py"></a>
 
 ### _geometry-harness/tests/test_evalrecords.py
@@ -1174,100 +1009,6 @@ Inputs: Controlled fixtures for test_evalrecords.
 Outputs: Assertion results for: Does the record capture's selection refuse empty and short reads and keep unjudged rows apart?
 
 Source: [_geometry-harness/tests/test_evalrecords.py](../_geometry-harness/tests/test_evalrecords.py) — `Known answers for evalrecords.py's selection rules (the record capture for the registry's mcp-only checks).`
-
-
-<a id="tool-_geometry-harness-tests-test_evalreel.py"></a>
-
-### _geometry-harness/tests/test_evalreel.py
-
-**Does the reel pipeline enforce media, audio, cache and clip-cut contracts?**
-
-Check reel assembly changes for stale media reuse, invalid audio, or incorrect segment boundaries.
-
-Inputs: Controlled fixtures for test_evalreel.
-
-Outputs: Assertion results or generated fixture data for: Does the reel pipeline enforce media, audio, cache and clip-cut contracts?
-
-Source: [_geometry-harness/tests/test_evalreel.py](../_geometry-harness/tests/test_evalreel.py) — `End-to-end contract for narrated evidence reels: media identity, audio decode, cache, clip cuts and refusal.`
-
-
-<a id="tool-_geometry-harness-tests-test_evalreport.py"></a>
-
-### _geometry-harness/tests/test_evalreport.py
-
-**Does the report compiler match the constructed bundle oracle?**
-
-Check report generation against independent expected findings before publishing schema changes.
-
-Inputs: Controlled fixtures for test_evalreport.
-
-Outputs: Assertion results or generated fixture data for: Does the report compiler match the constructed bundle oracle?
-
-Source: [_geometry-harness/tests/test_evalreport.py](../_geometry-harness/tests/test_evalreport.py) — `The report compiler against the oracle (Q45).`
-
-
-<a id="tool-_geometry-harness-tests-test_evalreport_comparison_kinds.py"></a>
-
-### _geometry-harness/tests/test_evalreport_comparison_kinds.py
-
-**Does the report distinguish removing a mod from repairing a conflict?**
-
-Prevent a mod-removal comparison from being presented as proof of a compatibility repair.
-
-Inputs: Controlled fixtures for test_evalreport_comparison_kinds.
-
-Outputs: Assertion results or generated fixture data for: Does the report distinguish removing a mod from repairing a conflict?
-
-Source: [_geometry-harness/tests/test_evalreport_comparison_kinds.py](../_geometry-harness/tests/test_evalreport_comparison_kinds.py) — `Checks for how the report compiler classifies a setup and what it is then allowed to claim.`
-
-
-Modifiers (do not select a separate mode):
-
-- `--prove-gate` — force repair_claimable open in memory and require this suite to FAIL
-
-<a id="tool-_geometry-harness-tests-test_evalreport_prediction.py"></a>
-
-### _geometry-harness/tests/test_evalreport_prediction.py
-
-**Does the report lead with what adding the mods will break, then coverage, then the patch?**
-
-Check that a report states the prediction before any patch tally and never counts a base-game difference as a clash.
-
-Inputs: Controlled fixtures for test_evalreport_prediction.
-
-Outputs: Assertion results or generated fixture data for: Does the report lead with what adding the mods will break, then coverage, then the patch?
-
-Source: [_geometry-harness/tests/test_evalreport_prediction.py](../_geometry-harness/tests/test_evalreport_prediction.py) — `Checks that an evaluation report leads with the prediction: what adding the mods will break.`
-
-
-<a id="tool-_geometry-harness-tests-test_evalreport_siblings.py"></a>
-
-### _geometry-harness/tests/test_evalreport_siblings.py
-
-**Does a report join several separate evaluations of the same order, each lending the setups it can stand in for, and refuse one it cannot use by name?**
-
-Check evalreport plan with --sibling-bundle given more than once: which sibling fills each role, the order given changes nothing, and each sub-order join criterion refuses what it should.
-
-Inputs: Controlled fixtures for test_evalreport_siblings.
-
-Outputs: Assertion results or generated fixture data for: Does a report join several separate evaluations of the same order, each lending the setups it can stand in for, and refuse one it cannot use by name?
-
-Source: [_geometry-harness/tests/test_evalreport_siblings.py](../_geometry-harness/tests/test_evalreport_siblings.py) — `Checks that a report joins more than one separate evaluation of the same order`
-
-
-<a id="tool-_geometry-harness-tests-test_evalreport_verify_in_place.py"></a>
-
-### _geometry-harness/tests/test_evalreport_verify_in_place.py
-
-**Does evalreport plan verify --bundle and --sibling-bundle in place without writing a byte or mtime into either, without a copy in proportion to the bundle even when its evidence is hard-linked, leave no tree after a failure mid-verify, refuse a verify that wrote no result, does runcontrol verify-bundle --out write its result only to the named file, and does every caller check a bundle with runcontrol rather than Python?**
-
-Qualify changes to evalreport's run_verify_bundle, plan's --verify-copy, runcontrol verify-bundle's --out, or which program a caller starts to check a bundle (C2230-C2235); offline, no game.
-
-Inputs: make_report_fixtures' R1 bundle, copied, with a folder of hard links to one 16 MiB blob outside it.
-
-Outputs: One ok or RED line per check (C2230-C2234).
-
-Source: [_geometry-harness/tests/test_evalreport_verify_in_place.py](../_geometry-harness/tests/test_evalreport_verify_in_place.py) — `Known answers for evalreport plan verifying a bundle without copying it`
 
 
 <a id="tool-_geometry-harness-tests-test_evalrun.py"></a>
@@ -1300,36 +1041,6 @@ Outputs: One GREEN, RED or CRASH line per check (C2400-C2402).
 Source: [_geometry-harness/tests/test_evalrun_population_verb.py](../_geometry-harness/tests/test_evalrun_population_verb.py) — `Known answers for 'runcontrol population'`
 
 
-<a id="tool-_geometry-harness-tests-test_evalsettings.py"></a>
-
-### _geometry-harness/tests/test_evalsettings.py
-
-**Does a fresh user get the settings window once, and is a saved choice honoured?**
-
-Qualify the first-run settings, the window's server and the plan's frozen copy.
-
-Inputs: Controlled fixtures for test_evalsettings.
-
-Outputs: Assertion results or generated fixture data for: Does a fresh user get the settings window once, and is a saved choice honoured?
-
-Source: [_geometry-harness/tests/test_evalsettings.py](../_geometry-harness/tests/test_evalsettings.py) — `Known answers for the evaluation's first-run settings and window (evalsettings.py), PROPOSAL section 7.`
-
-
-<a id="tool-_geometry-harness-tests-test_evalspeech.py"></a>
-
-### _geometry-harness/tests/test_evalspeech.py
-
-**Does narration preparation enforce its contracts without model weights or network access?**
-
-Exercise narration binding and refusal paths offline before testing a chosen speech engine.
-
-Inputs: Controlled fixtures for test_evalspeech.
-
-Outputs: Assertion results or generated fixture data for: Does narration preparation enforce its contracts without model weights or network access?
-
-Source: [_geometry-harness/tests/test_evalspeech.py](../_geometry-harness/tests/test_evalspeech.py) — `Narration preparation contracts, without model imports, weights or network access.`
-
-
 <a id="tool-_geometry-harness-tests-test_explicit_instance.py"></a>
 
 ### _geometry-harness/tests/test_explicit_instance.py
@@ -1343,21 +1054,6 @@ Inputs: Release builds of switchprobe, geoprobe and corridorprobe; a temporary h
 Outputs: Assertion results for: Does every probe refuse, with a named reason, when no MO2 instance is given instead of falling back to the harness config's instance?
 
 Source: [_geometry-harness/tests/test_explicit_instance.py](../_geometry-harness/tests/test_explicit_instance.py) — `Known answers for the explicit-instance rule in '_shared/HarnessTarget.cs'.`
-
-
-<a id="tool-_geometry-harness-tests-test_exterior_stations.py"></a>
-
-### _geometry-harness/tests/test_exterior_stations.py
-
-**Does an exterior camera station stand on navmesh at its own level, eye at that level plus the eye height, while interiors keep one floor?**
-
-Qualify changes to capture_points' station placement or shotplan's exterior eye; offline, no game.
-
-Inputs: Toy box scenes for fake_viewprobe.py; the real picker, capture_acquire and shotplan.
-
-Outputs: One ok/FAIL line per check; exit 1 on any failure.
-
-Source: [_geometry-harness/tests/test_exterior_stations.py](../_geometry-harness/tests/test_exterior_stations.py) — `Offline known answers for exterior camera stations`
 
 
 <a id="tool-_geometry-harness-tests-test_extraction_scratch.py"></a>
@@ -1375,21 +1071,6 @@ Outputs: Assertion results or generated fixture data for: Does extraction scratc
 Source: [_geometry-harness/tests/test_extraction_scratch.py](../_geometry-harness/tests/test_extraction_scratch.py) — `The extraction scratch's two contracts: what viewprobe may not DELETE, and how it FAILS.`
 
 
-<a id="tool-_geometry-harness-tests-test_eye_inside_solid.py"></a>
-
-### _geometry-harness/tests/test_eye_inside_solid.py
-
-**Does the planner refuse a camera eye inside a solid of any thickness on a real render, and accept one beside a thin wall?**
-
-Qualify changes to viewprobe --inside-at (its rays or facing) or shotplan's inside test; needs HOUSECARL_FIXTURE_GAME (else NOT RUN, exit 3).
-
-Inputs: CfFixture.esp from viewprobe --write-capture-fixture (cells CfThick, CfThickWalls), a Skyrim SE game folder's archives.
-
-Outputs: Assertion results per case; NOT RUN without game data.
-
-Source: [_geometry-harness/tests/test_eye_inside_solid.py](../_geometry-harness/tests/test_eye_inside_solid.py) — `Known answers for the planner's inside test on a real render`
-
-
 <a id="tool-_geometry-harness-tests-test_fingerprint_owner.py"></a>
 
 ### _geometry-harness/tests/test_fingerprint_owner.py
@@ -1403,21 +1084,6 @@ Inputs: The built runcontrol and the harness Python modules.
 Outputs: Assertion results for: Does the configuration fingerprint have one owner, runcontrol, that the Python tools ask?
 
 Source: [_geometry-harness/tests/test_fingerprint_owner.py](../_geometry-harness/tests/test_fingerprint_owner.py) — `Known answers for the configuration fingerprint's one owner`
-
-
-<a id="tool-_geometry-harness-tests-test_flipplan.py"></a>
-
-### _geometry-harness/tests/test_flipplan.py
-
-**Does the flip-plan generator keep branches apart, keep source order and name every call it does not plan?**
-
-Qualify a change to the flip-plan generator.
-
-Inputs: Controlled fixtures for test_flipplan.
-
-Outputs: Assertion results or generated fixture data for: Does the flip-plan generator keep branches apart, keep source order and name every call it does not plan?
-
-Source: [_geometry-harness/tests/test_flipplan.py](../_geometry-harness/tests/test_flipplan.py) — `Known answers for the flip-plan generator (flipplan.py).`
 
 
 <a id="tool-_geometry-harness-tests-test_import_empty_population.py"></a>
@@ -1478,21 +1144,6 @@ Inputs: Controlled fixtures for test_lightclash.
 Outputs: Assertion results for: Does the light-clash fold attribute and decide orphaned, leaking, doubled and over-limit lights correctly?
 
 Source: [_geometry-harness/tests/test_lightclash.py](../_geometry-harness/tests/test_lightclash.py) — `Known answers for lightclash.py`
-
-
-<a id="tool-_geometry-harness-tests-test_machineidle.py"></a>
-
-### _geometry-harness/tests/test_machineidle.py
-
-**Does the idle gate refuse probes by command line and blockers by name?**
-
-Qualify a change to the launch idle gate before it decides whether the game may start.
-
-Inputs: Controlled fixtures for test_machineidle.
-
-Outputs: Assertion results or generated fixture data for: Does the idle gate refuse probes by command line and blockers by name?
-
-Source: [_geometry-harness/tests/test_machineidle.py](../_geometry-harness/tests/test_machineidle.py) — `Known answers for the idle gate (machineidle.py).`
 
 
 <a id="tool-_geometry-harness-tests-test_mask_evidence.py"></a>
@@ -1585,21 +1236,6 @@ Outputs: Assertion results for: Do stateprobe, contactprobe and its empty-space 
 Source: [_geometry-harness/tests/test_modelless_light.py](../_geometry-harness/tests/test_modelless_light.py) — `A light whose base record has no model is not a physical object to any geometry probe (cases 1430-1438).`
 
 
-<a id="tool-_geometry-harness-tests-test_narration_fidelity.py"></a>
-
-### _geometry-harness/tests/test_narration_fidelity.py
-
-**Does the narration packet ask for plain words and carry the glossary, does narrate-apply accept a rewrite only where a fidelity judgement made for its exact text says it keeps the meaning, and does the judge's model setting never resolve to a Fable model?**
-
-Qualify changes to evalreport narrate-packet (instructions, glossary, the judge's packet), narrate-apply's judgement gate, the reporting skill's narration.json, or evalsettings models.checkExplanations and route --session-model, the judge packet's bound rows and the narrator's completion rule (C2020-C2029, C2050-C2053); offline, no game, no model call.
-
-Inputs: A hand-built presentation with made-up plugins, hand-written stand-in judgements, the shipped skill data.
-
-Outputs: One GREEN, RED or CRASH line per case (C2020-C2029, C2050-C2053).
-
-Source: [_geometry-harness/tests/test_narration_fidelity.py](../_geometry-harness/tests/test_narration_fidelity.py) — `Known answers: the narration packet asks for plain words`
-
-
 <a id="tool-_geometry-harness-tests-test_navedit.py"></a>
 
 ### _geometry-harness/tests/test_navedit.py
@@ -1630,36 +1266,6 @@ Outputs: Assertion results for: Does the navmesh grid rebuild reproduce the engi
 Source: [_geometry-harness/tests/test_navgrid_rebuild.py](../_geometry-harness/tests/test_navgrid_rebuild.py) — `Known answers for the navmesh grid rebuild`
 
 
-<a id="tool-_geometry-harness-tests-test_navmesh_caption.py"></a>
-
-### _geometry-harness/tests/test_navmesh_caption.py
-
-**Does a navmesh vignette's earlier-version caption, on the reel strip and in the report, name the plugin the historical frame's own --nav-version draws (never the plan's re-cut history, and none when the frame names none), say which mod replaced that version, and keep a name ending in s free of an "s's" possessive, in the narration too?**
-
-Qualify changes to reel_plan's frame_label for navmesh frames, navmesh_earlier_plugin (shared with evalreport's figure captions), navmesh_sentence, or the reporting skill's navmesh caption, label or narration words (C2240-C2244); offline, no game.
-
-Inputs: test_navmesh_reel's planner fixture with its earlier mod renamed, hand-built renderer commands, and the shipped skill data.
-
-Outputs: One GREEN, RED or CRASH line per check (C2240-C2244).
-
-Source: [_geometry-harness/tests/test_navmesh_caption.py](../_geometry-harness/tests/test_navmesh_caption.py) — `Known answers for the navmesh context caption`
-
-
-<a id="tool-_geometry-harness-tests-test_navmesh_reel.py"></a>
-
-### _geometry-harness/tests/test_navmesh_reel.py
-
-**Is a navmesh clash item 24's camera can draw pictured in the review reel as a vignette of its two navmesh states, bound to its capture request, captured by the pipeline with its control in the setup without the mod, refused without a clean control at the same camera, held for its narration, shown as one report figure with its own captions, and said with the control's result and no form key?**
-
-Qualify changes to reel_plan's navmesh vignette (camera shape, states, words, labels), report_scenes' reel-mode navmesh binding, evalpipeline.capture_request's navmesh branch, capture_acquire capture's --control gate, evalreel's vignette holds or evalreport's navmesh figure (C1970-C1978); offline, no game.
-
-Inputs: A hand-built Clockwork-shaped presentation, the shipped skill data, test_capture_navmesh's synthetic scene with fake_viewprobe.py, evalpipeline.capture_request with a recording child runner.
-
-Outputs: One GREEN, RED or CRASH line per case (C1970-C1978).
-
-Source: [_geometry-harness/tests/test_navmesh_reel.py](../_geometry-harness/tests/test_navmesh_reel.py) — `Known answers for a navmesh clash pictured in the review reel`
-
-
 <a id="tool-_geometry-harness-tests-test_navmesh_repair_rules.py"></a>
 
 ### _geometry-harness/tests/test_navmesh_repair_rules.py
@@ -1673,36 +1279,6 @@ Inputs: The Release navownprobe; NavRepairFixture laid out as an MO2 instance.
 Outputs: Assertion results for: Does navownprobe count a link into a deleted navmesh, emit mod deletions, judge border links by their geometry, find navmesh left on moved ground, and plan a relink that refuses an ambiguous match?
 
 Source: [_geometry-harness/tests/test_navmesh_repair_rules.py](../_geometry-harness/tests/test_navmesh_repair_rules.py) — `Known answers for the navmesh repair rules and the relink plan (C2450-C2489), on navownprobe/NavRepairFixture.cs.`
-
-
-<a id="tool-_geometry-harness-tests-test_navown_edge_identity.py"></a>
-
-### _geometry-harness/tests/test_navown_edge_identity.py
-
-**Does navownprobe write one EDGE-IDX row per broken edge link, and does every identity-keyed reader (conflictdiff, ordersweep, evalreport) keep and credit each link?**
-
-Qualify a change to navownprobe's dangling-link rows (DanglingLinks.cs), to ConflictIo.RowIdentity or to a reader that keys rows by it.
-
-Inputs: The Release navownprobe, conflictdiff and stateprobe, ordersweep.py and evalreport.py; EdgeLinkFixture laid out as an MO2 instance.
-
-Outputs: Assertion results for: Does navownprobe write one EDGE-IDX row per broken edge link, and does every identity-keyed reader (conflictdiff, ordersweep, evalreport) keep and credit each link?
-
-Source: [_geometry-harness/tests/test_navown_edge_identity.py](../_geometry-harness/tests/test_navown_edge_identity.py) — `navownprobe writes one EDGE-IDX row per broken edge link, and every identity-keyed reader keeps each one (1390-1405).`
-
-
-<a id="tool-_geometry-harness-tests-test_order_geometry.py"></a>
-
-### _geometry-harness/tests/test_order_geometry.py
-
-**Does a placed-object geometry row that holds in one order of a free pair and not the other reach the report as a load-order risk, with rows in both orders left out, unmeasured rows counted, drifted plugins named and mismatched orders refused?**
-
-Qualify a change to the order-geometry enrichment (bundleenrich.order_geometry_rows, enrich_order_geometry) or to evalreport's order-geometry lines and load-order geometry fact.
-
-Inputs: Hand-built bundles carrying an order-geometry enrichment, and three hand-written ordersweep emits.
-
-Outputs: Assertion results for: Does a placed-object geometry row that holds in one order of a free pair and not the other reach the report as a load-order risk?
-
-Source: [_geometry-harness/tests/test_order_geometry.py](../_geometry-harness/tests/test_order_geometry.py) — `Known answers: a geometry row that holds in one order of a free pair and not in the other is said as a load-order risk`
 
 
 <a id="tool-_geometry-harness-tests-test_order_input_refusal.py"></a>
@@ -1810,36 +1386,6 @@ Outputs: Assertion results or generated fixture data for: Does overlap attributi
 Source: [_geometry-harness/tests/test_overlap_attribution_contract.py](../_geometry-harness/tests/test_overlap_attribution_contract.py) — `Independent Q47 acceptance controls, frozen before implementation inspection.`
 
 
-<a id="tool-_geometry-harness-tests-test_overlap_triage.py"></a>
-
-### _geometry-harness/tests/test_overlap_triage.py
-
-**Does overlap triage preserve locality, counterpart identity and incomplete reviews?**
-
-Check incident grouping changes for lost members, incorrect counterparts, and false review completeness.
-
-Inputs: Controlled fixtures for test_overlap_triage.
-
-Outputs: Assertion results or generated fixture data for: Does overlap triage preserve locality, counterpart identity and incomplete reviews?
-
-Source: [_geometry-harness/tests/test_overlap_triage.py](../_geometry-harness/tests/test_overlap_triage.py) — `# 1||2 groups with 1||3; 3||4 cannot join through a transitive 1||3 link because it does not`
-
-
-<a id="tool-_geometry-harness-tests-test_patch_clash_pictures.py"></a>
-
-### _geometry-harness/tests/test_patch_clash_pictures.py
-
-**Is a clash that appears only with the supplied patches loaded pictured with them loaded, beside the setup without them, and said as such in the reel and the report; is one world-state check's new clashes counted once; and does a terrain station's label reach the picture's caption and reel note?**
-
-Qualify changes to reel_plan's patch vignettes or view_kind_line, evalreport's problems_text, SAY_SKIP_KEYS, patch_captions or view_kind_caption, the report templates' new-clashes figures, capture_acquire's standing or keep_refused_points, or the reporting skill's words for them (C2340-C2349); offline, no game.
-
-Inputs: test_reel_vignettes' synthetic evaluation, test_evalreport_prediction's synthetic bundles, hand-built capture planner results, and the shipped skill data.
-
-Outputs: One GREEN, RED or CRASH line per check (C2340-C2349).
-
-Source: [_geometry-harness/tests/test_patch_clash_pictures.py](../_geometry-harness/tests/test_patch_clash_pictures.py) — `Known answers for pictures of clashes new with the supplied patches`
-
-
 <a id="tool-_geometry-harness-tests-test_plan_paths.py"></a>
 
 ### _geometry-harness/tests/test_plan_paths.py
@@ -1915,36 +1461,6 @@ Outputs: Assertion results for: Do overlapprobe, contactprobe (default pass and 
 Source: [_geometry-harness/tests/test_population_scope.py](../_geometry-harness/tests/test_population_scope.py) — `Known answers for the plan's population (P25)`
 
 
-<a id="tool-_geometry-harness-tests-test_reader_rules.py"></a>
-
-### _geometry-harness/tests/test_reader_rules.py
-
-**Do the report and reel give a verdict and next step per patch, say unfinished testing first, name one patch per outcome, show every produced picture, and plan the reel's counts, labels, pages and closing in the report's terms?**
-
-Qualify changes to the report's patch verdict, incompleteness, attribution, figure, missing-asset and setup wording, the reel's stills and labels, or the record-rows enrichment's masters.
-
-Inputs: Controlled fixtures for test_reader_rules, and one recorded presentation where the machine holds it.
-
-Outputs: Assertion results for: Do the report and reel give a verdict and next step per patch, say unfinished testing first, name one patch per outcome, show every produced picture, and plan the reel's counts, labels, pages and closing in the report's terms?
-
-Source: [_geometry-harness/tests/test_reader_rules.py](../_geometry-harness/tests/test_reader_rules.py) — `Known answers for the report and reel rules a mod user acts on`
-
-
-<a id="tool-_geometry-harness-tests-test_readerdoc.py"></a>
-
-### _geometry-harness/tests/test_readerdoc.py
-
-**Does the reader's document list only clashes between the two mods and give the right install advice?**
-
-Check reader's-document changes against hand-built plans and one plan from the real compiler.
-
-Inputs: Controlled fixtures for test_readerdoc.
-
-Outputs: Assertion results for: Does the reader's document list only clashes between the two mods and give the right install advice?
-
-Source: [_geometry-harness/tests/test_readerdoc.py](../_geometry-harness/tests/test_readerdoc.py) — `Tests for readerdoc.py — the reader's document rendered from a presentation plan.`
-
-
 <a id="tool-_geometry-harness-tests-test_record_2_0_unjudged.py"></a>
 
 ### _geometry-harness/tests/test_record_2_0_unjudged.py
@@ -1973,21 +1489,6 @@ Inputs: Hand-written 1.9.0 text reads and 2.0 by-name and tree answers of one ce
 Outputs: One PASS or FAIL line per case (C2170, C2172, C2173).
 
 Source: [_geometry-harness/tests/test_record_unexpanded_leaves.py](../_geometry-harness/tests/test_record_unexpanded_leaves.py) — `a leaf that carries no value is unjudged with its reason, never equal`
-
-
-<a id="tool-_geometry-harness-tests-test_recordrows.py"></a>
-
-### _geometry-harness/tests/test_recordrows.py
-
-**Does the record-lane comparator emit a row only for a lost change, within the schema's field scope?**
-
-Check recordrows changes against hand-written transcripts.
-
-Inputs: Controlled fixtures for test_recordrows.
-
-Outputs: Assertion results for: Does the record-lane comparator emit a row only for a lost change, within the schema's field scope?
-
-Source: [_geometry-harness/tests/test_recordrows.py](../_geometry-harness/tests/test_recordrows.py) — `Tests for recordrows.py — record-lane rows derived from a record import's own MCP transcripts.`
 
 
 <a id="tool-_geometry-harness-tests-test_records_keep_work.py"></a>
@@ -2020,36 +1521,6 @@ Outputs: Assertion results for: Does reading a capture's arms side by side keep 
 Source: [_geometry-harness/tests/test_records_parallel.py](../_geometry-harness/tests/test_records_parallel.py) — `Known answers for reading a capture's arms side by side: what arms share, how many run, and what a failure leaves.`
 
 
-<a id="tool-_geometry-harness-tests-test_reel_names.py"></a>
-
-### _geometry-harness/tests/test_reel_names.py
-
-**Does the reel say and show a declared mod name or plugin file name as written (the round 2 subjects' patches, one with an all-capital word), still put an undeclared editor ID into words, and leave a count of 0 out of the unpictured line?**
-
-Qualify changes to reel_stills' spoken_text, shown_text or keep_names, evalreel's storyboard and render speech, reel_plan.account_counts or the reporting skill's unpicturedAccount and unpicturedCounts words (C2166-C2167); offline, no game.
-
-Inputs: A hand-built presentation whose reel plan declares the round 2 patches' names, and the shipped skill data.
-
-Outputs: One GREEN, RED or CRASH line per check (C2166-C2167).
-
-Source: [_geometry-harness/tests/test_reel_names.py](../_geometry-harness/tests/test_reel_names.py) — `Known answers for declared names in the reel and the unpictured count line`
-
-
-<a id="tool-_geometry-harness-tests-test_reel_vignettes.py"></a>
-
-### _geometry-harness/tests/test_reel_vignettes.py
-
-**Does the review reel plan and render Piranha's vignette format by rule: opening still, without/with/highlight vignettes, data stills, plain words, own-pair patch sentences and a closing still?**
-
-Qualify changes to reel_plan.py, the reel's skill data, the capture plan or evalreel's stills and sequences; --presentation checks a compiled reel, --sabotage and --code-sabotage must go red.
-
-Inputs: Controlled fixtures for test_reel_vignettes, or a compiled presentation.
-
-Outputs: Assertion results for: Does the review reel plan and render the vignette format by rule?
-
-Source: [_geometry-harness/tests/test_reel_vignettes.py](../_geometry-harness/tests/test_reel_vignettes.py) — `The review reel as clash vignettes:`
-
-
 <a id="tool-_geometry-harness-tests-test_replay_command.py"></a>
 
 ### _geometry-harness/tests/test_replay_command.py
@@ -2078,81 +1549,6 @@ Modifiers (do not select a separate mode):
 - `--size` — Set size for this invocation; consult the linked parser for accepted values.
 - `--work` — Set work for this invocation; consult the linked parser for accepted values.
 
-<a id="tool-_geometry-harness-tests-test_report_figures.py"></a>
-
-### _geometry-harness/tests/test_report_figures.py
-
-**Does the report show the frame that states a clash (the marked view, both halves of a split), and does the reel drop capital mod prefixes from names?**
-
-Check figure selection and spoken-name changes against synthetic media rows.
-
-Inputs: Controlled fixtures for test_report_figures.
-
-Outputs: Assertion results for: Does the report show the frame that states a clash (the marked view, both halves of a split), and does the reel drop capital mod prefixes from names?
-
-Source: [_geometry-harness/tests/test_report_figures.py](../_geometry-harness/tests/test_report_figures.py) — `Known answers for the report's figure units and the reel's spoken names and removals (Missives review, 2026-10-30).`
-
-
-<a id="tool-_geometry-harness-tests-test_report_record_labels.py"></a>
-
-### _geometry-harness/tests/test_report_record_labels.py
-
-**Does the report say each record in words (a placed object by its kind and base, a name, an editor ID in words, a navmesh by its place), keep two different values apart and number records named alike, say once per check across mod pairs what to check in game, keep a patch verdict's names out of the reel, say why a cell could not be read, and say a long mod name in full once and then by its own short form?**
-
-Qualify changes to evalreport's said_record, say_form_keys, record_object_name, said_place's unread cell, what_to_do's next steps or patch_acts, reel_plan's short_mod_names or say_short_forms, test_reel_vignettes' code-known-answer and code-split-left-arm arms, or the reporting skill's words for them (C2200-C2208); offline, no game.
-
-Inputs: test_evalreport_prediction's synthetic bundles, test_navmesh_reel's planner fixture, hand-built sentences, and the shipped skill data.
-
-Outputs: One GREEN, RED or CRASH line per check (C2200-C2208).
-
-Source: [_geometry-harness/tests/test_report_record_labels.py](../_geometry-harness/tests/test_report_record_labels.py) — `Known answers for report record labels and What-to-do length`
-
-
-<a id="tool-_geometry-harness-tests-test_report_reel_batch.py"></a>
-
-### _geometry-harness/tests/test_report_reel_batch.py
-
-**Do the report and reel say a single case in the singular, one reason per unchecked check, offline renders as renders, the location list's share of the load order, places by name or grid, forward-versus-carry-both, worse patch placements, a patch's lines on its own pair only, and relative PDF links?**
-
-Qualify changes to the report's and reel's wording rules from regeneration 3 and item 18 (C1780-C1798); C1785 needs a browser and pypdf.
-
-Inputs: Synthetic bundles from test_evalreport_prediction's builder, test_reel_vignettes' and test_reader_rules' fixtures, a browser for the PDF case.
-
-Outputs: One PASS or FAIL line per case (C1780-C1798; C1797 held).
-
-Source: [_geometry-harness/tests/test_report_reel_batch.py](../_geometry-harness/tests/test_report_reel_batch.py) — `Known answers for the report and reel wording batch`
-
-
-<a id="tool-_geometry-harness-tests-test_report_reel_batch_2.py"></a>
-
-### _geometry-harness/tests/test_report_reel_batch_2.py
-
-**Do the report lane and orderleads read the shared record-flag table, do the report and reel name a mod the same way, does the patch search keep its unread listings, hub paths and build, does the author-advice count include stated clashes, and does the reel read media from every joined sibling?**
-
-Qualify changes to the record-flag rule in the report lane, the reel's mod and patch names, the patch-search recorder and sentences, the author-advice count, or the reel's sibling media (C1800-C1814).
-
-Inputs: Synthetic bundles from test_evalreport_prediction's builder, test_recordrows', test_reader_rules' and test_evalreport_siblings' fixtures, a stub houseCARL server.
-
-Outputs: One PASS or FAIL line per case (C1800-C1814).
-
-Source: [_geometry-harness/tests/test_report_reel_batch_2.py](../_geometry-harness/tests/test_report_reel_batch_2.py) — `Known answers for the second report and reel batch`
-
-
-<a id="tool-_geometry-harness-tests-test_report_reel_wording.py"></a>
-
-### _geometry-harness/tests/test_report_reel_wording.py
-
-**Does the report and reel say why a clash was not captured (no camera for its kind, or the capture limit), say each patch fact in one wording, list each Nexus patch page once in What to do, keep form keys and editor IDs off still pages and report places, name both objects of a one-mark view, count navmesh links and groups in the intro, resolve evalpipeline's path arguments at parse time, and read the needs-some sentence in short sentences, and say in the reel the place the report names?**
-
-Qualify changes to reel_plan's unpictured reasons, patch phrasing, navmesh intro or marked-view label, report_scenes.capturable_checks, reel_stills' drawn page text, evalreport's patch_search_leads, said_place or highlight_caption, pluginread.cell_grids, evalpipeline's path arguments, or the reporting skill's words for them (C2120-C2131); offline, no game.
-
-Inputs: test_navmesh_reel's and test_reel_vignettes' hand-built presentations, a Clockwork-shaped patch search, the shipped skill data, and Skyrim.esm's own cell 00929E when the SSE install is present.
-
-Outputs: One GREEN, RED, SKIP or CRASH line per check (C2120-C2131).
-
-Source: [_geometry-harness/tests/test_report_reel_wording.py](../_geometry-harness/tests/test_report_reel_wording.py) — `Known answers for the report and reel wording batch`
-
-
 <a id="tool-_geometry-harness-tests-test_report_sink.py"></a>
 
 ### _geometry-harness/tests/test_report_sink.py
@@ -2166,21 +1562,6 @@ Inputs: Controlled fixtures for test_report_sink.
 Outputs: Assertion results or generated fixture data for: Are planes reports streamed with identical bytes and atomic publication?
 
 Source: [_geometry-harness/tests/test_report_sink.py](../_geometry-harness/tests/test_report_sink.py) — `The planes report goes to the file as it is serialised, and never half-written under its name.`
-
-
-<a id="tool-_geometry-harness-tests-test_report_words.py"></a>
-
-### _geometry-harness/tests/test_report_words.py
-
-**Does the report and reel say a name ending in s with a bare apostrophe ("Interesting NPCs'"), a landscape record by the ground of its cell, a patch named after the evaluated mod by the rest of its name, a long plugin file name in full once with a gloss and short after, and a buried object by its item's words?**
-
-Qualify changes to reel_plan's fill, possessive, short_mod_names or say_short_forms, evalreport's bind, said_record's landscape words, say_report_short_forms or buried_lines, readerdoc's bind, pluginread.record_cells, or the reporting skill's words for them (C2310-C2319); offline, no game.
-
-Inputs: test_reel_vignettes' synthetic evaluation, test_evalreport_prediction's synthetic bundles, a synthetic plugin file, hand-built sentences, and the shipped skill data.
-
-Outputs: One GREEN, RED or CRASH line per check (C2310-C2319).
-
-Source: [_geometry-harness/tests/test_report_words.py](../_geometry-harness/tests/test_report_words.py) — `Known answers for report and reel words`
 
 
 <a id="tool-_geometry-harness-tests-test_reverse_reconcile.py"></a>
@@ -2285,21 +1666,6 @@ Modifiers (do not select a separate mode):
 - `--render` — Set render for this invocation; consult the linked parser for accepted values.
 - `--store` — Set store for this invocation; consult the linked parser for accepted values.
 
-<a id="tool-_geometry-harness-tests-test_same_name_variant.py"></a>
-
-### _geometry-harness/tests/test_same_name_variant.py
-
-**Is a same-named plugin from another folder planned and reported as itself, not as the measured copy?**
-
-Qualify plan rows and report comparison kinds for arms that swap in an author's same-named variant.
-
-Inputs: A temporary MO2 instance with two copies of one plugin, and hand-built report bundles.
-
-Outputs: Assertion results for: Is a same-named plugin from another folder planned and reported as itself, not as the measured copy?
-
-Source: [_geometry-harness/tests/test_same_name_variant.py](../_geometry-harness/tests/test_same_name_variant.py) — `A same-named plugin from another folder is planned and reported as itself (cases 451-459).`
-
-
 <a id="tool-_geometry-harness-tests-test_scene_scope_import.py"></a>
 
 ### _geometry-harness/tests/test_scene_scope_import.py
@@ -2360,36 +1726,6 @@ Outputs: Assertion results for: Does stateprobe write one row per pair of refere
 Source: [_geometry-harness/tests/test_state_row_identity.py](../_geometry-harness/tests/test_state_row_identity.py) — `stateprobe writes one row per pair of references in a state, whichever contact pass found it (cases 1370-1381).`
 
 
-<a id="tool-_geometry-harness-tests-test_stategen.py"></a>
-
-### _geometry-harness/tests/test_stategen.py
-
-**Does a Deep evaluation judge every census state and name every one it cannot?**
-
-Qualify the state generator and the evaluation depth through the real controller.
-
-Inputs: Controlled fixtures for test_stategen.
-
-Outputs: Assertion results or generated fixture data for: Does a Deep evaluation judge every census state and name every one it cannot?
-
-Source: [_geometry-harness/tests/test_stategen.py](../_geometry-harness/tests/test_stategen.py) — `Known answers for the Deep evaluation's state generator (stategen.py) and evalrun's evaluation depth.`
-
-
-<a id="tool-_geometry-harness-tests-test_subject_gate.py"></a>
-
-### _geometry-harness/tests/test_subject_gate.py
-
-**Does subject qualification refuse wrong identities, invisible features and invalid evidence?**
-
-Check capture acceptance rules with deliberately misbound subjects and unusable visual witnesses.
-
-Inputs: Controlled fixtures for test_subject_gate.
-
-Outputs: Assertion results or generated fixture data for: Does subject qualification refuse wrong identities, invisible features and invalid evidence?
-
-Source: [_geometry-harness/tests/test_subject_gate.py](../_geometry-harness/tests/test_subject_gate.py) — `*case["viewArgs"]]`
-
-
 <a id="tool-_geometry-harness-tests-test_swept_oom_sentence.py"></a>
 
 ### _geometry-harness/tests/test_swept_oom_sentence.py
@@ -2403,81 +1739,6 @@ Inputs: The Release motionprobe and contactprobe (or HC_OOM_HARNESS); the test_c
 Outputs: Assertion results for: When motionprobe sweep or deltacheck, or contactprobe's swept review, runs out of memory, does it say so in one sentence that says what to try, and does that advice work?
 
 Source: [_geometry-harness/tests/test_swept_oom_sentence.py](../_geometry-harness/tests/test_swept_oom_sentence.py) — `Running out of memory on the swept paths ends in one sentence that says what to try (cases 1880-1885).`
-
-
-<a id="tool-_geometry-harness-tests-test_switchflip_outcome.py"></a>
-
-### _geometry-harness/tests/test_switchflip_outcome.py
-
-**Does the runtime switch reading rule classify crashes, stalls and completions correctly?**
-
-Qualify a change to the live classifier against known crash, stall, short-window and unreached-target streams.
-
-Inputs: Controlled fixtures for test_switchflip_outcome.
-
-Outputs: Assertion results or generated fixture data for: Does the runtime switch reading rule classify crashes, stalls and completions correctly?
-
-Source: [_geometry-harness/tests/test_switchflip_outcome.py](../_geometry-harness/tests/test_switchflip_outcome.py) — `Known answers for the runtime state-switch reading rule`
-
-
-<a id="tool-_geometry-harness-tests-test_switchflip_plan.py"></a>
-
-### _geometry-harness/tests/test_switchflip_plan.py
-
-**Does the live driver refuse a bad flip plan and export one arm's reading correctly?**
-
-Check flip-plan validation, the block lock and the export before any launch.
-
-Inputs: Controlled fixtures for test_switchflip_plan.
-
-Outputs: Assertion results or generated fixture data for: Does the live driver refuse a bad flip plan and export one arm's reading correctly?
-
-Source: [_geometry-harness/tests/test_switchflip_plan.py](../_geometry-harness/tests/test_switchflip_plan.py) — `Known answers for switchflip.py's launch-free parts`
-
-
-<a id="tool-_geometry-harness-tests-test_switchflip_rule_unavailable.py"></a>
-
-### _geometry-harness/tests/test_switchflip_rule_unavailable.py
-
-**Does the live driver keep a launch's cleanup when the reading rule's owner cannot be asked?**
-
-Qualify a change to switchflip.py or switchflip_outcome.py around runcontrol failures.
-
-Inputs: switchflip.py and an unset or missing HOUSECARL_RUNCONTROL.
-
-Outputs: Assertion results for: Does the live driver keep a launch's cleanup when the reading rule's owner cannot be asked?
-
-Source: [_geometry-harness/tests/test_switchflip_rule_unavailable.py](../_geometry-harness/tests/test_switchflip_rule_unavailable.py) — `Known answers for the live driver when the reading rule's owner cannot be asked`
-
-
-<a id="tool-_geometry-harness-tests-test_switchflip_scope.py"></a>
-
-### _geometry-harness/tests/test_switchflip_scope.py
-
-**Does the live switch check's population rule keep unknowns open and answer not-applicable only when nothing driven touches a target?**
-
-Qualify a change to which switches the runtime switch check is about.
-
-Inputs: Controlled fixtures for test_switchflip_scope.
-
-Outputs: Assertion results or generated fixture data for: Does the live switch check's population rule keep unknowns open and answer not-applicable only when nothing driven touches a target?
-
-Source: [_geometry-harness/tests/test_switchflip_scope.py](../_geometry-harness/tests/test_switchflip_scope.py) — `Known answers for which switches the runtime state-switch check is about`
-
-
-<a id="tool-_geometry-harness-tests-test_terrain_stations.py"></a>
-
-### _geometry-harness/tests/test_terrain_stations.py
-
-**Where no navmesh stands an exterior camera, does it stand on bare terrain only when the LAND footprint is planar and at most the measured 43.7 degrees, with nothing beside, overhead or under it but the ground, while navmesh stations keep today's rule?**
-
-Qualify changes to the terrain station rule in capture_points or shotplan (terrain_slope, terrain_verdict) (C1980-C1989); offline, no game.
-
-Inputs: Toy box scenes and a LAND vertex grid for fake_viewprobe.py; the real picker, capture_acquire and shotplan.
-
-Outputs: One ok/FAIL line per check; exit 1 on any failure.
-
-Source: [_geometry-harness/tests/test_terrain_stations.py](../_geometry-harness/tests/test_terrain_stations.py) — `Offline known answers for terrain stations`
 
 
 <a id="tool-_geometry-harness-tests-test_transcript_links.py"></a>
@@ -2854,7 +2115,7 @@ Inputs: Evidence-bound capture request and configured renderer/game access.
 
 Outputs: Verified camera/capture receipt or named refusal.
 
-Source: [_geometry-harness/capture_acquire.py](../_geometry-harness/capture_acquire.py) — `Acquire a verified camera for ONE reporting capture request, through the shared planner.`
+Source: [integration/housecarl/capture_acquire.py](../integration/housecarl/capture_acquire.py) — `Acquire a verified camera for ONE reporting capture request, through the shared planner.`
 
 
 <a id="tool-capture-acquire.acquire"></a>
@@ -2871,7 +2132,7 @@ Inputs: Evidence-bound capture request and configured renderer/game access.
 
 Outputs: Verified camera/capture receipt or named refusal.
 
-Source: [_geometry-harness/capture_acquire.py](../_geometry-harness/capture_acquire.py) — `add_parser(`
+Source: [integration/housecarl/capture_acquire.py](../integration/housecarl/capture_acquire.py) — `add_parser(`
 
 
 <a id="tool-capture-acquire.capture"></a>
@@ -2888,7 +2149,7 @@ Inputs: A camera-ready acquisition, its storyboard packet, and the candidate fil
 
 Outputs: Frames per state, media-<arm>.json per setup and capture-result.json (captured, or refused with its sentence).
 
-Source: [_geometry-harness/capture_acquire.py](../_geometry-harness/capture_acquire.py) — `def cmd_capture(`
+Source: [integration/housecarl/capture_acquire.py](../integration/housecarl/capture_acquire.py) — `def cmd_capture(`
 
 
 <a id="tool-capture-acquire.navmesh-control"></a>
@@ -2905,7 +2166,7 @@ Inputs: A camera-ready navmesh acquisition, its packet and the candidate file of
 
 Outputs: control-result.json (no-broken-crossing or broken-crossing-present, with pixel counts), the frame and the nav-link console.
 
-Source: [_geometry-harness/capture_navmesh.py](../_geometry-harness/capture_navmesh.py) — `def control(`
+Source: [integration/housecarl/capture_navmesh.py](../integration/housecarl/capture_navmesh.py) — `def control(`
 
 
 Modifiers (do not select a separate mode):
@@ -2941,7 +2202,7 @@ Inputs: A navmesh-version-comparison capture request and viewprobe --nav-link ro
 
 Outputs: The acquisition result, per-state navmesh flags, and refusals in one sentence.
 
-Source: [_geometry-harness/capture_navmesh.py](../_geometry-harness/capture_navmesh.py) — `The camera for a 'navmesh-version-comparison' capture request`
+Source: [integration/housecarl/capture_navmesh.py](../integration/housecarl/capture_navmesh.py) — `The camera for a 'navmesh-version-comparison' capture request`
 
 
 <a id="tool-capture-points"></a>
@@ -2956,7 +2217,7 @@ Inputs: A storyboard packet's overlap-pair capture request and configured render
 
 Outputs: A points document (capture_acquire's --points schema) with floor, bearing window and witness, or a one-sentence refusal.
 
-Source: [_geometry-harness/capture_points.py](../_geometry-harness/capture_points.py) — `Measured points on a face of each capture participant that an eye-level camera outside the pair can see.`
+Source: [integration/housecarl/capture_points.py](../integration/housecarl/capture_points.py) — `Measured points on a face of each capture participant that an eye-level camera outside the pair can see.`
 
 
 <a id="tool-capture-points.pick"></a>
@@ -2973,7 +2234,7 @@ Inputs: A storyboard packet's overlap-pair capture request and configured render
 
 Outputs: A points document with floor, bearing window and witness, or a one-sentence refusal.
 
-Source: [_geometry-harness/capture_points.py](../_geometry-harness/capture_points.py) — `add_parser(`
+Source: [integration/housecarl/capture_points.py](../integration/housecarl/capture_points.py) — `add_parser(`
 
 
 Modifiers (do not select a separate mode):
@@ -3340,6 +2601,21 @@ Outputs: Comparison measurements for rotation order.
 Source: [_geometry-harness/eulerprobe/Program.cs](../_geometry-harness/eulerprobe/Program.cs) — `// EULER ORDER — settling a question the charter has carried as "evidence, not proof" since day one.`
 
 
+<a id="tool-evalbase"></a>
+
+### evalbase
+
+**Which helpers do the evaluation tools on both sides of the houseCARL integration fence share?**
+
+Read a plugin's TES4 header, find the built-in controller, or build the bundle check's command from a Python tool.
+
+Inputs: A plugin file, a machine file's runcontrol, or HOUSECARL_RUNCONTROL.
+
+Outputs: A header dict, the controller's path, or the verify-bundle command; Refusal with one sentence.
+
+Source: [_geometry-harness/evalbase.py](../_geometry-harness/evalbase.py) — `evalbase - what the evaluation tools on both sides of the houseCARL integration fence share.`
+
+
 <a id="tool-evalpipeline"></a>
 
 ### evalpipeline
@@ -3352,7 +2628,7 @@ Inputs: A selection entry, a machine file, and the run folder runcontrol carried
 
 Outputs: The run folder's precedent, report-plan, capture, image-observations, report, reel and deliver stages; RUN/stages.json binds each stage.
 
-Source: [_geometry-harness/evalpipeline.py](../_geometry-harness/evalpipeline.py) — `evalpipeline - the stages of one mod's evaluation after its evidence bundle`
+Source: [integration/housecarl/evalpipeline.py](../integration/housecarl/evalpipeline.py) — `evalpipeline - the stages of one mod's evaluation after its evidence bundle`
 
 
 <a id="tool-evalpipeline.capture-rounds"></a>
@@ -3369,7 +2645,7 @@ Inputs: A selection entry, the machine file and the run folder of an evaluation 
 
 Outputs: RUN/capture/captures.json, rounds.json and capture-rounds.json (accepted with the stage's binding, or the refusal sentence).
 
-Source: [_geometry-harness/evalpipeline.py](../_geometry-harness/evalpipeline.py) — `add_parser(`
+Source: [integration/housecarl/evalpipeline.py](../integration/housecarl/evalpipeline.py) — `add_parser(`
 
 
 <a id="tool-evalpipeline.run"></a>
@@ -3386,7 +2662,7 @@ Inputs: A selection entry, a machine file, and the run folder runcontrol carried
 
 Outputs: The run folder's precedent, report-plan, capture, image-observations, report, reel and deliver stages; RUN/stages.json binds each stage.
 
-Source: [_geometry-harness/evalpipeline.py](../_geometry-harness/evalpipeline.py) — `add_parser(`
+Source: [integration/housecarl/evalpipeline.py](../integration/housecarl/evalpipeline.py) — `add_parser(`
 
 
 <a id="tool-evalpipeline.status"></a>
@@ -3403,7 +2679,7 @@ Inputs: A selection entry, a machine file, and the run folder runcontrol carried
 
 Outputs: The run folder's precedent, report-plan, capture, image-observations, report, reel and deliver stages; RUN/stages.json binds each stage.
 
-Source: [_geometry-harness/evalpipeline.py](../_geometry-harness/evalpipeline.py) — `add_parser(`
+Source: [integration/housecarl/evalpipeline.py](../integration/housecarl/evalpipeline.py) — `add_parser(`
 
 
 Modifiers (do not select a separate mode):
@@ -3488,7 +2764,7 @@ Inputs: Evaluation presentation and prepared local narration/media.
 
 Outputs: Diagnostic video reel or storyboard and media manifest.
 
-Source: [_geometry-harness/evalreel.py](../_geometry-harness/evalreel.py) — `evalreel — the diagnostic reel of an evaluation presentation (Q45, D6).`
+Source: [integration/housecarl/evalreel.py](../integration/housecarl/evalreel.py) — `evalreel — the diagnostic reel of an evaluation presentation (Q45, D6).`
 
 
 <a id="tool-evalreel.render"></a>
@@ -3505,7 +2781,7 @@ Inputs: Evaluation presentation and prepared local narration/media.
 
 Outputs: Diagnostic video reel or storyboard and media manifest.
 
-Source: [_geometry-harness/evalreel.py](../_geometry-harness/evalreel.py) — `add_parser(`
+Source: [integration/housecarl/evalreel.py](../integration/housecarl/evalreel.py) — `add_parser(`
 
 
 <a id="tool-evalreel.storyboard-packet"></a>
@@ -3522,7 +2798,7 @@ Inputs: Evaluation presentation and prepared local narration/media.
 
 Outputs: Diagnostic video reel or storyboard and media manifest.
 
-Source: [_geometry-harness/evalreel.py](../_geometry-harness/evalreel.py) — `add_parser(`
+Source: [integration/housecarl/evalreel.py](../integration/housecarl/evalreel.py) — `add_parser(`
 
 
 Modifiers (do not select a separate mode):
@@ -3550,7 +2826,7 @@ Inputs: Text, installed Windows voice and output path.
 
 Outputs: Local WAV narration.
 
-Source: [_geometry-harness/winrt-tts/Program.cs](../_geometry-harness/winrt-tts/Program.cs) — `[DllImport("kernel32.dll")] static extern uint SetErrorMode(uint mode);`
+Source: [integration/housecarl/winrt-tts/Program.cs](../integration/housecarl/winrt-tts/Program.cs) — `[DllImport("kernel32.dll")] static extern uint SetErrorMode(uint mode);`
 
 
 <a id="tool-evalreport"></a>
@@ -3565,7 +2841,7 @@ Inputs: Verified evaluation bundle and presentation options.
 
 Outputs: Human reports, narration packets and linked evidence index.
 
-Source: [_geometry-harness/evalreport.py](../_geometry-harness/evalreport.py) — `evalreport - compile a verified schema-2 evaluation bundle into one presentation plan and, from that`
+Source: [integration/housecarl/evalreport.py](../integration/housecarl/evalreport.py) — `evalreport - compile a verified schema-2 evaluation bundle into one presentation plan and, from that`
 
 
 <a id="tool-evalreport.narrate-apply"></a>
@@ -3582,7 +2858,7 @@ Inputs: Verified evaluation bundle and presentation options.
 
 Outputs: Human reports, narration packets and linked evidence index.
 
-Source: [_geometry-harness/evalreport.py](../_geometry-harness/evalreport.py) — `add_parser(`
+Source: [integration/housecarl/evalreport.py](../integration/housecarl/evalreport.py) — `add_parser(`
 
 
 <a id="tool-evalreport.narrate-packet"></a>
@@ -3599,7 +2875,7 @@ Inputs: Verified evaluation bundle and presentation options.
 
 Outputs: Human reports, narration packets and linked evidence index.
 
-Source: [_geometry-harness/evalreport.py](../_geometry-harness/evalreport.py) — `add_parser(`
+Source: [integration/housecarl/evalreport.py](../integration/housecarl/evalreport.py) — `add_parser(`
 
 
 <a id="tool-evalreport.plan"></a>
@@ -3616,7 +2892,7 @@ Inputs: Verified evaluation bundle and presentation options.
 
 Outputs: Human reports, narration packets and linked evidence index.
 
-Source: [_geometry-harness/evalreport.py](../_geometry-harness/evalreport.py) — `add_parser(`
+Source: [integration/housecarl/evalreport.py](../integration/housecarl/evalreport.py) — `add_parser(`
 
 
 <a id="tool-evalreport.report"></a>
@@ -3633,7 +2909,7 @@ Inputs: Verified evaluation bundle and presentation options.
 
 Outputs: Human reports, narration packets and linked evidence index.
 
-Source: [_geometry-harness/evalreport.py](../_geometry-harness/evalreport.py) — `add_parser(`
+Source: [integration/housecarl/evalreport.py](../integration/housecarl/evalreport.py) — `add_parser(`
 
 
 <a id="tool-evalreport.triage"></a>
@@ -3650,7 +2926,7 @@ Inputs: Verified evaluation bundle and presentation options.
 
 Outputs: Human reports, narration packets and linked evidence index.
 
-Source: [_geometry-harness/evalreport.py](../_geometry-harness/evalreport.py) — `add_parser(`
+Source: [integration/housecarl/evalreport.py](../integration/housecarl/evalreport.py) — `add_parser(`
 
 
 <a id="tool-evalreport.verify"></a>
@@ -3667,7 +2943,7 @@ Inputs: Verified evaluation bundle and presentation options.
 
 Outputs: Human reports, narration packets and linked evidence index.
 
-Source: [_geometry-harness/evalreport.py](../_geometry-harness/evalreport.py) — `add_parser(`
+Source: [integration/housecarl/evalreport.py](../integration/housecarl/evalreport.py) — `add_parser(`
 
 
 Modifiers (do not select a separate mode):
@@ -3754,7 +3030,7 @@ Inputs: The evaluation settings file, flags and the environment.
 
 Outputs: The resolved settings, a saved settings file, or one sentence naming what is wrong.
 
-Source: [_geometry-harness/evalsettings.py](../_geometry-harness/evalsettings.py) — `evalsettings — the first-run choices`
+Source: [integration/housecarl/evalsettings.py](../integration/housecarl/evalsettings.py) — `evalsettings — the first-run choices`
 
 
 <a id="tool-evalsettings.defaults"></a>
@@ -3771,7 +3047,7 @@ Inputs: The evaluation settings file, flags and the environment.
 
 Outputs: The resolved settings, a saved settings file, or one sentence naming what is wrong.
 
-Source: [_geometry-harness/evalsettings.py](../_geometry-harness/evalsettings.py) — `add_parser(`
+Source: [integration/housecarl/evalsettings.py](../integration/housecarl/evalsettings.py) — `add_parser(`
 
 
 <a id="tool-evalsettings.ensure"></a>
@@ -3788,7 +3064,7 @@ Inputs: The evaluation settings file, flags and the environment.
 
 Outputs: The resolved settings, a saved settings file, or one sentence naming what is wrong.
 
-Source: [_geometry-harness/evalsettings.py](../_geometry-harness/evalsettings.py) — `add_parser(`
+Source: [integration/housecarl/evalsettings.py](../integration/housecarl/evalsettings.py) — `add_parser(`
 
 
 <a id="tool-evalsettings.path"></a>
@@ -3805,7 +3081,7 @@ Inputs: The evaluation settings file, flags and the environment.
 
 Outputs: The resolved settings, a saved settings file, or one sentence naming what is wrong.
 
-Source: [_geometry-harness/evalsettings.py](../_geometry-harness/evalsettings.py) — `add_parser(`
+Source: [integration/housecarl/evalsettings.py](../integration/housecarl/evalsettings.py) — `add_parser(`
 
 
 <a id="tool-evalsettings.route"></a>
@@ -3822,7 +3098,7 @@ Inputs: One models.* key; the evaluation settings file and the environment.
 
 Outputs: One JSON line naming the agent (or session, or off), or one sentence saying why the named model cannot run here.
 
-Source: [_geometry-harness/evalsettings.py](../_geometry-harness/evalsettings.py) — `def cmd_route(`
+Source: [integration/housecarl/evalsettings.py](../integration/housecarl/evalsettings.py) — `def cmd_route(`
 
 
 <a id="tool-evalsettings.set"></a>
@@ -3839,7 +3115,7 @@ Inputs: The evaluation settings file, flags and the environment.
 
 Outputs: The resolved settings, a saved settings file, or one sentence naming what is wrong.
 
-Source: [_geometry-harness/evalsettings.py](../_geometry-harness/evalsettings.py) — `add_parser(`
+Source: [integration/housecarl/evalsettings.py](../integration/housecarl/evalsettings.py) — `add_parser(`
 
 
 <a id="tool-evalsettings.show"></a>
@@ -3856,7 +3132,7 @@ Inputs: The evaluation settings file, flags and the environment.
 
 Outputs: The resolved settings, a saved settings file, or one sentence naming what is wrong.
 
-Source: [_geometry-harness/evalsettings.py](../_geometry-harness/evalsettings.py) — `add_parser(`
+Source: [integration/housecarl/evalsettings.py](../integration/housecarl/evalsettings.py) — `add_parser(`
 
 
 <a id="tool-evalsettings.validate"></a>
@@ -3873,7 +3149,7 @@ Inputs: The evaluation settings file, flags and the environment.
 
 Outputs: The resolved settings, a saved settings file, or one sentence naming what is wrong.
 
-Source: [_geometry-harness/evalsettings.py](../_geometry-harness/evalsettings.py) — `add_parser(`
+Source: [integration/housecarl/evalsettings.py](../integration/housecarl/evalsettings.py) — `add_parser(`
 
 
 <a id="tool-evalsettings.window"></a>
@@ -3890,7 +3166,7 @@ Inputs: The evaluation settings file, flags and the environment.
 
 Outputs: The resolved settings, a saved settings file, or one sentence naming what is wrong.
 
-Source: [_geometry-harness/evalsettings.py](../_geometry-harness/evalsettings.py) — `add_parser(`
+Source: [integration/housecarl/evalsettings.py](../integration/housecarl/evalsettings.py) — `add_parser(`
 
 
 Modifiers (do not select a separate mode):
@@ -3916,7 +3192,7 @@ Inputs: Narration text, local voice/model configuration and destination.
 
 Outputs: Prepared audio files and narration metadata.
 
-Source: [_geometry-harness/evalspeech.py](../_geometry-harness/evalspeech.py) — `Prepare local narration WAVs for evalreel's existing narrationAudio interface.`
+Source: [integration/housecarl/evalspeech.py](../integration/housecarl/evalspeech.py) — `Prepare local narration WAVs for evalreel's existing narrationAudio interface.`
 
 
 Modifiers (do not select a separate mode):
@@ -3946,7 +3222,7 @@ Inputs: Each arm's switch census (switchprobe --json) and MO2 profile, the scope
 
 Outputs: A flip plan switchflip.py validates, and a groups document naming what was planned, dropped, flagged, unmapped or not planned.
 
-Source: [_geometry-harness/flipplan.py](../_geometry-harness/flipplan.py) — `flipplan — draft the flip plan of the runtime state-switch check`
+Source: [integration/housecarl/flipplan.py](../integration/housecarl/flipplan.py) — `flipplan — draft the flip plan of the runtime state-switch check`
 
 
 Modifiers (do not select a separate mode):
@@ -4077,6 +3353,747 @@ Outputs: Reading copies, pixel differences and embedded metadata.
 Source: [_geometry-harness/viewprobe/tools/imgcheck.py](../_geometry-harness/viewprobe/tools/imgcheck.py) — `imgcheck — the verification half of viewprobe's render discipline.`
 
 
+<a id="tool-integration-housecarl-tests-fixtures-evalsettings-stub_opener.py"></a>
+
+### integration/housecarl/tests/fixtures/evalsettings/stub_opener.py
+
+**How can a test stand in for the browser on the settings window?**
+
+Drive the settings window's Save, close and refusal paths without a browser.
+
+Inputs: Controlled fixtures for stub_opener.
+
+Outputs: Assertion results or generated fixture data for: How can a test stand in for the browser on the settings window?
+
+Source: [integration/housecarl/tests/fixtures/evalsettings/stub_opener.py](../integration/housecarl/tests/fixtures/evalsettings/stub_opener.py) — `The browser stand-in for test_evalsettings.py: 'evalsettings.py ensure|window --opener THIS' runs 'python THIS URL'.`
+
+
+<a id="tool-integration-housecarl-tests-fixtures-standin_hold.py"></a>
+
+### integration/housecarl/tests/fixtures/standin_hold.py
+
+**How can a test stand in for the machine's slot command with a real lock holder a hard kill leaves behind?**
+
+Exercise evalpipeline's heavy-child stop and lock release without the machine's idle_lock.
+
+Inputs: A lock path and a job command after --; the slot command's other options are accepted and ignored.
+
+Outputs: The lock file while the job runs and idle_lock.log take and release lines beside it.
+
+Source: [integration/housecarl/tests/fixtures/standin_hold.py](../integration/housecarl/tests/fixtures/standin_hold.py) — `A stand-in for the machine's slot command in tests`
+
+
+<a id="tool-integration-housecarl-tests-test_alpha_card_capture.py"></a>
+
+### integration/housecarl/tests/test_alpha_card_capture.py
+
+**When a plant made of alpha cards misses its mark at the composed camera, is the witness station's own camera tried before the top-down and kept only when the plant's point lands in its mark, is such a picture captioned as a station view, is a clash a station saw never said to be one no camera could see, does a kept image key never stand for a capture with other frames, are plugin names in capture requests compared without case, is a one-mark marked view named, does the report stage's media bundle use the frozen check registry, does the reel narration speak no form key or editor ID, do capture frames address the cell by its form key, and does every capture refusal code have its own reason?**
+
+Qualify changes to capture_acquire's routing after a refused composed pose (the alpha-card witness step), the station-view caption, the reel's reasons for refused clashes, the capture reuse rule for older pose refusals, the image-observations key, report_scenes' plugin-name comparisons, the marked-view and station-view captions, the report stage's media-bundle frozen inputs, a vignette's own capture request, the still pages' spoken wording, or the capture cell and its refusal reasons (C1890-C1899, C1930-C1933, C1935-C1939, C1960-C1961); offline, no game.
+
+Inputs: capture_acquire with its viewprobe call answered by a stand-in and its top-down recorded, test_reel_vignettes' synthetic evaluation, a hand-built capture folder.
+
+Outputs: One GREEN, RED or CRASH line per case (C1890-C1899, C1930-C1933, C1935-C1939, C1960-C1961).
+
+Source: [integration/housecarl/tests/test_alpha_card_capture.py](../integration/housecarl/tests/test_alpha_card_capture.py) — `Known answers for the interim alpha-card capture rule and the stale image key`
+
+
+<a id="tool-integration-housecarl-tests-test_capture_acquire.py"></a>
+
+### integration/housecarl/tests/test_capture_acquire.py
+
+**Does the real reporting request-to-camera path satisfy its offline contract?**
+
+Qualify changes to reporting capture acquisition with offline binding and planner-refusal controls.
+
+Inputs: Controlled fixtures for test_capture_acquire.
+
+Outputs: Assertion results or generated fixture data for: Does the real reporting request-to-camera path satisfy its offline contract?
+
+Source: [integration/housecarl/tests/test_capture_acquire.py](../integration/housecarl/tests/test_capture_acquire.py) — `Offline contract for 'capture_acquire.py': the request-to-camera path, end to end.`
+
+
+<a id="tool-integration-housecarl-tests-test_capture_every_state.py"></a>
+
+### integration/housecarl/tests/test_capture_every_state.py
+
+**Does a vignette's capture camera pass the measured state's camera checks (inside test, the sightlines of the participants that setup places) in every other state it renders, try the next pose of the chain when one fails, refuse naming the state and the object when none passes, and keep its single camera when every state is clear?**
+
+Qualify changes to capture_acquire's state_checks, --state-order, the pose, witness and top-down fallback chain, the cell each other state is rendered by, evalpipeline's acquire arguments or the state-camera-blocked reason (C2168-C2172); offline, no game.
+
+Inputs: capture_acquire with its renderer answered per setup in viewprobe's own inside-at and pick line formats, judged by the real shotplan; hand-built order files.
+
+Outputs: One GREEN, RED or CRASH line per check (C2168-C2172).
+
+Source: [integration/housecarl/tests/test_capture_every_state.py](../integration/housecarl/tests/test_capture_every_state.py) — `Known answers for a capture camera checked in every state it renders`
+
+
+<a id="tool-integration-housecarl-tests-test_capture_fallbacks.py"></a>
+
+### integration/housecarl/tests/test_capture_fallbacks.py
+
+**Do the capture fallbacks (cutaway, top-down, see-through marks) give their known answers on a real render, and do the reuse, reel and caption rules hold?**
+
+**Does a buried clash read as buried in the reel and the report, and does a top-down hide what covers the pair from above by the cutaway's rule?**
+
+Qualify changes to capture_points, capture_acquire, shotplan --top-down-only, viewprobe --hide/--protect/--contacts-of/--occluders-of/--coverage-of, the capture reuse rule or the buried-clash words; render cases need HOUSECARL_FIXTURE_GAME (else NOT RUN, exit 3); --code-only runs the code cases alone and exits 0 when they pass.
+
+Inputs: CfFixture.esp from viewprobe --write-capture-fixture, a Skyrim SE game folder's archives.
+
+Outputs: Assertion results per case; NOT RUN without game data; NOT ATTEMPTED with --code-only.
+
+Source: [integration/housecarl/tests/test_capture_fallbacks.py](../integration/housecarl/tests/test_capture_fallbacks.py) — `Known answers for the capture fallbacks: cutaway, top-down and see-through marks`
+
+
+<a id="tool-integration-housecarl-tests-test_capture_follow_ups.py"></a>
+
+### integration/housecarl/tests/test_capture_follow_ups.py
+
+**Does the capture ring stand on the navmesh storey rather than a floor high up a tall focus, does a flat partner box still find the floor, does the reel say how many camera spots a buried clash rests on, is a see-through partner never said to bury the other object, and does the reel picture a group's strongest crossing?**
+
+Qualify changes to capture_points' ground cast or focus storey, the eye-level step's see-through field, the buried wording in the reel and report, or the reel's choice of example within a group and a buried clash in a pictured group (C1830-C1836); offline, no game.
+
+Inputs: Toy box scenes through viewprobe/tools/fake_viewprobe.py (scene key contacts), test_reel_vignettes' synthetic evaluation, test_capture_fallbacks' refused capture result.
+
+Outputs: One GREEN, RED or CRASH line per case (C1830-C1836).
+
+Source: [integration/housecarl/tests/test_capture_follow_ups.py](../integration/housecarl/tests/test_capture_follow_ups.py) — `Known answers for the capture follow-ups after item 28`
+
+
+<a id="tool-integration-housecarl-tests-test_capture_navmesh.py"></a>
+
+### integration/housecarl/tests/test_capture_navmesh.py
+
+**Does a navmesh comparison request get its measured top-down camera, both states and its refusals offline?**
+
+Qualify changes to capture_navmesh.py, capture_acquire's navmesh path or viewprobe --nav-link's row shape.
+
+Inputs: Controlled fixtures for test_capture_navmesh.
+
+Outputs: Assertion results for: Does a navmesh comparison request get its measured top-down camera?
+
+Source: [integration/housecarl/tests/test_capture_navmesh.py](../integration/housecarl/tests/test_capture_navmesh.py) — `Offline contract for a navmesh comparison's camera`
+
+
+<a id="tool-integration-housecarl-tests-test_capture_points.py"></a>
+
+### integration/housecarl/tests/test_capture_points.py
+
+**Does the capture point picker return visible faces, the right floor and plain refusals on the shapes real requests were refused on?**
+
+Qualify changes to capture_points, capture_acquire --points auto or shotplan --bearing-window; --sabotage removes the owner test and must go red.
+
+Inputs: Controlled fixtures for test_capture_points.
+
+Outputs: Assertion results for: Does the capture point picker return visible faces, the right floor and plain refusals?
+
+Source: [integration/housecarl/tests/test_capture_points.py](../integration/housecarl/tests/test_capture_points.py) — `Offline known answers for 'capture_points.py': a measured point on a face an eye-level camera can see (C700-C716).`
+
+
+<a id="tool-integration-housecarl-tests-test_capture_results_unreadable.py"></a>
+
+### integration/housecarl/tests/test_capture_results_unreadable.py
+
+**Does evalreport's reel refuse a capture-results file it cannot read, and still plan without one?**
+
+Qualify a change to how evalreport plan reads --capture-results.
+
+Inputs: Synthetic capture-results files.
+
+Outputs: Assertion results for: Does evalreport's reel refuse a capture-results file it cannot read, and still plan without one?
+
+Source: [integration/housecarl/tests/test_capture_results_unreadable.py](../integration/housecarl/tests/test_capture_results_unreadable.py) — `evalreport's reel refuses a --capture-results file it cannot read`
+
+
+<a id="tool-integration-housecarl-tests-test_evalpipeline.py"></a>
+
+### integration/housecarl/tests/test_evalpipeline.py
+
+**Does the driver of the stages after the bundle reuse a stage only when nothing changed, continue a run folder the built-in controller carried through the bundle, and refuse one it did not?**
+
+Check changes to evalpipeline.py, the driver of the stages after the bundle.
+
+Inputs: Controlled fixtures for test_evalpipeline.
+
+Outputs: Assertion results for: Does the driver of the stages after the bundle reuse a stage only when nothing changed, continue a run folder the built-in controller carried through the bundle, and refuse one it did not?
+
+Source: [integration/housecarl/tests/test_evalpipeline.py](../integration/housecarl/tests/test_evalpipeline.py) — `Known answers for evalpipeline.py, the driver of the stages after the bundle`
+
+
+<a id="tool-integration-housecarl-tests-test_evalreel.py"></a>
+
+### integration/housecarl/tests/test_evalreel.py
+
+**Does the reel pipeline enforce media, audio, cache and clip-cut contracts?**
+
+Check reel assembly changes for stale media reuse, invalid audio, or incorrect segment boundaries.
+
+Inputs: Controlled fixtures for test_evalreel.
+
+Outputs: Assertion results or generated fixture data for: Does the reel pipeline enforce media, audio, cache and clip-cut contracts?
+
+Source: [integration/housecarl/tests/test_evalreel.py](../integration/housecarl/tests/test_evalreel.py) — `End-to-end contract for narrated evidence reels: media identity, audio decode, cache, clip cuts and refusal.`
+
+
+<a id="tool-integration-housecarl-tests-test_evalreport.py"></a>
+
+### integration/housecarl/tests/test_evalreport.py
+
+**Does the report compiler match the constructed bundle oracle?**
+
+Check report generation against independent expected findings before publishing schema changes.
+
+Inputs: Controlled fixtures for test_evalreport.
+
+Outputs: Assertion results or generated fixture data for: Does the report compiler match the constructed bundle oracle?
+
+Source: [integration/housecarl/tests/test_evalreport.py](../integration/housecarl/tests/test_evalreport.py) — `The report compiler against the oracle (Q45).`
+
+
+<a id="tool-integration-housecarl-tests-test_evalreport_comparison_kinds.py"></a>
+
+### integration/housecarl/tests/test_evalreport_comparison_kinds.py
+
+**Does the report distinguish removing a mod from repairing a conflict?**
+
+Prevent a mod-removal comparison from being presented as proof of a compatibility repair.
+
+Inputs: Controlled fixtures for test_evalreport_comparison_kinds.
+
+Outputs: Assertion results or generated fixture data for: Does the report distinguish removing a mod from repairing a conflict?
+
+Source: [integration/housecarl/tests/test_evalreport_comparison_kinds.py](../integration/housecarl/tests/test_evalreport_comparison_kinds.py) — `Checks for how the report compiler classifies a setup and what it is then allowed to claim.`
+
+
+Modifiers (do not select a separate mode):
+
+- `--prove-gate` — force repair_claimable open in memory and require this suite to FAIL
+
+<a id="tool-integration-housecarl-tests-test_evalreport_prediction.py"></a>
+
+### integration/housecarl/tests/test_evalreport_prediction.py
+
+**Does the report lead with what adding the mods will break, then coverage, then the patch?**
+
+Check that a report states the prediction before any patch tally and never counts a base-game difference as a clash.
+
+Inputs: Controlled fixtures for test_evalreport_prediction.
+
+Outputs: Assertion results or generated fixture data for: Does the report lead with what adding the mods will break, then coverage, then the patch?
+
+Source: [integration/housecarl/tests/test_evalreport_prediction.py](../integration/housecarl/tests/test_evalreport_prediction.py) — `Checks that an evaluation report leads with the prediction: what adding the mods will break.`
+
+
+<a id="tool-integration-housecarl-tests-test_evalreport_siblings.py"></a>
+
+### integration/housecarl/tests/test_evalreport_siblings.py
+
+**Does a report join several separate evaluations of the same order, each lending the setups it can stand in for, and refuse one it cannot use by name?**
+
+Check evalreport plan with --sibling-bundle given more than once: which sibling fills each role, the order given changes nothing, and each sub-order join criterion refuses what it should.
+
+Inputs: Controlled fixtures for test_evalreport_siblings.
+
+Outputs: Assertion results or generated fixture data for: Does a report join several separate evaluations of the same order, each lending the setups it can stand in for, and refuse one it cannot use by name?
+
+Source: [integration/housecarl/tests/test_evalreport_siblings.py](../integration/housecarl/tests/test_evalreport_siblings.py) — `Checks that a report joins more than one separate evaluation of the same order`
+
+
+<a id="tool-integration-housecarl-tests-test_evalreport_verify_in_place.py"></a>
+
+### integration/housecarl/tests/test_evalreport_verify_in_place.py
+
+**Does evalreport plan verify --bundle and --sibling-bundle in place without writing a byte or mtime into either, without a copy in proportion to the bundle even when its evidence is hard-linked, leave no tree after a failure mid-verify, refuse a verify that wrote no result, does runcontrol verify-bundle --out write its result only to the named file, and does every caller check a bundle with runcontrol rather than Python?**
+
+Qualify changes to evalreport's run_verify_bundle, plan's --verify-copy, runcontrol verify-bundle's --out, or which program a caller starts to check a bundle (C2230-C2235); offline, no game.
+
+Inputs: make_report_fixtures' R1 bundle, copied, with a folder of hard links to one 16 MiB blob outside it.
+
+Outputs: One ok or RED line per check (C2230-C2234).
+
+Source: [integration/housecarl/tests/test_evalreport_verify_in_place.py](../integration/housecarl/tests/test_evalreport_verify_in_place.py) — `Known answers for evalreport plan verifying a bundle without copying it`
+
+
+<a id="tool-integration-housecarl-tests-test_evalsettings.py"></a>
+
+### integration/housecarl/tests/test_evalsettings.py
+
+**Does a fresh user get the settings window once, and is a saved choice honoured?**
+
+Qualify the first-run settings, the window's server and the plan's frozen copy.
+
+Inputs: Controlled fixtures for test_evalsettings.
+
+Outputs: Assertion results or generated fixture data for: Does a fresh user get the settings window once, and is a saved choice honoured?
+
+Source: [integration/housecarl/tests/test_evalsettings.py](../integration/housecarl/tests/test_evalsettings.py) — `Known answers for the evaluation's first-run settings and window (evalsettings.py), PROPOSAL section 7.`
+
+
+<a id="tool-integration-housecarl-tests-test_evalspeech.py"></a>
+
+### integration/housecarl/tests/test_evalspeech.py
+
+**Does narration preparation enforce its contracts without model weights or network access?**
+
+Exercise narration binding and refusal paths offline before testing a chosen speech engine.
+
+Inputs: Controlled fixtures for test_evalspeech.
+
+Outputs: Assertion results or generated fixture data for: Does narration preparation enforce its contracts without model weights or network access?
+
+Source: [integration/housecarl/tests/test_evalspeech.py](../integration/housecarl/tests/test_evalspeech.py) — `Narration preparation contracts, without model imports, weights or network access.`
+
+
+<a id="tool-integration-housecarl-tests-test_exterior_stations.py"></a>
+
+### integration/housecarl/tests/test_exterior_stations.py
+
+**Does an exterior camera station stand on navmesh at its own level, eye at that level plus the eye height, while interiors keep one floor?**
+
+Qualify changes to capture_points' station placement or shotplan's exterior eye; offline, no game.
+
+Inputs: Toy box scenes for fake_viewprobe.py; the real picker, capture_acquire and shotplan.
+
+Outputs: One ok/FAIL line per check; exit 1 on any failure.
+
+Source: [integration/housecarl/tests/test_exterior_stations.py](../integration/housecarl/tests/test_exterior_stations.py) — `Offline known answers for exterior camera stations`
+
+
+<a id="tool-integration-housecarl-tests-test_eye_inside_solid.py"></a>
+
+### integration/housecarl/tests/test_eye_inside_solid.py
+
+**Does the planner refuse a camera eye inside a solid of any thickness on a real render, and accept one beside a thin wall?**
+
+Qualify changes to viewprobe --inside-at (its rays or facing) or shotplan's inside test; needs HOUSECARL_FIXTURE_GAME (else NOT RUN, exit 3).
+
+Inputs: CfFixture.esp from viewprobe --write-capture-fixture (cells CfThick, CfThickWalls), a Skyrim SE game folder's archives.
+
+Outputs: Assertion results per case; NOT RUN without game data.
+
+Source: [integration/housecarl/tests/test_eye_inside_solid.py](../integration/housecarl/tests/test_eye_inside_solid.py) — `Known answers for the planner's inside test on a real render`
+
+
+<a id="tool-integration-housecarl-tests-test_flipplan.py"></a>
+
+### integration/housecarl/tests/test_flipplan.py
+
+**Does the flip-plan generator keep branches apart, keep source order and name every call it does not plan?**
+
+Qualify a change to the flip-plan generator.
+
+Inputs: Controlled fixtures for test_flipplan.
+
+Outputs: Assertion results or generated fixture data for: Does the flip-plan generator keep branches apart, keep source order and name every call it does not plan?
+
+Source: [integration/housecarl/tests/test_flipplan.py](../integration/housecarl/tests/test_flipplan.py) — `Known answers for the flip-plan generator (flipplan.py).`
+
+
+<a id="tool-integration-housecarl-tests-test_machineidle.py"></a>
+
+### integration/housecarl/tests/test_machineidle.py
+
+**Does the idle gate refuse probes by command line and blockers by name?**
+
+Qualify a change to the launch idle gate before it decides whether the game may start.
+
+Inputs: Controlled fixtures for test_machineidle.
+
+Outputs: Assertion results or generated fixture data for: Does the idle gate refuse probes by command line and blockers by name?
+
+Source: [integration/housecarl/tests/test_machineidle.py](../integration/housecarl/tests/test_machineidle.py) — `Known answers for the idle gate (machineidle.py).`
+
+
+<a id="tool-integration-housecarl-tests-test_narration_fidelity.py"></a>
+
+### integration/housecarl/tests/test_narration_fidelity.py
+
+**Does the narration packet ask for plain words and carry the glossary, does narrate-apply accept a rewrite only where a fidelity judgement made for its exact text says it keeps the meaning, and does the judge's model setting never resolve to a Fable model?**
+
+Qualify changes to evalreport narrate-packet (instructions, glossary, the judge's packet), narrate-apply's judgement gate, the reporting skill's narration.json, or evalsettings models.checkExplanations and route --session-model, the judge packet's bound rows and the narrator's completion rule (C2020-C2029, C2050-C2053); offline, no game, no model call.
+
+Inputs: A hand-built presentation with made-up plugins, hand-written stand-in judgements, the shipped skill data.
+
+Outputs: One GREEN, RED or CRASH line per case (C2020-C2029, C2050-C2053).
+
+Source: [integration/housecarl/tests/test_narration_fidelity.py](../integration/housecarl/tests/test_narration_fidelity.py) — `Known answers: the narration packet asks for plain words`
+
+
+<a id="tool-integration-housecarl-tests-test_navmesh_caption.py"></a>
+
+### integration/housecarl/tests/test_navmesh_caption.py
+
+**Does a navmesh vignette's earlier-version caption, on the reel strip and in the report, name the plugin the historical frame's own --nav-version draws (never the plan's re-cut history, and none when the frame names none), say which mod replaced that version, and keep a name ending in s free of an "s's" possessive, in the narration too?**
+
+Qualify changes to reel_plan's frame_label for navmesh frames, navmesh_earlier_plugin (shared with evalreport's figure captions), navmesh_sentence, or the reporting skill's navmesh caption, label or narration words (C2240-C2244); offline, no game.
+
+Inputs: test_navmesh_reel's planner fixture with its earlier mod renamed, hand-built renderer commands, and the shipped skill data.
+
+Outputs: One GREEN, RED or CRASH line per check (C2240-C2244).
+
+Source: [integration/housecarl/tests/test_navmesh_caption.py](../integration/housecarl/tests/test_navmesh_caption.py) — `Known answers for the navmesh context caption`
+
+
+<a id="tool-integration-housecarl-tests-test_navmesh_reel.py"></a>
+
+### integration/housecarl/tests/test_navmesh_reel.py
+
+**Is a navmesh clash item 24's camera can draw pictured in the review reel as a vignette of its two navmesh states, bound to its capture request, captured by the pipeline with its control in the setup without the mod, refused without a clean control at the same camera, held for its narration, shown as one report figure with its own captions, and said with the control's result and no form key?**
+
+Qualify changes to reel_plan's navmesh vignette (camera shape, states, words, labels), report_scenes' reel-mode navmesh binding, evalpipeline.capture_request's navmesh branch, capture_acquire capture's --control gate, evalreel's vignette holds or evalreport's navmesh figure (C1970-C1978); offline, no game.
+
+Inputs: A hand-built Clockwork-shaped presentation, the shipped skill data, test_capture_navmesh's synthetic scene with fake_viewprobe.py, evalpipeline.capture_request with a recording child runner.
+
+Outputs: One GREEN, RED or CRASH line per case (C1970-C1978).
+
+Source: [integration/housecarl/tests/test_navmesh_reel.py](../integration/housecarl/tests/test_navmesh_reel.py) — `Known answers for a navmesh clash pictured in the review reel`
+
+
+<a id="tool-integration-housecarl-tests-test_navown_edge_identity.py"></a>
+
+### integration/housecarl/tests/test_navown_edge_identity.py
+
+**Does navownprobe write one EDGE-IDX row per broken edge link, and does every identity-keyed reader (conflictdiff, ordersweep, evalreport) keep and credit each link?**
+
+Qualify a change to navownprobe's dangling-link rows (DanglingLinks.cs), to ConflictIo.RowIdentity or to a reader that keys rows by it.
+
+Inputs: The Release navownprobe, conflictdiff and stateprobe, ordersweep.py and evalreport.py; EdgeLinkFixture laid out as an MO2 instance.
+
+Outputs: Assertion results for: Does navownprobe write one EDGE-IDX row per broken edge link, and does every identity-keyed reader (conflictdiff, ordersweep, evalreport) keep and credit each link?
+
+Source: [integration/housecarl/tests/test_navown_edge_identity.py](../integration/housecarl/tests/test_navown_edge_identity.py) — `navownprobe writes one EDGE-IDX row per broken edge link, and every identity-keyed reader keeps each one (1390-1405).`
+
+
+<a id="tool-integration-housecarl-tests-test_order_geometry.py"></a>
+
+### integration/housecarl/tests/test_order_geometry.py
+
+**Does a placed-object geometry row that holds in one order of a free pair and not the other reach the report as a load-order risk, with rows in both orders left out, unmeasured rows counted, drifted plugins named and mismatched orders refused?**
+
+Qualify a change to the order-geometry enrichment (bundleenrich.order_geometry_rows, enrich_order_geometry) or to evalreport's order-geometry lines and load-order geometry fact.
+
+Inputs: Hand-built bundles carrying an order-geometry enrichment, and three hand-written ordersweep emits.
+
+Outputs: Assertion results for: Does a placed-object geometry row that holds in one order of a free pair and not the other reach the report as a load-order risk?
+
+Source: [integration/housecarl/tests/test_order_geometry.py](../integration/housecarl/tests/test_order_geometry.py) — `Known answers: a geometry row that holds in one order of a free pair and not in the other is said as a load-order risk`
+
+
+<a id="tool-integration-housecarl-tests-test_overlap_triage.py"></a>
+
+### integration/housecarl/tests/test_overlap_triage.py
+
+**Does overlap triage preserve locality, counterpart identity and incomplete reviews?**
+
+Check incident grouping changes for lost members, incorrect counterparts, and false review completeness.
+
+Inputs: Controlled fixtures for test_overlap_triage.
+
+Outputs: Assertion results or generated fixture data for: Does overlap triage preserve locality, counterpart identity and incomplete reviews?
+
+Source: [integration/housecarl/tests/test_overlap_triage.py](../integration/housecarl/tests/test_overlap_triage.py) — `# 1||2 groups with 1||3; 3||4 cannot join through a transitive 1||3 link because it does not`
+
+
+<a id="tool-integration-housecarl-tests-test_patch_clash_pictures.py"></a>
+
+### integration/housecarl/tests/test_patch_clash_pictures.py
+
+**Is a clash that appears only with the supplied patches loaded pictured with them loaded, beside the setup without them, and said as such in the reel and the report; is one world-state check's new clashes counted once; and does a terrain station's label reach the picture's caption and reel note?**
+
+Qualify changes to reel_plan's patch vignettes or view_kind_line, evalreport's problems_text, SAY_SKIP_KEYS, patch_captions or view_kind_caption, the report templates' new-clashes figures, capture_acquire's standing or keep_refused_points, or the reporting skill's words for them (C2340-C2349); offline, no game.
+
+Inputs: test_reel_vignettes' synthetic evaluation, test_evalreport_prediction's synthetic bundles, hand-built capture planner results, and the shipped skill data.
+
+Outputs: One GREEN, RED or CRASH line per check (C2340-C2349).
+
+Source: [integration/housecarl/tests/test_patch_clash_pictures.py](../integration/housecarl/tests/test_patch_clash_pictures.py) — `Known answers for pictures of clashes new with the supplied patches`
+
+
+<a id="tool-integration-housecarl-tests-test_reader_rules.py"></a>
+
+### integration/housecarl/tests/test_reader_rules.py
+
+**Do the report and reel give a verdict and next step per patch, say unfinished testing first, name one patch per outcome, show every produced picture, and plan the reel's counts, labels, pages and closing in the report's terms?**
+
+Qualify changes to the report's patch verdict, incompleteness, attribution, figure, missing-asset and setup wording, the reel's stills and labels, or the record-rows enrichment's masters.
+
+Inputs: Controlled fixtures for test_reader_rules, and one recorded presentation where the machine holds it.
+
+Outputs: Assertion results for: Do the report and reel give a verdict and next step per patch, say unfinished testing first, name one patch per outcome, show every produced picture, and plan the reel's counts, labels, pages and closing in the report's terms?
+
+Source: [integration/housecarl/tests/test_reader_rules.py](../integration/housecarl/tests/test_reader_rules.py) — `Known answers for the report and reel rules a mod user acts on`
+
+
+<a id="tool-integration-housecarl-tests-test_readerdoc.py"></a>
+
+### integration/housecarl/tests/test_readerdoc.py
+
+**Does the reader's document list only clashes between the two mods and give the right install advice?**
+
+Check reader's-document changes against hand-built plans and one plan from the real compiler.
+
+Inputs: Controlled fixtures for test_readerdoc.
+
+Outputs: Assertion results for: Does the reader's document list only clashes between the two mods and give the right install advice?
+
+Source: [integration/housecarl/tests/test_readerdoc.py](../integration/housecarl/tests/test_readerdoc.py) — `Tests for readerdoc.py — the reader's document rendered from a presentation plan.`
+
+
+<a id="tool-integration-housecarl-tests-test_recordrows.py"></a>
+
+### integration/housecarl/tests/test_recordrows.py
+
+**Does the record-lane comparator emit a row only for a lost change, within the schema's field scope?**
+
+Check recordrows changes against hand-written transcripts.
+
+Inputs: Controlled fixtures for test_recordrows.
+
+Outputs: Assertion results for: Does the record-lane comparator emit a row only for a lost change, within the schema's field scope?
+
+Source: [integration/housecarl/tests/test_recordrows.py](../integration/housecarl/tests/test_recordrows.py) — `Tests for recordrows.py — record-lane rows derived from a record import's own MCP transcripts.`
+
+
+<a id="tool-integration-housecarl-tests-test_reel_names.py"></a>
+
+### integration/housecarl/tests/test_reel_names.py
+
+**Does the reel say and show a declared mod name or plugin file name as written (the round 2 subjects' patches, one with an all-capital word), still put an undeclared editor ID into words, and leave a count of 0 out of the unpictured line?**
+
+Qualify changes to reel_stills' spoken_text, shown_text or keep_names, evalreel's storyboard and render speech, reel_plan.account_counts or the reporting skill's unpicturedAccount and unpicturedCounts words (C2166-C2167); offline, no game.
+
+Inputs: A hand-built presentation whose reel plan declares the round 2 patches' names, and the shipped skill data.
+
+Outputs: One GREEN, RED or CRASH line per check (C2166-C2167).
+
+Source: [integration/housecarl/tests/test_reel_names.py](../integration/housecarl/tests/test_reel_names.py) — `Known answers for declared names in the reel and the unpictured count line`
+
+
+<a id="tool-integration-housecarl-tests-test_reel_vignettes.py"></a>
+
+### integration/housecarl/tests/test_reel_vignettes.py
+
+**Does the review reel plan and render Piranha's vignette format by rule: opening still, without/with/highlight vignettes, data stills, plain words, own-pair patch sentences and a closing still?**
+
+Qualify changes to reel_plan.py, the reel's skill data, the capture plan or evalreel's stills and sequences; --presentation checks a compiled reel, --sabotage and --code-sabotage must go red.
+
+Inputs: Controlled fixtures for test_reel_vignettes, or a compiled presentation.
+
+Outputs: Assertion results for: Does the review reel plan and render the vignette format by rule?
+
+Source: [integration/housecarl/tests/test_reel_vignettes.py](../integration/housecarl/tests/test_reel_vignettes.py) — `The review reel as clash vignettes:`
+
+
+<a id="tool-integration-housecarl-tests-test_report_figures.py"></a>
+
+### integration/housecarl/tests/test_report_figures.py
+
+**Does the report show the frame that states a clash (the marked view, both halves of a split), and does the reel drop capital mod prefixes from names?**
+
+Check figure selection and spoken-name changes against synthetic media rows.
+
+Inputs: Controlled fixtures for test_report_figures.
+
+Outputs: Assertion results for: Does the report show the frame that states a clash (the marked view, both halves of a split), and does the reel drop capital mod prefixes from names?
+
+Source: [integration/housecarl/tests/test_report_figures.py](../integration/housecarl/tests/test_report_figures.py) — `Known answers for the report's figure units and the reel's spoken names and removals (Missives review, 2026-10-30).`
+
+
+<a id="tool-integration-housecarl-tests-test_report_record_labels.py"></a>
+
+### integration/housecarl/tests/test_report_record_labels.py
+
+**Does the report say each record in words (a placed object by its kind and base, a name, an editor ID in words, a navmesh by its place), keep two different values apart and number records named alike, say once per check across mod pairs what to check in game, keep a patch verdict's names out of the reel, say why a cell could not be read, and say a long mod name in full once and then by its own short form?**
+
+Qualify changes to evalreport's said_record, say_form_keys, record_object_name, said_place's unread cell, what_to_do's next steps or patch_acts, reel_plan's short_mod_names or say_short_forms, test_reel_vignettes' code-known-answer and code-split-left-arm arms, or the reporting skill's words for them (C2200-C2208); offline, no game.
+
+Inputs: test_evalreport_prediction's synthetic bundles, test_navmesh_reel's planner fixture, hand-built sentences, and the shipped skill data.
+
+Outputs: One GREEN, RED or CRASH line per check (C2200-C2208).
+
+Source: [integration/housecarl/tests/test_report_record_labels.py](../integration/housecarl/tests/test_report_record_labels.py) — `Known answers for report record labels and What-to-do length`
+
+
+<a id="tool-integration-housecarl-tests-test_report_reel_batch.py"></a>
+
+### integration/housecarl/tests/test_report_reel_batch.py
+
+**Do the report and reel say a single case in the singular, one reason per unchecked check, offline renders as renders, the location list's share of the load order, places by name or grid, forward-versus-carry-both, worse patch placements, a patch's lines on its own pair only, and relative PDF links?**
+
+Qualify changes to the report's and reel's wording rules from regeneration 3 and item 18 (C1780-C1798); C1785 needs a browser and pypdf.
+
+Inputs: Synthetic bundles from test_evalreport_prediction's builder, test_reel_vignettes' and test_reader_rules' fixtures, a browser for the PDF case.
+
+Outputs: One PASS or FAIL line per case (C1780-C1798; C1797 held).
+
+Source: [integration/housecarl/tests/test_report_reel_batch.py](../integration/housecarl/tests/test_report_reel_batch.py) — `Known answers for the report and reel wording batch`
+
+
+<a id="tool-integration-housecarl-tests-test_report_reel_batch_2.py"></a>
+
+### integration/housecarl/tests/test_report_reel_batch_2.py
+
+**Do the report lane and orderleads read the shared record-flag table, do the report and reel name a mod the same way, does the patch search keep its unread listings, hub paths and build, does the author-advice count include stated clashes, and does the reel read media from every joined sibling?**
+
+Qualify changes to the record-flag rule in the report lane, the reel's mod and patch names, the patch-search recorder and sentences, the author-advice count, or the reel's sibling media (C1800-C1814).
+
+Inputs: Synthetic bundles from test_evalreport_prediction's builder, test_recordrows', test_reader_rules' and test_evalreport_siblings' fixtures, a stub houseCARL server.
+
+Outputs: One PASS or FAIL line per case (C1800-C1814).
+
+Source: [integration/housecarl/tests/test_report_reel_batch_2.py](../integration/housecarl/tests/test_report_reel_batch_2.py) — `Known answers for the second report and reel batch`
+
+
+<a id="tool-integration-housecarl-tests-test_report_reel_wording.py"></a>
+
+### integration/housecarl/tests/test_report_reel_wording.py
+
+**Does the report and reel say why a clash was not captured (no camera for its kind, or the capture limit), say each patch fact in one wording, list each Nexus patch page once in What to do, keep form keys and editor IDs off still pages and report places, name both objects of a one-mark view, count navmesh links and groups in the intro, resolve evalpipeline's path arguments at parse time, and read the needs-some sentence in short sentences, and say in the reel the place the report names?**
+
+Qualify changes to reel_plan's unpictured reasons, patch phrasing, navmesh intro or marked-view label, report_scenes.capturable_checks, reel_stills' drawn page text, evalreport's patch_search_leads, said_place or highlight_caption, pluginread.cell_grids, evalpipeline's path arguments, or the reporting skill's words for them (C2120-C2131); offline, no game.
+
+Inputs: test_navmesh_reel's and test_reel_vignettes' hand-built presentations, a Clockwork-shaped patch search, the shipped skill data, and Skyrim.esm's own cell 00929E when the SSE install is present.
+
+Outputs: One GREEN, RED, SKIP or CRASH line per check (C2120-C2131).
+
+Source: [integration/housecarl/tests/test_report_reel_wording.py](../integration/housecarl/tests/test_report_reel_wording.py) — `Known answers for the report and reel wording batch`
+
+
+<a id="tool-integration-housecarl-tests-test_report_words.py"></a>
+
+### integration/housecarl/tests/test_report_words.py
+
+**Does the report and reel say a name ending in s with a bare apostrophe ("Interesting NPCs'"), a landscape record by the ground of its cell, a patch named after the evaluated mod by the rest of its name, a long plugin file name in full once with a gloss and short after, and a buried object by its item's words?**
+
+Qualify changes to reel_plan's fill, possessive, short_mod_names or say_short_forms, evalreport's bind, said_record's landscape words, say_report_short_forms or buried_lines, readerdoc's bind, pluginread.record_cells, or the reporting skill's words for them (C2310-C2319); offline, no game.
+
+Inputs: test_reel_vignettes' synthetic evaluation, test_evalreport_prediction's synthetic bundles, a synthetic plugin file, hand-built sentences, and the shipped skill data.
+
+Outputs: One GREEN, RED or CRASH line per check (C2310-C2319).
+
+Source: [integration/housecarl/tests/test_report_words.py](../integration/housecarl/tests/test_report_words.py) — `Known answers for report and reel words`
+
+
+<a id="tool-integration-housecarl-tests-test_same_name_variant.py"></a>
+
+### integration/housecarl/tests/test_same_name_variant.py
+
+**Is a same-named plugin from another folder planned and reported as itself, not as the measured copy?**
+
+Qualify plan rows and report comparison kinds for arms that swap in an author's same-named variant.
+
+Inputs: A temporary MO2 instance with two copies of one plugin, and hand-built report bundles.
+
+Outputs: Assertion results for: Is a same-named plugin from another folder planned and reported as itself, not as the measured copy?
+
+Source: [integration/housecarl/tests/test_same_name_variant.py](../integration/housecarl/tests/test_same_name_variant.py) — `A same-named plugin from another folder is planned and reported as itself (cases 451-459).`
+
+
+<a id="tool-integration-housecarl-tests-test_stategen.py"></a>
+
+### integration/housecarl/tests/test_stategen.py
+
+**Does a Deep evaluation judge every census state and name every one it cannot?**
+
+Qualify the state generator and the evaluation depth through the real controller.
+
+Inputs: Controlled fixtures for test_stategen.
+
+Outputs: Assertion results or generated fixture data for: Does a Deep evaluation judge every census state and name every one it cannot?
+
+Source: [integration/housecarl/tests/test_stategen.py](../integration/housecarl/tests/test_stategen.py) — `Known answers for the Deep evaluation's state generator (stategen.py) and evalrun's evaluation depth.`
+
+
+<a id="tool-integration-housecarl-tests-test_subject_gate.py"></a>
+
+### integration/housecarl/tests/test_subject_gate.py
+
+**Does subject qualification refuse wrong identities, invisible features and invalid evidence?**
+
+Check capture acceptance rules with deliberately misbound subjects and unusable visual witnesses.
+
+Inputs: Controlled fixtures for test_subject_gate.
+
+Outputs: Assertion results or generated fixture data for: Does subject qualification refuse wrong identities, invisible features and invalid evidence?
+
+Source: [integration/housecarl/tests/test_subject_gate.py](../integration/housecarl/tests/test_subject_gate.py) — `*case["viewArgs"]]`
+
+
+<a id="tool-integration-housecarl-tests-test_switchflip_outcome.py"></a>
+
+### integration/housecarl/tests/test_switchflip_outcome.py
+
+**Does the runtime switch reading rule classify crashes, stalls and completions correctly?**
+
+Qualify a change to the live classifier against known crash, stall, short-window and unreached-target streams.
+
+Inputs: Controlled fixtures for test_switchflip_outcome.
+
+Outputs: Assertion results or generated fixture data for: Does the runtime switch reading rule classify crashes, stalls and completions correctly?
+
+Source: [integration/housecarl/tests/test_switchflip_outcome.py](../integration/housecarl/tests/test_switchflip_outcome.py) — `Known answers for the runtime state-switch reading rule`
+
+
+<a id="tool-integration-housecarl-tests-test_switchflip_plan.py"></a>
+
+### integration/housecarl/tests/test_switchflip_plan.py
+
+**Does the live driver refuse a bad flip plan and export one arm's reading correctly?**
+
+Check flip-plan validation, the block lock and the export before any launch.
+
+Inputs: Controlled fixtures for test_switchflip_plan.
+
+Outputs: Assertion results or generated fixture data for: Does the live driver refuse a bad flip plan and export one arm's reading correctly?
+
+Source: [integration/housecarl/tests/test_switchflip_plan.py](../integration/housecarl/tests/test_switchflip_plan.py) — `Known answers for switchflip.py's launch-free parts`
+
+
+<a id="tool-integration-housecarl-tests-test_switchflip_rule_unavailable.py"></a>
+
+### integration/housecarl/tests/test_switchflip_rule_unavailable.py
+
+**Does the live driver keep a launch's cleanup when the reading rule's owner cannot be asked?**
+
+Qualify a change to switchflip.py or switchflip_outcome.py around runcontrol failures.
+
+Inputs: switchflip.py and an unset or missing HOUSECARL_RUNCONTROL.
+
+Outputs: Assertion results for: Does the live driver keep a launch's cleanup when the reading rule's owner cannot be asked?
+
+Source: [integration/housecarl/tests/test_switchflip_rule_unavailable.py](../integration/housecarl/tests/test_switchflip_rule_unavailable.py) — `Known answers for the live driver when the reading rule's owner cannot be asked`
+
+
+<a id="tool-integration-housecarl-tests-test_switchflip_scope.py"></a>
+
+### integration/housecarl/tests/test_switchflip_scope.py
+
+**Does the live switch check's population rule keep unknowns open and answer not-applicable only when nothing driven touches a target?**
+
+Qualify a change to which switches the runtime switch check is about.
+
+Inputs: Controlled fixtures for test_switchflip_scope.
+
+Outputs: Assertion results or generated fixture data for: Does the live switch check's population rule keep unknowns open and answer not-applicable only when nothing driven touches a target?
+
+Source: [integration/housecarl/tests/test_switchflip_scope.py](../integration/housecarl/tests/test_switchflip_scope.py) — `Known answers for which switches the runtime state-switch check is about`
+
+
+<a id="tool-integration-housecarl-tests-test_terrain_stations.py"></a>
+
+### integration/housecarl/tests/test_terrain_stations.py
+
+**Where no navmesh stands an exterior camera, does it stand on bare terrain only when the LAND footprint is planar and at most the measured 43.7 degrees, with nothing beside, overhead or under it but the ground, while navmesh stations keep today's rule?**
+
+Qualify changes to the terrain station rule in capture_points or shotplan (terrain_slope, terrain_verdict) (C1980-C1989); offline, no game.
+
+Inputs: Toy box scenes and a LAND vertex grid for fake_viewprobe.py; the real picker, capture_acquire and shotplan.
+
+Outputs: One ok/FAIL line per check; exit 1 on any failure.
+
+Source: [integration/housecarl/tests/test_terrain_stations.py](../integration/housecarl/tests/test_terrain_stations.py) — `Offline known answers for terrain stations`
+
+
 <a id="tool-leftbehindprobe"></a>
 
 ### leftbehindprobe
@@ -4162,7 +4179,7 @@ Inputs: An MO2 instance, profile and game folder.
 
 Outputs: looks.json (rows, set-aside counts, the per-line swap table, the CONFLICTS block, a plugin and folder index for the screen) and a text summary.
 
-Source: [_geometry-harness/lookprobe/Program.cs](../_geometry-harness/lookprobe/Program.cs) — `// LOOKPROBE — the whole-order looks, run over a load order: a patch on disk and not enabled, a swap file pointing at a`
+Source: [integration/housecarl/lookprobe/Program.cs](../integration/housecarl/lookprobe/Program.cs) — `// LOOKPROBE — the whole-order looks, run over a load order: a patch on disk and not enabled, a swap file pointing at a`
 
 
 Modifiers (do not select a separate mode):
@@ -4287,7 +4304,7 @@ Inputs: The evaluation's plans (where each plugin was read), the scope's targets
 
 Outputs: Each plugin's name and source, and the evidence document evalreport writes to evidence/mod-names.json.
 
-Source: [_geometry-harness/modnames.py](../_geometry-harness/modnames.py) — `The review reel's mod names: each plugin's Nexus page name`
+Source: [integration/housecarl/modnames.py](../integration/housecarl/modnames.py) — `The review reel's mod names: each plugin's Nexus page name`
 
 
 <a id="tool-motionprobe"></a>
@@ -4751,7 +4768,7 @@ Inputs: A houseCARL server command, the two mods' plugins, Nexus ids and search 
 
 Outputs: patch-search.json (pairs with hits and their archive paths, unreadSources, the known answer, the server build) and every query's request, response and hash.
 
-Source: [_geometry-harness/patchsearch.py](../_geometry-harness/patchsearch.py) — `Record a Nexus patch search for one plugin pair through the houseCARL server`
+Source: [integration/housecarl/patchsearch.py](../integration/housecarl/patchsearch.py) — `Record a Nexus patch search for one plugin pair through the houseCARL server`
 
 
 Modifiers (do not select a separate mode):
@@ -5120,7 +5137,7 @@ Inputs: An evalreport presentation plan, optional ordinary mod names, in-game na
 
 Outputs: reader.md, reader.html, reader.pdf, summary.txt and reader-manifest.json.
 
-Source: [_geometry-harness/readerdoc.py](../_geometry-harness/readerdoc.py) — `readerdoc - the reader's document: one or two pages in ordinary words, rendered from a presentation plan.`
+Source: [integration/housecarl/readerdoc.py](../integration/housecarl/readerdoc.py) — `readerdoc - the reader's document: one or two pages in ordinary words, rendered from a presentation plan.`
 
 
 <a id="tool-recordrows"></a>
@@ -5150,7 +5167,7 @@ Inputs: A compiled presentation, its bundle's names and masters, the skill's vig
 
 Outputs: The presentation's reel block, or a one-sentence refusal.
 
-Source: [_geometry-harness/reel_plan.py](../_geometry-harness/reel_plan.py) — `The review reel's plan: which clashes it shows, how, and what it says`
+Source: [integration/housecarl/reel_plan.py](../integration/housecarl/reel_plan.py) — `The review reel's plan: which clashes it shows, how, and what it says`
 
 
 <a id="tool-reel-stills"></a>
@@ -5165,7 +5182,7 @@ Inputs: A still page from the reel plan and the named font files.
 
 Outputs: A 1280x720 image, or a one-sentence refusal when the font is absent.
 
-Source: [_geometry-harness/reel_stills.py](../_geometry-harness/reel_stills.py) — `The review reel's stills: the opening infographic, the load order, the statement of clashes it cannot picture`
+Source: [integration/housecarl/reel_stills.py](../integration/housecarl/reel_stills.py) — `The review reel's stills: the opening infographic, the load order, the statement of clashes it cannot picture`
 
 
 <a id="tool-refscan"></a>
@@ -5390,7 +5407,7 @@ Inputs: Evaluation evidence and presentation requirements.
 
 Outputs: Evidence-bound scene/capture requests.
 
-Source: [_geometry-harness/report_scenes.py](../_geometry-harness/report_scenes.py) — `Evidence-bound capture requests; domain selection rules live in the reporting skill.`
+Source: [integration/housecarl/report_scenes.py](../integration/housecarl/report_scenes.py) — `Evidence-bound capture requests; domain selection rules live in the reporting skill.`
 
 
 <a id="tool-runcontrol"></a>
@@ -5998,6 +6015,21 @@ Outputs: Synthetic viewprobe-compatible query responses for planner tests.
 Source: [_geometry-harness/viewprobe/tools/fake_viewprobe.py](../_geometry-harness/viewprobe/tools/fake_viewprobe.py) — `A stand-in for viewprobe that answers shotplan's queries from a declared toy scene.`
 
 
+<a id="tool-skywright_paths"></a>
+
+### skywright_paths
+
+**Where is SkyWright's checkout, seen from the houseCARL integration module?**
+
+Find SkyWright's Python tools, run log, data or the houseCARL pin from a script or suite inside integration/housecarl/.
+
+Inputs: None: the module file's own location.
+
+Outputs: CHECKOUT, HARNESS, SCRIPTS, DATA and HOUSECARL paths; SkyWright's tools and run log on sys.path.
+
+Source: [integration/housecarl/skywright_paths.py](../integration/housecarl/skywright_paths.py) — `Where SkyWright's checkout is, seen from the houseCARL integration module (integration/housecarl/).`
+
+
 <a id="tool-stategen"></a>
 
 ### stategen
@@ -6143,7 +6175,7 @@ Inputs: Captured subject identity, depth/visibility evidence and witness contrac
 
 Outputs: Qualification or explicit identity/visibility refusal.
 
-Source: [_geometry-harness/subject_gate.py](../_geometry-harness/subject_gate.py) — `Post-render qualification. Pixel eligibility never substitutes for a normal-view witness.`
+Source: [integration/housecarl/subject_gate.py](../integration/housecarl/subject_gate.py) — `Post-render qualification. Pixel eligibility never substitutes for a normal-view witness.`
 
 
 Modifiers (do not select a separate mode):
@@ -6163,7 +6195,7 @@ Inputs: A flip plan, a scratch MO2 instance, its launch shortcut, the game path 
 
 Outputs: Per launch a receipt, events and crash logs with a classification; per block the arm readings and an import document for the live check (not imported until evallive.py is ported).
 
-Source: [_geometry-harness/switchflip.py](../_geometry-harness/switchflip.py) — `switchflip — the live driver of the runtime state-switch check`
+Source: [integration/housecarl/switchflip.py](../integration/housecarl/switchflip.py) — `switchflip — the live driver of the runtime state-switch check`
 
 
 <a id="tool-switchflip.batch"></a>
@@ -6180,7 +6212,7 @@ Inputs: A flip plan, a scratch instance, its shortcut, the game path and a lock 
 
 Outputs: One receipt, events, crash logs and a recording per launch, and the block's arm readings.
 
-Source: [_geometry-harness/switchflip.py](../_geometry-harness/switchflip.py) — `add_parser(`
+Source: [integration/housecarl/switchflip.py](../integration/housecarl/switchflip.py) — `add_parser(`
 
 
 <a id="tool-switchflip.export"></a>
@@ -6197,7 +6229,7 @@ Inputs: A block folder and an arm id.
 
 Outputs: A schema-1 live import document (not imported until evallive.py is ported to the built-in controller).
 
-Source: [_geometry-harness/switchflip.py](../_geometry-harness/switchflip.py) — `add_parser(`
+Source: [integration/housecarl/switchflip.py](../integration/housecarl/switchflip.py) — `add_parser(`
 
 
 <a id="tool-switchflip.validate"></a>
@@ -6214,7 +6246,7 @@ Inputs: A flip plan JSON.
 
 Outputs: Valid, or every problem named.
 
-Source: [_geometry-harness/switchflip.py](../_geometry-harness/switchflip.py) — `add_parser(`
+Source: [integration/housecarl/switchflip.py](../integration/housecarl/switchflip.py) — `add_parser(`
 
 
 Modifiers (do not select a separate mode):
@@ -6252,7 +6284,7 @@ Inputs: One launch's recorded events, or an arm's per-launch classifications.
 
 Outputs: Crash, stall, complete or not-measured with the reason; finding, no-finding or unsettled.
 
-Source: [_geometry-harness/switchflip_outcome.py](../_geometry-harness/switchflip_outcome.py) — `switchflip_outcome — the live driver's client for the runtime state-switch check's reading rule.`
+Source: [integration/housecarl/switchflip_outcome.py](../integration/housecarl/switchflip_outcome.py) — `switchflip_outcome — the live driver's client for the runtime state-switch check's reading rule.`
 
 
 <a id="tool-switchflip_scope"></a>
@@ -6267,7 +6299,7 @@ Inputs: One arm's switch census (switchprobe --json) and the evaluation scope.
 
 Outputs: not-applicable or open with each cause named; the population with how each switch touches a target.
 
-Source: [_geometry-harness/switchflip_scope.py](../_geometry-harness/switchflip_scope.py) — `switchflip_scope — which switches the runtime state-switch check`
+Source: [integration/housecarl/switchflip_scope.py](../integration/housecarl/switchflip_scope.py) — `switchflip_scope — which switches the runtime state-switch check`
 
 
 <a id="tool-switchprobe"></a>

@@ -527,6 +527,7 @@ public static class SelfTestPlanModules
                           "live: Python's record of the settings on this machine"];
         string? root = HarnessShared.CheckoutLayout.Locate(null, out _)?.Checkout;
         string harness = root == null ? "" : Path.Combine(root, "_geometry-harness");
+        string module = Checkout.Integration ?? "";   // evalsettings is the houseCARL integration module's
         string registryPath = root == null ? "" : HarnessShared.CheckoutLayout.Registry(root);
         if (!File.Exists(registryPath))
         {
@@ -545,7 +546,7 @@ public static class SelfTestPlanModules
         Case(names[1], () =>
         {
             var r = Python(harness, "-c", head + "import evalsettings as S; r = S.load(None, {'evaluation.budgetMinutes': 7.5}); "
-                + "print(json.dumps([r.record(), r.sentences()], separators=(',', ':'), ensure_ascii=False))", harness);
+                + "print(json.dumps([r.record(), r.sentences()], separators=(',', ':'), ensure_ascii=False))", module);
             if (r is not { exit: 0 }) return r!.Value.stderr.Contains("SettingsError") ? null : $"python failed: {r.Value.stderr}";
             var s = EvalSettings.Load(null, new PyDict { ["evaluation.budgetMinutes"] = 7.5 });
             var mine = new List<object?> { s.Record(), s.Sentences().Cast<object?>().ToList() };

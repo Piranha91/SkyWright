@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Tests of the houseCARL integration module's C#: lookprobe's whole-order looks (OrderLooksTests, moved from
+       SkyWright.Engine.Tests with the three look files in step 1 of the boundary). The looks compile here from
+       lookprobe's folder; the engine types they build on (OrderLooks, SwapLooks, BaseObjectSwaps) come from
+       SkyWright.Engine. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>SkyWright.Engine.Tests</RootNamespace>
+    <AssemblyName>HousecarlIntegration.Tests</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
+    <ProjectReference Include="$(SkyWrightSrc)SkyWright.Engine\SkyWright.Engine.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\lookprobe\InactivePatchLook.cs" Link="InactivePatchLook.cs" />
+    <Compile Include="..\..\lookprobe\DummyTargetLook.cs" Link="DummyTargetLook.cs" />
+    <Compile Include="..\..\lookprobe\ScriptDependencyLook.cs" Link="ScriptDependencyLook.cs" />
+    <!-- houseCARL's .pex fixture writer, compiled from the pin (OrderLooksTests writes scripts with it). -->
+    <Compile Include="$(HousecarlSrc)housecarl-mcp-tests\PexWriter.cs" Link="PexWriter.cs" />
+  </ItemGroup>
+
+</Project>

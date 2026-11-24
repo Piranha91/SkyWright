@@ -5,6 +5,8 @@ most one more saying how to check it.
 
 ## Unreleased
 
+- **The report, reel, narration and capture tools, the in-game switch flips and `lookprobe` now live in the houseCARL integration module, `integration/housecarl/`, which builds to its own folder and which nothing in the app, the probes or the run controller refers into.** Run `bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.exe fence`; an evaluation run folder made before this change re-runs its stages after the bundle, because their tools' recorded paths moved.
+
 ## From houseCARL, before the split
 
 These entries were in houseCARL's unreleased changelog (`plugin/CHANGELOG.md`) when the probes, the workbench, the

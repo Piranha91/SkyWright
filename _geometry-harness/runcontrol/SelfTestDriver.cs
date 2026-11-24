@@ -698,7 +698,8 @@ public static partial class SelfTest
         const string name = "live: the Python pipeline reuses the census, prepare and scope this program accepted";
         string? root = HarnessShared.CheckoutLayout.Locate(null, out _)?.Checkout;
         string harness = root == null ? "" : Path.Combine(root, "_geometry-harness");
-        string? reason = !File.Exists(Path.Combine(harness, "evalpipeline.py")) ? "this build is not inside a SkyWright checkout with the Python controller"
+        string module = Checkout.Integration ?? "";   // the Python pipeline is the houseCARL integration module's
+        string? reason = !File.Exists(Path.Combine(module, "evalpipeline.py")) ? "this build is not inside a SkyWright checkout with the Python controller"
             : Python(harness, "--version") is not { exit: 0 } ? "python is not on PATH" : null;
         if (reason != null)
         {
@@ -722,7 +723,7 @@ public static partial class SelfTest
                 if (exit != Exit.Ok) return $"this program's run: exit {exit}: {stderr}";
             }
             finally { ChildLaunch.RunJob = saved; }
-            var r = Python(harness, "-B", Path.Combine(harness, "evalpipeline.py"), "run", "--entry", t.At("entry.json"), "--out", t.At("run"), "--through", "scope");
+            var r = Python(harness, "-B", Path.Combine(module, "evalpipeline.py"), "run", "--entry", t.At("entry.json"), "--out", t.At("run"), "--through", "scope");
             if (r is not { exit: 0 }) return $"python exited {r?.exit}: {r?.stderr}";
             return Rows(BuiltStages, s => r.Value.stdout.Contains($"{s}: reused (inputs and outputs unchanged)") ? null : $"Python ran {s} again: {r.Value.stdout}");
         });
