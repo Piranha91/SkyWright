@@ -8783,6 +8783,27 @@
       ]
     },
     {
+      "id": "integration/housecarl/tests/test_runcontrol_seam.py",
+      "path": "integration/housecarl/tests/test_runcontrol_seam.py",
+      "kind": "script",
+      "answers": [
+        "Does the module's pipeline reuse the census, prepare and scope the built-in controller accepted, black box, and refuse a changed entry?"
+      ],
+      "useWhen": "Qualify a change to the stage receipts or entry hashing on either side of the controller and the module's pipeline.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/tests/test_runcontrol_seam.py",
+          "anchor": "The seam between the built-in controller and the module's pipeline on one run folder, black box"
+        }
+      ],
+      "inputs": [
+        "Controlled fixtures for test_record_capture."
+      ],
+      "outputs": [
+        "Assertion results or generated fixture data for: Does the module's pipeline reuse the census, prepare and scope the built-in controller accepted, black box, and refuse a changed entry?"
+      ]
+    },
+    {
       "id": "integration/housecarl/tests/test_switchflip_scope.py",
       "path": "integration/housecarl/tests/test_switchflip_scope.py",
       "kind": "script",

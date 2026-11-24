@@ -690,42 +690,4 @@ public static partial class SelfTest
                 ? null : $"status: {status.output}";
         });
     }
-
-    // ---- against a live Python: the seam between the two controllers on one run folder
-
-    static void PipelineLiveCases()
-    {
-        const string name = "live: the Python pipeline reuses the census, prepare and scope this program accepted";
-        string? root = HarnessShared.CheckoutLayout.Locate(null, out _)?.Checkout;
-        string harness = root == null ? "" : Path.Combine(root, "_geometry-harness");
-        string module = Checkout.Integration ?? "";   // the Python pipeline is the houseCARL integration module's
-        string? reason = !File.Exists(Path.Combine(module, "evalpipeline.py")) ? "this build is not inside a SkyWright checkout with the Python controller"
-            : Python(harness, "--version") is not { exit: 0 } ? "python is not on PATH" : null;
-        if (reason != null)
-        {
-            Skip(name, reason);
-            return;
-        }
-        var saved = ChildLaunch.RunJob;
-        Case(name, () =>
-        {
-            using var t = new Temp();
-            var (inst, game) = World(t, ShadowMods, ShadowEnabled, ShadowPlugins);
-            var entry = InPlaceEntry(inst, game, ["Sel"], ["geometry.object-overlap"]);
-            entry["modNames"] = Json("{\"Sel.esp\": \"The Selection\"}");
-            PyJson.WritePipelineFile(t.At("entry.json"), entry);
-            var res = new RunContext(t.At("entry.json"), null, t.At("run")).Resolve();
-            ChildLaunch.RunJob = (_, _, _, job) => StandInScopeprobe(res, job, []);
-            try
-            {
-                var (exit, _, stderr) = Drive(new Driver { OpenRun = QuietRun, SetsRunLogFolder = false },
-                                              new PipelineArgs(Entry: t.At("entry.json"), Out: t.At("run"), Through: "scope"));
-                if (exit != Exit.Ok) return $"this program's run: exit {exit}: {stderr}";
-            }
-            finally { ChildLaunch.RunJob = saved; }
-            var r = Python(harness, "-B", Path.Combine(module, "evalpipeline.py"), "run", "--entry", t.At("entry.json"), "--out", t.At("run"), "--through", "scope");
-            if (r is not { exit: 0 }) return $"python exited {r?.exit}: {r?.stderr}";
-            return Rows(BuiltStages, s => r.Value.stdout.Contains($"{s}: reused (inputs and outputs unchanged)") ? null : $"Python ran {s} again: {r.Value.stdout}");
-        });
-    }
 }

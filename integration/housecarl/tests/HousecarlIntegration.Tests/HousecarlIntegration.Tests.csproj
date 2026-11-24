@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- Tests of the houseCARL integration module's C#: lookprobe's whole-order looks (OrderLooksTests, moved from
-       SkyWright.Engine.Tests with the three look files in step 1 of the boundary). The looks compile here from
+       SkyWright.Engine.Tests with the three look files in step 1 of the boundary), and the stage ledger runcontrol and the
+       module's pipeline share (StageLedgerSeamTests, step 2). The looks compile here from
        lookprobe's folder; the engine types they build on (OrderLooks, SwapLooks, BaseObjectSwaps) come from
        SkyWright.Engine. -->
   <PropertyGroup>
@@ -23,6 +24,15 @@
   <ItemGroup>
     <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
     <ProjectReference Include="$(SkyWrightSrc)SkyWright.Engine\SkyWright.Engine.csproj" />
+  </ItemGroup>
+
+  <!-- runcontrol's stage ledger, from the app's build (scripts\build.ps1 builds the app before this module), for the
+       seam tests that compare it with the module's Python pipeline (StageLedgerSeamTests). -->
+  <ItemGroup>
+    <Reference Include="runcontrol">
+      <HintPath>$(SkyWrightLayoutRoot)$(SkyWrightTools)\runcontrol\runcontrol.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>

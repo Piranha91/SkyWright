@@ -93,14 +93,8 @@ internal static class FenceGuard
         Crossings:
         [
             new("_geometry-harness/runcontrol/Checkout.cs", ["integration/housecarl"],
-                "Checkout.Integration: the one place runcontrol finds the module's source folder, for the self-test's live cross-checks with the Python pipeline and settings (it opens nothing itself)",
-                "with the last of the three self-test rows below: step 2(b) for EvalSettings's; the task file names no step for the pipeline cross-checks (proposed: 2(b))"),
-            new("_geometry-harness/runcontrol/SelfTest.cs", ["Checkout.Integration", "evalpipeline.py", "import evalpipeline"],
-                "live cases: starts python to import evalpipeline and compare its StageLedger with this program's (the file's presence gates them)",
-                "not named in the task file (its step 2(b) lists EvalSettings, StageRecords' Python arm, LiveImport, SwitchFlip*, BundleMedia and Discovery); proposed for step 2(b)"),
-            new("_geometry-harness/runcontrol/SelfTestDriver.cs", ["Checkout.Integration", "evalpipeline.py"],
-                "live case: starts evalpipeline.py run to show the Python pipeline reuses the stages this program accepted",
-                "not named in the task file; proposed for step 2(b)"),
+                "Checkout.Integration: the one place runcontrol finds the module's source folder, for the self-test's live cross-check of the Python settings record (it opens nothing itself)",
+                "step 2(b), with that cross-check, when EvalSettings leaves runcontrol"),
             new("_geometry-harness/runcontrol/SelfTestPlanModules.cs", ["Checkout.Integration", "import evalsettings"],
                 "live case: starts python to import evalsettings and compare its record with EvalSettings.cs",
                 "step 2(b), when EvalSettings leaves runcontrol"),

@@ -160,7 +160,6 @@ public static partial class SelfTest
         RecordsSeamCases();
         SelfTestFinalize.RunOwnCases(Case);
         LiveCases();
-        PipelineLiveCases();
 
         Console.WriteLine($"{_green} green, {_red} red, {_skipped} skipped");
         return _red == 0 ? 0 : 1;
@@ -501,14 +500,14 @@ public static partial class SelfTest
         return why != null ? null : PyText.SplitLines(r!.Value.stdout).LastOrDefault() ?? "";
     }
 
+    // ToolIdentity (C#) against _geometry-harness/toolidentity.py, the Python copy SkyWright's Python tools use (the
+    // two stage-ledger cross-checks with the module's pipeline moved to the module's tests, StageLedgerSeamTests)
     static void LiveCases()
     {
-        string[] names = ["live: toolidentity.package of real build folders", "live: toolidentity.probe_cmd with an interpreter on PATH",
-                          "live: Python reuses a stage this program recorded", "live: this program reuses a stage Python recorded"];
+        string[] names = ["live: toolidentity.package of real build folders", "live: toolidentity.probe_cmd with an interpreter on PATH"];
         string? root = HarnessShared.CheckoutLayout.Locate(null, out _)?.Checkout;
         string harness = root == null ? "" : Path.Combine(root, "_geometry-harness");
-        string module = Checkout.Integration ?? "";   // the Python pipeline is the houseCARL integration module's
-        string? reason = !File.Exists(Path.Combine(module, "evalpipeline.py")) ? "this build is not inside a SkyWright checkout with the Python controller"
+        string? reason = !File.Exists(Path.Combine(harness, "toolidentity.py")) ? "this build is not inside a SkyWright checkout with its Python tools"
             : Python(harness, "--version") is not { exit: 0 } ? "python is not on PATH" : null;
         if (reason != null) { foreach (string n in names) Skip(n, reason); return; }
         const string head = "import sys, json; sys.path.insert(0, sys.argv[1]); ";
@@ -533,46 +532,6 @@ public static partial class SelfTest
                 return why ?? Same("identity", PyJson.Dumps(ToolIdentity.ProbeCmd(text)), line);
             }
             finally { Environment.CurrentDirectory = before; }
-        });
-
-        var inputs = new PyDict { ["entry"] = new string('a', 64), ["upstream"] = new PyDict { ["census"] = null }, ["tools"] = new PyDict { ["caf\u00e9"] = 1.5 } };
-        var extra = new PyDict { ["bound"] = null, ["seconds"] = 2.5, ["driverSha256"] = ToolIdentity.DriverSha256() };
-        const string decide = head + "import evalpipeline as EP; print(EP.StageLedger(sys.argv[2]).decide(sys.argv[3], json.load(open(sys.argv[4], encoding='utf-8'))))";
-        const string record = head + "import evalpipeline as EP; EP.StageLedger(sys.argv[2]).record(sys.argv[3], json.load(open(sys.argv[4], encoding='utf-8')), json.loads(sys.argv[5]), 0, json.load(open(sys.argv[6], encoding='utf-8'))); print('recorded')";
-        void Outputs(Temp t)
-        {
-            Directory.CreateDirectory(t.At("run/scope/deep"));
-            File.WriteAllText(t.At("run/scope/scopes.json"), "{}");
-            File.WriteAllText(t.At("run/scope/deep/B.txt"), "b");
-            File.WriteAllText(t.At("run/scope/deep/a-1.txt"), "a");
-            PyJson.WritePipelineFile(t.At("inputs.json"), inputs);
-            PyJson.WritePipelineFile(t.At("extra.json"), extra);
-        }
-        Case(names[2], () =>
-        {
-            using var t = new Temp();
-            Outputs(t);
-            new StageLedger(t.At("run")).Record("scope", inputs, [t.At("run/scope/scopes.json"), t.At("run/scope")], 0, extra);
-            string? line = LastLine(Python(harness, "-c", decide, module, t.At("run"), "scope", t.At("inputs.json")), out var why);
-            if (why != null || line != "reuse") return why ?? $"Python decided {line}";
-            File.WriteAllText(t.At("run/scope/deep/B.txt"), "changed");
-            line = LastLine(Python(harness, "-c", decide, module, t.At("run"), "scope", t.At("inputs.json")), out why);
-            return why ?? (line == "run" ? null : $"after an output changed Python decided {line}");
-        });
-        Case(names[3], () =>
-        {
-            using var t = new Temp();
-            Outputs(t);
-            string outs = PyJson.Dumps(new List<object?> { t.At("run/scope/scopes.json"), t.At("run/scope") });
-            LastLine(Python(harness, "-c", record, module, t.At("run"), "scope", t.At("inputs.json"), outs, t.At("extra.json")), out var why);
-            if (why != null) return why;
-            var ledger = new StageLedger(t.At("run"));
-            if (ledger.Decide("scope", inputs) != "reuse") return "this program decided run on Python's receipt";
-            ledger.Save();
-            string? line = LastLine(Python(harness, "-c", decide, module, t.At("run"), "scope", t.At("inputs.json")), out why);
-            if (why != null || line != "reuse") return why ?? $"after this program rewrote stages.json Python decided {line}";
-            File.WriteAllText(t.At("run/scope/scopes.json"), "{ }");
-            return ledger.Decide("scope", inputs) == "run" ? null : "a changed output was still reused";
         });
     }
 }

@@ -131,6 +131,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does the live switch check's population rule keep unknowns open and answer not-applicable only when nothing driven touches a target?](#tool-integration-housecarl-tests-test_switchflip_scope.py) — `integration/housecarl/tests/test_switchflip_scope.py`
 - [Does the measured outward depth survey admit or block this candidate eye?](#tool-depthsurvey) — `depthsurvey`
 - [Does the mesh reuse ownership diagnostic satisfy its expected contract?](#tool-viewprobe.mesh-reuse-red) — `viewprobe.mesh-reuse-red`
+- [Does the module's pipeline reuse the census, prepare and scope the built-in controller accepted, black box, and refuse a changed entry?](#tool-integration-housecarl-tests-test_runcontrol_seam.py) — `integration/housecarl/tests/test_runcontrol_seam.py`
 - [Does the moved and deleted reference selection diagnostic satisfy its expected contract?](#tool-viewprobe.moved-ref-selftest) — `viewprobe.moved-ref-selftest`
 - [Does the names read of a manual-mode bundle read the plan's review arm, not the baseline or a union of arms?](#tool-_geometry-harness-tests-test_workbench_manual_names.py) — `_geometry-harness/tests/test_workbench_manual_names.py`
 - [Does the narration packet ask for plain words and carry the glossary, does narrate-apply accept a rewrite only where a fidelity judgement made for its exact text says it keeps the meaning, and does the judge's model setting never resolve to a Fable model?](#tool-integration-housecarl-tests-test_narration_fidelity.py) — `integration/housecarl/tests/test_narration_fidelity.py`
@@ -4006,6 +4007,21 @@ Inputs: test_reel_vignettes' synthetic evaluation, test_evalreport_prediction's 
 Outputs: One GREEN, RED or CRASH line per check (C2310-C2319).
 
 Source: [integration/housecarl/tests/test_report_words.py](../integration/housecarl/tests/test_report_words.py) — `Known answers for report and reel words`
+
+
+<a id="tool-integration-housecarl-tests-test_runcontrol_seam.py"></a>
+
+### integration/housecarl/tests/test_runcontrol_seam.py
+
+**Does the module's pipeline reuse the census, prepare and scope the built-in controller accepted, black box, and refuse a changed entry?**
+
+Qualify a change to the stage receipts or entry hashing on either side of the controller and the module's pipeline.
+
+Inputs: Controlled fixtures for test_record_capture.
+
+Outputs: Assertion results or generated fixture data for: Does the module's pipeline reuse the census, prepare and scope the built-in controller accepted, black box, and refuse a changed entry?
+
+Source: [integration/housecarl/tests/test_runcontrol_seam.py](../integration/housecarl/tests/test_runcontrol_seam.py) — `The seam between the built-in controller and the module's pipeline on one run folder, black box`
 
 
 <a id="tool-integration-housecarl-tests-test_same_name_variant.py"></a>
