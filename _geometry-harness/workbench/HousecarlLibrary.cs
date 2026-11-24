@@ -34,7 +34,7 @@ internal sealed class HousecarlLibrary : IDisposable
     /// <summary>The call itself (<see cref="HousecarlCalls.Invoke"/>); refused on a window's thread, and after <see cref="Dispose"/>.</summary>
     internal string Invoke(string tool, IReadOnlyDictionary<string, object?> args, CancellationToken ct = default)
     {
-        if (System.Windows.Threading.Dispatcher.FromThread(Thread.CurrentThread) is not null)
+        if (OnWindowThread())
             throw new InvalidOperationException($"houseCARL's {tool} was called on a window's thread, where it would freeze the window; this is a fault in SkyWright, not in your load order.");
         _use.EnterReadLock();
         try
@@ -49,12 +49,17 @@ internal sealed class HousecarlLibrary : IDisposable
     /// <summary>A fingerprint of houseCARL's code (<see cref="HousecarlCalls.IdentityOf"/>).</summary>
     internal static string IdentityOf(params string[] assemblies) => HousecarlCalls.IdentityOf(assemblies);
 
+    /// <summary>A window's thread: a single-threaded apartment with a WPF dispatcher. A pool thread is never one, even when
+    /// some code has attached a dispatcher to it (Dispatcher.CurrentDispatcher on a pool thread does that, for good).</summary>
+    internal static bool OnWindowThread() =>
+        Thread.CurrentThread.GetApartmentState() == ApartmentState.STA && System.Windows.Threading.Dispatcher.FromThread(Thread.CurrentThread) is not null;
+
     /// <summary>Waits for the calls under way, then closes the service; a later call is refused in one sentence. Refused
     /// on a window's thread, which must not wait on a read or an index build (<see cref="HousecarlWriters.RetireAll"/>
     /// closes on the pool).</summary>
     public void Dispose()
     {
-        if (System.Windows.Threading.Dispatcher.FromThread(Thread.CurrentThread) is not null)
+        if (OnWindowThread())
             throw new InvalidOperationException("houseCARL's service was closed on a window's thread, where it would freeze the window until its calls end; this is a fault in SkyWright.");
         _use.EnterWriteLock();
         try { if (_disposed != 0) return; _disposed = 1; _svc.Dispose(); }

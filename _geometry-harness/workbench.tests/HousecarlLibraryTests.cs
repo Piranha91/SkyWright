@@ -60,6 +60,16 @@ public sealed class HousecarlLibraryTests : IClassFixture<TiltedRefWorld>
         Assert.Contains(TiltedRefWorld.Ref.ToString(), viaAsync);
     }
 
+    /// <summary>Rejects taking a pool thread for a window's because some code attached a dispatcher to it: the Release suite
+    /// run before commit 8 had a test do that, and four in-process calls on the pool were refused.</summary>
+    [Fact]
+    public async Task A_pool_thread_with_a_stray_dispatcher_is_not_a_windows_thread()
+    {
+        var (window, mta) = await Task.Run(() => { _ = System.Windows.Threading.Dispatcher.CurrentDispatcher; return (HousecarlLibrary.OnWindowThread(), Thread.CurrentThread.GetApartmentState() == ApartmentState.MTA); });
+        Assert.True(mta, "the pool thread was not a multi-threaded apartment");
+        Assert.False(window);
+    }
+
     [Fact]
     public async Task A_call_after_the_profile_closes_is_refused_in_one_sentence()
     {
