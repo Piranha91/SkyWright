@@ -60,7 +60,10 @@ public sealed class InProcessNamesTests
     {
         using var w = new TiltedRefWorld();
         var work = Path.Combine(w.Root, "work");
-        var served = Run(w, new { readerCmd = "\"" + TestBuild.Server + "\"" }, work);
+        // houseCARL's server program from the pin's build output (the tests' own entry), reading the rulebook the
+        // in-process read uses (the build's Data\corpus.json), as it read the copy beside it in the old layout
+        var corpus = TestBuild.Layout.PathOf(HarnessShared.CheckoutLayout.Piece.Corpus);
+        var served = Run(w, new { readerCmd = "\"" + TestBuild.Server + "\" \"--HouseCarl:CorpusPath=" + corpus + "\"" }, work);
         // the same finished run bundled again, its names read in process from the same private instance
         var inproc = Path.Combine(work, "bundle-inproc");
         // the private instance the run's bundle stage made, spelled as that stage spells it (forward slashes: houseCARL's

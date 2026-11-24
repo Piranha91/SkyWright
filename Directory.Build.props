@@ -19,8 +19,8 @@
   </PropertyGroup>
 
   <!-- The build layout, one folder per configuration: bin\<Configuration>\<the app's .NET version>\ holds SkyWright.exe,
-       Probes\<name>\ (every program SkyWright runs), Tools\<name>\ (runcontrol, houseCARL's server and its rulebook),
-       Data\ and Tests\. This file is the ONE owner of where each program goes; the SkyWrightLayout target below writes
+       Probes\<name>\ (every program SkyWright runs), Tools\<name>\ (runcontrol, the guards), Data\ (with houseCARL's
+       rulebook) and Tests\. This file is the ONE owner of where each program goes; the SkyWrightLayout target below writes
        the same names into skywright-layout.json, which the programs (CheckoutLayout.cs) and the Python tools
        (_geometry-harness/buildlayout.py) read instead of spelling a path. houseCARL's own projects keep their output. -->
   <PropertyGroup>
@@ -66,31 +66,48 @@
     </ItemGroup>
   </Target>
 
-  <!-- After the app builds: houseCARL's server and its rulebook into Tools\housecarl-mcp\, the app data and the
-       rulebook the app's in-process houseCARL reads (corpus.json) into Data\, and the marker that names the layout. The
-       app's project references the server project so it is built first. -->
+  <!-- For workbench.tests ONLY: houseCARL's server program where the pin's own project builds it, as the assembly
+       metadata HousecarlServerProgram, for the tests that start houseCARL's server the way an AI client does (H5a,
+       H5b). Nothing else in the build learns this path, and no build folder holds the program (BuildLayoutTests). -->
+  <Target Name="SkyWrightTestServerProgram" BeforeTargets="GetAssemblyAttributes" Condition="'$(MSBuildProjectName)' == 'workbench.tests'">
+    <MSBuild Projects="$(HousecarlSrc)housecarl-mcp\housecarl-mcp.csproj" Targets="GetTargetPath" Properties="Configuration=$(SkyWrightConfiguration)">
+      <Output TaskParameter="TargetOutputs" PropertyName="_SwTestServerDll" />
+    </MSBuild>
+    <ItemGroup>
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>HousecarlServerProgram</_Parameter1>
+        <_Parameter2>$([System.IO.Path]::ChangeExtension('$(_SwTestServerDll)', '.exe'))</_Parameter2>
+      </AssemblyAttribute>
+    </ItemGroup>
+  </Target>
+  <!-- ...and the tests' folder holds no copy of that program: the rulebook generator the tests reference references the
+       server project, which would bring its exe, runtimeconfig and deps along as copy items. Its assembly stays (the
+       app's in-process houseCARL needs it); an older build's copy is cleaned away as an output no longer written. -->
+  <Target Name="SkyWrightTestsHoldNoServerProgram" AfterTargets="GetCopyToOutputDirectoryItems" Condition="'$(MSBuildProjectName)' == 'workbench.tests'">
+    <ItemGroup>
+      <_SourceItemsToCopyToOutputDirectory Remove="@(_SourceItemsToCopyToOutputDirectory)" Condition="'%(TargetPath)' == 'housecarl-mcp.exe' or '%(TargetPath)' == 'housecarl-mcp.runtimeconfig.json' or '%(TargetPath)' == 'housecarl-mcp.runtimeconfig.dev.json' or '%(TargetPath)' == 'housecarl-mcp.deps.json' or '%(TargetPath)' == 'housecarl-mcp.staticwebassets.endpoints.json'" />
+      <_SourceItemsToCopyToOutputDirectoryAlways Remove="@(_SourceItemsToCopyToOutputDirectoryAlways)" Condition="'%(TargetPath)' == 'housecarl-mcp.exe' or '%(TargetPath)' == 'housecarl-mcp.runtimeconfig.json' or '%(TargetPath)' == 'housecarl-mcp.runtimeconfig.dev.json' or '%(TargetPath)' == 'housecarl-mcp.deps.json' or '%(TargetPath)' == 'housecarl-mcp.staticwebassets.endpoints.json'" />
+      <_SourceItemsToCopyToOutputDirectoryIfDifferent Remove="@(_SourceItemsToCopyToOutputDirectoryIfDifferent)" Condition="'%(TargetPath)' == 'housecarl-mcp.exe' or '%(TargetPath)' == 'housecarl-mcp.runtimeconfig.json' or '%(TargetPath)' == 'housecarl-mcp.runtimeconfig.dev.json' or '%(TargetPath)' == 'housecarl-mcp.deps.json' or '%(TargetPath)' == 'housecarl-mcp.staticwebassets.endpoints.json'" />
+      <AllItemsFullPathWithTargetPath Remove="@(AllItemsFullPathWithTargetPath)" Condition="'%(TargetPath)' == 'housecarl-mcp.exe' or '%(TargetPath)' == 'housecarl-mcp.runtimeconfig.json' or '%(TargetPath)' == 'housecarl-mcp.runtimeconfig.dev.json' or '%(TargetPath)' == 'housecarl-mcp.deps.json' or '%(TargetPath)' == 'housecarl-mcp.staticwebassets.endpoints.json'" />
+    </ItemGroup>
+  </Target>
+
+  <!-- After the app builds: the app data and the rulebook the app's in-process houseCARL reads (corpus.json) into Data\,
+       and the marker that names the layout. The build holds no houseCARL program: the app and runcontrol run
+       houseCARL's code in process (SkyWrightHousecarlLibrary above), and the server program is the integration module's
+       (SkyWrightIntegrationServer below). A Tools\housecarl-mcp\ left by an older build is removed. -->
   <Target Name="SkyWrightLayout" AfterTargets="Build" Condition="'$(MSBuildProjectName)' == 'workbench'">
     <PropertyGroup>
       <_SwCorpus>$(HousecarlRoot)generated\corpus.json</_SwCorpus>
       <_SwScenePolicy>$(HousecarlRoot).claude\skills\evaluation-reporting\references\scene-policy.json</_SwScenePolicy>
-      <_SwJson>{ "kind": "skywright-build", "configuration": "$(SkyWrightConfiguration)", "framework": "$(SkyWrightFramework)", "app": "SkyWright.exe", "program": "$(SkyWrightProbes)/{name}/{name}.exe", "tool": "$(SkyWrightTools)/{name}/{name}.exe", "tools": ["runcontrol", "housecarl-mcp"], "server": "$(SkyWrightTools)/housecarl-mcp/housecarl-mcp.exe", "corpus": "$(SkyWrightData)/corpus.json", "registry": "$(SkyWrightData)/check-registry.json", "severity": "$(SkyWrightData)/workbench-severity.json", "scenePolicy": "$(SkyWrightData)/scene-policy.json" }</_SwJson>
-    </PropertyGroup>
-    <MSBuild Projects="$(HousecarlSrc)housecarl-mcp\housecarl-mcp.csproj" Targets="GetTargetPath" Properties="Configuration=$(SkyWrightConfiguration)">
-      <Output TaskParameter="TargetOutputs" PropertyName="_SwServerDll" />
-    </MSBuild>
-    <PropertyGroup>
-      <_SwServerOut>$([System.IO.Path]::GetDirectoryName($(_SwServerDll)))\</_SwServerOut>
+      <_SwJson>{ "kind": "skywright-build", "configuration": "$(SkyWrightConfiguration)", "framework": "$(SkyWrightFramework)", "app": "SkyWright.exe", "program": "$(SkyWrightProbes)/{name}/{name}.exe", "tool": "$(SkyWrightTools)/{name}/{name}.exe", "tools": ["runcontrol"], "corpus": "$(SkyWrightData)/corpus.json", "registry": "$(SkyWrightData)/check-registry.json", "severity": "$(SkyWrightData)/workbench-severity.json", "scenePolicy": "$(SkyWrightData)/scene-policy.json" }</_SwJson>
     </PropertyGroup>
     <ItemGroup>
-      <_SwServerFiles Include="$(_SwServerOut)**\*" />
       <_SwDataFiles Include="$(MSBuildThisFileDirectory)data\*" />
     </ItemGroup>
     <Error Condition="'$([System.IO.Path]::GetFullPath($(OutDir)))' != '$([System.IO.Path]::GetFullPath($(SkyWrightLayoutRoot)))'" Text="the app was built to $(OutDir), but SkyWright's layout is $(SkyWrightLayoutRoot); build without -o or OutputPath (scripts\build.ps1), so the app, its programs and its marker stay together." />
-    <Error Condition="'@(_SwServerFiles)' == ''" Text="houseCARL's server is not built at $(_SwServerOut); build the solution (it builds the server first)." />
-    <Copy SourceFiles="@(_SwServerFiles)" DestinationFiles="@(_SwServerFiles->'$(SkyWrightLayoutRoot)$(SkyWrightTools)\housecarl-mcp\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <RemoveDir Condition="Exists('$(SkyWrightLayoutRoot)$(SkyWrightTools)\housecarl-mcp')" Directories="$(SkyWrightLayoutRoot)$(SkyWrightTools)\housecarl-mcp" />
     <Warning Condition="!Exists('$(_SwCorpus)')" Text="the rulebook $(_SwCorpus) is missing, so SkyWright cannot write patches; run scripts\build.ps1, which makes it." />
-    <Delete Condition="!Exists('$(_SwCorpus)')" Files="$(SkyWrightLayoutRoot)$(SkyWrightTools)\housecarl-mcp\corpus.json" />
-    <Copy Condition="Exists('$(_SwCorpus)')" SourceFiles="$(_SwCorpus)" DestinationFolder="$(SkyWrightLayoutRoot)$(SkyWrightTools)\housecarl-mcp\" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_SwDataFiles)" DestinationFolder="$(SkyWrightLayoutRoot)$(SkyWrightData)\" SkipUnchangedFiles="true" />
     <Delete Condition="!Exists('$(_SwCorpus)')" Files="$(SkyWrightLayoutRoot)$(SkyWrightData)\corpus.json" />
     <Copy Condition="Exists('$(_SwCorpus)')" SourceFiles="$(_SwCorpus)" DestinationFolder="$(SkyWrightLayoutRoot)$(SkyWrightData)\" SkipUnchangedFiles="true" />

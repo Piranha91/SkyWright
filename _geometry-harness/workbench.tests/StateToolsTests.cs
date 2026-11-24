@@ -388,11 +388,12 @@ public sealed class StateToolsTests : IAsyncLifetime
 
     // ---- H5: houseCARL mode starts the server as the client does ----
 
-    /// <summary>A copy of the server this checkout builds, so a config can sit beside it without touching the build.</summary>
+    /// <summary>A copy of the server program the pin's project builds (the tests' own entry, TestBuild.Server), so a
+    /// config can sit beside it without touching that output.</summary>
     static string ServerCopy(string dir)
     {
         var src = Path.GetDirectoryName(TestBuild.Server)!;
-        Assert.True(File.Exists(TestBuild.Server), "build the solution first: the build's Tools/housecarl-mcp is missing");
+        Assert.True(File.Exists(TestBuild.Server), $"build the solution first: houseCARL's server program is not built at {TestBuild.Server}");
         foreach (var f in Directory.EnumerateFiles(src, "*", SearchOption.AllDirectories))
         {
             var t = Path.Combine(dir, Path.GetRelativePath(src, f));
