@@ -141,4 +141,16 @@ public sealed class BuildLayoutTests : IDisposable
             Assert.True(File.Exists(TestBuild.Layout.PathOf(p)), $"the build has no {p} at {TestBuild.Layout.PathOf(p)}");
         Assert.True(File.Exists(TestBuild.Program("overlapprobe")), "the build has no overlapprobe");
     }
+
+    /// <summary>houseCARL's server code sits beside the app as a library: its assembly is there, and nothing that would
+    /// make it a program (its exe, runtimeconfig, deps or appsettings) is. Rejects a plain project reference to the
+    /// server, which copies housecarl-mcp.exe into the app's own folder.</summary>
+    [Fact]
+    public void The_app_folder_holds_houseCARLs_server_code_as_a_library_and_not_its_program()
+    {
+        var root = TestBuild.Layout.Root;
+        Assert.True(File.Exists(Path.Combine(root, "housecarl-mcp.dll")), $"the app's folder {root} has no housecarl-mcp.dll");
+        foreach (var f in new[] { "housecarl-mcp.exe", "housecarl-mcp.runtimeconfig.json", "housecarl-mcp.deps.json", "appsettings.json" })
+            Assert.False(File.Exists(Path.Combine(root, f)), $"the app's folder {root} holds {f}, which belongs to houseCARL's program");
+    }
 }

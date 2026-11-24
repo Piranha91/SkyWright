@@ -54,6 +54,18 @@
     <OutputPath>$(SkyWrightLayoutRoot)$(SkyWrightTools)\$(MSBuildProjectName)\</OutputPath>
   </PropertyGroup>
 
+  <!-- houseCARL's server code as a library, for a project that sets SkyWrightHousecarlLibrary: its built assembly is
+       referenced by the path houseCARL's project reports, so only housecarl-mcp.dll (and what it references) is copied,
+       never its program. The project also keeps a ProjectReference with ReferenceOutputAssembly="false" so it is built first. -->
+  <Target Name="SkyWrightHousecarlLibrary" BeforeTargets="ResolveAssemblyReferences" Condition="'$(SkyWrightHousecarlLibrary)' == 'true'">
+    <MSBuild Projects="$(HousecarlSrc)housecarl-mcp\housecarl-mcp.csproj" Targets="GetTargetPath" Properties="Configuration=$(SkyWrightConfiguration)">
+      <Output TaskParameter="TargetOutputs" PropertyName="_SwHousecarlLibrary" />
+    </MSBuild>
+    <ItemGroup>
+      <Reference Include="housecarl-mcp" HintPath="$(_SwHousecarlLibrary)" />
+    </ItemGroup>
+  </Target>
+
   <!-- After the app builds: houseCARL's server and its rulebook into Tools\housecarl-mcp\, the app data into Data\, and
        the marker that names the layout. The app's project references the server project so it is built first. -->
   <Target Name="SkyWrightLayout" AfterTargets="Build" Condition="'$(MSBuildProjectName)' == 'workbench'">

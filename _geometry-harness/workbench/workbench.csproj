@@ -14,6 +14,8 @@
     <UseWPF>true</UseWPF>
     <NoWarn>CA1416</NoWarn>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- houseCARL's server code compiled in as a library (Directory.Build.props), never its program -->
+    <SkyWrightHousecarlLibrary>true</SkyWrightHousecarlLibrary>
   </PropertyGroup>
   <ItemGroup>
     <Using Include="System.IO" />
@@ -25,7 +27,8 @@
     <ProjectReference Include="..\viewprobe\viewprobe.csproj" />
     <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
     <ProjectReference Include="$(SkyWrightSrc)SkyWright.Engine\SkyWright.Engine.csproj" />
-    <!-- built first, not referenced: the SkyWrightLayout target (Directory.Build.props) copies it into Tools\housecarl-mcp -->
+    <!-- built first, its program not referenced: the SkyWrightLayout target (Directory.Build.props) copies it into
+         Tools\housecarl-mcp, and SkyWrightHousecarlLibrary references its assembly alone -->
     <ProjectReference Include="$(HousecarlSrc)housecarl-mcp\housecarl-mcp.csproj" ReferenceOutputAssembly="false" Private="false" />
     <PackageReference Include="ModelContextProtocol.Core" Version="2.2.0" />
     <!-- The MCP state tools: a localhost Streamable HTTP server inside the app (DESIGN.md section 7). -->
