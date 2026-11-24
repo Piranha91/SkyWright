@@ -20,7 +20,10 @@ powershell -File scripts\build.ps1
 bin\Release\net9.0-windows10.0.19041.0\Tools\runcontrol\runcontrol.exe --self-test
 dotnet test bin\Release\net9.0-windows10.0.19041.0\Tests\workbench.tests\workbench.tests.dll
 dotnet test bin\Release\net9.0-windows10.0.19041.0\Tests\SkyWright.Engine.Tests\SkyWright.Engine.Tests.dll
+bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.exe harness-suites
 ```
+
+The harness-suites guard runs every Python suite and probe self-test it finds (`--full` adds the slow ones); its `python` needs Pillow and numpy.
 
 `scripts\build.ps1` builds both configurations; build both after every change. Each is one folder, `bin\<Configuration>\net9.0-windows10.0.19041.0\`: `SkyWright.exe`, `Probes\<name>\`, `Tools\runcontrol\`, `Tools\housecarl-mcp\` (with the rulebook), `Data\`, `Tests\` and the marker `skywright-layout.json`. `Directory.Build.props` owns that layout and writes the marker; programs read it through `_geometry-harness/_shared/CheckoutLayout.cs` and the Python tools through `_geometry-harness/buildlayout.py`. Never spell a program's path anywhere else.
 

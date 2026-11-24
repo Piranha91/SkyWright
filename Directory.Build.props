@@ -48,6 +48,11 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <OutputPath>$(SkyWrightLayoutRoot)Tests\$(MSBuildProjectName)\</OutputPath>
   </PropertyGroup>
+  <!-- The guards run the probes of the build they sit in, so they sit in it, as a tool. -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'SkyWright.Guards'">
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>$(SkyWrightLayoutRoot)$(SkyWrightTools)\$(MSBuildProjectName)\</OutputPath>
+  </PropertyGroup>
 
   <!-- After the app builds: houseCARL's server and its rulebook into Tools\housecarl-mcp\, the app data into Data\, and
        the marker that names the layout. The app's project references the server project so it is built first. -->
