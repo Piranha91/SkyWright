@@ -369,6 +369,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Which evidence-bound views should an evaluation report ask to capture?](#tool-report-scenes) — `report-scenes`
 - [Which findings change across every enumerated switch flip?](#tool-stateprobe.all) — `stateprobe.all`
 - [Which fixture do the capture-fallback tests render?](#tool-viewprobe.write-capture-fixture) — `viewprobe.write-capture-fixture`
+- [Which helpers do the evaluation tools on both sides of the houseCARL integration fence share?](#tool-evalbase) — `evalbase`
 - [Which installed plugins should one new mod be evaluated against, and why is each other plugin left out?](#tool-selectprobe) — `selectprobe`
 - [Which installer patch options were offered but not selected?](#tool-fomodprobe) — `fomodprobe`
 - [Which kinds of edit does a patch make to a record, in the fixed vocabulary (ADD, DISABLE, MOVE, ENABLE-PARENT, FIELD:<name> and the rest)?](#tool-editkinds) — `editkinds`
@@ -3338,6 +3339,21 @@ Inputs: Measured geometry and candidate rotation compositions.
 Outputs: Comparison measurements for rotation order.
 
 Source: [_geometry-harness/eulerprobe/Program.cs](../_geometry-harness/eulerprobe/Program.cs) — `// EULER ORDER — settling a question the charter has carried as "evidence, not proof" since day one.`
+
+
+<a id="tool-evalbase"></a>
+
+### evalbase
+
+**Which helpers do the evaluation tools on both sides of the houseCARL integration fence share?**
+
+Read a plugin's TES4 header, find the built-in controller, or build the bundle check's command from a Python tool.
+
+Inputs: A plugin file, a machine file's runcontrol, or HOUSECARL_RUNCONTROL.
+
+Outputs: A header dict, the controller's path, or the verify-bundle command; Refusal with one sentence.
+
+Source: [_geometry-harness/evalbase.py](../_geometry-harness/evalbase.py) — `evalbase - what the evaluation tools on both sides of the houseCARL integration fence share.`
 
 
 <a id="tool-evalpipeline"></a>

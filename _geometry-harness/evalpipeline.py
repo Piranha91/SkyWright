@@ -51,6 +51,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(HERE))
 from runlog import Run, Runner  # noqa: E402
 import buildlayout  # noqa: E402  where the build put runcontrol and viewprobe
+# shared with the record capture and bundle enrichment outside the module: the same objects (evalbase)
+from evalbase import (Refusal, sha256_file, fwd, _header_fields, plugin_header, plugin_records,  # noqa: E402,F401
+                      RUNCONTROL_ENV, runcontrol_exe, verify_bundle_argv)
 
 STAGES = ("census", "prepare", "scope", "plan", "evaluate", "records", "scenes", "bundle", "precedent",
           "report-plan", "capture", "image-observations", "report", "reel", "deliver")
@@ -68,10 +71,6 @@ EXIT_OK, EXIT_REFUSED, EXIT_JUDGEMENT = 0, 2, 3
 MAX_PATH = 240  # leave room under Windows' 260-character limit for the probes' own file names
 
 
-class Refusal(Exception):
-    """One sentence: what went wrong and what to try."""
-
-
 # ---------------------------------------------------------------- small helpers
 
 def read_json(p):
@@ -86,21 +85,8 @@ def write_json(p, obj):
     os.replace(tmp, p)
 
 
-def sha256_file(p) -> str:
-    h = hashlib.sha256()
-    with open(p, "rb") as f:
-        for block in iter(lambda: f.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
-
-
 def sha256_json(obj) -> str:
     return hashlib.sha256(json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-
-
-def fwd(p) -> str:
-    """A path in forward-slash spelling: argument parsers downstream have lost backslashes before."""
-    return str(p).replace("\\", "/")
 
 
 def same_path(a, b) -> bool:
@@ -112,44 +98,6 @@ def utcnow() -> str:
 
 
 # ---------------------------------------------------------------- plugin headers
-
-def _header_fields(p: Path) -> tuple[int, list[str], int | None]:
-    """(flags, masters, HEDR record count) from one plugin's TES4 header. Refuses a file that is not a plugin."""
-    with open(p, "rb") as f:
-        head = f.read(24)
-        if len(head) < 24 or head[:4] != b"TES4":
-            raise Refusal(f"{p.name} is not a plugin (no TES4 header); check the file at {fwd(p)}.")
-        size, flags = struct.unpack_from("<II", head, 4)
-        body = f.read(size)
-    masters, records, i, big = [], None, 0, None
-    while i + 6 <= len(body):
-        sig = body[i:i + 4]
-        n = struct.unpack_from("<H", body, i + 4)[0]
-        if big is not None:
-            n, big = big, None
-        data = body[i + 6:i + 6 + n]
-        if sig == b"XXXX":
-            big = struct.unpack_from("<I", data, 0)[0]
-        elif sig == b"MAST":
-            masters.append(data.split(b"\0", 1)[0].decode("cp1252"))
-        elif sig == b"HEDR" and len(data) >= 8:
-            records = struct.unpack_from("<I", data, 4)[0]
-        i += 6 + n
-    return flags, masters, records
-
-
-def plugin_header(path) -> dict:
-    """The TES4 header of one plugin: masters, ESM/ESL flags and the file's sha256. Refuses a file that is not a plugin."""
-    p = Path(path)
-    flags, masters, _ = _header_fields(p)
-    return {"path": fwd(p), "sha256": sha256_file(p), "masters": masters, "esm": bool(flags & 0x1),
-            "esl": bool(flags & 0x200)}
-
-
-def plugin_records(path) -> int | None:
-    """The record count a plugin's TES4 header states (HEDR); None when it states none."""
-    return _header_fields(Path(path))[2]
-
 
 # ---------------------------------------------------------------- plugin identity
 
@@ -435,22 +383,6 @@ def measuring_refusal(ctx, stage: str) -> str:
             f"this command again.")
 
 
-#: The environment variable naming runcontrol.exe for a tool started without a machine file (evalreport, evalrun enrich);
-#: the pipeline sets it on every child from the machine file's `runcontrol`.
-RUNCONTROL_ENV = "HOUSECARL_RUNCONTROL"
-
-
-def runcontrol_exe(machine: dict | None) -> Path:
-    """The built-in controller: the machine file's `runcontrol`, else HOUSECARL_RUNCONTROL, else this checkout's build;
-    refused when it is absent."""
-    named = (machine or {}).get("runcontrol") or (os.environ.get(RUNCONTROL_ENV) or "").strip()
-    exe = Path(named) if named else buildlayout.runcontrol()
-    if not exe.is_file():
-        raise Refusal(f"the built-in controller is not at {fwd(exe)}; build it (scripts/build.ps1) or "
-                      f"name runcontrol.exe under the key runcontrol in the machine file.")
-    return exe
-
-
 # ---------------------------------------------------------------- preparation
 
 
@@ -534,11 +466,6 @@ def budget_differs(ctx_entry: dict, out: Path):
     planned = planned_budget(out)
     want = (ctx_entry.get("evaluation") or {}).get("budgetMinutes")
     return want if planned is not None and want is not None and float(want) != float(planned) else None
-
-
-def verify_bundle_argv(machine: dict | None, bundle: Path) -> list[str]:
-    """The bundle check: the built-in controller's `verify-bundle`, its one owner."""
-    return [fwd(runcontrol_exe(machine)), "verify-bundle", fwd(bundle)]
 
 
 def reader_cmd(ctx) -> str:

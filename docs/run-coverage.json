@@ -6450,6 +6450,31 @@
       ]
     },
     {
+      "id": "evalbase",
+      "kind": "script",
+      "lang": "python",
+      "path": "_geometry-harness/evalbase.py",
+      "adapter": "none",
+      "stageSource": "unknown",
+      "exempt": "Imported library with no executable entry point, no child process of its own and no workload: the refusal, plugin-header and controller-lookup helpers the record capture, bundle enrichment and the module's evalpipeline share. Its callers own the runlog lifecycle.",
+      "answers": [
+        "Which helpers do the evaluation tools on both sides of the houseCARL integration fence share?"
+      ],
+      "useWhen": "Read a plugin's TES4 header, find the built-in controller, or build the bundle check's command from a Python tool.",
+      "evidence": [
+        {
+          "path": "_geometry-harness/evalbase.py",
+          "anchor": "evalbase - what the evaluation tools on both sides of the houseCARL integration fence share."
+        }
+      ],
+      "inputs": [
+        "A plugin file, a machine file's runcontrol, or HOUSECARL_RUNCONTROL."
+      ],
+      "outputs": [
+        "A header dict, the controller's path, or the verify-bundle command; Refusal with one sentence."
+      ]
+    },
+    {
       "id": "editkinds",
       "kind": "script",
       "lang": "python",
