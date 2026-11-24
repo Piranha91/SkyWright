@@ -39,6 +39,8 @@ namespace Workbench;
 /// conflict N                     click the Conflicts tab's row ranked N (as listed now)
 /// treeref FORMKEY                click that reference in the Records tree
 /// showall on|off                 the Conflicts tab's "all rows on this arm" toggle
+/// conflictrecords on|off         the Records tab's "show only records in a conflict" toggle (on by default)
+/// tab NAME                       bring a tab to the front (Start, Conflicts, Findings, Results, Records, World)
 /// state NAME                     dump the shell's structured state (bundle, ranked rows, tree, scene, camera) as NAME.json
 /// msgclickworld X,Y,Z            post WM_LBUTTONDOWN/UP to the view's window at the point's device pixel (the real mouse path)
 /// msgclickref FORMKEY           the same, at the reference's box centre (where a landing points the camera)
@@ -272,6 +274,8 @@ internal sealed class Script
                 if (node is null) { WorkbenchHost.Say($"treeref {a[1]}: the Records tree has no such reference"); break; }
                 Shell.CurrentRow = null; Shell.OpenRef(node.Key, Shell.CellOfRef(node.Key)); _wait = 3; break;
             }
+            case "tab": WorkbenchHost.Say(Shell.ShowTab(string.Join(' ', a.Skip(1)))); _wait = 2; break;
+            case "conflictrecords": Shell.SetOnlyConflictRecords(a[1] == "on"); _wait = 2; break;
             case "showall": Shell.ShowAll = a[1] == "on"; Shell.FillConflicts(); break;
             case "state": Shell.Dump(_h, Path.Combine(_h.OutDir, a[1] + ".json")); break;
             case "msgclickworld":

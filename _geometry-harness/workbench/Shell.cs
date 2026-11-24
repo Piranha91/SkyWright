@@ -182,6 +182,11 @@ internal static class Shell
         DockPanel.SetDock(repairBar, Dock.Top);
         findingsTab.Children.Add(repairBar); findingsTab.Children.Add(FindingList);
         // Three tabs: Start (load, check), Conflicts (what was found, three ways), Explore (the load order as it is)
+        ConflictRecordsOnly.Checked += (_, _) => { if (!OnlyConflictRecords) SetOnlyConflictRecords(true); };
+        ConflictRecordsOnly.Unchecked += (_, _) => { if (OnlyConflictRecords) SetOnlyConflictRecords(false); };
+        var recordsTab = new DockPanel();
+        DockPanel.SetDock(ConflictRecordsOnly, Dock.Top);
+        recordsTab.Children.Add(ConflictRecordsOnly); recordsTab.Children.Add(Records);
         var tabs = Tabs = new TabControl { MinWidth = 340 };
         var start = new TabItem { Header = "Start", Content = LauncherView.Build(), ToolTip = "load a Data folder, a profile or earlier results, and check a mod" };
         Views["Start"] = (start, null, "Start");
@@ -191,7 +196,7 @@ internal static class Shell
             ("Findings", "Other issues", "what the checks found that is not a clash at one place: missing masters, navmesh, patch advice", findingsTab),
             ("Results", "Earlier results", "an earlier evaluation's results, pair by pair", ResultsView.Build())));
         tabs.Items.Add(Group("Explore", "the load order as it is, without a check",
-            ("Records", "Records", "the cells and references of the scene shown, by worldspace", Records),
+            ("Records", "Records", "the cells and references of the scene shown, by worldspace", recordsTab),
             ("World", "World", "the map and cells of the loaded Data folder or profile", WorldView.Build())));
         tabs.SelectedIndex = Bundle is null ? 0 : 1;           // the Start tab until a bundle is open
         ViewSlot.Content ??= EmptyView;
@@ -440,24 +445,50 @@ internal static class Shell
         return new ListBoxItem { Content = content, Foreground = c.State == "ran" ? Brushes.DarkGray : Brushes.Salmon };
     }
 
+    /// <summary>The Records tree shows only the records a conflict involves (on by default); off, it shows every record and
+    /// highlights those. Applies only when the tree comes from a check with conflicts.</summary>
+    internal static bool OnlyConflictRecords { get; set; } = true;
+    static readonly CheckBox ConflictRecordsOnly = new() { Content = "show only records in a conflict", IsChecked = true, Margin = new Thickness(6, 2, 6, 2),
+        ToolTip = "on: the tree lists only the references a clash involves, and their cells; off: every record of the scene, with those highlighted",
+        Visibility = Visibility.Collapsed };
+    static readonly Brush ConflictBack = new SolidColorBrush(Color.FromArgb(0x40, 0xFA, 0x80, 0x72));   // salmon, translucent
+
+    /// <summary>Whether the tree now shows only conflict records: the toggle is on and the tree has conflicts to keep.</summary>
+    internal static bool RecordsFiltered => OnlyConflictRecords && RecordsTree.HasConflicts(Tree);
+
+    internal static void SetOnlyConflictRecords(bool on)
+    {
+        OnlyConflictRecords = on;
+        if (ConflictRecordsOnly.IsChecked != on) ConflictRecordsOnly.IsChecked = on;
+        FillTree(Tree);
+        // back to the scene's cell and selected record once the new items are laid out (before, there is nothing to scroll to)
+        if (Window is not null) Window.Dispatcher.BeginInvoke(FollowScene, System.Windows.Threading.DispatcherPriority.Loaded);
+        else FollowScene();
+    }
+
     internal static void FillTree(IReadOnlyList<TreeNode> tree)
     {
         Tree = tree;
+        bool hasConflicts = RecordsTree.HasConflicts(tree);
+        ConflictRecordsOnly.Visibility = hasConflicts ? Visibility.Visible : Visibility.Collapsed;
+        bool filtered = OnlyConflictRecords && hasConflicts;
         Records.Items.Clear();
-        foreach (var n in tree) Records.Items.Add(Item(n));
-        static TreeViewItem Item(TreeNode n)
+        foreach (var n in filtered ? RecordsTree.OnlyConflicts(tree) : tree) Records.Items.Add(Item(n, !filtered));
+        static TreeViewItem Item(TreeNode n, bool highlight)
         {
             var t = new TreeViewItem { Header = n.Label + (n.Conflict && n.Kind == "ref" ? "   (conflict)" : ""), Tag = n, IsExpanded = n.Kind == "worldspace" };
             if (n.Conflict) { t.Foreground = Brushes.Salmon; if (n.Kind == "ref") t.FontWeight = FontWeights.Bold; }
+            // every record listed: a conflict reference stands out by its background too (a header, so its children keep their own)
+            if (highlight && n.Conflict && n.Kind == "ref") t.Header = new TextBlock { Text = (string)t.Header, Background = ConflictBack, Padding = new Thickness(2, 0, 2, 0) };
             if (!n.Loaded) t.FontStyle = FontStyles.Italic;
             // A cell's references are made when the cell is first expanded: a city scene draws thousands.
             if (n.Kind == "cell" && n.Children.Count > 0)
             {
                 t.Items.Add(new TreeViewItem { Header = $"{n.Children.Count} reference(s)" });
                 bool filled = false;
-                t.Expanded += (_, _) => { if (filled) return; filled = true; t.Items.Clear(); foreach (var c in n.Children) t.Items.Add(Item(c)); };
+                t.Expanded += (_, _) => { if (filled) return; filled = true; t.Items.Clear(); foreach (var c in n.Children) t.Items.Add(Item(c, highlight)); };
             }
-            else foreach (var c in n.Children) t.Items.Add(Item(c));
+            else foreach (var c in n.Children) t.Items.Add(Item(c, highlight));
             return t;
         }
     }
@@ -483,8 +514,28 @@ internal static class Shell
                 top.IsExpanded = true; c.IsExpanded = true;
                 var target = selected is null ? null : c.Items.OfType<TreeViewItem>().FirstOrDefault(r => r.Tag is TreeNode { Kind: "ref" } rn && string.Equals(rn.Key, selected, StringComparison.OrdinalIgnoreCase));
                 (target ?? c).IsSelected = true;
-                (target ?? c).BringIntoView();
+                if (target is null) c.BringIntoView(); else ScrollTo(c, target);
             }
+    }
+
+    /// <summary>Scroll the tree to <paramref name="target"/> under <paramref name="parent"/>. The tree virtualizes: a row it
+    /// has not laid out has no place to scroll to, so the parent's panel is asked to lay out that index first.</summary>
+    static void ScrollTo(TreeViewItem parent, TreeViewItem target)
+    {
+        parent.BringIntoView();
+        Records.UpdateLayout();
+        if (FindPanel(parent) is { } panel) panel.BringIndexIntoViewPublic(parent.Items.IndexOf(target));
+        target.BringIntoView();
+        VirtualizingStackPanel? FindPanel(DependencyObject d)
+        {
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(d); i++)
+            {
+                var child = VisualTreeHelper.GetChild(d, i);
+                if (child is VirtualizingStackPanel p && ItemsControl.GetItemsOwner(p) == parent) return p;
+                if (FindPanel(child) is { } found) return found;
+            }
+            return null;
+        }
     }
 
     internal static string? CellOfRef(string refKey) =>
@@ -557,6 +608,8 @@ internal static class Shell
         director = SceneDirector.State(),
         scene = h?.SceneState(),
         tree = Tree,
+        records = new { onlyConflicts = OnlyConflictRecords, filtered = RecordsFiltered,
+                        listed = RecordsTree.Walk(RecordsFiltered ? RecordsTree.OnlyConflicts(Tree) : Tree).Count(n => n.Kind == "ref") },
         lastLanding = LastLanding,
         loading = Loading.State(),
         recheck = h is null ? null : new

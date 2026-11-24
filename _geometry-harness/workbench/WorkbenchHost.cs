@@ -772,6 +772,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var drawn = RecordsTree.Entries(DrawnAll().Select(r => (r.Ref.RefKey, r.Ref.BaseEditorId)), _opt.RefOutcomes, cells);
         var conflictRefs = Shell.Ranked.SelectMany(r => new[] { r.Row.RefKey, r.Row.OtherKey }).Where(k => k is not null)
                                  .Select(k => k!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (ReadOnly) conflictRefs.UnionWith(ResultsView.ConflictRefs());   // a scene opened from Earlier results: its pair's predicted clashes
         var loadedCells = drawn.Where(d => d.Cell is not null).Select(d => d.Cell!.Value.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (SceneCell is { } sc) loadedCells.Add(sc);
         var unloaded = Shell.Ranked.Where(r => r.Row.Cell is { } c && !loadedCells.Contains(c))

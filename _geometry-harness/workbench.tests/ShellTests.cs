@@ -85,6 +85,26 @@ public class ShellTests
     }
 
     [Fact]
+    public void The_conflict_filter_keeps_only_conflict_refs_and_the_cells_that_hold_them()
+    {
+        var cellA = K(0x900); var cellB = K(0x901);
+        var drawn = new[] { new SceneRefEntry(K(0x801), cellA, "Wall"), new SceneRefEntry(K(0x802), cellA, "Crate"), new SceneRefEntry(K(0x803), cellB, "Tree") };
+        var conflicts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { K(0x802).ToString(), "000999:Far.esp" };
+        var unloaded = new Dictionary<string, IReadOnlyList<string>> { ["000777:Far.esp"] = new[] { "000999:Far.esp" } };
+        var tree = RecordsTree.Build("worldspace W", drawn, c => c.ToString(), conflicts, unloaded);
+
+        var only = RecordsTree.OnlyConflicts(tree);
+        Assert.Equal(new[] { "000999:Far.esp", K(0x802).ToString() }.OrderBy(x => x),
+                     RecordsTree.Walk(only).Where(n => n.Kind == "ref").Select(n => n.Key).OrderBy(x => x));
+        Assert.Equal(new[] { "000777:Far.esp", cellA.ToString() }.OrderBy(x => x),
+                     RecordsTree.Walk(only).Where(n => n.Kind == "cell").Select(n => n.Key).OrderBy(x => x));
+        Assert.True(RecordsTree.HasConflicts(tree));
+        // a scene with no conflict (not a check's result): nothing to filter by, so the filter does not apply
+        var plain = RecordsTree.Build("worldspace W", drawn, c => c.ToString(), new HashSet<string>(), new Dictionary<string, IReadOnlyList<string>>());
+        Assert.False(RecordsTree.HasConflicts(plain));
+    }
+
+    [Fact]
     public void A_reference_is_found_in_the_names_enrichment_whatever_case_its_plugin_is_spelled_in()
     {
         var p = Path.Combine(Path.GetTempPath(), "hc-wb-names-" + Guid.NewGuid().ToString("N") + ".json");

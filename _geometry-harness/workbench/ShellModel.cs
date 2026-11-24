@@ -59,6 +59,14 @@ internal static class RecordsTree
         return roots;
     }
 
+    /// <summary>The tree with only what a conflict involves: the conflict references, and the cells and worldspaces that
+    /// hold one (Build marks a cell or worldspace a conflict when any reference under it is).</summary>
+    internal static IReadOnlyList<TreeNode> OnlyConflicts(IEnumerable<TreeNode> nodes) =>
+        nodes.Where(n => n.Conflict).Select(n => n with { Children = OnlyConflicts(n.Children) }).ToList();
+
+    /// <summary>Whether the tree comes from a check with conflicts: only then does the conflict filter apply.</summary>
+    internal static bool HasConflicts(IEnumerable<TreeNode> nodes) => Walk(nodes).Any(n => n.Kind == "ref" && n.Conflict);
+
     internal static IEnumerable<TreeNode> Walk(IEnumerable<TreeNode> nodes)
     {
         foreach (var n in nodes) { yield return n; foreach (var c in Walk(n.Children)) yield return c; }

@@ -490,6 +490,18 @@ internal static class ResultsView
         return OpenRow(r);
     }
 
+    /// <summary>The references the open row's pair predicts a clash for (every group but a patch change nothing predicted),
+    /// both objects of each: what the Records tree counts as records in a conflict. Empty when no row is open.</summary>
+    internal static IReadOnlySet<string> ConflictRefs()
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (Open is null || !Loaded.TryGetValue(Open.Pair, out var rows)) return set;
+        foreach (var r in rows.Where(r => r.Group != ResultGroup.PatchChange))
+            foreach (var k in new[] { r.Place.RefKey, r.Place.OtherKey })
+                if (k is not null) set.Add(k);
+        return set;
+    }
+
     /// <summary>Mark, in the scene shown, every listed row of the open row's pair that the scene draws, each in its group's shape.</summary>
     static void ApplyMarks()
     {
