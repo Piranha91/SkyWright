@@ -101,9 +101,6 @@ internal static class FenceGuard
             new("_geometry-harness/runcontrol/EvalSettings.cs", ["evalsettings.py"],
                 "prints only: its refusal sentences tell the user to run evalsettings.py window or set; it opens the settings file, never the script",
                 "step 2(b), when EvalSettings leaves runcontrol"),
-            new("data/record-field-scope.json", ["test_recordrows.py"],
-                "prose only: its about text names the module's suite that checks every field it lists exists in the schema; no program follows it",
-                "not named in the task file; proposed with the split of the mixed suites (test_recordrows' outside cases return outside), or a prose edit in step 3's registry work"),
         ],
         SkillReadsOutside:
         [
