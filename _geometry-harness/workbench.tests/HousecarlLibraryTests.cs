@@ -65,8 +65,40 @@ public sealed class HousecarlLibraryTests : IClassFixture<TiltedRefWorld>
     {
         var lib = HousecarlLibrary.Open(Target(Output()), Path.Combine(_w.Root, "hcdata-closed"), TestCorpus.Path);
         lib.Dispose();
-        var ex = await Assert.ThrowsAsync<ObjectDisposedException>(() => lib.CallAsync(ToolNames.Records, new Dictionary<string, object?> { ["formids"] = new[] { TiltedRefWorld.Ref.ToString() } }));
-        Assert.Contains("after its profile was closed", ex.Message);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => lib.CallAsync(ToolNames.Records, new Dictionary<string, object?> { ["formids"] = new[] { TiltedRefWorld.Ref.ToString() } }));
+        Assert.Equal("houseCARL's housecarl_records was called after its profile was closed; open the profile again.", ex.Message);
+    }
+
+    /// <summary>What the server's argument shim did that a typed call cannot need: every parameter of the five tools has
+    /// a default, so none can go missing; a parameter without one is refused, never passed as null; an in_place edit is
+    /// refused outright; and an argument that only the shim's coercion would accept (a bare string for a list) is
+    /// refused in one sentence, not coerced. Rejects a call site that starts relying on any of them.</summary>
+    [Fact]
+    public void What_the_servers_argument_shim_did_is_refused_in_one_sentence_in_process()
+    {
+        using var lib = HousecarlLibrary.Open(Target(Output()), Path.Combine(_w.Root, "hcdata-shim"), TestCorpus.Path);
+        foreach (var t in new[] { typeof(HousecarlMcp.RecordsTools).GetMethod("Records")!, typeof(HousecarlMcp.ApplyTools).GetMethod("Apply")!,
+                                  typeof(HousecarlMcp.RemoveTools).GetMethod("Remove")!, typeof(HousecarlMcp.ForwardTools).GetMethod("Forward")!,
+                                  typeof(HousecarlMcp.AssetTools).GetMethod("AssetStatus")! })
+            Assert.All(t.GetParameters().Where(p => p.ParameterType != typeof(HousecarlMcp.LoadOrderService) && p.ParameterType != typeof(CancellationToken)),
+                       p => Assert.True(p.HasDefaultValue, $"{t.Name}'s {p.Name} has no default, so a call that leaves it out must be refused"));
+        var inPlace = Assert.Throws<InvalidOperationException>(() => lib.Invoke(ToolNames.Apply, new Dictionary<string, object?> { ["ops"] = Array.Empty<object>(), ["in_place"] = "HcWbWorld.esm" }));
+        Assert.Equal("houseCARL's housecarl_apply was asked to edit a plugin in place, which SkyWright never does; this is a fault in SkyWright.", inPlace.Message);
+        var bare = Assert.Throws<InvalidOperationException>(() => lib.Invoke(ToolNames.Records, new Dictionary<string, object?> { ["formids"] = TiltedRefWorld.Ref.ToString() }));
+        Assert.StartsWith("houseCARL's housecarl_records could not be given its formids (", bare.Message);
+        Assert.DoesNotContain('\n', bare.Message);
+        // a nested part houseCARL marks required (an op's formid) is houseCARL's own refusal, in one answer
+        var said = lib.Invoke(ToolNames.Apply, new Dictionary<string, object?> { ["ops"] = new[] { new Dictionary<string, object?> { ["field_path"] = "Placement.Position", ["value"] = "1,2,3" } }, ["patch"] = "WbShim", ["dry_run"] = true });
+        Assert.StartsWith("error:", said.TrimStart());
+    }
+
+    [Fact]
+    public void An_assembly_that_is_not_a_file_is_one_sentence_and_the_builds_two_assemblies_are_files()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => HousecarlLibrary.IdentityOf(""));
+        Assert.Equal("houseCARL's code is not a file this program can read (''), so what reads and writes cannot be named; reinstall SkyWright.", ex.Message);
+        Assert.True(File.Exists(typeof(HousecarlMcp.LoadOrderService).Assembly.Location) && File.Exists(typeof(HousecarlCore.WriteEngine).Assembly.Location),
+                    "the build's houseCARL assemblies are not files beside it");
     }
 
     [Fact]

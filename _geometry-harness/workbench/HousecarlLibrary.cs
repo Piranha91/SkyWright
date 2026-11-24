@@ -40,7 +40,7 @@ internal sealed class HousecarlLibrary : IDisposable
         try
         {
             if (_disposed != 0)
-                throw new ObjectDisposedException(nameof(HousecarlLibrary), $"houseCARL's {tool} was called after its profile was closed; open the profile again.");
+                throw new InvalidOperationException($"houseCARL's {tool} was called after its profile was closed; open the profile again.");
             return HousecarlCalls.Invoke(_svc, tool, args, ct);
         }
         finally { _use.ExitReadLock(); }
