@@ -14,12 +14,10 @@ internal sealed record LauncherMod(string Name, int Priority, bool Enabled, bool
 /// <summary>The launcher's state: the mode, the chosen instance, profile and game, the profile's
 /// mod folders and the ticked ones, the ticked probes, the Output Folder and the Work Folder. Every verb is a method here
 /// that the window's controls and <c>workbench_act</c> both call; a refusal is an <see cref="InvalidOperationException"/>
-/// carrying one sentence. It also owns the houseCARL server bound to the open profile, which the endpoint forwards to.</summary>
+/// carrying one sentence. Opening a profile retires the houseCARL writers of the one before (<see cref="HousecarlWriters"/>).</summary>
 internal sealed class Launcher : IAsyncDisposable
 {
     readonly object _gate = new();
-    PatchWriter? _bound;
-    Task<PatchWriter>? _starting;
 
     internal string Mode { get; private set; } = "free";
     internal string? Instance { get; private set; }
@@ -110,7 +108,6 @@ internal sealed class Launcher : IAsyncDisposable
     System.Threading.Timer? _enforce;
     bool _groupAborted;
 
-    internal Mo2OutputLayout Layout() => Mo2OutputLayout.Of(Instance!, Profile!, Game!);
 
     /// <summary>Free mode: any MO2 instance in place. The game folder is the instance's gamePath unless given.</summary>
     internal async Task<string> OpenProfileAsync(string? mode, string? instance, string? profile, string? game)
@@ -149,7 +146,6 @@ internal sealed class Launcher : IAsyncDisposable
         else if (Mo2Instance.TryResolve(inst, out var paths) && paths is not null) g = OutputFolderPolicy.Full(paths.GamePath);
         else g = GamePathFromIni(inst) ?? throw new InvalidOperationException($"'{inst}' names no game folder in its ModOrganizer.ini (gamePath); give game, the game's folder.");
         var lines = File.ReadAllLines(modlist).Where(l => l.Length > 1 && (l[0] == '+' || l[0] == '-' || l[0] == '*')).ToList();
-        await DropBoundAsync();
         // a new profile: every houseCARL writer of the old one is closed (on the pool), and the next use opens the new one
         await HousecarlWriters.RetireAll();
         lock (_gate)
@@ -563,63 +559,8 @@ internal sealed class Launcher : IAsyncDisposable
         }
     }
 
-
-    /// <summary>The houseCARL server bound to the open profile by explicit paths, its data folder under the Work Folder
-    ///, started on the first forwarded call.</summary>
-    Task<PatchWriter> BoundAsync()
-    {
-        lock (_gate)
-        {
-            if (_bound is not null) return Task.FromResult(_bound);
-            if (_starting is not null) return _starting;
-            NeedProfile();
-            if (Output is null) throw new InvalidOperationException("choose an Output Folder first (workbench_act verb set_output): in manual mode every houseCARL write goes under it.");
-            if (WorkFolder is null) throw new InvalidOperationException("choose a Work Folder outside the instance and the game folder first (workbench_act verb set_work_folder): the houseCARL server keeps its data there.");
-            var exe = Program.ServerExe();
-            var corpus = Program.Corpus();
-            var target = new WriteTarget(Instance!, Profile!, Path.Combine(Game!, "Data"), Output);
-            var data = Path.Combine(WorkFolder, "hcdata");
-            _starting = Task.Run(async () =>
-            {
-                var w = await PatchWriter.StartAsync(exe, target, data, corpus, WorkbenchHost.Say);
-                lock (_gate) { _bound = w; _starting = null; }
-                return w;
-            });
-            return _starting;
-        }
-    }
-
-    internal async Task<CallToolResult> ForwardAsync(string tool, IDictionary<string, JsonElement>? args, JsonElement schema, CancellationToken ct)
-    {
-        // judge the names the server will bind, not only the spelling given (toFile binds as to_file)
-        var (canon, bad) = ForwardRule.Canonical(tool, args is null ? null : new Dictionary<string, JsonElement>(args), schema);
-        if (bad is not null) return StateTools.Refuse(bad);
-        args = canon;
-        string output; Mo2OutputLayout layout; string? work;
-        lock (_gate)
-        {
-            NeedProfile();
-            if (Output is null) throw new InvalidOperationException("choose an Output Folder first (workbench_act verb set_output): in manual mode every houseCARL write goes under it.");
-            output = Output; layout = Layout(); work = WorkFolder;
-        }
-        var (send, refusal) = ForwardRule.Prepare(tool, args is null ? null : new Dictionary<string, JsonElement>(args), output, layout, work);
-        if (refusal is not null) return StateTools.Refuse(refusal);
-        // the folder an allowed to_file goes in may not exist yet; it is under the Output or the Work Folder
-        if (send!.TryGetValue("to_file", out var tfe) && tfe.ValueKind == JsonValueKind.String && Path.GetDirectoryName(tfe.GetString()!) is { Length: > 0 } tfd)
-            Directory.CreateDirectory(tfd);
-        var server = await BoundAsync();
-        return await server.ForwardAsync(tool, send!, ct);
-    }
-
-    async Task DropBoundAsync()
-    {
-        PatchWriter? old; Task<PatchWriter>? starting;
-        lock (_gate) { old = _bound; starting = _starting; _bound = null; _starting = null; }
-        if (starting is not null) { try { old = await starting; } catch { } }
-        if (old is not null) await old.DisposeAsync();
-    }
-
-    public async ValueTask DisposeAsync() => await DropBoundAsync();
+    /// <summary>Closes every houseCARL writer (the app closing).</summary>
+    public async ValueTask DisposeAsync() => await HousecarlWriters.RetireAll();
 
     /// <summary>The <c>launcher</c> part of <c>workbench_state</c>.</summary>
     internal object Project()

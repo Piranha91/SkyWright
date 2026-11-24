@@ -60,9 +60,7 @@ internal sealed class StateServer : IAsyncDisposable
             o.ServerInstructions = StateTools.Instructions;
         })
         .WithHttpTransport(o => o.Stateless = true)
-        .WithTools<StateTools>()
-        // the houseCARL tools of the server bound to the launcher's profile, forwarded under the manual-mode write rule
-        .WithTools(await ForwardedTool.AllAsync(SafeServerExe()));
+        .WithTools<StateTools>();
         var url = $"http://127.0.0.1:{port}";
         b.WebHost.UseUrls(url);
         var app = b.Build();
@@ -70,8 +68,6 @@ internal sealed class StateServer : IAsyncDisposable
         await app.StartAsync();
         return new StateServer(app, url, hub);
     }
-
-    static string SafeServerExe() { try { return Program.ServerExe(); } catch (InvalidOperationException) { return ""; } }
 
     public async ValueTask DisposeAsync() { await _app.StopAsync(); await _app.DisposeAsync(); await _hub.Launcher.DisposeAsync(); }
 }

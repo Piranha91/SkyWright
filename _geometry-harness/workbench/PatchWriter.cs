@@ -126,15 +126,6 @@ internal sealed class PatchWriter : IAsyncDisposable
         return text;
     }
 
-    /// <summary>A forwarded call (the workbench endpoint's houseCARL surface): the arguments as the client sent them,
-    /// after the manual-mode rule, and the server's own answer.</summary>
-    internal async Task<CallToolResult> ForwardAsync(string tool, IReadOnlyDictionary<string, System.Text.Json.JsonElement> args, CancellationToken ct = default)
-    {
-        if (_client is null) throw new InvalidOperationException($"{tool} is not forwarded: this writer runs houseCARL's code in process, not a server.");
-        Log($"forwarded {tool} to the houseCARL server of {Target}");
-        return await _client.CallToolAsync(new CallToolRequestParams { Name = tool, Arguments = args.ToDictionary(kv => kv.Key, kv => kv.Value) }, ct);
-    }
-
     static string F(float v) => v.ToString("R", CultureInfo.InvariantCulture);
     static string V(HousecarlCore.Vec3 v) => $"{F(v.X)},{F(v.Y)},{F(v.Z)}";
 
