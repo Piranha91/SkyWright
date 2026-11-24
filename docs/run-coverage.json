@@ -6827,6 +6827,31 @@
       ]
     },
     {
+      "id": "reporting_data",
+      "kind": "script",
+      "lang": "python",
+      "path": "integration/housecarl/reporting_data.py",
+      "adapter": "none",
+      "stageSource": "unknown",
+      "exempt": "Imported library with no executable entry point, no child process and no workload: it names where the houseCARL integration module keeps its own report and reel data and agent definitions. The module's scripts that import it own the runlog lifecycle.",
+      "answers": [
+        "Where are the report's words, the scene policy, the narration words and the model agent definitions the houseCARL integration module reads?"
+      ],
+      "useWhen": "Read the report and reel data or the agent definitions from a script or suite inside integration/housecarl/, never from houseCARL's skill folders.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/reporting_data.py",
+          "anchor": "Where the houseCARL integration module keeps its own data"
+        }
+      ],
+      "inputs": [
+        "None: the module file's own location."
+      ],
+      "outputs": [
+        "DATA, PRIORITIES, SCENE_POLICY, NARRATION and AGENTS paths, and under(tree) for a copy of the checkout."
+      ]
+    },
+    {
       "id": "runcontrol",
       "kind": "csharp-exe",
       "path": "_geometry-harness/runcontrol/runcontrol.csproj",

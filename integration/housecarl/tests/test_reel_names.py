@@ -29,7 +29,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the module's fol
 import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is: its tools and run log on sys.path
 sys.path.append(str(SW.HARNESS / "tests"))  # SkyWright's own suites and fixtures the module's suites reuse
 HARNESS = HERE.parent
-SKILL = SW.CHECKOUT / "external" / "houseCARL" / ".claude" / "skills" / "evaluation-reporting" / "references"
+import reporting_data  # noqa: E402
+SKILL = reporting_data.DATA
 sys.path.insert(0, str(HARNESS))
 sys.path.insert(0, str(SW.SCRIPTS))
 

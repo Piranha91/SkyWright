@@ -59,8 +59,9 @@ except ImportError:  # pragma: no cover - stated, never worked around
     jinja2 = None
 
 TEMPLATES = HERE / "evalreport_templates"
-PRIORITIES = SW.CHECKOUT / "external" / "houseCARL" / ".claude" / "skills" / "evaluation-reporting" / "references" / "report-priorities.json"
-NARRATION = PRIORITIES.parent / "narration.json"
+import reporting_data  # noqa: E402  the module's own data
+PRIORITIES = reporting_data.PRIORITIES
+NARRATION = reporting_data.NARRATION
 
 PRESENTATION_SCHEMA = 1
 BUNDLE_SCHEMA = 2
@@ -11437,7 +11438,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     return plan
 
 
-SCENE_POLICY = SW.CHECKOUT / "external" / "houseCARL" / ".claude" / "skills" / "evaluation-reporting" / "references" / "scene-policy.json"
+SCENE_POLICY = reporting_data.SCENE_POLICY
 
 
 def bundle_media_rows(b: "Bundle", arms: set) -> list[dict]:

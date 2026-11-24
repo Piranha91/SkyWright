@@ -12,7 +12,7 @@ import math
 import re
 from pathlib import Path
 
-POLICY = Path(__file__).resolve().parent.parent.parent / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/references/scene-policy.json"
+POLICY = Path(__file__).resolve().parent / "reporting-data" / "scene-policy.json"   # reporting_data.SCENE_POLICY, read beside this file
 
 
 COLOURS = ("cyan", "magenta")

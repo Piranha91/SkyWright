@@ -24,7 +24,8 @@ _path = os.environ.get("READERDOC_PATH") or str(HERE.parent / "readerdoc.py")
 _spec = importlib.util.spec_from_file_location("readerdoc_under_test", _path)
 RD = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(RD)
-WORDS = json.loads((SW.CHECKOUT / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/references/report-priorities.json")
+import reporting_data  # noqa: E402
+WORDS = json.loads((reporting_data.PRIORITIES)
                    .read_text(encoding="utf-8"))["readerDoc"]
 
 A, B, OTHER, PATCH = "ModA.esp", "ModB.esp", "Other.esp", "ModA - ModB patch.esp"

@@ -264,7 +264,8 @@ def t8(root):
     check(sha(run / "plan.json") == plan_sha, "8: the plan is unchanged")
 
 
-AGENTS = SW.CHECKOUT / "external" / "houseCARL" / "plugin" / "agents"
+import reporting_data  # noqa: E402
+AGENTS = reporting_data.AGENTS
 SHORT_NAMES = ("haiku", "sonnet", "opus", "fable")
 MODEL_KEYS = ("models.recordChecks", "models.imageReview", "models.flipPlan", "models.rewriteExplanations",
               "models.checkExplanations")
@@ -360,7 +361,7 @@ def t10(root):
 
 def t11(root):
     agents = shipped_agents()
-    check(bool(agents), "11: plugin/agents holds agent definitions")
+    check(bool(agents), "11: the module's model-agents folder holds agent definitions")
     for mid, a in agents.items():
         check(mid.startswith("claude-") and mid not in SHORT_NAMES, f"11: {a['stem']} names a full model ID ({mid})")
         check(a["name"] == a["stem"] == f"model-{mid}", f"11: {a['stem']}: file, name and model agree")

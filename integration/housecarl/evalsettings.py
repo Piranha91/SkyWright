@@ -83,7 +83,8 @@ def _plugin_name() -> str:
     return str(json.loads((PLUGIN_DIR / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["name"])
 
 
-MODEL_AGENTS = _model_agents(PLUGIN_DIR / "agents")
+import reporting_data  # noqa: E402  the module's own agent definitions
+MODEL_AGENTS = _model_agents(reporting_data.AGENTS)
 
 # The option table: the window, validation, `show` and `defaults` all read this one list. `default` None means the
 # evaluation tool's own default (named in `defaultText`); `when` shows the option only under another option's value.

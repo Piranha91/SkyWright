@@ -28,7 +28,8 @@ import test_evalreport_prediction as P  # noqa: E402  (sets the no-settings envi
 import evalreport as R  # noqa: E402
 import reel_plan  # noqa: E402
 
-SKILL = SW.CHECKOUT / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/references"
+import reporting_data  # noqa: E402
+SKILL = reporting_data.DATA
 PR = json.loads((SKILL / "report-priorities.json").read_text(encoding="utf-8"))
 BASE, A, B, OTHER, PATCH = P.BASE, P.MOD_A, P.MOD_B, P.OTHER, P.PATCH
 CONTACT, OVERLAP, RECORDS, CELLATTR, NAVOWN = P.CONTACT, P.OVERLAP, P.RECORDS, P.CELLATTR, P.NAVOWN

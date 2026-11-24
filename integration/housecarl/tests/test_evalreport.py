@@ -33,6 +33,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the module's folder
 import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is: its tools and run log on sys.path
+import reporting_data  # noqa: E402  the module's own reporting data
 sys.path.append(str(SW.HARNESS / "tests"))  # SkyWright's own suites and fixtures the module's suites reuse
 import os as _os_settings, tempfile as _tf_settings  # noqa: E402
 # The evaluation tools read the saved evaluation settings. These known answers build their bundles with evalrun and
@@ -1079,7 +1080,7 @@ def check_alternative_identity(bundle: Path):
           and not names(masters[0], "candidate-01-patcha") and not names(masters[0], "candidate-03-combined"),
           f"{label}: a check clean on exactly one arm names that arm alone (got {masters!r})")
     # the concise page prints a no-problem line in its short form (skill data concise.nullLong -> nullShort, W-B1)
-    conc_ = (json.loads((SW.CHECKOUT / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/references/report-priorities.json")
+    conc_ = (json.loads((reporting_data.PRIORITIES)
                         .read_text(encoding="utf-8")).get("concise") or {})
     links = [x.replace(conc_.get("nullLong") or "\0", conc_.get("nullShort") or "") for x in links]
     masters = [x.replace(conc_.get("nullLong") or "\0", conc_.get("nullShort") or "") for x in masters]

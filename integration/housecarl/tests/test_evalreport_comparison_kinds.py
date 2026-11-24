@@ -39,6 +39,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the module's folder
 import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is: its tools and run log on sys.path
+import reporting_data  # noqa: E402  the module's own reporting data
 sys.path.append(str(SW.HARNESS / "tests"))  # SkyWright's own suites and fixtures the module's suites reuse
 import os as _os_settings, tempfile as _tf_settings  # noqa: E402
 # The evaluation tools read the saved evaluation settings; these known answers use the built-in defaults, never
@@ -175,8 +176,7 @@ def run_compiler(arms, repaired_on=None, created_on=None, patches=None, declared
     with tempfile.TemporaryDirectory() as td:
         bdir = make_bundle(Path(td) / "bundle", arms, repaired_on, created_on, patches,
                            import_note, import_arm, targets)
-        pr = json.loads((SW.CHECKOUT / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/"
-                         "references/report-priorities.json").read_text(encoding="utf-8"))
+        pr = json.loads((reporting_data.PRIORITIES).read_text(encoding="utf-8"))
         conc, page = pr.get("concise") or {}, pr.get("page") or {}
         settings = {"mode": "concise", "layout": conc.get("layout", "normal"),
                     "maxPages": conc.get("maxPages", 8),
@@ -214,8 +214,7 @@ def render_artifacts(plan):
     one of two templates read it, and a test on the data could not tell. These cells assert on
     the rendered text of every artifact instead.
     """
-    pr = json.loads((SW.CHECKOUT / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/"
-                     "references/report-priorities.json").read_text(encoding="utf-8"))
+    pr = json.loads((reporting_data.PRIORITIES).read_text(encoding="utf-8"))
     view = R.effective_view(plan, 3, 1, pr, "normal")
     css = ""
     with tempfile.TemporaryDirectory() as td:

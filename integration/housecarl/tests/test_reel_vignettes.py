@@ -37,7 +37,9 @@ import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is: its t
 sys.path.append(str(SW.HARNESS / "tests"))  # SkyWright's own suites and fixtures the module's suites reuse
 HARNESS = HERE.parent
 ROOT = SW.CHECKOUT
-SKILL = ROOT / "external" / "houseCARL" / ".claude/skills/evaluation-reporting"
+import reporting_data  # noqa: E402
+DATA = reporting_data.DATA
+SKILL = ROOT / "external" / "houseCARL" / ".claude/skills/evaluation-reporting"   # the skill's prose only (case_skill_data's docs check)
 sys.path.insert(0, str(HARNESS))
 os.environ["HOUSECARL_EVAL_SETTINGS"] = str(Path(tempfile.gettempdir()) / "hc-tests-no-eval-settings" / "houseCARL.evaluation.json")
 
@@ -1151,7 +1153,7 @@ def planned(pres, names, masters, search, mods, policy=POLICY, words=WORDS, capt
         return copy.deepcopy(pres)
     out = copy.deepcopy(pres)
     switches = SWITCHES if switches is None else switches
-    shipped = json.loads((SKILL / "references/report-priorities.json").read_text(encoding="utf-8"))["reel"]["words"]
+    shipped = json.loads((DATA / "report-priorities.json").read_text(encoding="utf-8"))["reel"]["words"]
     first = {**words, "patch": {k: (v[0] if isinstance(v, list) else v) for k, v in words["patch"].items()}}
     merged = {**shipped, **{k: ({**shipped.get(k, {}), **v} if isinstance(v, dict) else v) for k, v in first.items()}}
     attempts = [("as given", words, {"switches": switches}), ("each pool's first phrasing", first, {"switches": switches}),
@@ -1484,7 +1486,7 @@ def case_planner():
 # ------------------------------------------------------------------------------------------ phase 3 gaps (item 36)
 def shipped_pool_words():
     """The test's words with the shipped phrasing pools (every case the planner can say, as the skill ships it)."""
-    shipped = json.loads((SKILL / "references/report-priorities.json").read_text(encoding="utf-8"))["reel"]["words"]
+    shipped = json.loads((DATA / "report-priorities.json").read_text(encoding="utf-8"))["reel"]["words"]
     return {**WORDS, "patch": dict(shipped["patch"])}
 
 
@@ -1559,7 +1561,7 @@ def case_gaps():
     # N7: a hit in housecarl_nexus_file_search's own shape (the file an object; Helgi's round-2 reel spoke that object
     # raw) is said by the file's name, with its status and category cautions
     pres, names, masters, search, mods, words = pool_fixture("listed")
-    shipped = json.loads((SKILL / "references/report-priorities.json").read_text(encoding="utf-8"))["reel"]["words"]
+    shipped = json.loads((DATA / "report-priorities.json").read_text(encoding="utf-8"))["reel"]["words"]
     words["leadCautions"] = shipped["leadCautions"]
     search["pairs"][0]["hits"] = [{"modId": 34228, "pageName": "Alpha Patches", "otherMentions": [],
                                    "file": {"fileId": "136332", "name": "Alpha - Target patch v2", "version": "1.0",
@@ -2055,8 +2057,8 @@ def case_caveats():
 
 
 def case_skill_data():
-    pr = json.loads((SKILL / "references/report-priorities.json").read_text(encoding="utf-8"))
-    sp = json.loads((SKILL / "references/scene-policy.json").read_text(encoding="utf-8"))
+    pr = json.loads((DATA / "report-priorities.json").read_text(encoding="utf-8"))
+    sp = json.loads((DATA / "scene-policy.json").read_text(encoding="utf-8"))
     words = ((pr.get("reel") or {}).get("words")) or {}
     vign = sp.get("vignettes") or {}
     # since R2 (2026-11-13) each patch case is one phrasing: one fact said one way in every vignette
@@ -2228,7 +2230,7 @@ def case_render():
 # ------------------------------------------------------------------------------------------ code sabotage arms
 # Each arm breaks one rule in a copy of the shipped code or skill data (one exact replacement each, counted), runs the
 # case that protects it against the copy, and passes only when the named check fails on its own assertion.
-REF = "external/houseCARL/.claude/skills/evaluation-reporting/references"
+REF = "integration/housecarl/reporting-data"
 CODE_SABOTAGE = {
     "code-f1": ("planner", "F1-own-pair", [("integration/housecarl/reel_plan.py",
         "return [p for p in supplied if {other.lower(), target.lower()} <= patch_pair(p, masters)]",
@@ -2399,7 +2401,7 @@ def code_sabotage(name: str) -> int:
                 shutil.copy2(f, tmp / d / f.name)
         (tmp / "integration/housecarl/tests").mkdir()
         shutil.copy2(Path(__file__), tmp / "integration/housecarl/tests" / Path(__file__).name)
-        shutil.copytree(SKILL, tmp / "external" / "houseCARL" / ".claude/skills/evaluation-reporting")
+        shutil.copytree(DATA, reporting_data.under(tmp))
         for rel, old, new in edits:
             f = tmp / rel
             text = f.read_text(encoding="utf-8")
@@ -2456,7 +2458,7 @@ def plan_final(pres, names, masters, search, mods, captures, final):
 
 def binding_words():
     """The test's words plus any the shipped skill data adds (the closed-capture sentence is skill data)."""
-    shipped = json.loads((SKILL / "references/report-priorities.json").read_text(encoding="utf-8"))["reel"]["words"]
+    shipped = json.loads((DATA / "report-priorities.json").read_text(encoding="utf-8"))["reel"]["words"]
     return {**WORDS, **{k: v for k, v in shipped.items() if k not in WORDS}}
 
 

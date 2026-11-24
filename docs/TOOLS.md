@@ -327,6 +327,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [When motionprobe sweep or deltacheck, or contactprobe's swept review, runs out of memory, does it say so in one sentence that says what to try, and does that advice work?](#tool-_geometry-harness-tests-test_swept_oom_sentence.py) — `_geometry-harness/tests/test_swept_oom_sentence.py`
 - [Where are the built probe, runcontrol and server programs for the Python tools?](#tool-buildlayout) — `buildlayout`
 - [Where are the occlusion primitives in this scene?](#tool-viewprobe.planes) — `viewprobe.planes`
+- [Where are the report's words, the scene policy, the narration words and the model agent definitions the houseCARL integration module reads?](#tool-reporting_data) — `reporting_data`
 - [Where can I put a camera that verifiably sees these subjects?](#tool-shotplan) — `shotplan`
 - [Where can a verified camera see all these subjects?](#tool-shotplan.plan) — `shotplan.plan`
 - [Where do neighbouring landscape vertices disagree?](#tool-viewprobe.seams) — `viewprobe.seams`
@@ -5408,6 +5409,21 @@ Inputs: Evaluation evidence and presentation requirements.
 Outputs: Evidence-bound scene/capture requests.
 
 Source: [integration/housecarl/report_scenes.py](../integration/housecarl/report_scenes.py) — `Evidence-bound capture requests; domain selection rules live in the reporting skill.`
+
+
+<a id="tool-reporting_data"></a>
+
+### reporting_data
+
+**Where are the report's words, the scene policy, the narration words and the model agent definitions the houseCARL integration module reads?**
+
+Read the report and reel data or the agent definitions from a script or suite inside integration/housecarl/, never from houseCARL's skill folders.
+
+Inputs: None: the module file's own location.
+
+Outputs: DATA, PRIORITIES, SCENE_POLICY, NARRATION and AGENTS paths, and under(tree) for a copy of the checkout.
+
+Source: [integration/housecarl/reporting_data.py](../integration/housecarl/reporting_data.py) — `Where the houseCARL integration module keeps its own data`
 
 
 <a id="tool-runcontrol"></a>

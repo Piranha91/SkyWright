@@ -64,7 +64,8 @@ sys.path.append(str(SW.HARNESS / "tests"))  # SkyWright's own suites and fixture
 HARNESS = HERE.parent
 EVALREPORT = Path(os.environ.get("HOUSECARL_EVALREPORT") or (HARNESS / "evalreport.py"))
 TREE = EVALREPORT.parent.parent.parent   # the checkout: the module is integration/housecarl/
-REFS = TREE / "external" / "houseCARL" / ".claude" / "skills" / "evaluation-reporting" / "references"
+import reporting_data  # noqa: E402
+REFS = reporting_data.under(TREE)   # the module's own reporting data, in the tree under test
 DATA = REFS / "narration.json"
 os.environ["PYTHONUTF8"] = "1"
 os.environ.setdefault("HOUSECARL_EVAL_SETTINGS",

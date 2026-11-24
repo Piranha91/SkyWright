@@ -129,7 +129,15 @@ internal static class FenceGuard
                 "the plan's settings reader looks for plugin/agents above its own program to validate model IDs",
                 "step 2(b), when EvalSettings leaves runcontrol"),
         ],
-        SkillReadsInside: null,   // rule (2) is applied once the module reads its own copy of the data
+        SkillReadsInside:
+        [
+            new("integration/housecarl/tests/test_reel_vignettes.py", ["skills/evaluation-reporting"],
+                "case_skill_data's docs check reads the skill's prose (SKILL.md, references/reel-layout.md) for rules the vignette format superseded; prose, not data",
+                "step 3, when the skill moves into the module"),
+            new("integration/housecarl/tests/test_narration_fidelity.py", ["evaluation-reporting"],
+                "C2029 reads the skill's SKILL.md for the setting and flag a rewrite needs; prose, not data",
+                "step 3, when the skill moves into the module"),
+        ],
         SkillExempt:
         [
             new("src/SkyWright.Guards/", "the guard names the folders it fences"),

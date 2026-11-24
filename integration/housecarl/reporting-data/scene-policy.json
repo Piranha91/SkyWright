@@ -1,0 +1,153 @@
+{
+  "schemaVersion": 1,
+  "examplesPerPair": 3,
+  "vignettes": {
+    "about": "The review reel's selection (evalreport -> reel_plan.py). Every admitted clash between mods is pictured, represented by its type's 'There are N cases' sentence, or counted in the one statement of clashes the reel cannot picture. Of the clashes a picture can show (pictureTypes, drawableFields, no visual effect), a type with at most allUpTo shows all of them; otherwise perType are taken, one per mod pair first in pair order (most clashes first), then round the pairs again. Capture tries them in that order, at most captureAttemptsPerType per type; a refused capture is counted as not pictured and the next takes its place. maxVignettes caps the reel. Selection reads only the prediction record and the capture results, never which media exists.",
+    "allUpTo": 3,
+    "perType": 3,
+    "maxVignettes": 24,
+    "patchNewPerCheck": 1,
+    "patchNewAbout": "A clash that appears only with every supplied patch loaded (the report's new clashes with the patches, by check) of a check capture can request is pictured with the patches loaded, beside the same camera without them, after What to do: patchNewPerCheck examples per check, the strongest first, inside maxVignettes. With capture closed an example never captured has no vignette.",
+    "captureAttemptsPerType": 5,
+    "typeOrder": ["overlap", "contact", "record", "cell", "state", "navmesh", "other"],
+    "otherType": "other",
+    "countRows": ["navmesh"],
+    "readingWordsPerSecond": 3.0,
+    "pageMaxWords": 90,
+    "types": {"geometry.object-overlap": "overlap", "geometry.object-contact": "contact",
+              "geometry.fixture-empty-space": "contact", "records.contested-fields": "record",
+              "records.cell-attributes": "cell", "state.conditional-geometry": "state",
+              "geometry.navmesh-ownership": "navmesh", "geometry.placement-contact": "contact"},
+    "pictureTypes": ["overlap", "contact", "record", "state", "navmesh"], "captureChecks": ["geometry.navmesh-ownership", "geometry.object-overlap", "records.contested-fields", "state.conditional-geometry"], "captureChecksWhy": "The checks whose clashes capture can request (report_scenes.capturable_checks: this file's rules plus the reel's placement split and world-state pair); a known answer keeps the two equal. A clash a picture could show but no capture took is said as captureNoRule when its check is not here, else as captureLimit.",
+    "drawableFields": ["Placement"],
+    "groupKey": ["type", "pair", "cell", "field"],
+    "groupKeyWhy": "Instances of one problem are pictured once, the count still said and the other members named: the type (an overlap and a placement are different problems), the mod pair (the patch sentence and the fix belong to the pair), the cell (the same change in two places is two things a player meets) and, for a record clash, the field (a moved NPC and a renamed one differ). A record clash's cell is the one the other mod's version is filed in; a geometry clash's is the cell its row names. A group's next member is its capture fallback.",
+    "structureShare": 0.5,
+    "storeyTolerance": 96.0,
+    "metresPerUnit": 0.01428,
+    "orientWhy": "A placement split says who moved the object (a version differing from the base game's), whether the structure was replaced (at least structureShare of the mover's overrides in that cell are turned off) or moved with it (at least structureShare of its remaining overrides there shift by the object's height within storeyTolerance); otherwise nothing is said about the structure, where the other spot is (metres, 70 u to the metre, rounded to 5 m; under 5 m it is close) and, from the right half's downward probe, whether that spot has no floor, is below the ground (exteriors) or in the air. Missing data drops the clause.",
+    "drawableWhy": "A record clash is pictured only for a placement, as a split screen: the other mod's spot on the left (the setup without the mod being added), the winner's on the right (the prediction setup), the object highlighted in each (an actor by its puck). It needs a drawn base (a model or an actor) and the other mod's version winning once the mod being added is gone. A world-state clash is pictured in the state it was measured in (viewprobe --state with the switch the row names).",
+    "volumeFactor": 50,
+    "volumeFactorWhy": "When one participant's bounds (OBND x scale cubed) are this many times the other's, only the smaller is marked: a landscape-scale ghost covers the frame and shows nothing.",
+    "split": {"half": [638, 680], "divider": 4, "strip": 40},
+    "stillReasonsWhy": "Why a clash is counted as one the reel cannot picture (recorded in the plan, not shown): the capture tools refuse visual-effect participants and the renderer skips effect shapes; cell settings and record fields other than a placement have no camera path; a navmesh clash has one only where its broken link starts in a navmesh one mod re-cut over another's, outdoors (item 24's camera), and is pictured only when the control in the setup without the mod finds that link whole; a placement whose base has no model, or whose other mod's version would not win without the mod, has no true left half; a capture that no camera could take is refused.",
+    "stillReasons": {
+      "effect": "One of the two is a visual effect such as mist, which a picture cannot show clashing.",
+      "record": "A record field other than a placement has no picture.",
+      "cell": "A cell setting has no picture.",
+      "navmesh": "Only a broken navmesh link that starts in a navmesh one mod re-cut over the other's, outdoors, can be drawn beside the earlier version; these links start elsewhere.",
+      "navmeshControlBroken": "Without the mod this link is broken too, so a picture cannot show what the mod changes.",
+      "notDrawn": "The placed object has no model to draw.",
+      "leftNotLoser": "Without the mod being added, a third plugin's placement wins, so the other mod's spot cannot be shown.",
+      "captureRefused": "No camera could see the clash.", "stationSaw": "A camera spot at a player's eye height sees it, but no picture of it could be kept.", "unmarkable": "The renderer cannot mark the see-through shapes of one of its objects, so no picture was taken.", "placeOnlyWithMod": "The place exists only with the mod, so there is no picture of it without the mod.", "noView": "No camera at a player's eye height, behind a cutaway or from above could see both objects.", "noPlace": "No spot near it where a camera could stand was found.", "switchedOff": "One of its objects is switched off in the game for good, so a player never sees this clash.", "startsOff": "One of its objects starts switched off in the game, so it is not drawn.", "deleted": "One of its objects is deleted, so there is nothing to picture.", "notPlaced": "One of its objects is not placed in that cell in the winning load order, so there is nothing to picture.", "navmeshNoPicture": "The navmesh picture could not show this link.", "captureFailed": "The capture tools could not take this picture; that is a tool problem, not the clash.", "notDrawnUnknown": "The renderer does not draw one of its objects, so there is nothing to picture.", "buried": "Buried inside another object or the ground: no camera at a player's eye height around it saw any of it, so a player does not see it.", "captureNoRule": "Not captured: the capture tool has no camera for this kind of clash.", "captureLimit": "Not captured: capture limit reached.", "stateBlocked": "Without the mod, another object stands where the cameras that see it would be, so no picture shows it both ways.",
+      "removed": "The winning mod takes the object out of the world, so there is no second spot to show; the reel says so aloud.",
+      "other": "This kind of clash has no picture in this reel."
+    },
+    "refusalReasons": {"bind-request-not-in-packet": "captureFailed", "configuration-identity-absent": "captureFailed", "configuration-mismatch": "captureFailed", "control-without-camera": "navmeshNoPicture", "navmesh-control-crossing-present": "navmeshControlBroken", "navmesh-control-missing": "captureFailed", "navmesh-control-pose-mismatch": "captureFailed", "cutaway-contacts-unknown": "noView", "cutaway-no-station": "noPlace", "cutaway-not-applicable": "stationSaw", "cutaway-refused": "noView", "navmesh-corroboration-unsupported": "navmeshNoPicture", "navmesh-interior-unsupported": "navmeshNoPicture", "navmesh-layer-unseen": "navmeshNoPicture", "navmesh-link-not-located": "navmeshNoPicture", "navmesh-link-not-reproduced": "navmeshNoPicture", "navmesh-link-same-cell": "navmeshNoPicture", "navmesh-link-unmeasured": "navmeshNoPicture", "navmesh-links-too-far-apart": "navmeshNoPicture", "navmesh-location-unreadable": "navmeshNoPicture", "navmesh-overwrite-not-winning": "navmeshNoPicture", "navmesh-points-supplied": "navmeshNoPicture", "navmesh-receipt-mismatch": "navmeshNoPicture", "navmesh-version-absent": "navmeshNoPicture", "navmesh-views-unusable": "navmeshNoPicture", "packet-unreadable": "captureFailed", "place-only-with-mod": "placeOnlyWithMod", "placement-no-cell": "notPlaced", "placement-unknown": "notPlaced", "plan-subject-mismatch": "captureFailed", "planner-inconsistent": "captureFailed", "planner-not-verified": "captureFailed", "planner-result-stale": "captureFailed", "planner-unreadable": "captureFailed", "points-camera-malformed": "captureFailed", "points-camera-unknown": "captureFailed", "points-cell-unknown": "captureFailed", "points-duplicate": "captureFailed", "points-malformed": "captureFailed", "points-missing": "captureFailed", "points-no-floor": "noPlace", "points-no-station": "noPlace", "points-no-visible-face": "noView", "points-not-drawn": "notDrawn", "points-not-placed": "notPlaced", "points-participant-mismatch": "captureFailed", "points-participant-missing": "captureFailed", "points-participants-unusable": "captureFailed", "points-placement-missing": "captureFailed", "points-renderer-failed": "captureFailed", "points-request-mismatch": "captureFailed", "points-request-unknown": "captureFailed", "points-source-mismatch": "captureFailed", "points-synthetic-undeclared": "captureFailed", "points-under-water": "noPlace", "points-unpickable": "captureFailed", "points-unreadable": "captureFailed", "request-ambiguous": "captureFailed", "request-configuration-unidentified": "captureFailed", "request-not-in-packet": "captureFailed", "request-participants-unusable": "captureFailed", "request-type-unsupported": "other", "see-through-not-covered-at-pose": "stationSaw", "see-through-unmarked": "unmarkable", "source-changed": "captureFailed", "source-configuration-inconsistent": "captureFailed", "source-escapes-bundle": "captureFailed", "source-missing": "captureFailed", "source-unidentified": "captureFailed", "source-unreadable": "captureFailed", "state-camera-blocked": "stateBlocked", "top-down-participant-unseen": "noView", "witness-not-applicable": "noView", "witness-not-covered": "stationSaw"},
+    "refusalReasonsWhy": "Why a refused capture is not pictured, by its refusal code (the picker's code first): every code the capture side can emit has its own stillReasons key; captureRefused's generic line is only for a code not listed here. notDrawn is said by viewprobe's own reason for not drawing the reference (switched off for good, starts switched off, deleted, no model).",
+    "strengthPattern": "([0-9,]+) triangle pairs",
+    "strengthPatternWhy": "Which clash of a group is pictured: the one whose row summary states the most crossing triangle pairs (the reviewers' strongest crossing), so the example is the clearest one; it orders examples only and ranks no finding.",
+    "stillReasonsCount": {"buried": "{count} not pictured; {rest} on {spots} camera spot{plural} at a player's eye height"},
+    "stillReasonsShort": {"effect": "with a visual effect", "record": "record fields", "cell": "cell settings", "navmesh": "navmesh links no camera draws", "navmeshControlBroken": "broken without the mod too", "notDrawn": "with no model", "leftNotLoser": "where a third plugin's placement wins", "captureRefused": "no camera could see", "stateBlocked": "camera spot blocked without the mod", "stationSaw": "seen at eye height, no picture kept", "unmarkable": "see-through, cannot be marked", "placeOnlyWithMod": "a place only the mod has", "noView": "no camera could see both", "noPlace": "no spot for a camera", "switchedOff": "switched off for good", "startsOff": "starts switched off", "deleted": "deleted", "notPlaced": "not placed there", "navmeshNoPicture": "navmesh not shown", "captureFailed": "a capture tool problem", "notDrawnUnknown": "not drawn by the renderer", "buried": "buried, not seen by a player", "removed": "taken out of the world", "other": "with no picture kind", "contact": "not pictured"},
+    "actorTypes": ["Npc"],
+    "disabledZ": -30000.0,
+    "baseGameMasters": ["Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm"],
+    "removedMarkColour": "magenta",
+    "showValuesFields": ["Description", "Name"],
+    "noInGameEffectFields": ["EditorID"],
+    "noInGameEffectWhy": "An editor ID is a name only the Creation Kit and xEdit show; changing it changes nothing in play, so it is not a clash a player meets.",
+    "sequence": ["without", "with", "highlight"],
+    "navmeshSequence": ["winning-linked-navmeshes", "historical-navmesh-context"],
+    "navmeshSequenceWhy": "A navmesh vignette is item 24's two states at one top-down camera, both in the setup with the mod: the winning linked navmeshes (red where a link points past its target's triangles), then the source's earlier version. The control in the setup without the mod is evidence only: it gates the capture and is said in one clause, never shown (Gate A, 2026-11-12: its frame differs from the historical one by 0.4-3.3% of pixels and neither has red).",
+    "holdSeconds": {"without": 2.5, "with": 2.5, "highlightMin": 4.0, "stillPause": 1.5, "loadOrderPage": 6.0, "pageMin": 4.0, "maxSilence": 3.0, "silenceNoiseDb": -40},
+    "patchSearch": {
+      "about": "The recorded Nexus search the patch sentences rest on (evalreport plan --patch-search FILE). For every mod pair the reel speaks about, each mod's Nexus page (main and optional files) is read with housecarl_nexus_mod, and housecarl_nexus_file_search is run for each mod's name over the patch hubs. Each query records its tool, arguments, a sha256 of the response and the date. A pair whose queries do not cover this refuses the reel, naming the pair.",
+      "requiredTools": ["housecarl_nexus_mod", "housecarl_nexus_file_search"]
+    }
+  },
+  "camera": {
+    "reportMode": true,
+    "lockPoseAndFramingAcrossViews": true,
+    "pose": null,
+    "nextAction": "Resolve the location and both subjects; use measured geometry or shotplan to plan one camera, then inspect a pilot before expanding."
+  },
+  "rules": [
+    {
+      "checkId": "geometry.navmesh-ownership",
+      "probe": "navownprobe",
+      "conflictKind": "CLOBBERED",
+      "requestType": "navmesh-version-comparison",
+      "physical": ["Holds", "Gone"],
+      "corroborationKinds": ["EDGE-IDX", "EDGE-NAV", "DOOR-TRI", "DOOR-GONE", "DOOR-NAV"],
+      "metricPattern": "victim-only ground: (?P<samples>[0-9,]+) sample",
+      "metricFields": ["samples"],
+      "metricLabel": "Reported samples outside the overwriting navmesh's coverage, when available",
+      "metricLimit": "Historical shape context only. Eligibility requires an independently measured winning-link mismatch on this record in the same setup; a coverage sample count alone is insufficient.",
+      "views": [
+        {"role": "earlier-navmesh", "pluginField": "A", "navColor": "cyan"},
+        {"role": "overwriting-navmesh", "pluginField": "B", "navColor": "magenta"}
+      ],
+      "camera": {
+        "showAllRecordKeysTogether": true,
+        "showLinkedBorder": true,
+        "support": {"supported": true, "command": "capture_acquire.py acquire --points auto"},
+        "nextAction": "The camera is measured from the records: viewprobe --nav-link finds the source edges that cross past the target's triangle count, and a labelled sliced top-down frames them. Only EDGE-IDX links in exteriors, with the target in a neighbouring cell, are drawn; anything else refuses in one sentence."
+      },
+      "sequence": {
+        "states": ["winning-linked-navmeshes", "historical-navmesh-context"],
+        "locked": ["pose", "projection", "canvas", "imageFit", "surroundingSceneConfiguration"],
+        "direction": "First show both winning linked navmeshes together in one measured view, including the neighbouring cell and linked border. Keep both endpoints visible during any historical layer comparison. Historical substitutions are context, not historical whole-scene configurations. Never draw a missing target triangle as present."
+      },
+      "review": {
+        "separateJudgments": ["sourceIdentityAndAdmission", "subjectVisible", "sharedLinkComprehension", "defectSupport"],
+        "sourceRequirements": ["both winning linked navmeshes visible together", "linked border identifiable", "historical substitutions labelled in provenance"],
+        "decodedRequirements": ["inspect exact frame indices from reel-map.json", "both endpoints visible", "stable pose, projection, canvas and image fit"],
+        "claimLimit": "The measured link mismatch supports a record-level defect. Neither historical coverage nor the picture establishes NPC movement or a working or broken route."
+      },
+      "explanation": "Show both winning navmeshes and their linked border together in one locked view first. The earlier/overwriting versions of the source record may then explain its history at that same camera. Describe the corroborated link mismatch, not the overwrite itself as an incompatibility or its cause. These are navmesh-version comparisons, not complete historical mod configurations."
+    },
+    {
+      "checkId": "geometry.object-overlap",
+      "probe": "overlapprobe",
+      "conflictKind": "OVERLAP",
+      "requestType": "overlap-pair",
+      "physical": "Holds",
+      "metricPattern": null,
+      "metricFields": [],
+      "metricLabel": "Stable sample of object-pair evidence; no severity score",
+      "metricLimit": "Box depth, fraction, area and volume do not rank conflict evidence. Surface intersection or validated containment establishes geometry only; intentional overlap and visible or gameplay consequences require separate adjudication. Historical bounds-only inputs remain historical candidates.",
+      "highlights": [
+        {"recordSet": "Necessary", "color": "cyan"},
+        {"recordSet": "Alternative", "color": "magenta"}
+      ],
+      "camera": {
+        "showAllRecordKeysTogether": true,
+        "support": {"supported": true, "command": "capture_acquire.py acquire --points auto"},
+        "nextAction": "Use measured geometry to choose a view that makes both physical objects and their room context recognizable; an eye-height or oblique view may work better than a top-down cutaway. Qualify one pilot pair before expanding."
+      },
+      "sequence": {
+        "states": ["without", "with", "highlight"],
+        "setups": {"without": "withoutArm", "with": "predictionArm", "highlight": "predictionArm"},
+        "highlightMode": "ghost",
+        "highlightArgs": ["--ref", "{cyan}=cyan", "--ref", "{magenta}=magenta"],
+        "locked": ["pose", "projection", "canvas", "imageFit", "lighting", "worldState"],
+        "direction": "Show the scene in the evaluation's setup without the evaluated mod, then the same camera in the setup with it, then the same view with both objects marked. The without frame is a render of a different measured setup, never an object hidden in the with-setup. The highlight is the through-occluder ghost (coloured --ref without --ref-surface): a picture aid that shows each object's hidden part, not contact qualification. Retain each state's clean original, metadata and provenance."
+      },
+      "review": {
+        "separateJudgments": ["sourceIdentityAndAdmission", "subjectVisible", "objectComprehension", "defectSupport"],
+        "imageModel": {
+          "required": true,
+          "input": "actual-candidate-frame",
+          "firstPassBlind": true,
+          "withhold": ["expectedObjectNames", "recordAndMeshNames", "expectedConcern", "captions", "narration"],
+          "prompt": "Do you understand what these objects are? Describe the physical objects you can identify in this image, their location in the room or setting, and any apparent concern. Explain the visible clues and your uncertainty. If you cannot identify an object or see a problem, say so.",
+          "retain": ["framePath", "frameSha256", "prompt", "model", "response", "knownRecordAndMeshIdentity", "assessmentAgainstIdentity", "defectSupport"],
+          "assessment": "After the blind response, compare it with the known record and mesh identity. An expected-answer echo or unsupported confident guess is not a pass. If recognition fails, improve the measured view or mark the scene unsuitable."
+        },
+        "decodedRequirements": ["inspect all three states and both cuts at exact frame indices from reel-map.json", "the without and with frames share one camera and canvas", "the highlight changes only the marks", "review actual decoded frames with an image-capable model", "obtain the intended viewer's object and concern comprehension assessment"],
+        "claimLimit": "Recognizing an object is separate from supporting a defect. An understood candidate with no defect demonstrated is a valid review outcome. Model agreement cannot turn a bounds intersection into visible clipping or a gameplay consequence. If no problem is demonstrated, explain why the pair is a review candidate and what remains unknown."
+      },
+      "explanation": "Show the place without the evaluated mod, then with it, then with both referenced objects marked in their assigned colours, at one locked camera with recognizable surroundings. Review the actual frame without supplying the expected object names before checking the response against known identities. Inspect the geometry intersection before describing clipping, a blocked doorway or a gameplay consequence."
+    }
+  ]
+}

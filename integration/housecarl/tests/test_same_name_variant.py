@@ -478,7 +478,8 @@ def prediction_cases():
 
     # 474: the reader's document lists the variant by its folder, not the same file name twice.
     import readerdoc as RD
-    words = json.loads((REPO / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/references/report-priorities.json")
+    import reporting_data
+    words = json.loads((reporting_data.PRIORITIES)
                        .read_text(encoding="utf-8"))["readerDoc"]
     plan2, _, _ = P.compile_and_render(p_arms(), res, [SEW, CW], patches=[BY_HASH], count_only=co, enrichment=enr)
     try:

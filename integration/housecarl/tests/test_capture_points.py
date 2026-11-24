@@ -24,6 +24,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the module's folder
 import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is: its tools and run log on sys.path
+import reporting_data  # noqa: E402  the module's own reporting data
 sys.path.append(str(SW.HARNESS / "tests"))  # SkyWright's own suites and fixtures the module's suites reuse
 HARNESS = HERE.parent
 TOOLS = SW.HARNESS / "viewprobe" / "tools"
@@ -333,7 +334,7 @@ def c709_c710(fx):
 
 
 def c711(fx):
-    pol = load(SW.CHECKOUT / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/references/scene-policy.json")
+    pol = load(reporting_data.SCENE_POLICY)
     by = {r["requestType"]: (r.get("camera") or {}).get("support") or {} for r in pol["rules"]}
     nav = by.get("navmesh-version-comparison", {})
     check("C711 the scene policy marks navmesh comparisons as supported, with the command that acquires them "
@@ -347,7 +348,7 @@ def c711(fx):
 def c712(fx):
     pk = load(fx.packet)
     row = pk["capturePlan"]["requests"][0]
-    pol = load(SW.CHECKOUT / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/references/scene-policy.json")
+    pol = load(reporting_data.SCENE_POLICY)
     nav = ([r for r in pol["rules"] if r["requestType"] == "navmesh-version-comparison"][0]["camera"].get("support")
            or {"supported": False, "reason": "(the scene policy carries no support mark)"})
     row["requestType"] = "navmesh-version-comparison"

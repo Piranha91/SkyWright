@@ -36,7 +36,8 @@ import evalreport as R  # noqa: E402
 import reel_plan  # noqa: E402
 import reel_stills  # noqa: E402
 
-SKILL = SW.CHECKOUT / "external" / "houseCARL" / ".claude/skills/evaluation-reporting/references"
+import reporting_data  # noqa: E402
+SKILL = reporting_data.DATA
 PR = json.loads((SKILL / "report-priorities.json").read_text(encoding="utf-8"))
 POLICY = dict(json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"])
 POLICY["effectModelPattern"] = ((PR.get("reader") or {}).get("prediction") or {}).get("effectModelPattern")

@@ -36,6 +36,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the module's folder
 import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is: its tools and run log on sys.path
+import reporting_data  # noqa: E402  the module's own reporting data
 sys.path.append(str(SW.HARNESS / "tests"))  # SkyWright's own suites and fixtures the module's suites reuse
 HARNESS = HERE.parent
 sys.path.append(str(HARNESS))
@@ -660,8 +661,7 @@ def cf23_caption_words(tmp: Path):
     top-down's say it is a sliced view from above. Wrong answer: a caption calling a cutaway or a top-down 'the view'."""
     ER = load("cf_evalreport", HARNESS / "evalreport.py")
     RP = load("cf_reel_plan2", HARNESS / "reel_plan.py")
-    words = json.loads((SW.CHECKOUT / "external" / "houseCARL" / ".claude" / "skills" / "evaluation-reporting" / "references"
-                        / "report-priorities.json").read_text(encoding="utf-8"))["reader"]["figureCaptions"]
+    words = json.loads((reporting_data.PRIORITIES).read_text(encoding="utf-8"))["reader"]["figureCaptions"]
     cut = {"viewKind": "cutaway", "hidden": [{"formKey": "1:x.esp"}, {"formKey": "2:x.esp"}]}
     top = {"viewKind": "top-down", "cullAbove": 512.0}
     fe, fr = getattr(ER, "view_kind_caption", None), getattr(RP, "view_kind_line", None)
@@ -783,8 +783,7 @@ def cf28_buried_said(tmp: Path):
     fr = getattr(ER, "buried_lines", None)
     if not check("CF28", fr is not None, "evalreport has no buried-line rule a test can call"):
         return
-    words = json.loads((SW.CHECKOUT / "external" / "houseCARL" / ".claude" / "skills" / "evaluation-reporting" / "references"
-                        / "report-priorities.json").read_text(encoding="utf-8"))["reader"]["figureCaptions"]
+    words = json.loads((reporting_data.PRIORITIES).read_text(encoding="utf-8"))["reader"]["figureCaptions"]
     plan = {"reader": {"prediction": {"record": [{"findingId": "F-1", "formKey": A, "other": [B]},
                                                  {"findingId": "F-2", "formKey": "000103:Target.esp", "other": [B]}],
                                       "items": [{"findingIds": ["F-1"]}, {"findingIds": ["F-2"]}]}}}
@@ -805,8 +804,7 @@ def rv_reason_only(tmp: Path, RP, A: str, B: str):
     import copy as _copy
     import inspect
     pres, names, masters, search, mods, captures = RV.capture_binding_fixture()
-    shipped = json.loads((SW.CHECKOUT / "external" / "houseCARL" / ".claude" / "skills" / "evaluation-reporting" / "references"
-                          / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"]
+    shipped = json.loads((reporting_data.SCENE_POLICY).read_text(encoding="utf-8"))["vignettes"]
     pol = dict(RV.POLICY, captureAttemptsPerType=1, stillReasons=shipped["stillReasons"])
     keep = [c for c in captures if c["request"] != "req-own"]
     pres2 = _copy.deepcopy(pres)
