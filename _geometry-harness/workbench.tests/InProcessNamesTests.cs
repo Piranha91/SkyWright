@@ -5,8 +5,8 @@ using Xunit;
 
 namespace WorkbenchTests;
 
-/// <summary>runcontrol's names read with houseCARL's code compiled in (<c>bundle --in-process-reader</c>, the machine
-/// file's <c>readerInProcess</c>): on one finished run, the bundle names the same objects as the build's server reader
+/// <summary>runcontrol's names read with houseCARL's code compiled in (the bundle step's reader whenever no reader program is
+/// named): on one finished run, the bundle names the same objects as the build's server reader
 /// does, says truthfully that it read them in process and with which houseCARL build, and verifies; a named reader
 /// program is still the one used, and recorded as before. Set WB_EVIDENCE_DIR to keep the two bundles.</summary>
 [Trait("tier", "integration")]
@@ -16,6 +16,7 @@ public sealed class InProcessNamesTests
     {
         var psi = new ProcessStartInfo(R3Bundle.Runcontrol) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var a in args) psi.ArgumentList.Add(a);
+        psi.Environment.Remove("HOUSECARL_RECORD_READER_CMD");           // no reader program named: houseCARL in process
         using var p = Process.Start(psi)!;
         var o = p.StandardOutput.ReadToEndAsync(); var e = p.StandardError.ReadToEndAsync();
         p.WaitForExit();
@@ -65,10 +66,10 @@ public sealed class InProcessNamesTests
         // the private instance the run's bundle stage made, spelled as that stage spells it (forward slashes: houseCARL's
         // epoch hashes the resolved path's spelling)
         var inst = Path.Combine(work, "names-instance").Replace(Path.DirectorySeparatorChar, '/');
-        var (exit, text) = Runcontrol("bundle", "--run", Path.Combine(work, "evaluation"), "--out", inproc, "--in-process-reader",
+        var (exit, text) = Runcontrol("bundle", "--run", Path.Combine(work, "evaluation"), "--out", inproc,
             "--reader-env", "HOUSECARL_DATA_DIR=" + inst + "/data", "--reader-env", "HouseCarl__DataDir=" + inst + "/Data",
             "--reader-env", "HouseCarl__ModsDir=" + inst + "/mods", "--reader-env", "HouseCarl__ProfileDir=" + inst + "/profile");
-        Assert.True(exit == 0, $"runcontrol bundle --in-process-reader exited {exit}: {text}");
+        Assert.True(exit == 0, $"runcontrol bundle (no reader named) exited {exit}: {text}");
         var (vexit, vtext) = Runcontrol("verify-bundle", inproc);
         Assert.True(vexit == 0, $"the in-process bundle does not verify (exit {vexit}): {vtext}");
         if (Environment.GetEnvironmentVariable("WB_EVIDENCE_DIR") is { Length: > 0 } keep)
@@ -93,22 +94,14 @@ public sealed class InProcessNamesTests
     }
 
     [Fact]
-    public void A_run_whose_machine_file_asks_for_the_in_process_reader_bundles_and_verifies_with_it()
+    public void A_run_whose_machine_file_names_no_reader_reads_the_names_in_process_and_verifies()
     {
         using var w = new TiltedRefWorld();
-        var bundle = Run(w, new { readerInProcess = true }, Path.Combine(w.Root, "work"));
+        var bundle = Run(w, new { }, Path.Combine(w.Root, "work"));
         Assert.Equal("enriched", (string?)NamesStatus(bundle)["status"]);
         Assert.Equal("in-process", (string?)NamesStatus(bundle)["reader"]);
         var (vexit, vtext) = Runcontrol("verify-bundle", bundle);
         Assert.True(vexit == 0, $"the bundle does not verify (exit {vexit}): {vtext}");
-    }
-
-    [Fact]
-    public void Both_readers_named_at_once_are_refused_in_one_sentence()
-    {
-        var (exit, text) = Runcontrol("bundle", "--run", Path.GetTempPath(), "--in-process-reader", "--reader-cmd", "x.exe");
-        Assert.Equal(2, exit);
-        Assert.Contains("name two record readers", text);
     }
 
     static void CopyTree(string from, string to)

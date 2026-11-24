@@ -66,7 +66,7 @@ public sealed class NoHousecarlProgramTests
                 selection = new { mods = new[] { "SelMod" } }, evaluation = new { select = new[] { "geometry.object-overlap" }, depth = "standard" },
             }));
             var mf = Path.Combine(w.Root, "machine.json");
-            File.WriteAllText(mf, JsonSerializer.Serialize(new { readerInProcess = true }));
+            File.WriteAllText(mf, "{}");
             var psi = new ProcessStartInfo(R3Bundle.Runcontrol) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
             foreach (var a in new[] { "run", "--entry", entry, "--machine", mf, "--out", Path.Combine(w.Root, "work"), "--through", "bundle" }) psi.ArgumentList.Add(a);
             using var run = Process.Start(psi)!;

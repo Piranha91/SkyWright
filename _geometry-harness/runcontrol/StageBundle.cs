@@ -7,15 +7,18 @@ public static class StageBundle
     /// <summary>Where a run's bundle is written.</summary>
     public static string BundleDir(RunContext ctx) => PyPath.Join(ctx.Out, "bundle", "evidence");
 
-    /// <summary>The record reader's command: the machine file's readerCmd, else HOUSECARL_RECORD_READER_CMD.</summary>
-    public static string ReaderCmd(RunContext ctx)
+    /// <summary>The record reader program the machine file (readerCmd) or HOUSECARL_RECORD_READER_CMD names, or null.</summary>
+    public static string? NamedReader(RunContext ctx)
     {
         object? cmd = Py.Truthy(ctx.Machine.Get("readerCmd")) ? ctx.Machine["readerCmd"] : Environment.GetEnvironmentVariable("HOUSECARL_RECORD_READER_CMD");
-        if (!Py.Truthy(cmd))
-            throw new Refusal("no record reader is named: set readerCmd in the machine file (a houseCARL server whose folder "
-                              + "carries its generated corpus.json).");
-        return PyText.Str(cmd);
+        return Py.Truthy(cmd) ? PyText.Str(cmd) : null;
     }
+
+    /// <summary>The record reader program for a stage that needs one (the lab's record capture): <see cref="NamedReader"/>,
+    /// or a refusal.</summary>
+    public static string ReaderCmd(RunContext ctx) => NamedReader(ctx)
+        ?? throw new Refusal("no record reader is named: set readerCmd in the machine file (a houseCARL server whose folder "
+                             + "carries its generated corpus.json).");
 
     /// <summary>The reader's environment for the names read: a private, empty instance under the run folder, so every
     /// record is read by absolute path and never from an active copy of the same plugin.</summary>
@@ -28,10 +31,9 @@ public static class StageBundle
         string bundle = BundleDir(ctx);
         if (Ev.Exists(bundle))
             throw new Refusal($"{PyOrder.Fwd(bundle)} exists from an earlier bundle; move it aside rather than overwrite it.");
-        // the machine file's readerInProcess reads the names with houseCARL's code compiled in; else the named reader program
+        // a named reader program reads the names; with none named, bundle reads them with houseCARL's code compiled in
         var bundleArgs = new List<string> { "--run", PyOrder.Fwd(run), "--out", PyOrder.Fwd(bundle) };
-        if (Py.Truthy(ctx.Machine.Get("readerInProcess")) && !Py.Truthy(ctx.Machine.Get("readerCmd"))) bundleArgs.Add(InProcessReader.Flag);
-        else bundleArgs.AddRange(["--reader-cmd", ReaderCmd(ctx)]);
+        if (NamedReader(ctx) is { } reader) bundleArgs.AddRange(["--reader-cmd", reader]);
         foreach (var (k, v) in NamesEnv(ctx)) bundleArgs.AddRange(["--reader-env", $"{k}={v}"]);
         foreach (var (p, n) in Py.DictOrEmpty(Py.Truthy(ctx.Entry.Presentation("bundle", "modNames")) ? ctx.Entry.Presentation("bundle", "modNames") : null))
             bundleArgs.AddRange(["--mod-name", $"{p}={PyText.Str(n)}"]);

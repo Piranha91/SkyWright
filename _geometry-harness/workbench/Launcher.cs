@@ -446,15 +446,11 @@ internal sealed class Launcher : IAsyncDisposable
             schema = 1, id = "wb-" + stamp, inPlace = new { instance = Instance, profile = Profile, game = Game },
             selection = new { mods = sel }, evaluation = new { select = checks.ToArray(), depth },
         }, new JsonSerializerOptions { WriteIndented = true }));
-        // the machine file: WB_MACHINE's (heavy-stage prefix and the rest), with the names read through this checkout's server
+        // the machine file: WB_MACHINE's (heavy-stage prefix and the rest); with no readerCmd in it, the run reads the names
+        // with houseCARL's code compiled into runcontrol, starting no reader program
         var machine = Path.Combine(dir, "machine.json");
         var m = Environment.GetEnvironmentVariable("WB_MACHINE") is { Length: > 0 } mf && File.Exists(mf)
             ? System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(mf))!.AsObject() : new System.Text.Json.Nodes.JsonObject();
-        if (!m.ContainsKey("readerCmd"))
-        {
-            var exe = StateServerExe();
-            m["readerCmd"] = "\"" + exe + "\"";
-        }
         File.WriteAllText(machine, m.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         var run = Path.Combine(dir, "run");
         var psi = engine.Pipeline(entry, machine, run, WorkFolder, Path.Combine(dir, "runlog"));
@@ -567,7 +563,6 @@ internal sealed class Launcher : IAsyncDisposable
         }
     }
 
-    static string StateServerExe() { try { return Program.ServerExe(); } catch (InvalidOperationException) { return "housecarl-mcp.exe"; } }
 
     /// <summary>The houseCARL server bound to the open profile by explicit paths, its data folder under the Work Folder
     ///, started on the first forwarded call.</summary>

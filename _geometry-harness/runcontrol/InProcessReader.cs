@@ -7,12 +7,10 @@ namespace RunControl;
 
 /// <summary>The names read with houseCARL's own record reader compiled in (<see cref="HousecarlCalls"/>), no program
 /// started. It answers the same JSON-RPC lines a reader process would, so the bundle keeps its request and response
-/// transcript; the lines say it was read in process, and by which houseCARL build.</summary>
+/// transcript; the lines say it was read in process, and by which houseCARL build. It is the names read's reader
+/// whenever no reader program is named (--reader-cmd, HOUSECARL_RECORD_READER_CMD, the machine file's readerCmd).</summary>
 public static class InProcessReader
 {
-    /// <summary>The bundle command's flag that asks for it.</summary>
-    public const string Flag = "--in-process-reader";
-
     /// <summary>What stands for the reader's command line: no program has this name, so it can never be started.</summary>
     public const string Command = "<in-process houseCARL>";
 

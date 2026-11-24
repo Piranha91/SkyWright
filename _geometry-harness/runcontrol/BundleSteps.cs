@@ -7,25 +7,15 @@ public static class BundleSteps
     /// <summary>The environment variable naming the record reader when --reader-cmd names none.</summary>
     public const string ReaderVariable = "HOUSECARL_RECORD_READER_CMD";
 
-    /// <summary>houseCARL's server in this program's build (Tools\housecarl-mcp). Outside a build, the name beside this
-    /// program, which is never there.</summary>
-    public static string CheckoutReader() =>
-        PyPath.Str(HarnessShared.CheckoutLayout.Locate(null, out _)?.PathOf(HarnessShared.CheckoutLayout.Piece.Server)
-                   ?? Path.Combine(AppContext.BaseDirectory, "housecarl-mcp.exe"));
-
-    /// <summary>Where <see cref="CheckoutReader"/> comes from, for the names step's source.</summary>
-    public static string ReaderSource() => "build";
-
-    /// <summary>The record reader the names enrichment starts: --reader-cmd, else the environment variable, else this
-    /// checkout's built server. (command, where it came from), or (null, one sentence why there is none).</summary>
+    /// <summary>The record reader of the names enrichment: the program --reader-cmd names, else the one the environment
+    /// variable names, else houseCARL's records tool compiled into this program (<see cref="InProcessReader"/>), with no
+    /// program started. (command, where it came from).</summary>
     public static (string? command, string source) DefaultReaderCmd(string? given)
     {
         if (!string.IsNullOrEmpty(given)) return (given, "--reader-cmd");
         string env = PyValue.Strip(Environment.GetEnvironmentVariable(ReaderVariable) ?? "");
         if (env.Length > 0) return (env, ReaderVariable);
-        string exe = CheckoutReader();
-        if (File.Exists(exe)) return ($"\"{exe}\"", ReaderSource());
-        return (null, $"no record reader was given (--reader-cmd or {ReaderVariable}) and this {ReaderSource()}'s houseCARL server is not at {exe}.");
+        return (InProcessReader.Command, InProcessReader.Source);
     }
 
     /// <summary>--mod-name PLUGIN=NAME pairs, each side stripped.</summary>

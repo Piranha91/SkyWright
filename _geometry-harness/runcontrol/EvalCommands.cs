@@ -96,13 +96,10 @@ public static class EvalCommands
                 case "--reader-env": a.ReaderEnv.Add(Value()); break;
                 case "--mod-name": a.ModName.Add(Value()); break;
                 case "--no-names" when joined == null: a.NoNames = true; break;
-                case InProcessReader.Flag when joined == null: a.InProcessReader = true; break;
                 default: throw new Refusal($"bundle does not take {flag}.");
             }
         }
         if (!run) throw new Refusal("bundle needs --run, the evaluation's RUN folder.");
-        if (a.InProcessReader && a.ReaderCmd is not null)
-            throw new Refusal($"bundle: {InProcessReader.Flag} and --reader-cmd name two record readers; give one.");
         try { return Bundle.Run(a); }
         catch (Exception ex) when (ex is PyError or KeyNotFoundException or InvalidCastException or FormatException or ArgumentException
             or IndexOutOfRangeException or IOException or UnauthorizedAccessException)
