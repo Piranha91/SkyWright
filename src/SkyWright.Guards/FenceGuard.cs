@@ -224,14 +224,14 @@ internal static class FenceGuard
         {
             case ".py":
                 var (code, lits, dynamic) = PythonParts(text);
-                foreach (var (line, s) in lits) foreach (var hit in InText(s, n, lone: true)) yield return new(rel, line, hit, "names");
+                foreach (var (line, s) in lits) foreach (var hit in InText(s, n)) yield return new(rel, line, hit, "names");
                 foreach (var (line, mod) in PythonImports(code).Concat(dynamic)) if (n.Python.Contains(mod)) yield return new(rel, line, "import " + mod, "imports");
                 break;
             case ".cs":
                 var (csCode, csLits) = CSharpParts(text);
                 foreach (var (line, s) in csLits)
                 {
-                    foreach (var hit in InText(s, n, lone: true)) yield return new(rel, line, hit, "names");
+                    foreach (var hit in InText(s, n)) yield return new(rel, line, hit, "names");
                     foreach (var (_, mod) in PythonImports(s)) if (n.Python.Contains(mod)) yield return new(rel, line, "import " + mod, "hands python");
                 }
                 foreach (Match m in Regex.Matches(csCode, @"\bCheckout\.Integration\b"))
@@ -243,14 +243,14 @@ internal static class FenceGuard
                 {
                     var t = lines[i].TrimStart();
                     if (t.StartsWith('#') || t.StartsWith("::") || t.StartsWith("REM ", StringComparison.OrdinalIgnoreCase)) continue;
-                    foreach (var hit in InText(lines[i], n, lone: false)) yield return new(rel, i + 1, hit, "names");
+                    foreach (var hit in InText(lines[i], n)) yield return new(rel, i + 1, hit, "names");
                 }
                 break;
             default:
                 var all = text.Split('\n');
                 for (int i = 0; i < all.Length; i++)
                 {
-                    foreach (var hit in InText(all[i], n, lone: false)) yield return new(rel, i + 1, hit, "names");
+                    foreach (var hit in InText(all[i], n)) yield return new(rel, i + 1, hit, "names");
                     // a build file can reach the module through the layout's own properties without naming a file
                     if (kind is ".csproj" or ".props" or ".targets" && Regex.IsMatch(all[i], @"\$\(SkyWrightIntegration\w*\)"))
                         yield return new(rel, i + 1, "$(SkyWrightIntegration)", "uses");
@@ -260,9 +260,10 @@ internal static class FenceGuard
     }
 
     /// <summary>The module names one piece of text holds.</summary>
-    static IEnumerable<string> InText(string s, Names n, bool lone)
+    static IEnumerable<string> InText(string s, Names n)
     {
-        var t = s.Replace('\\', '/');
+        // a separator however it is spelled: / or \, and \\ (an escaped backslash in a Python or C# literal) or // as one
+        var t = Regex.Replace(s.Replace('\\', '/'), "/{2,}", "/");
         if (t.Contains(n.ModulePath, StringComparison.OrdinalIgnoreCase)) yield return n.ModulePath;
         foreach (var tok in n.Tokens)
             if (Regex.IsMatch(t, @"(?<![\w.-])" + Regex.Escape(tok) + @"(?![\w-])", RegexOptions.IgnoreCase)) yield return tok;
@@ -270,17 +271,19 @@ internal static class FenceGuard
 
     static int LineOf(string text, int index) { int l = 1; for (int i = 0; i < index && i < text.Length; i++) if (text[i] == '\n') l++; return l; }
 
-    /// <summary>(line, module) of every import in Python code (strings and comments already blanked).</summary>
+    /// <summary>(line, module) of every import in Python code (strings and comments already blanked): at the start of a
+    /// line, after a <c>;</c>, or after the colon of a one-line compound statement (<c>try: import x</c>,
+    /// <c>if a: import x</c>, <c>else: import x</c>).</summary>
     static IEnumerable<(int, string)> PythonImports(string code)
     {
-        foreach (Match m in Regex.Matches(code, @"(?m)(?:^|;)\s*import\s+([\w., ]+)"))
+        foreach (Match m in Regex.Matches(code, @"(?m)(?:^|[;:])[ \t]*import[ \t]+([\w., \t]+)"))
             foreach (var part in m.Groups[1].Value.Split(','))
             {
-                var mod = part.Trim().Split(' ')[0].Split('.')[0];
-                if (mod.Length > 0) yield return (LineOf(code, m.Index), mod);
+                var mod = part.Trim().Split(' ', '\t')[0].Split('.')[0];
+                if (mod.Length > 0) yield return (LineOf(code, m.Groups[1].Index), mod);
             }
-        foreach (Match m in Regex.Matches(code, @"(?m)(?:^|;)\s*from\s+(\w+)[\w.]*\s+import\b"))
-            yield return (LineOf(code, m.Index), m.Groups[1].Value);
+        foreach (Match m in Regex.Matches(code, @"(?m)(?:^|[;:])[ \t]*from[ \t]+(\w+)[\w.]*[ \t]+import\b"))
+            yield return (LineOf(code, m.Groups[1].Index), m.Groups[1].Value);
     }
 
     /// <summary>Python split into code (every string blanked to a marker, comments removed) and its string literals
@@ -348,60 +351,113 @@ internal static class FenceGuard
         return true;
     }
 
-    /// <summary>C# split into code (comments removed, strings blanked) and its string literals with their lines.</summary>
+    /// <summary>C# split into code (comments removed, strings blanked) and its string literals with their lines. An
+    /// interpolated string's holes are read as code, so a literal inside a hole (<c>$"{Path.Combine(h, "x.py")}"</c>) is a
+    /// literal of its own; the string's own text is one literal with each hole marked; a hole's format clause is text.</summary>
     internal static (string Code, List<(int Line, string Text)> Literals) CSharpParts(string text)
     {
-        var code = new StringBuilder();
-        var lits = new List<(int, string)>();
-        int i = 0, line = 1, n = text.Length;
-        void Lit(int from, int to, int at)
+        var s = new CsScanner(text);
+        s.Code(hole: false);
+        return (s.Out.ToString(), s.Lits);
+    }
+
+    sealed class CsScanner(string t)
+    {
+        int i, line = 1;
+        readonly int n = t.Length;
+        public readonly StringBuilder Out = new();
+        public readonly List<(int, string)> Lits = new();
+
+        void NewLine() { Out.Append('\n'); line++; }
+
+        /// <summary>Code up to the end, or, in an interpolation hole, up to and past the hole's closing brace (a format
+        /// clause, after a colon outside any bracket, is skipped as text).</summary>
+        public void Code(bool hole, int closers = 1)
         {
-            var s = text.Substring(from, Math.Max(0, to - from));
-            lits.Add((at, s));
-            code.Append("\"\"");
-            foreach (var ch in s) if (ch == '\n') { code.Append('\n'); line++; }
+            int braces = 0, brackets = 0;
+            while (i < n)
+            {
+                char c = t[i];
+                if (c == '/' && i + 1 < n && t[i + 1] == '/') { while (i < n && t[i] != '\n') i++; continue; }
+                if (c == '/' && i + 1 < n && t[i + 1] == '*')
+                {
+                    int e = t.IndexOf("*/", i + 2, StringComparison.Ordinal); e = e < 0 ? n : e + 2;
+                    for (int k = i; k < e; k++) if (t[k] == '\n') NewLine();
+                    i = e; continue;
+                }
+                int p = i;
+                while (p < n && (t[p] == '$' || t[p] == '@') && p - i < 8) p++;
+                if (p < n && t[p] == '"' && (p == i || !char.IsLetterOrDigit(i > 0 ? t[i - 1] : ' '))) { String(p); continue; }
+                if (c == '\'')
+                {
+                    int j = i + 1; while (j < n && t[j] != '\'' && t[j] != '\n') j += t[j] == '\\' ? 2 : 1;
+                    Out.Append("' '"); i = Math.Min(n, j + 1); continue;
+                }
+                if (hole)
+                {
+                    if (c is '(' or '[') brackets++;
+                    else if (c is ')' or ']') brackets = Math.Max(0, brackets - 1);
+                    else if (c == '{') braces++;
+                    else if (c == '}' && braces > 0) braces--;
+                    else if (c == '}' || (c == ':' && braces == 0 && brackets == 0))
+                    {
+                        // the hole ends here; a format clause runs to the closing brace(s)
+                        if (c == ':') while (i < n && t[i] != '}') { if (t[i] == '\n') NewLine(); i++; }
+                        i = Math.Min(n, i + closers);
+                        return;
+                    }
+                }
+                if (c == '\n') NewLine(); else Out.Append(c);
+                i++;
+            }
         }
-        while (i < n)
+
+        /// <summary>One string literal starting with its prefix at i and its first quote at p.</summary>
+        void String(int p)
         {
-            char c = text[i];
-            if (c == '/' && i + 1 < n && text[i + 1] == '/') { while (i < n && text[i] != '\n') i++; continue; }
-            if (c == '/' && i + 1 < n && text[i + 1] == '*')
+            var prefix = t.Substring(i, p - i);
+            int dollars = prefix.Count(ch => ch == '$');
+            bool verbatim = prefix.Contains('@');
+            int quotes = 0; while (p + quotes < n && t[p + quotes] == '"') quotes++;
+            bool raw = quotes >= 3;
+            if (!raw) quotes = 1;
+            if (!raw && quotes == 1 && p + 1 < n && t[p + 1] == '"' && !(p + 2 < n && t[p + 2] == '"')) { Lits.Add((line, "")); Out.Append("\"\""); i = p + 2; return; }
+            int startLine = line;
+            var lit = new StringBuilder();
+            int j = p + quotes;
+            int open = raw ? Math.Max(1, dollars) : 1;   // braces that open a hole
+            while (j < n)
             {
-                int e = text.IndexOf("*/", i + 2, StringComparison.Ordinal); e = e < 0 ? n : e + 2;
-                for (int k = i; k < e; k++) if (text[k] == '\n') { code.Append('\n'); line++; }
-                i = e; continue;
-            }
-            int p = i;
-            while (p < n && (text[p] == '$' || text[p] == '@') && p - i < 3) p++;
-            if (p < n && text[p] == '"')
-            {
-                bool verbatim = text.Substring(i, p - i).Contains('@');
-                int quotes = 0; while (p + quotes < n && text[p + quotes] == '"') quotes++;
-                if (quotes >= 3)
+                char c = t[j];
+                if (raw && c == '"' && t.AsSpan(j).StartsWith(new string('"', quotes))) { j += quotes; break; }
+                if (!raw && c == '"')
                 {
-                    var close = new string('"', quotes);
-                    int e = text.IndexOf(close, p + quotes, StringComparison.Ordinal); e = e < 0 ? n : e;
-                    Lit(p + quotes, e, line); i = Math.Min(n, e + quotes); continue;
+                    if (verbatim && j + 1 < n && t[j + 1] == '"') { lit.Append('"'); j += 2; continue; }
+                    j++; break;
                 }
-                int j = p + 1;
-                while (j < n)
+                if (!raw && !verbatim && c == '\\') { lit.Append(c); if (j + 1 < n) lit.Append(t[j + 1]); j += 2; continue; }
+                if (!raw && !verbatim && c == '\n') { j++; NewLine(); break; }
+                if (dollars > 0 && c == '{')
                 {
-                    if (verbatim) { if (text[j] == '"') { if (j + 1 < n && text[j + 1] == '"') { j += 2; continue; } break; } }
-                    else { if (text[j] == '\\') { j += 2; continue; } if (text[j] == '"' || text[j] == '\n') break; }
-                    j++;
+                    if (!raw && j + 1 < n && t[j + 1] == '{') { lit.Append('{'); j += 2; continue; }
+                    if (!raw || t.AsSpan(j).StartsWith(new string('{', open)))
+                    {
+                        lit.Append('\u0001');
+                        i = j + open;
+                        Code(hole: true, closers: open);
+                        j = i;
+                        continue;
+                    }
                 }
-                Lit(p + 1, Math.Min(j, n), line); i = Math.Min(n, j + 1); continue;
+                if (dollars > 0 && !raw && c == '}' && j + 1 < n && t[j + 1] == '}') { lit.Append('}'); j += 2; continue; }
+                if (c == '\n') NewLine();
+                lit.Append(c);
+                j++;
             }
-            if (c == '\'' )
-            {
-                int j = i + 1; while (j < n && text[j] != '\'' && text[j] != '\n') j += text[j] == '\\' ? 2 : 1;
-                code.Append("' '"); i = Math.Min(n, j + 1); continue;
-            }
-            if (c == '\n') line++;
-            code.Append(c);
-            i++;
+            Lits.Add((startLine, lit.ToString()));
+            Out.Append("\"\"");
+            i = Math.Min(n, j);
         }
-        return (code.ToString(), lits);
     }
 
     // ---- the check's own known answers
@@ -431,7 +487,44 @@ internal static class FenceGuard
             Touch("app/Bad.cs", "var code = \"import sys; import tool; print(1)\";\n");
             var (f2b, _, _) = Scan(root, cfg);
             yield return (f2b.Any(f => f.File == "app/Bad.cs" && f.Name == "import tool"), "an outside C# literal handing python an import of a module name fails: " + Describe(f2b, []));
+
+            // interpolated strings: a literal inside a hole is a literal; the reader keeps its place after the string,
+            // through format clauses and nested braces, and in verbatim and raw interpolated strings
+            (string Code, string[] Names, string Label)[] interpolated =
+            [
+                ("var a = $\"{System.IO.Path.Combine(h, \"tool.py\")}\";\n", ["tool.py"], "a literal inside an interpolation hole"),
+                ("var a = $\"{x}\"; var b = \"tool.py\";\n", ["tool.py"], "a literal after an interpolated string on the same line"),
+                ("var a = $\"{n:0.00} {d:yyyy-MM-dd} {new[] { \"a\" }.Length} {Path.Combine(h, \"tool.py\")}\"; var b = \"probe\";\n", ["tool.py", "probe"], "a hole after format clauses and nested braces, and a literal after the string"),
+                ("var a = $@\"{Path.Combine(h, \"tool.py\")}\\x\";\n", ["tool.py"], "a hole in a verbatim interpolated string"),
+                ("var a = $\"\"\"{Path.Combine(h, \"tool.py\")}\"\"\";\n", ["tool.py"], "a hole in a raw interpolated string"),
+            ];
+            foreach (var (code, names, label) in interpolated)
+            {
+                Touch("app/Bad.cs", code);
+                var (fi, _, _) = Scan(root, cfg);
+                yield return (names.All(nm => fi.Any(f => f.File == "app/Bad.cs" && f.Name == nm && f.Line == 1)), $"C#: {label} fails: " + Describe(fi, []));
+            }
+
+            // an escaped separator spells the module's path as well as a plain one
+            Touch("app/Bad.cs", @"var p = ""mod\\m\\y"";" + "\n");
+            var (fe, _, _) = Scan(root, cfg);
+            yield return (fe.Any(f => f.File == "app/Bad.cs" && f.Name == "mod/m"), "C#: the module's path with escaped backslashes fails: " + Describe(fe, []));
             File.Delete(Path.Combine(root, "app/Bad.cs"));
+            Touch("app/bad.py", @"x = ""mod\\m\\y""" + "\n");
+            var (fpe, _, _) = Scan(root, cfg);
+            yield return (fpe.Any(f => f.File == "app/bad.py" && f.Name == "mod/m"), "Python: the module's path with escaped backslashes fails: " + Describe(fpe, []));
+
+            // an import after the colon of a one-line compound statement
+            foreach (var (code, label) in new[] { ("x = 1\ntry: import tool\nexcept ImportError: pass\n", "try: import"),
+                                                  ("x = 1\nif True: import tool\n", "if ...: import"),
+                                                  ("x = 1\nif x: pass\nelse: from tool import y\n", "else: from ... import") })
+            {
+                Touch("app/bad.py", code);
+                var (fc, _, _) = Scan(root, cfg);
+                int want = code.Split('\n').TakeWhile(l => !l.Contains("tool")).Count() + 1;
+                yield return (fc.Any(f => f.File == "app/bad.py" && f.Name == "import tool" && f.Line == want), $"Python: {label} on one line fails on its line {want}: " + Describe(fc, []));
+            }
+            File.Delete(Path.Combine(root, "app/bad.py"));
 
             Touch("app/app.csproj", "<ItemGroup><ProjectReference Include=\"..\\mod\\m\\probe\\probe.csproj\" /></ItemGroup>");
             var (f3, _, _) = Scan(root, cfg);
