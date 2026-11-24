@@ -107,11 +107,21 @@ internal sealed class PatchWriter : IAsyncDisposable
         return new PatchWriter(client, null, target, serverExe, sha, log);
     }
 
+    /// <summary>Test seam: each call's tool, whether houseCARL flagged it an error, and its text, as answered (the
+    /// equivalence tests compare the two ways of writing call by call).</summary>
+    internal Action<string, bool, string>? Answered;
+
     internal async Task<string> CallAsync(string tool, Dictionary<string, object?> args, CancellationToken ct = default)
     {
-        if (_library is not null) return await _library.CallAsync(tool, args, ct);
+        if (_library is not null)
+        {
+            var said = await _library.CallAsync(tool, args, ct);
+            Answered?.Invoke(tool, false, said);
+            return said;
+        }
         var r = await _client!.CallToolAsync(tool, args, cancellationToken: ct);
         var text = string.Join("\n", r.Content.OfType<TextContentBlock>().Select(c => c.Text));
+        Answered?.Invoke(tool, r.IsError == true, text);
         if (r.IsError == true) throw new InvalidOperationException($"{tool} refused: {text}");
         return text;
     }
