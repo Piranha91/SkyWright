@@ -80,7 +80,8 @@ def fabricate(base, *, exe=True, newer=None):
     files = {
         "viewprobe": os.path.join(root, "Program.cs"),
         "shared": os.path.join(base, "_geometry-harness", "_shared", "Worklist.cs"),
-        "core": os.path.join(base, "src", "housecarl-core", "Progress", "RunLog.cs"),
+        "core": os.path.join(base, "external", "houseCARL", "src", "housecarl-core", "Progress", "RunLog.cs"),
+        "engine": os.path.join(base, "src", "SkyWright.Engine", "MeshIntersection.cs"),
     }
     for key, path in files.items():
         write(path, "// %s\n" % key, NEW if key == newer else OLD)
@@ -151,6 +152,11 @@ def test_stale_against_the_shared_sources():
 
 def test_stale_against_the_core_library():
     stale_case("core", "RunLog.cs")
+
+
+def test_stale_against_the_engine():
+    """SkyWright.Engine (src/SkyWright.Engine) is built into the renderer like the core: a newer engine source is stale."""
+    stale_case("engine", "MeshIntersection.cs")
 
 
 def test_the_fallback_says_what_it_could_not_check():
@@ -266,7 +272,7 @@ def deployed(base, *, exe=T0, dll=None, core=None, sources=None):
     root = os.path.join(base, "_geometry-harness", "viewprobe")
     files = {"viewprobe": os.path.join(root, "Program.cs"),
              "shared": os.path.join(base, "_geometry-harness", "_shared", "CellBoundaryIndex.cs"),
-             "core": os.path.join(base, "src", "housecarl-core", "Progress", "RunLog.cs")}
+             "core": os.path.join(base, "external", "houseCARL", "src", "housecarl-core", "Progress", "RunLog.cs")}
     for key, path in files.items():
         write(path, "// %s\n" % key, (sources or {}).get(key, T0 - 1000))
     buildlayout.plant_marker(build_of(root))
@@ -336,6 +342,7 @@ def main():
                test_stale_against_the_probe_itself,
                test_stale_against_the_shared_sources,
                test_stale_against_the_core_library,
+               test_stale_against_the_engine,
                test_the_fallback_says_what_it_could_not_check,
                test_a_build_output_is_not_a_source,
                test_resolver_reports_both_halves,

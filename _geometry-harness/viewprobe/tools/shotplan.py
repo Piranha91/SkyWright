@@ -769,10 +769,11 @@ LIBRARY_NOTE = ("the rendering library lives in another repository, so its fresh
 
 def _source_roots(root: str) -> list[str]:
     """Every project IN THIS REPOSITORY the executable is built from: the probe, the shared
-    harness sources beside it, and the core library it links."""
+    harness sources beside it, and the libraries it links: SkyWright's engine and the pinned houseCARL core."""
     harness = os.path.dirname(root)
     repo = os.path.dirname(harness)
-    return [root, os.path.join(harness, "_shared"), os.path.join(repo, "src", "housecarl-core")]
+    return [root, os.path.join(harness, "_shared"), os.path.join(repo, "src", "SkyWright.Engine"),
+            os.path.join(repo, "external", "houseCARL", "src", "housecarl-core")]
 
 
 def newest_source(root: str, roots: list[str] | None = None) -> tuple[str | None, float]:
@@ -813,10 +814,10 @@ def viewprobe_exe(root: str | None = None, build: str | None = None) -> tuple[st
     exe = _built_viewprobe(build)
     if not os.path.isfile(exe):
         return None, "no built viewprobe at %s" % exe.replace("\\", "/")
-    # A deploy replaces the managed viewprobe.dll (and housecarl-core.dll) beside the exe and leaves
+    # A deploy replaces the managed viewprobe.dll (and the libraries' dlls) beside the exe and leaves
     # the apphost exe with its first build's time (P75): the build that runs is the newest of them.
-    # The renderer's own and shared sources compile into viewprobe.dll; the core library's into
-    # housecarl-core.dll, which a viewprobe build also writes.
+    # The renderer's own and shared sources compile into viewprobe.dll; the libraries' into
+    # SkyWright.Engine.dll and housecarl-core.dll, which a viewprobe build also writes.
     out = os.path.dirname(exe)
 
     def newest(names):
@@ -824,7 +825,7 @@ def viewprobe_exe(root: str | None = None, build: str | None = None) -> tuple[st
         return max(got) if got else (0.0, None)
     roots = _source_roots(root)
     for src_roots, built in ((roots[:2], newest(["viewprobe.exe", "viewprobe.dll"])),
-                             (roots[2:], newest(["viewprobe.exe", "viewprobe.dll", "housecarl-core.dll"]))):
+                             (roots[2:], newest(["viewprobe.exe", "viewprobe.dll", "SkyWright.Engine.dll", "housecarl-core.dll"]))):
         src, when = newest_source(root, src_roots)
         if src is not None and when > built[0]:
             rel = os.path.relpath(src, os.path.dirname(os.path.dirname(root))).replace("\\", "/")

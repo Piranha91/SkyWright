@@ -1843,7 +1843,7 @@ def _capture(a) -> int:
             cams = {s_: {**c_, "cellFormKey": cell_fk} for s_, c_ in cams.items()}
     vp_cmd = shlex.split(a.vp) if a.vp and not Path(a.vp).is_file() else [str(a.vp or VIEWPROBE)]
     vp = Path(vp_cmd[-1])
-    renderer = {n: sha256_file(vp.parent / n) for n in ("viewprobe.exe", "viewprobe.dll", "housecarl-core.dll")
+    renderer = {n: sha256_file(vp.parent / n) for n in ("viewprobe.exe", "viewprobe.dll", "SkyWright.Engine.dll", "housecarl-core.dll")
                 if (vp.parent / n).is_file()}
     media = {}
     poses = set()

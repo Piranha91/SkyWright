@@ -638,7 +638,7 @@ def stations_step(g, viewprobe, work, copy_to, instance, game, only=None, exempt
         jobs.append({"id": "%s-stations-%s" % (g["name"], w["name"]), "argv": argv, "cwd": str(out)})
         outs.append((w["name"], out))
     summary = {"viewprobeDll": sha(exe.parent / "viewprobe.dll"), "coreDll": sha(exe.parent / "housecarl-core.dll"),
-               "orderU": str(g["orders"]["u"]), "orderSha256": sha(g["orders"]["u"]), "profile": profile, "runs": []}
+               "engineDll": sha(exe.parent / "SkyWright.Engine.dll"), "orderU": str(g["orders"]["u"]), "orderSha256": sha(g["orders"]["u"]), "profile": profile, "runs": []}
     t0 = time.time()
     res = runlog.Runner("planeassess-stations", out_dir=str(Path(work) / "logs")).run(jobs)
     summary["wallSeconds"] = round(time.time() - t0, 1)
@@ -883,7 +883,7 @@ def _proc_mem_mib(pid):
         ctypes.windll.kernel32.CloseHandle(h)
 
 
-RESUME_KEYS = ("viewprobeDll", "coreDll", "rule", "order", "arm", "measurementMode", "occlusionQuery")
+RESUME_KEYS = ("viewprobeDll", "coreDll", "engineDll", "rule", "order", "arm", "measurementMode", "occlusionQuery")
 DEPTH_FLAG, DEPTH_MODE = "--depth-measurement", "depth-measurement"
 QUERY_FLAG = "--occlusion-query"
 
@@ -1048,7 +1048,7 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
     profile = json.loads(Path(order).read_text(encoding="utf-8")).get("BaseProfile") or "Manual"
     exe = Path(viewprobe)
     ident = with_mode({"viewprobeDll": sha(exe.parent / "viewprobe.dll"), "coreDll": sha(exe.parent / "housecarl-core.dll"),
-                       "rule": sha(g["_rel"](g["rule"])), "order": sha(order), "arm": arm, "reuseCell": not no_reuse},
+                       "engineDll": sha(exe.parent / "SkyWright.Engine.dll"), "rule": sha(g["_rel"](g["rule"])), "order": sha(order), "arm": arm, "reuseCell": not no_reuse},
                       depth_measurement, occlusion_query)
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
