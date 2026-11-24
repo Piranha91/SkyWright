@@ -21,12 +21,6 @@ public static class Checkout
     /// <summary>One of SkyWright's programs in this layout.</summary>
     public static string Program(string name) => PyPath.Str(HarnessShared.CheckoutLayout.ProgramExe(Harness, name));
 
-    /// <summary>A Python script of the checkout this build was made in (its _geometry-harness); refused in one sentence
-    /// when the build sits in no checkout.</summary>
-    public static string Script(string name, string step) => Layout.Checkout is { } checkout
-        ? PyPath.Join(PyPath.Resolve(checkout), "_geometry-harness", name)
-        : throw new Refusal($"{step} is a Python step of a SkyWright checkout, and this runcontrol's build at {PyOrder.Fwd(Layout.Root)} is in none; run it from a build inside a checkout.");
-
     /// <summary>The houseCARL integration module's source folder in the checkout this build was made in, or null when the
     /// build sits in none. Only the self-test's live cross-checks with the module's Python pipeline and settings use it;
     /// nothing a run does reads the module (a named crossing in SkyWright.Guards' fence check, until step 2).</summary>

@@ -47,6 +47,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does a Deep evaluation judge every census state and name every one it cannot?](#tool-integration-housecarl-tests-test_stategen.py) — `integration/housecarl/tests/test_stategen.py`
 - [Does a buried clash read as buried in the reel and the report, and does a top-down hide what covers the pair from above by the cutaway's rule?](#tool-integration-housecarl-tests-test_capture_fallbacks.py) — `integration/housecarl/tests/test_capture_fallbacks.py`
 - [Does a fresh user get the settings window once, and is a saved choice honoured?](#tool-integration-housecarl-tests-test_evalsettings.py) — `integration/housecarl/tests/test_evalsettings.py`
+- [Does a lab run's record capture read the open arms, take the machine slot, import only rows that were open, and refuse in one sentence?](#tool-integration-housecarl-tests-test_record_capture.py) — `integration/housecarl/tests/test_record_capture.py`
 - [Does a navmesh comparison request get its measured top-down camera, both states and its refusals offline?](#tool-integration-housecarl-tests-test_capture_navmesh.py) — `integration/housecarl/tests/test_capture_navmesh.py`
 - [Does a navmesh vignette's earlier-version caption, on the reel strip and in the report, name the plugin the historical frame's own --nav-version draws (never the plan's re-cut history, and none when the frame names none), say which mod replaced that version, and keep a name ending in s free of an "s's" possessive, in the narration too?](#tool-integration-housecarl-tests-test_navmesh_caption.py) — `integration/housecarl/tests/test_navmesh_caption.py`
 - [Does a neighbour mod's page state a clash with the evaluated mod?](#tool-adviceprobe) — `adviceprobe`
@@ -3838,6 +3839,21 @@ Inputs: Controlled fixtures for test_readerdoc.
 Outputs: Assertion results for: Does the reader's document list only clashes between the two mods and give the right install advice?
 
 Source: [integration/housecarl/tests/test_readerdoc.py](../integration/housecarl/tests/test_readerdoc.py) — `Tests for readerdoc.py — the reader's document rendered from a presentation plan.`
+
+
+<a id="tool-integration-housecarl-tests-test_record_capture.py"></a>
+
+### integration/housecarl/tests/test_record_capture.py
+
+**Does a lab run's record capture read the open arms, take the machine slot, import only rows that were open, and refuse in one sentence?**
+
+Qualify a change to the lab record capture between runcontrol's evaluate and records stages, or to how the module measures a lab entry.
+
+Inputs: Controlled fixtures for test_record_capture.
+
+Outputs: Assertion results or generated fixture data for: Does a lab run's record capture read the open arms, take the machine slot, import only rows that were open, and refuse in one sentence?
+
+Source: [integration/housecarl/tests/test_record_capture.py](../integration/housecarl/tests/test_record_capture.py) — `Known answers for a lab run's record capture`
 
 
 <a id="tool-integration-housecarl-tests-test_recordrows.py"></a>

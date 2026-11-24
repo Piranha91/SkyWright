@@ -1,14 +1,17 @@
 """evalpipeline - the stages of one mod's evaluation after its evidence bundle, on the run folder the built-in
 controller made.
 
-    runcontrol run --entry ENTRY.json --out RUN [--machine MACHINE.json] --through bundle      (census to bundle)
-    python _geometry-harness/evalpipeline.py run    --entry ENTRY.json --out RUN [--machine MACHINE.json] [--through STAGE]
-    python _geometry-harness/evalpipeline.py status --out RUN
+    python integration/housecarl/evalpipeline.py run    --entry ENTRY.json --out RUN [--machine MACHINE.json] [--through STAGE]
+    python integration/housecarl/evalpipeline.py status --out RUN
+    runcontrol run --entry ENTRY.json --out RUN [--machine MACHINE.json] --through bundle      (an in-place entry's census to bundle)
 
 What this is for. Census to bundle (census, prepare, scope, plan, evaluate, records, scenes, bundle) are run by the
 built-in controller, runcontrol (_geometry-harness/runcontrol), which derives the arms and their order from the entry and
-writes RUN/stages.json, RUN/arms.json and RUN/prepare/preparation.json. This driver runs what follows on the same run
-folder: precedent, report-plan, capture, image-observations, report, reel, deliver.
+writes RUN/stages.json, RUN/arms.json and RUN/prepare/preparation.json. For a lab entry this driver starts runcontrol
+itself: through evaluate, then the record capture (the lab's mcp-only rows read with houseCARL's record reader and
+imported with runcontrol import-results), then on through the bundle. An in-place entry (the app's) is carried through
+the bundle by the app. This driver then runs what follows on the same run folder: precedent, report-plan, capture,
+image-observations, report, reel, deliver.
 
   stages    Each stage is a receipt in RUN/stages.json bound to the hashes of its inputs and outputs; `run` reuses an
             accepted stage whose bindings are unchanged and reruns one that changed. A stage from census to bundle is
@@ -466,6 +469,127 @@ def budget_differs(ctx_entry: dict, out: Path):
     planned = planned_budget(out)
     want = (ctx_entry.get("evaluation") or {}).get("budgetMinutes")
     return want if planned is not None and want is not None and float(want) != float(planned) else None
+
+
+#: an arm's record read is stopped at this many minutes (a hung reader); the capture's backstop scales with the open arms
+RECORDS_ARM_MINUTES = 150
+
+
+def slot_wait_sentence(log: Path, ctx) -> str | None:
+    """The one sentence for a capture that never started because the machine slot's wait for idle ran out; None for any other end."""
+    if not log.is_file():
+        return None
+    line = next((x for x in log.read_text(encoding="utf-8", errors="replace").splitlines() if "gave up waiting for idle" in x), None)
+    if line is None:
+        return None
+    why = line.split(": ", 1)[-1].strip()
+    prefix = ctx.machine.get("heavyPrefix") or []
+    floor = prefix[prefix.index("--min-free-gb") + 1] if "--min-free-gb" in prefix else None
+    if "memory" in why:
+        return (f"the record capture never started: the machine slot's wait for memory ran out ({why}); it needs {floor} GB free, so close other programs "
+                f"or lower --min-free-gb in the machine file's heavyPrefix, then run again.")
+    return f"the record capture never started: the machine slot's wait for an idle machine ran out ({why}); end what it names, then run again."
+
+
+def capture_python(ctx) -> str:
+    """The Python the capture runs under: the machine file's `python`, else this driver's own."""
+    return str(ctx.machine.get("python") or sys.executable)
+
+
+def capture_records(ctx, res: dict, sdir: Path) -> tuple[dict, list]:
+    """A lab run's record capture, between runcontrol's evaluate and its records stage: every arm with an mcp-only row
+    open in the ledger is read by evalrecords.py capture under the machine slot, then each document of a row that was
+    open is imported by runcontrol's own import-results. Writes RUN/records/records.json (runcontrol's records stage
+    leaves it and lists the rows still open). Returns (bound, outputs) as the stage it was."""
+    run = ctx.out / "evaluation"
+    led = read_json(run / "ledger.json").get("entries") or {}
+    open_arms = sorted({k.split("__")[1] for k, v in led.items() if str(v.get("status")) == "mcp-only" and "__" in k})
+    if not open_arms:
+        write_json(sdir / "records.json", {"note": "no mcp-only row is open; nothing to capture"})
+        return {"openArms": 0}, [sdir / "records.json"]
+    import evalrecords_workers
+    try:
+        record_workers = evalrecords_workers.parse_workers(ctx.machine.get("recordWorkers", "auto"), "the machine file's recordWorkers")
+    except ValueError as ex:
+        raise Refusal(str(ex))
+    n = len(list(sdir.glob("capture-*")))
+    cap = sdir / f"capture-{n + 1:02d}"
+    argv = [capture_python(ctx), fwd(SW.HARNESS / "evalrecords.py"), "capture", "--run", fwd(run),
+            *[x for a in open_arms for x in ("--arm", a)],
+            "--baseline-from", fwd(ctx.out / "prepare" / "preparation.json"), "--reader-cmd", reader_cmd(ctx),
+            "--data", fwd(ctx.game / "Data"), "--mods", fwd(ctx.instance / "mods"),
+            "--profile-dir", fwd(ctx.instance / "profiles" / ctx.profile),
+            "--reader-data", fwd(ctx.out / "reader-data"), "--out", fwd(cap)]
+    # an arm's read is stopped at RECORDS_ARM_MINUTES (a hung reader); the stage's backstop scales with the open arms.
+    # Finished arms are kept in the checkpoints folder, so a stop or a rerun reads only the arms not yet finished.
+    (sdir / "checkpoints").mkdir(parents=True, exist_ok=True)
+    argv += ["--checkpoints", fwd(sdir / "checkpoints"), "--arm-deadline-min", str(RECORDS_ARM_MINUTES)]
+    # how many arms read at once: the machine file's recordWorkers, a number or auto; workers run inside the one slot below
+    argv += ["--workers", str(record_workers)]
+    # the read takes the machine slot, held as long as the stage's own backstop so the slot never stops it first
+    backstop = RECORDS_ARM_MINUTES * len(open_arms) + 10
+    r = child(ctx, sdir / "commands", "records-capture", argv, heavy=True, purpose=f"evalpipeline {ctx.id} records",
+              deadline_min=backstop, hold_min=backstop)
+    summary = read_json(cap / "capture-summary.json") if (cap / "capture-summary.json").is_file() else {}
+    workers = read_json(cap / "capture-workers.json") if (cap / "capture-workers.json").is_file() else {}
+    if workers.get("warning"):
+        print(f"records: {workers['warning']}")
+    for arm, why in (workers.get("curedAlone") or {}).items():
+        print(f"records: {arm} was refused beside other arms and read fine alone: {why}")
+    imports, refusals = [], {}
+    for arm, v in summary.items():
+        if "refused" in v:
+            refusals[arm] = v["refused"]
+        imports += v.get("imports", [])
+    results = []
+    # only a document for a row that was open before the capture is imported
+    imports = [d for d in imports if str((led.get(Path(d).parent.name) or {}).get("status")) == "mcp-only"]
+    for i, doc in enumerate(sorted(imports)):
+        rr = child(ctx, sdir / "commands", f"import-{cap.name}-{i:02d}",
+                   [fwd(runcontrol_exe(ctx.machine)), "import-results", "--run", fwd(run), "--file", doc])
+        log = sdir / "commands" / f"import-{cap.name}-{i:02d}.txt"
+        results.append({"file": doc, "exitCode": rr.get("exitCode"),
+                        "log": fwd(log) if log.is_file() else None})
+    write_json(sdir / "records.json", {"capture": summary, "captureExit": r.get("exitCode"), "imports": results,
+                                       "refusedArms": refusals,
+                                       "workers": {k: workers.get(k) for k in ("requested", "workers", "case", "warning", "memory", "curedAlone")}})
+    bad = [x for x in results if x["exitCode"] != 0]
+    if r.get("exitCode") not in (0, 2) or not summary:
+        raise Refusal(slot_wait_sentence(sdir / "commands" / "records-capture.txt", ctx)
+                      or f"the record capture did not finish (exit {r.get('exitCode')}); read {fwd(sdir / 'commands')}.")
+    stopped = sorted(a_ for a_, why in refusals.items() if "deadline" in str(why))
+    if stopped:
+        raise Refusal(f"the record read of arm(s) {', '.join(stopped)} reached its {RECORDS_ARM_MINUTES}-minute deadline; "
+                      f"run again: finished arms are kept in {fwd(sdir / 'checkpoints')} and only these are read again.")
+    if bad or refusals:
+        # recorded, not hidden: the evaluation stays incomplete for those rows, and the bundle says so
+        print(f"records: {len(bad)} import(s) refused and {len(refusals)} arm(s) refused; see {fwd(sdir / 'records.json')}")
+    return {"imports": len(results), "refused": len(bad) + len(refusals)}, [sdir / "records.json", cap, sdir / "checkpoints"]
+
+
+def measure(ctx, through: str) -> None:
+    """A lab entry's census to bundle: runcontrol through evaluate, the record capture, then runcontrol on through the
+    bundle (each part only as far as `through`). runcontrol reuses every stage whose inputs and outputs are unchanged, so
+    a run folder already measured starts no probe again. Raises Refusal with runcontrol's own sentence when it stops."""
+    last = STAGES[min(STAGES.index(through), STAGES.index("bundle"))]
+    rc = [fwd(runcontrol_exe(ctx.machine)), "run", "--entry", fwd(ctx.entry_path), "--out", fwd(ctx.out)]
+    if ctx.machine_path:
+        rc += ["--machine", fwd(ctx.machine_path)]
+
+    def controller(upto: str):
+        r = child(ctx, ctx.out / "measure", f"runcontrol-through-{upto}", rc + ["--through", upto])
+        if r.get("exitCode") != 0:
+            st = ctx.out / "status.json"
+            said = (read_json(st).get("sentence") if st.is_file() else None) or f"read {fwd(ctx.out / 'measure')}"
+            raise Refusal(f"the built-in controller stopped before {upto} (exit {r.get('exitCode')}): {said}")
+    if STAGES.index(last) < STAGES.index("records"):
+        controller(last)
+        return
+    controller("evaluate")
+    sdir = ctx.out / "records"
+    sdir.mkdir(parents=True, exist_ok=True)
+    capture_records(ctx, {}, sdir)
+    controller(last)
 
 
 def reader_cmd(ctx) -> str:
@@ -1368,6 +1492,9 @@ def patch_search_refusal(ctx, res: dict, through: str) -> str | None:
 
 # ---------------------------------------------------------------- driver
 
+#: how a lab entry's census to bundle is measured (a seam for the suites)
+MEASURE = measure
+
 
 def cmd_run(a) -> int:
     out = Path(a.out)
@@ -1379,8 +1506,16 @@ def cmd_run(a) -> int:
     ctx = Context(a.entry, a.machine, out)
     if getattr(ctx, "in_place", None):
         os.environ["HOUSECARL_RUNLOG_DIR"] = fwd(out / "runlog")     # a manual run's log stays in its work folder, set
-    ledger = StageLedger(out)
     through = a.through or STAGES[-1]
+    if not getattr(ctx, "in_place", None):
+        # a lab entry is measured here: runcontrol through evaluate, the record capture, runcontrol through the bundle
+        try:
+            MEASURE(ctx, through)
+        except Refusal as r:
+            write_json(out / "status.json", {"status": "incomplete", "stoppedAt": "census", "sentence": str(r), "at": utcnow()})
+            print(f"REFUSED: {r}", file=sys.stderr)
+            return EXIT_REFUSED
+    ledger = StageLedger(out)
     refusals = []      # non-blocking refusals: the run goes on, and its final status still names each one
     with Run("evalpipeline", mode=ctx.id, stage_source="counted") as run:
         try:

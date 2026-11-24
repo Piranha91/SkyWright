@@ -8,10 +8,12 @@ using RunControl;
 // The pipeline driver and its stages census, prepare, scope, plan, evaluate, records, scenes and bundle, and the
 // commands plan, run, resume, status, import-results, finalize, bundle, verify-bundle, population and the order sweep,
 // over the foundations (the JSON bytes, hashes, orderings and text forms its files are read in, the program identity
-// rule, the stage ledger). The names in brackets below are the Python commands each replaced. For a lab entry the
-// records stage starts the record capture, which stays the Python tool evalrecords.py until it is ported, and then this
-// program's own import-results, which also imports a live game driver's export (LiveImport). A plan is bound to the controller build that froze it. The stages from report-plan on
-// are the Python pipeline's (evalpipeline.py), which continues a run folder this program took through the bundle.
+// rule, the stage ledger). The names in brackets below are the Python commands each replaced. The records stage starts
+// no record reader: a lab run's records are captured by the AI-driven evaluation, which imports them through this
+// program's own import-results (which also imports a live game driver's export, LiveImport) and then runs this program
+// on to the bundle; the stage lists the mcp-only rows still open. A plan is bound to the controller build that froze it.
+// The stages from report-plan on belong to the AI-driven evaluation, which continues a run folder this program took
+// through the bundle.
 //
 // usage: runcontrol run    --entry ENTRY.json --out RUN [--machine MACHINE.json] [--through STAGE]
 //                          [--reuse-preparation-from WORK_FOLDER]
@@ -23,10 +25,10 @@ using RunControl;
 //        runcontrol canon                read JSON on standard input; print the hash of its two canonical forms
 //        runcontrol fingerprint          read a JSON list of configurations on standard input (plugins, providers, overlays,
 //                                        population, state, schemaVersion); print the list of their fingerprints as JSON.
-//                                        The Python that stays (switchflip, capture_acquire, evalrecords) asks this.
+//                                        For a caller that must not hold its own copy of the rule.
 //        runcontrol switchflip-outcome   read one JSON request on standard input ({"classify": {events, flipStart, windowSeconds?}},
 //                                        {"armReading": [...]} or {"rules": true}); print the switch-flip reading rule's answer.
-//                                        The live driver, switchflip.py, asks this.
+//                                        For the live switch check's driver.
 //        runcontrol finalize --run RUN   derive disposition.json and STATUS.md from the ledger and receipts (evalrun finalize)
 //        runcontrol bundle --run RUN [--out DIR] [--reader-cmd CMD] [--reader-env K=V]... [--mod-name PLUGIN=NAME]... [--no-names]
 //                          [--media FILE] [--registry FILE] [--scope FILE] [--search FILE]   assemble one evidence bundle (evalrun bundle)

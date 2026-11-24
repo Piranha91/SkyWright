@@ -566,6 +566,8 @@ def case_68_a_stage_after_the_bundle_runs_again_when_its_tools_change():
             return body
         try:
             ep.Context = FakeCtx
+            # the stand-in bodies are every stage's, the measuring ones too, so the lab entry's measuring is stood in
+            ep.MEASURE = lambda ctx, through: None
             for n in ep.STAGES:
                 ep.STAGE_BODIES[n] = light(n)
             a = types.SimpleNamespace(entry="e.json", machine=None, out=str(out), through="capture")
@@ -626,7 +628,7 @@ def _fake_pipeline(entry_box: dict, calls: list, refuse_when=None, res=None, mac
 def _run_pipeline(t, entry_box, calls, runs, refuse_when=None, res=None, machine=None):
     """Run the driver once per entry in `runs` (each replaces entry_box['entry']); returns [(exit, stages run)]."""
     import types
-    saved = EP.Context, dict(EP.STAGE_BODIES)
+    saved = EP.Context, dict(EP.STAGE_BODIES), EP.MEASURE
     out = Path(t) / "run"
     os.environ["HOUSECARL_RUNLOG_DIR"] = str(Path(t) / "runlog")
     got = []
@@ -634,6 +636,8 @@ def _run_pipeline(t, entry_box, calls, runs, refuse_when=None, res=None, machine
         fake, bodies = _fake_pipeline(entry_box, calls, refuse_when, res, machine)
         EP.Context = fake
         EP.STAGE_BODIES.update(bodies)
+        # the stand-in bodies are every stage's, the measuring ones too, so the lab entry's measuring is stood in
+        EP.MEASURE = lambda ctx, through: None
         a = types.SimpleNamespace(entry="e.json", machine=None, out=str(out), through=None)
         for e in runs:
             entry_box["entry"] = e
@@ -644,6 +648,7 @@ def _run_pipeline(t, entry_box, calls, runs, refuse_when=None, res=None, machine
         EP.Context = saved[0]
         EP.STAGE_BODIES.clear()
         EP.STAGE_BODIES.update(saved[1])
+        EP.MEASURE = saved[2]
         os.environ.pop("HOUSECARL_RUNLOG_DIR", None)
     return out, got
 

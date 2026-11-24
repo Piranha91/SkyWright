@@ -8704,6 +8704,27 @@
       ]
     },
     {
+      "id": "integration/housecarl/tests/test_record_capture.py",
+      "path": "integration/housecarl/tests/test_record_capture.py",
+      "kind": "script",
+      "answers": [
+        "Does a lab run's record capture read the open arms, take the machine slot, import only rows that were open, and refuse in one sentence?"
+      ],
+      "useWhen": "Qualify a change to the lab record capture between runcontrol's evaluate and records stages, or to how the module measures a lab entry.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/tests/test_record_capture.py",
+          "anchor": "Known answers for a lab run's record capture"
+        }
+      ],
+      "inputs": [
+        "Controlled fixtures for test_record_capture."
+      ],
+      "outputs": [
+        "Assertion results or generated fixture data for: Does a lab run's record capture read the open arms, take the machine slot, import only rows that were open, and refuse in one sentence?"
+      ]
+    },
+    {
       "id": "integration/housecarl/tests/test_switchflip_scope.py",
       "path": "integration/housecarl/tests/test_switchflip_scope.py",
       "kind": "script",

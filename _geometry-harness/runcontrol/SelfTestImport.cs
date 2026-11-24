@@ -42,25 +42,13 @@ public static partial class SelfTestFinalize
             ka = D(PyJson.Loads(r.ReadToEnd()));
         ImportTables(ka);
         foreach (var folder in L(ka["imports"]).Select(D)) ImportFolder(folder);
-        // the record capture is a Python step of the checkout the build sits in (Checkout.Script): its cases need one
-        if (HarnessShared.CheckoutLayout.Locate(null, out _)?.Checkout is null)
-        {
-            const string why = "the record capture is a Python step of a checkout, and this build sits in none";
-            foreach (var stage in L(ka["recordsStage"]).Select(D)) Skip($"records stage: {S(stage["name"])}", why);
-            Skip("records stage: the capture's Python, and the suite's cases 58 and after", why);
-        }
-        else
-        {
-            foreach (var stage in L(ka["recordsStage"]).Select(D)) RecordsStageCase(stage);
-            RecordsPythonCases();
-            RecordsSuiteCases();
-        }
+        // the record capture is the AI-driven evaluation's (the module's own suite holds its recorded rows); this
+        // program's records stage starts no child: the in-place row, and the open rows of a lab run
+        foreach (var stage in L(ka["recordsStage"]).Select(D)) RecordsStageCase(stage);
+        OpenRowsCases();
     }
 
-    // The capture's stand-in: the canned summary with the capture folder written into its paths.
-    static byte[] Filled(object? doc, string cap) => PyJson.Utf8(PyJson.Dumps(doc).Replace("{cap}", PyOrder.Fwd(cap)));
-
-    // One recorded run of the records stage, its capture and its imports stood in for.
+    // One recorded run of the records stage that starts no child.
     static void RecordsStageCase(PyDict c)
     {
         Case($"records stage: {S(c["name"])}", () =>
@@ -70,68 +58,18 @@ public static partial class SelfTestFinalize
             t.Write("run/evaluation/ledger.json", PyJson.Utf8(PyJson.Dumps(new PyDict { ["entries"] = c["entries"] })));
             Directory.CreateDirectory(sdir);
             for (int i = 0; i < (long)c["earlier"]!; i++) Directory.CreateDirectory(PyPath.Join(sdir, $"capture-{i + 1:00}"));
-            // the capture's Python is a file of this test's own, so the case does not need one on this machine
-            var machine = new PyDict(D(c["machine"])) { ["python"] = t.Write("python.exe", []) };
-            var ctx = new RunContext(D(Py.Copy(c["entry"])), machine, run);
-            var prefix = machine.Get("heavyPrefix") as List<object?>;
+            var ctx = new RunContext(D(Py.Copy(c["entry"])), new PyDict(D(c["machine"])), run);
             var started = new List<object?>();
-            var exits = L(c["importExits"]);
-            int imports = 0;
-            string? wrong = null, refusal = null;
+            string? refusal = null;
             (PyDict? bound, List<string> outputs) got = (null, []);
             var saved = ChildLaunch.RunJob;
             var savedOut = Report.Out;
             var printed = new StringWriter();
-            string? before = Environment.GetEnvironmentVariable("HOUSECARL_RECORD_READER_CMD");
-            Environment.SetEnvironmentVariable("HOUSECARL_RECORD_READER_CMD", (string?)c["envReader"]);
             Report.Out = printed;
             ChildLaunch.RunJob = (op, dir, deadline, job) =>
             {
-                var argv = job.Argv.ToList();
-                bool capture = job.Id == "records-capture";
-                var more = new PyDict();
-                if (op != "evalpipeline-" + job.Id) wrong ??= $"{job.Id} was started under the run-log name {op}";
-                if (capture)
-                {
-                    const long backstop = 460;   // 150 minutes for each of three arms, and ten
-                    double minutes = Math.Round(((deadline ?? 0) - ChildRunner.Now()) / 60);
-                    if (prefix != null)
-                    {
-                        int cut = argv.IndexOf("--");
-                        var slot = argv.Take(cut).ToList();
-                        argv = argv.Skip(cut + 1).ToList();
-                        string lockFile = PyOrder.Fwd(PyPath.Join(run, "HEAVY-LOCK-m-records-capture"));
-                        string wantSlot = $"python S:/tools/idle_lock.py hold --lock {lockFile} --min-free-gb 16 --purpose evalpipeline m records --max-min {backstop}";
-                        if (string.Join(" ", slot) != wantSlot) wrong ??= $"the slot command was {string.Join(" ", slot)}";
-                        if (minutes != 240 + backstop + ChildLaunch.HoldMarginMin) wrong ??= $"under the slot the capture's deadline was {minutes} minutes";
-                    }
-                    else if (minutes != backstop) wrong ??= $"the capture's deadline was {minutes} minutes";
-                    more = new PyDict { ["deadline_min"] = backstop, ["heavy"] = true, ["hold_min"] = backstop, ["purpose"] = "evalpipeline m records" };
-                    if (argv[0] != S(machine["python"])) wrong ??= $"the capture was started with {argv[0]}";
-                    if (argv[1] != PyOrder.Fwd(Checkout.Script("evalrecords.py", "the record capture"))) wrong ??= $"the capture's script was {argv[1]}";
-                }
-                else
-                {
-                    if (deadline != null) wrong ??= $"{job.Id} was started with a deadline";
-                    if (argv[0] != Environment.ProcessPath) wrong ??= $"{job.Id} was started with {argv[0]}";
-                }
-                started.Add(new PyDict
-                {
-                    ["op"] = job.Id, ["dir"] = t.Mask(dir), ["script"] = capture ? PyPath.Name(argv[1]) : "evalrun.py",
-                    ["argv"] = t.Mask((capture ? argv.Skip(2) : argv.Skip(1)).Cast<object?>().ToList()), ["more"] = more,
-                });
-                if (capture)
-                {
-                    string cap = argv[argv.IndexOf("--out") + 1];
-                    string rel = Path.GetRelativePath(t.Root, PyPath.Str(cap));
-                    if (c["summary"] != null) t.Write(PyPath.Join(rel, "capture-summary.json"), Filled(c["summary"], cap));
-                    if (c["workers"] != null) t.Write(PyPath.Join(rel, "capture-workers.json"), PyJson.Utf8(PyJson.Dumps(c["workers"])));
-                    if (c["captureLog"] != null) t.Write(Path.GetRelativePath(t.Root, PyPath.Join(dir, "records-capture.txt")), PyJson.Utf8(S(c["captureLog"])));
-                    return new ChildResult(job.Id, c["captureExit"] == null ? null : (int)(long)c["captureExit"]!, 0.1, null, 1);
-                }
-                if (c["importLogs"] is true) t.Write(Path.GetRelativePath(t.Root, PyPath.Join(dir, job.Id + ".txt")), PyJson.Utf8("$ import\n(exit 0, 0.1s)\n\n"));
-                object? code = exits[imports++];
-                return new ChildResult(job.Id, code == null ? null : (int)(long)code, 0.1, null, 1);
+                started.Add(new PyDict { ["op"] = job.Id });
+                return new ChildResult(job.Id, 0, 0.1, null, 1);
             };
             try { got = StageRecords.Records(ctx, new PyDict(), sdir); }
             catch (Refusal r) { refusal = t.Mask(r.Message); }
@@ -139,11 +77,10 @@ public static partial class SelfTestFinalize
             {
                 ChildLaunch.RunJob = saved;
                 Report.Out = savedOut;
-                Environment.SetEnvironmentVariable("HOUSECARL_RECORD_READER_CMD", before);
             }
             var folders = PyOrder.SortedByCodePoint(Directory.GetDirectories(sdir, "*", SearchOption.AllDirectories)
                 .Select(p => PyOrder.Fwd(Path.GetRelativePath(run, p)))).Cast<object?>().ToList();
-            return wrong ?? Same("refusal", refusal, (string?)c["refusal"])
+            return Same("refusal", refusal, (string?)c["refusal"])
                    ?? SameJson("children", started, c["started"])
                    ?? Same("printed", t.Mask(printed.ToString().Replace("\r\n", "\n")), S(c["printed"]))
                    ?? Same("records.json", t.Mask(Lines(PyPath.Join(sdir, "records.json"))), (string?)c["record"])
@@ -153,107 +90,63 @@ public static partial class SelfTestFinalize
         });
     }
 
-    // The records stage over `arms` open arms, its capture stood in for: the capture's command line after any slot
-    // command, the slot command before it, and the minutes of its deadline.
-    static (List<string> argv, List<string> slot, double minutes) CaptureLaunch(int arms, PyDict? machineMore = null)
+    // A lab run's records stage after the evaluation's own capture (or without one): it starts no child, leaves the
+    // capture's records.json alone, and lists every mcp-only row still open.
+    static void OpenRowsCases()
     {
-        using var t = new Temp();
-        var entries = new PyDict();
-        for (int i = 0; i < arms; i++) entries[$"row{i}__{(i == 0 ? "baseline" : $"candidate-{i:00}")}"] = new PyDict { ["status"] = "mcp-only" };
-        t.Write("run/evaluation/ledger.json", PyJson.Utf8(PyJson.Dumps(new PyDict { ["entries"] = entries })));
-        Directory.CreateDirectory(t.At("run/records"));
-        var machine = new PyDict { ["readerCmd"] = "reader", ["python"] = t.Write("python.exe", []) };
-        if (machineMore != null) machine.Update(machineMore);
-        var entry = D(PyJson.Loads("{\"schema\": 1, \"id\": \"m\", \"subject\": {\"plugin\": \"S.esp\", \"mod\": \"MS\"}, "
-            + "\"source\": {\"instance\": \"S:/src\", \"profile\": \"P\"}, \"lab\": {\"instance\": \"L:/lab\", \"game\": \"G:/game\"}}"));
-        var ctx = new RunContext(entry, machine, t.At("run"));
-        List<string> argv = [], slot = [];
-        double minutes = double.NaN;
-        var saved = ChildLaunch.RunJob;
-        ChildLaunch.RunJob = (op, dir, deadline, job) =>
+        (PyDict? bound, List<string> outputs, string printed, List<string> jobs, Temp t) Stage(PyDict entries, string? captureRecord)
         {
-            if (job.Id == "records-capture")
-            {
-                var all = job.Argv.ToList();
-                int cut = machine.ContainsKey("heavyPrefix") ? all.IndexOf("--") : -1;
-                slot = all.Take(Math.Max(cut, 0)).ToList();
-                argv = all.Skip(cut + 1).ToList();
-                minutes = deadline is { } d ? Math.Round((d - ChildRunner.Now()) / 60) : double.NaN;
-            }
-            return new ChildResult(job.Id, 0, 0.1, null, 1);
-        };
-        try { StageRecords.Records(ctx, new PyDict(), t.At("run/records")); }
-        catch (Refusal) { }   // the stand-in writes no summary, as the suite's does
-        finally { ChildLaunch.RunJob = saved; }
-        return (argv, slot, minutes);
-    }
-
-    // Two cases of tests/test_evalpipeline.py about the records stage, with the suite's own expected values. Case 58
-    // reads the Python function's text; here the same facts are read from the child the stage starts.
-    static void RecordsSuiteCases()
-    {
-        Case("case 58 the records stage keeps finished arms and scales its deadline", () =>
-        {
-            if (StageRecords.ArmMinutes is < 60 or > 600) return $"a per-arm record deadline is set, got {StageRecords.ArmMinutes}";
-            var (one, _, oneMinutes) = CaptureLaunch(1);
-            var (three, _, threeMinutes) = CaptureLaunch(3);
-            int at = three.IndexOf("--arm-deadline-min");
-            if (!three.Contains("--checkpoints") || at < 0 || three[at + 1] != StageRecords.ArmMinutes.ToString())
-                return "the records stage keeps finished arms and stops a hung arm: " + string.Join(" ", three);
-            return Same("the backstop for one open arm", oneMinutes.ToString(), (StageRecords.ArmMinutes * 1 + 10).ToString())
-                   ?? Same("the backstop scales with the open arms", threeMinutes.ToString(), (StageRecords.ArmMinutes * 3 + 10).ToString())
-                   ?? (threeMinutes == 240 ? "a fixed stage deadline" : null)
-                   ?? Same("one --arm for each open arm", three.Count(x => x == "--arm").ToString(), "3")
-                   ?? Same("and one for one", one.Count(x => x == "--arm").ToString(), "1");
-        });
-        Case("case 59 the records stage takes the machine slot for its backstop", () =>
-        {
-            long want = StageRecords.ArmMinutes * 3 + 10;
-            var (plain, _, plainMinutes) = CaptureLaunch(3);
-            if (plain.Count < 3 || plain[2] != "capture") return "the records stage reads its arms through one child: " + string.Join(" ", plain);
-            var prefix = new PyDict { ["heavyPrefix"] = new List<object?> { "slot.exe", "hold", "--lock", "{lock}", "--purpose", "{purpose}", "--max-min", "5" } };
-            var (_, slot, slotMinutes) = CaptureLaunch(3, prefix);
-            int hold = slot.IndexOf("--max-min");
-            return (slot.Count > 0 && slot[0] == "slot.exe" ? null : "the records stage takes the machine slot: its capture was not started through the slot command")
-                   ?? Same("the slot is held for the stage's backstop", hold < 0 ? null : slot[hold + 1], want.ToString())
-                   ?? Same("the slot is asked for by the stage's purpose", slot[slot.IndexOf("--purpose") + 1], "evalpipeline m records")
-                   ?? Same("the stage's backstop", plainMinutes.ToString(), want.ToString())
-                   ?? Same("under the slot the deadline sits past its waits and its hold", slotMinutes.ToString(), (240 + want + ChildLaunch.HoldMarginMin).ToString());
-        });
-    }
-
-    // Where the capture's Python is found: this controller's own rule (decision D7), so its own cases.
-    static void RecordsPythonCases()
-    {
-        Case("records stage: the capture's Python is the machine file's, else the first python.exe on PATH, else one sentence", () =>
-        {
-            using var t = new Temp();
-            string named = t.Write("named/python.exe", []), onPath = t.Write("second/python.exe", []);
-            Directory.CreateDirectory(t.At("first"));
-            var saved = StageRecords.SearchPath;
-            RunContext Ctx(PyDict machine) => new(new PyDict(), machine, t.Root, "lab");
-            string? Refused(PyDict machine)
-            {
-                try { return "found " + StageRecords.Python(Ctx(machine)); }
-                catch (Refusal r) { return r.Message; }
-            }
+            var t = new Temp();
+            t.Write("run/evaluation/ledger.json", PyJson.Utf8(PyJson.Dumps(new PyDict { ["entries"] = entries })));
+            Directory.CreateDirectory(t.At("run/records"));
+            if (captureRecord != null) t.Write("run/records/records.json", PyJson.Utf8(captureRecord));
+            var entry = D(PyJson.Loads("{\"schema\": 1, \"id\": \"m\", \"subject\": {\"plugin\": \"S.esp\", \"mod\": \"MS\"}, "
+                + "\"source\": {\"instance\": \"S:/src\", \"profile\": \"P\"}, \"lab\": {\"instance\": \"L:/lab\", \"game\": \"G:/game\"}}"));
+            var ctx = new RunContext(entry, new PyDict { ["readerCmd"] = "reader" }, t.At("run"));
+            var jobs = new List<string>();
+            var saved = ChildLaunch.RunJob;
+            var savedOut = Report.Out;
+            var printed = new StringWriter();
+            Report.Out = printed;
+            ChildLaunch.RunJob = (op, dir, deadline, job) => { jobs.Add(job.Id); return new ChildResult(job.Id, 0, 0.1, null, 1); };
             try
             {
-                StageRecords.SearchPath = () => $"{t.At("first")};\"{t.At("second")}\"; ;{t.At("none")}";
-                string? why = Same("the machine file's python", StageRecords.Python(Ctx(new PyDict { ["python"] = named })), named)
-                              ?? Same("python on PATH", StageRecords.Python(Ctx(new PyDict())), onPath);
-                if (why != null) return why;
-                string gone = Refused(new PyDict { ["python"] = t.At("gone/python.exe") })!;
-                StageRecords.SearchPath = () => t.At("first");
-                string none = Refused(new PyDict())!;
-                StageRecords.SearchPath = () => null;
-                string unset = Refused(new PyDict())!;
-                foreach (string sentence in new[] { gone, none, unset })
-                    if (!sentence.StartsWith("the lab records capture needs Python", StringComparison.Ordinal) || !sentence.Contains("key python", StringComparison.Ordinal))
-                        return "the refusal does not say that the capture needs Python and name the machine key: " + sentence;
-                return gone.Contains(t.At("gone/python.exe"), StringComparison.Ordinal) ? null : "the refusal does not name the file the machine file gave: " + gone;
+                var (bound, outputs) = StageRecords.Records(ctx, new PyDict(), t.At("run/records"));
+                return (bound, outputs, printed.ToString(), jobs, t);
             }
-            finally { StageRecords.SearchPath = saved; }
+            finally { ChildLaunch.RunJob = saved; Report.Out = savedOut; }
+        }
+        Case("records stage: a lab run's open mcp-only rows are listed by arm, and nothing is started", () =>
+        {
+            var entries = D(PyJson.Loads("{\"r.fields__baseline\": {\"checkId\": \"r.fields\", \"status\": \"mcp-only\"}, "
+                + "\"r.fields__candidate-01\": {\"checkId\": \"r.fields\", \"status\": \"accepted\"}, "
+                + "\"r.cells__candidate-01\": {\"checkId\": \"r.cells\", \"status\": \"mcp-only\"}, \"g.overlap__baseline\": {\"checkId\": \"g.overlap\", \"status\": \"accepted\"}}"));
+            const string capture = "{\"capture\": {}, \"captureExit\": 0}";
+            var (bound, outputs, printed, jobs, t) = Stage(entries, capture);
+            using (t)
+            {
+                var doc = D(PyJson.ReadPipelineFile(t.At("run/records/" + StageRecords.OpenRowsFile)));
+                return (jobs.Count == 0 ? null : $"the stage started {string.Join(", ", jobs)}")
+                       ?? SameJson("open rows", doc["open"], PyJson.Loads("{\"baseline\": [\"r.fields\"], \"candidate-01\": [\"r.cells\"]}"))
+                       ?? SameJson("bound", bound, PyJson.Loads("{\"openRows\": 2}"))
+                       ?? SameJson("outputs", t.Mask(outputs.Cast<object?>().ToList()), PyJson.Loads("[\"<ROOT\\\\>\\\\run\\\\records\\\\open-rows.json\"]"))
+                       ?? Same("the capture's record", File.ReadAllText(t.At("run/records/records.json")), capture)
+                       ?? (printed.Contains("2 mcp-only row(s) on arm(s) baseline, candidate-01 have no imported record check") ? null : $"said: {printed}");
+            }
+        });
+        Case("records stage: a lab run whose mcp-only rows were all imported lists none and says nothing", () =>
+        {
+            var entries = D(PyJson.Loads("{\"r.fields__baseline\": {\"checkId\": \"r.fields\", \"status\": \"accepted\"}}"));
+            var (bound, _, printed, jobs, t) = Stage(entries, null);
+            using (t)
+            {
+                var doc = D(PyJson.ReadPipelineFile(t.At("run/records/" + StageRecords.OpenRowsFile)));
+                return (jobs.Count == 0 ? null : $"the stage started {string.Join(", ", jobs)}")
+                       ?? SameJson("open rows", doc["open"], new PyDict())
+                       ?? SameJson("bound", bound, PyJson.Loads("{\"openRows\": 0}"))
+                       ?? (printed.Length == 0 ? null : $"said: {printed}")
+                       ?? (File.Exists(t.At("run/records/records.json")) ? "the stage wrote records.json, which is the capture's" : null);
+            }
         });
     }
 
