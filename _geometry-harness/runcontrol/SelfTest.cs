@@ -506,7 +506,8 @@ public static partial class SelfTest
                           "live: Python reuses a stage this program recorded", "live: this program reuses a stage Python recorded"];
         string? root = HarnessShared.CheckoutLayout.Locate(null, out _)?.Checkout;
         string harness = root == null ? "" : Path.Combine(root, "_geometry-harness");
-        string? reason = !File.Exists(Path.Combine(harness, "evalpipeline.py")) ? "this build is not inside a SkyWright checkout with the Python controller"
+        string module = Checkout.Integration ?? "";   // the Python pipeline is the houseCARL integration module's
+        string? reason = !File.Exists(Path.Combine(module, "evalpipeline.py")) ? "this build is not inside a SkyWright checkout with the Python controller"
             : Python(harness, "--version") is not { exit: 0 } ? "python is not on PATH" : null;
         if (reason != null) { foreach (string n in names) Skip(n, reason); return; }
         const string head = "import sys, json; sys.path.insert(0, sys.argv[1]); ";
@@ -551,10 +552,10 @@ public static partial class SelfTest
             using var t = new Temp();
             Outputs(t);
             new StageLedger(t.At("run")).Record("scope", inputs, [t.At("run/scope/scopes.json"), t.At("run/scope")], 0, extra);
-            string? line = LastLine(Python(harness, "-c", decide, harness, t.At("run"), "scope", t.At("inputs.json")), out var why);
+            string? line = LastLine(Python(harness, "-c", decide, module, t.At("run"), "scope", t.At("inputs.json")), out var why);
             if (why != null || line != "reuse") return why ?? $"Python decided {line}";
             File.WriteAllText(t.At("run/scope/deep/B.txt"), "changed");
-            line = LastLine(Python(harness, "-c", decide, harness, t.At("run"), "scope", t.At("inputs.json")), out why);
+            line = LastLine(Python(harness, "-c", decide, module, t.At("run"), "scope", t.At("inputs.json")), out why);
             return why ?? (line == "run" ? null : $"after an output changed Python decided {line}");
         });
         Case(names[3], () =>
@@ -562,12 +563,12 @@ public static partial class SelfTest
             using var t = new Temp();
             Outputs(t);
             string outs = PyJson.Dumps(new List<object?> { t.At("run/scope/scopes.json"), t.At("run/scope") });
-            LastLine(Python(harness, "-c", record, harness, t.At("run"), "scope", t.At("inputs.json"), outs, t.At("extra.json")), out var why);
+            LastLine(Python(harness, "-c", record, module, t.At("run"), "scope", t.At("inputs.json"), outs, t.At("extra.json")), out var why);
             if (why != null) return why;
             var ledger = new StageLedger(t.At("run"));
             if (ledger.Decide("scope", inputs) != "reuse") return "this program decided run on Python's receipt";
             ledger.Save();
-            string? line = LastLine(Python(harness, "-c", decide, harness, t.At("run"), "scope", t.At("inputs.json")), out why);
+            string? line = LastLine(Python(harness, "-c", decide, module, t.At("run"), "scope", t.At("inputs.json")), out why);
             if (why != null || line != "reuse") return why ?? $"after this program rewrote stages.json Python decided {line}";
             File.WriteAllText(t.At("run/scope/scopes.json"), "{ }");
             return ledger.Decide("scope", inputs) == "run" ? null : "a changed output was still reused";

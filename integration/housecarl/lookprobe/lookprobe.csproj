@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>lookprobe</AssemblyName>
+    <NoWarn>CA1416</NoWarn>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
+    <ProjectReference Include="$(SkyWrightSrc)SkyWright.Engine\SkyWright.Engine.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="$(SkyWrightHarness)_shared\StateArm.cs" Link="StateArm.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\EnableArms.cs" Link="EnableArms.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\DetectorModel.cs" Link="DetectorModel.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\OrderMasters.cs" Link="OrderMasters.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\Configuration.cs" Link="Configuration.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\PlacementHistory.cs" Link="PlacementHistory.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\DeletionHistory.cs" Link="DeletionHistory.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\OverlapIndex.cs" Link="OverlapIndex.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\DependencyIndex.cs" Link="DependencyIndex.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\BosHook.cs" Link="BosHook.cs" />
+    <Compile Include="$(HousecarlSrc)housecarl-mcp-tests\PexWriter.cs" Link="PexWriter.cs" />
+  </ItemGroup>
+</Project>

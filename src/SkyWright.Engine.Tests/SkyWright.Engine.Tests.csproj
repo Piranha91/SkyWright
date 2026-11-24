@@ -21,9 +21,4 @@
     <ProjectReference Include="..\SkyWright.Engine\SkyWright.Engine.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <!-- houseCARL's .pex fixture writer, compiled from the pin (OrderLooksTests writes scripts with it). -->
-    <Compile Include="$(HousecarlSrc)housecarl-mcp-tests\PexWriter.cs" Link="PexWriter.cs" />
-  </ItemGroup>
-
 </Project>

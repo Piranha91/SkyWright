@@ -16,7 +16,8 @@
   "defaultStatus": "current",
   "toolRoots": [
     "_geometry-harness",
-    "scripts"
+    "scripts",
+    "integration/housecarl"
   ],
   "skipDirectories": [
     "external",
@@ -177,7 +178,7 @@
     {
       "id": "lookprobe",
       "kind": "csharp-exe",
-      "path": "_geometry-harness/lookprobe/lookprobe.csproj",
+      "path": "integration/housecarl/lookprobe/lookprobe.csproj",
       "adapter": "csharp",
       "stageSource": "single-stage",
       "answers": [
@@ -186,7 +187,7 @@
       "useWhen": "Before or beside a whole-order screen: cheap read-only looks at a load order's files for patches left off and runtime layers pointing at nothing, each row saying how its consequence is known.",
       "evidence": [
         {
-          "path": "_geometry-harness/lookprobe/Program.cs",
+          "path": "integration/housecarl/lookprobe/Program.cs",
           "anchor": "// LOOKPROBE — the whole-order looks, run over a load order: a patch on disk and not enabled, a swap file pointing at a"
         }
       ],
@@ -198,7 +199,7 @@
       ],
       "flagCoverage": {
         "parser": "csharp-args",
-        "path": "_geometry-harness/lookprobe/Program.cs"
+        "path": "integration/housecarl/lookprobe/Program.cs"
       },
       "modifiers": {
         "--game": "The game folder whose Data the order reads; required.",
@@ -3678,7 +3679,7 @@
       "id": "readerdoc",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/readerdoc.py",
+      "path": "integration/housecarl/readerdoc.py",
       "adapter": "python",
       "stageSource": "counted",
       "note": "Roadmap 4.24: the reader's document. Renders one or two pages in ordinary words from an evalreport presentation plan: only clashes the plan attributes to both evaluated mods together are listed as problems, with install advice from validation.byItem. One Run per invocation (scripts/runlog.py through evalreport); the only child process is the headless browser print for the page count. tests/test_readerdoc.py is its known-answer suite.",
@@ -3688,7 +3689,7 @@
       "useWhen": "Give a modder a one-to-two-page answer (what goes wrong, where, install the patch or not) after evalreport plan has compiled the evaluation.",
       "evidence": [
         {
-          "path": "_geometry-harness/readerdoc.py",
+          "path": "integration/housecarl/readerdoc.py",
           "anchor": "readerdoc - the reader's document: one or two pages in ordinary words, rendered from a presentation plan."
         }
       ],
@@ -3807,7 +3808,7 @@
       "id": "evalreport",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/evalreport.py",
+      "path": "integration/housecarl/evalreport.py",
       "adapter": "python",
       "stageSource": "counted",
       "note": "Roadmap 4.24: the evaluation report compiler. One run per subcommand (plan / report / verify / narrate), with findings, groups, media, figures and pages as features; report counts one browser print attempt per abridgement-ladder step, and the print outcome is recorded in the presentation manifest, never assumed.",
@@ -3817,7 +3818,7 @@
       "useWhen": "Prepare reader-facing evidence from a completed evaluation whose bundle integrity can be verified.",
       "evidence": [
         {
-          "path": "_geometry-harness/evalreport.py",
+          "path": "integration/housecarl/evalreport.py",
           "anchor": "evalreport - compile a verified schema-2 evaluation bundle into one presentation plan and, from that"
         }
       ],
@@ -3848,7 +3849,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalreport.py",
+              "path": "integration/housecarl/evalreport.py",
               "anchor": "add_parser("
             }
           ]
@@ -3873,7 +3874,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalreport.py",
+              "path": "integration/housecarl/evalreport.py",
               "anchor": "add_parser("
             }
           ]
@@ -3898,7 +3899,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalreport.py",
+              "path": "integration/housecarl/evalreport.py",
               "anchor": "add_parser("
             }
           ]
@@ -3923,7 +3924,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalreport.py",
+              "path": "integration/housecarl/evalreport.py",
               "anchor": "add_parser("
             }
           ]
@@ -3948,7 +3949,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalreport.py",
+              "path": "integration/housecarl/evalreport.py",
               "anchor": "add_parser("
             }
           ]
@@ -3973,7 +3974,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalreport.py",
+              "path": "integration/housecarl/evalreport.py",
               "anchor": "add_parser("
             }
           ]
@@ -3981,7 +3982,7 @@
       ],
       "flagCoverage": {
         "parser": "argparse",
-        "path": "_geometry-harness/evalreport.py"
+        "path": "integration/housecarl/evalreport.py"
       },
       "modifiers": {
         "--answers": "narrate-apply: the narrator's answers; narrate-packet: write the fidelity judge's packet for these answers instead of the narrator's",
@@ -4018,7 +4019,7 @@
       "id": "evalreel",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/evalreel.py",
+      "path": "integration/housecarl/evalreel.py",
       "adapter": "python",
       "stageSource": "counted",
       "note": "The narrated evidence reel. Render covers preparation, speech, segments and concat; storyboard-packet has its own run. Source/audio hashes and decoded output determine reuse and success.",
@@ -4028,7 +4029,7 @@
       "useWhen": "Present evaluation findings as a reviewable sequence of scenes with bound evidence and narration.",
       "evidence": [
         {
-          "path": "_geometry-harness/evalreel.py",
+          "path": "integration/housecarl/evalreel.py",
           "anchor": "evalreel — the diagnostic reel of an evaluation presentation (Q45, D6)."
         }
       ],
@@ -4059,7 +4060,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalreel.py",
+              "path": "integration/housecarl/evalreel.py",
               "anchor": "add_parser("
             }
           ]
@@ -4084,7 +4085,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalreel.py",
+              "path": "integration/housecarl/evalreel.py",
               "anchor": "add_parser("
             }
           ]
@@ -4092,7 +4093,7 @@
       ],
       "flagCoverage": {
         "parser": "argparse",
-        "path": "_geometry-harness/evalreel.py"
+        "path": "integration/housecarl/evalreel.py"
       },
       "modifiers": {
         "--bundle": "where the plan's bundle-relative media paths resolve (default: source.bundleDir, relative to the presentation)",
@@ -4111,7 +4112,7 @@
       "id": "evalspeech",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/evalspeech.py",
+      "path": "integration/housecarl/evalspeech.py",
       "adapter": "python",
       "stageSource": "counted",
       "note": "Explicit local neural narration preparation through the reel's narrationAudio interface. Preparation, model load and each included scene are counted; verification records its own lifecycle. Existing outputs and silent engine fallback are refused.",
@@ -4121,7 +4122,7 @@
       "useWhen": "Add neural speech to a reviewed storyboard using explicitly selected, already available local model assets.",
       "evidence": [
         {
-          "path": "_geometry-harness/evalspeech.py",
+          "path": "integration/housecarl/evalspeech.py",
           "anchor": "Prepare local narration WAVs for evalreel's existing narrationAudio interface."
         }
       ],
@@ -4133,7 +4134,7 @@
       ],
       "flagCoverage": {
         "parser": "argparse",
-        "path": "_geometry-harness/evalspeech.py"
+        "path": "integration/housecarl/evalspeech.py"
       },
       "modifiers": {
         "--device": "cpu (default), cuda or cuda:N; no automatic fallback",
@@ -4154,7 +4155,7 @@
       "id": "evalreel-speech",
       "kind": "csharp-exe",
       "lang": "csharp",
-      "path": "_geometry-harness/winrt-tts/winrt-tts.csproj",
+      "path": "integration/housecarl/winrt-tts/winrt-tts.csproj",
       "adapter": "csharp",
       "stageSource": "single-stage",
       "note": "Local Windows speech helper. Shared process lifecycle records the actual terminal exit code; the reel passes its parent run id. WinRT failures are caught and Windows error dialogs suppressed.",
@@ -4164,7 +4165,7 @@
       "useWhen": "Supply narration through an explicitly chosen installed Windows voice when that engine is the intended delivery choice.",
       "evidence": [
         {
-          "path": "_geometry-harness/winrt-tts/Program.cs",
+          "path": "integration/housecarl/winrt-tts/Program.cs",
           "anchor": "[DllImport(\"kernel32.dll\")] static extern uint SetErrorMode(uint mode);"
         }
       ],
@@ -4249,7 +4250,7 @@
       "id": "report-scenes",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/report_scenes.py",
+      "path": "integration/housecarl/report_scenes.py",
       "adapter": "none",
       "stageSource": "unknown",
       "exempt": "Imported capture-planning helper with no executable entry point or child process. Its source hashing and ranked selection run inside evalreel-storyboard-packet's recorded lifecycle; the reel suite covers its selection and refusal behavior.",
@@ -4259,7 +4260,7 @@
       "useWhen": "Select capture requests from bound evaluation evidence before asking a camera planner to acquire them.",
       "evidence": [
         {
-          "path": "_geometry-harness/report_scenes.py",
+          "path": "integration/housecarl/report_scenes.py",
           "anchor": "Evidence-bound capture requests; domain selection rules live in the reporting skill."
         }
       ],
@@ -4274,7 +4275,7 @@
       "id": "capture-navmesh",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/capture_navmesh.py",
+      "path": "integration/housecarl/capture_navmesh.py",
       "adapter": "none",
       "stageSource": "unknown",
       "exempt": "Imported by capture_acquire.py, with no executable entry point of its own: its renders and the planner call run inside capture-acquire's recorded lifecycle (acquire, capture, navmesh-control); test_capture_navmesh.py covers it.",
@@ -4284,7 +4285,7 @@
       "useWhen": "Change how a navmesh-version-comparison request is framed, which flags each state draws, or what its receipt and pixel checks accept.",
       "evidence": [
         {
-          "path": "_geometry-harness/capture_navmesh.py",
+          "path": "integration/housecarl/capture_navmesh.py",
           "anchor": "The camera for a `navmesh-version-comparison` capture request"
         }
       ],
@@ -4299,7 +4300,7 @@
       "id": "reel-plan",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/reel_plan.py",
+      "path": "integration/housecarl/reel_plan.py",
       "adapter": "none",
       "stageSource": "unknown",
       "exempt": "Imported reel-planning helper with no executable entry point or child process. It runs inside evalreport-plan's recorded lifecycle; test_reel_vignettes.py covers its selection, wording and refusals.",
@@ -4309,7 +4310,7 @@
       "useWhen": "Plan a review reel by rule from a compiled presentation, the names enrichment, the masters, the skill's vignette data and a recorded patch search.",
       "evidence": [
         {
-          "path": "_geometry-harness/reel_plan.py",
+          "path": "integration/housecarl/reel_plan.py",
           "anchor": "The review reel's plan: which clashes it shows, how, and what it says"
         }
       ],
@@ -4324,7 +4325,7 @@
       "id": "modnames",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/modnames.py",
+      "path": "integration/housecarl/modnames.py",
       "adapter": "none",
       "stageSource": "unknown",
       "exempt": "A library, not an entry point: evalreport plan imports it inside its own Run (evalreport-plan); its one child, the houseCARL server it asks for a missing Nexus page with --nexus-names fetch, is that run's work. test_reel_vignettes.py --case names covers it.",
@@ -4335,7 +4336,7 @@
       "useWhen": "Resolve the names the review reel speaks: declared, else the Nexus catalogue page of the plugin's mod, else its MO2 folder with the reason.",
       "evidence": [
         {
-          "path": "_geometry-harness/modnames.py",
+          "path": "integration/housecarl/modnames.py",
           "anchor": "The review reel's mod names: each plugin's Nexus page name"
         }
       ],
@@ -4350,7 +4351,7 @@
       "id": "reel-stills",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/reel_stills.py",
+      "path": "integration/housecarl/reel_stills.py",
       "adapter": "none",
       "stageSource": "unknown",
       "exempt": "Imported drawing helper with no executable entry point or child process. It runs inside evalreel-render's recorded lifecycle; test_reel_vignettes.py covers its font refusal and the map's font and page hashes.",
@@ -4360,7 +4361,7 @@
       "useWhen": "Draw a reel still page from the plan's page data in a named TrueType font.",
       "evidence": [
         {
-          "path": "_geometry-harness/reel_stills.py",
+          "path": "integration/housecarl/reel_stills.py",
           "anchor": "The review reel's stills: the opening infographic, the load order, the statement of clashes it cannot picture"
         }
       ],
@@ -4375,7 +4376,7 @@
       "id": "capture-acquire",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/capture_acquire.py",
+      "path": "integration/housecarl/capture_acquire.py",
       "adapter": "python",
       "stageSource": "counted",
       "note": "Acquires ONE reporting capture request's camera by shelling to shotplan plan. The planner's own run covers the viewprobe invocations; this run covers the request/source/configuration binding around them. One stage, one request.",
@@ -4385,7 +4386,7 @@
       "useWhen": "Turn a reporting capture request into a planner invocation while preserving its source and configuration bindings.",
       "evidence": [
         {
-          "path": "_geometry-harness/capture_acquire.py",
+          "path": "integration/housecarl/capture_acquire.py",
           "anchor": "Acquire a verified camera for ONE reporting capture request, through the shared planner."
         }
       ],
@@ -4416,7 +4417,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/capture_acquire.py",
+              "path": "integration/housecarl/capture_acquire.py",
               "anchor": "add_parser("
             }
           ]
@@ -4441,7 +4442,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/capture_acquire.py",
+              "path": "integration/housecarl/capture_acquire.py",
               "anchor": "def cmd_capture("
             }
           ]
@@ -4466,7 +4467,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/capture_navmesh.py",
+              "path": "integration/housecarl/capture_navmesh.py",
               "anchor": "def control("
             }
           ]
@@ -4474,7 +4475,7 @@
       ],
       "flagCoverage": {
         "parser": "argparse",
-        "path": "_geometry-harness/capture_acquire.py"
+        "path": "integration/housecarl/capture_acquire.py"
       },
       "modifiers": {
         "--bind-packet": "also write a copy of the packet with this request's camera.pose filled in",
@@ -4501,7 +4502,7 @@
       "id": "capture-points",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/capture_points.py",
+      "path": "integration/housecarl/capture_points.py",
       "adapter": "python",
       "stageSource": "counted",
       "note": "Measures one visible surface point per participant of ONE capture request: three viewprobe runs (placements, floor, an eye-level witness worklist with participant marks and depth picks). Called in-process by capture_acquire --points auto, whose run then covers it; standalone it opens its own run. One stage, one request.",
@@ -4511,7 +4512,7 @@
       "useWhen": "Give capture_acquire measured surface points the planner can verify, instead of points picked by hand.",
       "evidence": [
         {
-          "path": "_geometry-harness/capture_points.py",
+          "path": "integration/housecarl/capture_points.py",
           "anchor": "Measured points on a face of each capture participant that an eye-level camera outside the pair can see."
         }
       ],
@@ -4542,7 +4543,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/capture_points.py",
+              "path": "integration/housecarl/capture_points.py",
               "anchor": "add_parser("
             }
           ]
@@ -4550,7 +4551,7 @@
       ],
       "flagCoverage": {
         "parser": "argparse",
-        "path": "_geometry-harness/capture_points.py"
+        "path": "integration/housecarl/capture_points.py"
       },
       "modifiers": {
         "--cell": "viewprobe's cell, when the request's location does not name one",
@@ -5074,7 +5075,7 @@
       "id": "subject-gate",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/subject_gate.py",
+      "path": "integration/housecarl/subject_gate.py",
       "adapter": "python",
       "stageSource": "counted",
       "note": "Post-render subject/contact qualification. Opens a run, binds source and capture evidence, retains refusals and separates capture usability from measurement validity and consequence.",
@@ -5084,7 +5085,7 @@
       "useWhen": "Decide whether a rendered finding has enough correctly bound visual evidence to support its reported conclusion.",
       "evidence": [
         {
-          "path": "_geometry-harness/subject_gate.py",
+          "path": "integration/housecarl/subject_gate.py",
           "anchor": "Post-render qualification. Pixel eligibility never substitutes for a normal-view witness."
         }
       ],
@@ -5096,7 +5097,7 @@
       ],
       "flagCoverage": {
         "parser": "argparse",
-        "path": "_geometry-harness/subject_gate.py"
+        "path": "integration/housecarl/subject_gate.py"
       },
       "modifiers": {
         "--input": "Set input for this invocation; consult the linked parser for accepted values.",
@@ -5474,7 +5475,7 @@
       "id": "switchflip",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/switchflip.py",
+      "path": "integration/housecarl/switchflip.py",
       "adapter": "python",
       "stageSource": "external-opaque",
       "note": "The live driver of the opt-in runtime.state-switch-flip check. `batch` opens one Run, holds the block lock and runs every launch as a scripts/runlog.py Runner child with a deadline; each `launch` child opens its own Run and drives the game through dbharness (an external process whose internals are not visible, so external-opaque). `validate` and `export` are launch-free and run as single counted stages. tests/test_switchflip_plan.py covers the launch-free parts offline.",
@@ -5484,7 +5485,7 @@
       "useWhen": "Run the opt-in live check of an evaluation on a scratch game instance, after writing a flip plan from the switch census and the bound scripts' source.",
       "evidence": [
         {
-          "path": "_geometry-harness/switchflip.py",
+          "path": "integration/housecarl/switchflip.py",
           "anchor": "switchflip — the live driver of the runtime state-switch check"
         }
       ],
@@ -5515,7 +5516,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/switchflip.py",
+              "path": "integration/housecarl/switchflip.py",
               "anchor": "add_parser("
             }
           ]
@@ -5540,7 +5541,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/switchflip.py",
+              "path": "integration/housecarl/switchflip.py",
               "anchor": "add_parser("
             }
           ]
@@ -5565,7 +5566,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/switchflip.py",
+              "path": "integration/housecarl/switchflip.py",
               "anchor": "add_parser("
             }
           ]
@@ -5573,7 +5574,7 @@
       ],
       "flagCoverage": {
         "parser": "argparse",
-        "path": "_geometry-harness/switchflip.py"
+        "path": "integration/housecarl/switchflip.py"
       },
       "modifiers": {
         "--arm": "export: the flip plan's arm whose launches form one import document",
@@ -5636,7 +5637,7 @@
       "id": "switchflip_outcome",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/switchflip_outcome.py",
+      "path": "integration/housecarl/switchflip_outcome.py",
       "adapter": "none",
       "stageSource": "unknown",
       "exempt": "Imported client with no command line of its own: switchflip.py owns the run-log lifecycle, and the calls this module makes into `runcontrol switchflip-outcome` run inside that run. tests/test_switchflip_outcome.py exercises it offline and is a test under the discovery rule.",
@@ -5646,7 +5647,7 @@
       "useWhen": "Re-derive a live receipt's classification from its recorded events rather than trusting its label.",
       "evidence": [
         {
-          "path": "_geometry-harness/switchflip_outcome.py",
+          "path": "integration/housecarl/switchflip_outcome.py",
           "anchor": "switchflip_outcome — the live driver's client for the runtime state-switch check's reading rule."
         }
       ],
@@ -5661,7 +5662,7 @@
       "id": "switchflip_scope",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/switchflip_scope.py",
+      "path": "integration/housecarl/switchflip_scope.py",
       "adapter": "none",
       "stageSource": "unknown",
       "exempt": "Imported library with no executable entry point, no child process and no workload: the live switch check's population rule as pure functions. evalrun.py, evallive.py and flipplan.py own the runlog lifecycle; tests/test_switchflip_scope.py exercises it offline and is a test under the discovery rule.",
@@ -5671,7 +5672,7 @@
       "useWhen": "Decide from an arm's switch census and the scope whether any script-driven switch touches a target.",
       "evidence": [
         {
-          "path": "_geometry-harness/switchflip_scope.py",
+          "path": "integration/housecarl/switchflip_scope.py",
           "anchor": "switchflip_scope — which switches the runtime state-switch check"
         }
       ],
@@ -6114,7 +6115,7 @@
       "id": "evalsettings",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/evalsettings.py",
+      "path": "integration/housecarl/evalsettings.py",
       "adapter": "python",
       "stageSource": "single-stage",
       "note": "The first-run settings of the worldspace compatibility evaluation: one Run per invocation; `ensure` and `window` serve a one-shot loopback page for the life of the window. tests/test_evalsettings.py is its known-answer suite.",
@@ -6124,7 +6125,7 @@
       "useWhen": "Show, set or validate the evaluation's saved choices, or open the first-run window that sets them.",
       "evidence": [
         {
-          "path": "_geometry-harness/evalsettings.py",
+          "path": "integration/housecarl/evalsettings.py",
           "anchor": "evalsettings — the first-run choices"
         }
       ],
@@ -6155,7 +6156,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalsettings.py",
+              "path": "integration/housecarl/evalsettings.py",
               "anchor": "add_parser("
             }
           ]
@@ -6180,7 +6181,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalsettings.py",
+              "path": "integration/housecarl/evalsettings.py",
               "anchor": "add_parser("
             }
           ]
@@ -6205,7 +6206,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalsettings.py",
+              "path": "integration/housecarl/evalsettings.py",
               "anchor": "add_parser("
             }
           ]
@@ -6230,7 +6231,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalsettings.py",
+              "path": "integration/housecarl/evalsettings.py",
               "anchor": "add_parser("
             }
           ]
@@ -6255,7 +6256,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalsettings.py",
+              "path": "integration/housecarl/evalsettings.py",
               "anchor": "add_parser("
             }
           ]
@@ -6280,7 +6281,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalsettings.py",
+              "path": "integration/housecarl/evalsettings.py",
               "anchor": "add_parser("
             }
           ]
@@ -6305,7 +6306,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalsettings.py",
+              "path": "integration/housecarl/evalsettings.py",
               "anchor": "add_parser("
             }
           ]
@@ -6330,7 +6331,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalsettings.py",
+              "path": "integration/housecarl/evalsettings.py",
               "anchor": "def cmd_route("
             }
           ]
@@ -6338,7 +6339,7 @@
       ],
       "flagCoverage": {
         "parser": "argparse",
-        "path": "_geometry-harness/evalsettings.py"
+        "path": "integration/housecarl/evalsettings.py"
       },
       "modifiers": {
         "--settings": "the settings file to use (first in the resolution order)",
@@ -6389,7 +6390,7 @@
       "id": "flipplan",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/flipplan.py",
+      "path": "integration/housecarl/flipplan.py",
       "adapter": "python",
       "stageSource": "single-stage",
       "note": "Drafts the runtime switch check's flip plan from each arm's census and the bound scripts' source; the evaluator reviews it and switchflip.py validates it. One Run per invocation; evalrun never runs it. tests/test_flipplan.py is its known-answer suite.",
@@ -6399,7 +6400,7 @@
       "useWhen": "Draft a flip plan for an opted-in runtime.state-switch-flip check instead of writing it by hand.",
       "evidence": [
         {
-          "path": "_geometry-harness/flipplan.py",
+          "path": "integration/housecarl/flipplan.py",
           "anchor": "flipplan — draft the flip plan of the runtime state-switch check"
         }
       ],
@@ -6411,7 +6412,7 @@
       ],
       "flagCoverage": {
         "parser": "argparse",
-        "path": "_geometry-harness/flipplan.py"
+        "path": "integration/housecarl/flipplan.py"
       },
       "modifiers": {
         "--arm": "an arm: its id, MO2 profile and census (repeatable)",
@@ -6692,7 +6693,7 @@
       "id": "evalpipeline",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/evalpipeline.py",
+      "path": "integration/housecarl/evalpipeline.py",
       "adapter": "python",
       "stageSource": "counted",
       "note": "The stages of one mod's evaluation after its evidence bundle (precedent, report-plan, capture, image-observations, report, reel, deliver), on the run folder the built-in controller (runcontrol run --through bundle) made: census to bundle are reused from their receipts and never run here; a folder without them is refused naming the runcontrol command. Each stage is a Runner child; the parent opens one Run per invocation. tests/test_evalpipeline.py is its known-answer suite.",
@@ -6702,7 +6703,7 @@
       "useWhen": "Report on a mod after runcontrol has taken its run folder through the bundle.",
       "evidence": [
         {
-          "path": "_geometry-harness/evalpipeline.py",
+          "path": "integration/housecarl/evalpipeline.py",
           "anchor": "evalpipeline - the stages of one mod's evaluation after its evidence bundle"
         }
       ],
@@ -6714,7 +6715,7 @@
       ],
       "flagCoverage": {
         "parser": "argparse",
-        "path": "_geometry-harness/evalpipeline.py"
+        "path": "integration/housecarl/evalpipeline.py"
       },
       "modifiers": {
         "--entry": "the mod's selection entry (JSON)",
@@ -6743,7 +6744,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalpipeline.py",
+              "path": "integration/housecarl/evalpipeline.py",
               "anchor": "add_parser("
             }
           ]
@@ -6768,7 +6769,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalpipeline.py",
+              "path": "integration/housecarl/evalpipeline.py",
               "anchor": "add_parser("
             }
           ]
@@ -6793,11 +6794,36 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalpipeline.py",
+              "path": "integration/housecarl/evalpipeline.py",
               "anchor": "add_parser("
             }
           ]
         }
+      ]
+    },
+    {
+      "id": "skywright_paths",
+      "kind": "script",
+      "lang": "python",
+      "path": "integration/housecarl/skywright_paths.py",
+      "adapter": "none",
+      "stageSource": "unknown",
+      "exempt": "Imported library with no executable entry point, no child process and no workload: it names SkyWright's checkout, tool folders and data as seen from the houseCARL integration module and puts the tools and run log on sys.path. The module's scripts that import it own the runlog lifecycle.",
+      "answers": [
+        "Where is SkyWright's checkout, seen from the houseCARL integration module?"
+      ],
+      "useWhen": "Find SkyWright's Python tools, run log, data or the houseCARL pin from a script or suite inside integration/housecarl/.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/skywright_paths.py",
+          "anchor": "Where SkyWright's checkout is, seen from the houseCARL integration module (integration/housecarl/)."
+        }
+      ],
+      "inputs": [
+        "None: the module file's own location."
+      ],
+      "outputs": [
+        "CHECKOUT, HARNESS, SCRIPTS, DATA and HOUSECARL paths; SkyWright's tools and run log on sys.path."
       ]
     },
     {
@@ -7099,7 +7125,7 @@
       "id": "patchsearch",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/patchsearch.py",
+      "path": "integration/housecarl/patchsearch.py",
       "adapter": "python",
       "stageSource": "counted",
       "note": "Talks to the houseCARL server it is given and writes only its --out folder; housecarl_nexus_catalog add= and housecarl_nexus_mod may ask Nexus (the catalogue's own request budget). unreadSources is always written: an answer whose coverage cannot be read is a 'not known' row, never an empty list.",
@@ -7110,7 +7136,7 @@
       "useWhen": "Before evalreport plan --patch-search: record each mod pair's search, with its known answer, so the reel's patch sentences rest on what was read.",
       "evidence": [
         {
-          "path": "_geometry-harness/patchsearch.py",
+          "path": "integration/housecarl/patchsearch.py",
           "anchor": "Record a Nexus patch search for one plugin pair through the houseCARL server"
         }
       ],
@@ -7122,7 +7148,7 @@
       ],
       "flagCoverage": {
         "parser": "argparse",
-        "path": "_geometry-harness/patchsearch.py"
+        "path": "integration/housecarl/patchsearch.py"
       },
       "modifiers": {
         "--known": "The search's own known answer: PLUGIN_A,PLUGIN_B=PATCH.esp=PAGEID.",
@@ -7284,8 +7310,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/fixtures/standin_hold.py",
-      "path": "_geometry-harness/tests/fixtures/standin_hold.py",
+      "id": "integration/housecarl/tests/fixtures/standin_hold.py",
+      "path": "integration/housecarl/tests/fixtures/standin_hold.py",
       "kind": "script",
       "answers": [
         "How can a test stand in for the machine's slot command with a real lock holder a hard kill leaves behind?"
@@ -7293,7 +7319,7 @@
       "useWhen": "Exercise evalpipeline's heavy-child stop and lock release without the machine's idle_lock.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/fixtures/standin_hold.py",
+          "path": "integration/housecarl/tests/fixtures/standin_hold.py",
           "anchor": "A stand-in for the machine's slot command in tests"
         }
       ],
@@ -7607,8 +7633,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_capture_acquire.py",
-      "path": "_geometry-harness/tests/test_capture_acquire.py",
+      "id": "integration/housecarl/tests/test_capture_acquire.py",
+      "path": "integration/housecarl/tests/test_capture_acquire.py",
       "kind": "script",
       "answers": [
         "Does the real reporting request-to-camera path satisfy its offline contract?"
@@ -7616,7 +7642,7 @@
       "useWhen": "Qualify changes to reporting capture acquisition with offline binding and planner-refusal controls.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_capture_acquire.py",
+          "path": "integration/housecarl/tests/test_capture_acquire.py",
           "anchor": "Offline contract for `capture_acquire.py`: the request-to-camera path, end to end."
         }
       ],
@@ -7628,8 +7654,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_capture_navmesh.py",
-      "path": "_geometry-harness/tests/test_capture_navmesh.py",
+      "id": "integration/housecarl/tests/test_capture_navmesh.py",
+      "path": "integration/housecarl/tests/test_capture_navmesh.py",
       "kind": "script",
       "answers": [
         "Does a navmesh comparison request get its measured top-down camera, both states and its refusals offline?"
@@ -7637,7 +7663,7 @@
       "useWhen": "Qualify changes to capture_navmesh.py, capture_acquire's navmesh path or viewprobe --nav-link's row shape.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_capture_navmesh.py",
+          "path": "integration/housecarl/tests/test_capture_navmesh.py",
           "anchor": "Offline contract for a navmesh comparison's camera"
         }
       ],
@@ -7649,8 +7675,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_capture_points.py",
-      "path": "_geometry-harness/tests/test_capture_points.py",
+      "id": "integration/housecarl/tests/test_capture_points.py",
+      "path": "integration/housecarl/tests/test_capture_points.py",
       "kind": "script",
       "answers": [
         "Does the capture point picker return visible faces, the right floor and plain refusals on the shapes real requests were refused on?"
@@ -7658,7 +7684,7 @@
       "useWhen": "Qualify changes to capture_points, capture_acquire --points auto or shotplan --bearing-window; --sabotage removes the owner test and must go red.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_capture_points.py",
+          "path": "integration/housecarl/tests/test_capture_points.py",
           "anchor": "Offline known answers for `capture_points.py`: a measured point on a face an eye-level camera can see (C700-C716)."
         }
       ],
@@ -7670,8 +7696,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_evalreel.py",
-      "path": "_geometry-harness/tests/test_evalreel.py",
+      "id": "integration/housecarl/tests/test_evalreel.py",
+      "path": "integration/housecarl/tests/test_evalreel.py",
       "kind": "script",
       "answers": [
         "Does the reel pipeline enforce media, audio, cache and clip-cut contracts?"
@@ -7679,7 +7705,7 @@
       "useWhen": "Check reel assembly changes for stale media reuse, invalid audio, or incorrect segment boundaries.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_evalreel.py",
+          "path": "integration/housecarl/tests/test_evalreel.py",
           "anchor": "End-to-end contract for narrated evidence reels: media identity, audio decode, cache, clip cuts and refusal."
         }
       ],
@@ -7691,8 +7717,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_reel_vignettes.py",
-      "path": "_geometry-harness/tests/test_reel_vignettes.py",
+      "id": "integration/housecarl/tests/test_reel_vignettes.py",
+      "path": "integration/housecarl/tests/test_reel_vignettes.py",
       "kind": "script",
       "answers": [
         "Does the review reel plan and render Piranha's vignette format by rule: opening still, without/with/highlight vignettes, data stills, plain words, own-pair patch sentences and a closing still?"
@@ -7700,7 +7726,7 @@
       "useWhen": "Qualify changes to reel_plan.py, the reel's skill data, the capture plan or evalreel's stills and sequences; --presentation checks a compiled reel, --sabotage and --code-sabotage must go red.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_reel_vignettes.py",
+          "path": "integration/housecarl/tests/test_reel_vignettes.py",
           "anchor": "The review reel as clash vignettes:"
         }
       ],
@@ -7712,8 +7738,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_evalreport.py",
-      "path": "_geometry-harness/tests/test_evalreport.py",
+      "id": "integration/housecarl/tests/test_evalreport.py",
+      "path": "integration/housecarl/tests/test_evalreport.py",
       "kind": "script",
       "answers": [
         "Does the report compiler match the constructed bundle oracle?"
@@ -7721,7 +7747,7 @@
       "useWhen": "Check report generation against independent expected findings before publishing schema changes.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_evalreport.py",
+          "path": "integration/housecarl/tests/test_evalreport.py",
           "anchor": "The report compiler against the oracle (Q45)."
         }
       ],
@@ -7733,8 +7759,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_evalreport_comparison_kinds.py",
-      "path": "_geometry-harness/tests/test_evalreport_comparison_kinds.py",
+      "id": "integration/housecarl/tests/test_evalreport_comparison_kinds.py",
+      "path": "integration/housecarl/tests/test_evalreport_comparison_kinds.py",
       "kind": "script",
       "answers": [
         "Does the report distinguish removing a mod from repairing a conflict?"
@@ -7742,7 +7768,7 @@
       "useWhen": "Prevent a mod-removal comparison from being presented as proof of a compatibility repair.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_evalreport_comparison_kinds.py",
+          "path": "integration/housecarl/tests/test_evalreport_comparison_kinds.py",
           "anchor": "Checks for how the report compiler classifies a setup and what it is then allowed to claim."
         }
       ],
@@ -7754,15 +7780,15 @@
       ],
       "flagCoverage": {
         "parser": "argparse",
-        "path": "_geometry-harness/tests/test_evalreport_comparison_kinds.py"
+        "path": "integration/housecarl/tests/test_evalreport_comparison_kinds.py"
       },
       "modifiers": {
         "--prove-gate": "force repair_claimable open in memory and require this suite to FAIL"
       }
     },
     {
-      "id": "_geometry-harness/tests/test_readerdoc.py",
-      "path": "_geometry-harness/tests/test_readerdoc.py",
+      "id": "integration/housecarl/tests/test_readerdoc.py",
+      "path": "integration/housecarl/tests/test_readerdoc.py",
       "kind": "script",
       "answers": [
         "Does the reader's document list only clashes between the two mods and give the right install advice?"
@@ -7770,7 +7796,7 @@
       "useWhen": "Check reader's-document changes against hand-built plans and one plan from the real compiler.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_readerdoc.py",
+          "path": "integration/housecarl/tests/test_readerdoc.py",
           "anchor": "Tests for readerdoc.py — the reader's document rendered from a presentation plan."
         }
       ],
@@ -7782,8 +7808,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_recordrows.py",
-      "path": "_geometry-harness/tests/test_recordrows.py",
+      "id": "integration/housecarl/tests/test_recordrows.py",
+      "path": "integration/housecarl/tests/test_recordrows.py",
       "kind": "script",
       "answers": [
         "Does the record-lane comparator emit a row only for a lost change, within the schema's field scope?"
@@ -7791,7 +7817,7 @@
       "useWhen": "Check recordrows changes against hand-written transcripts.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_recordrows.py",
+          "path": "integration/housecarl/tests/test_recordrows.py",
           "anchor": "Tests for recordrows.py — record-lane rows derived from a record import's own MCP transcripts."
         }
       ],
@@ -7824,8 +7850,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_evalreport_prediction.py",
-      "path": "_geometry-harness/tests/test_evalreport_prediction.py",
+      "id": "integration/housecarl/tests/test_evalreport_prediction.py",
+      "path": "integration/housecarl/tests/test_evalreport_prediction.py",
       "kind": "script",
       "answers": [
         "Does the report lead with what adding the mods will break, then coverage, then the patch?"
@@ -7833,7 +7859,7 @@
       "useWhen": "Check that a report states the prediction before any patch tally and never counts a base-game difference as a clash.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_evalreport_prediction.py",
+          "path": "integration/housecarl/tests/test_evalreport_prediction.py",
           "anchor": "Checks that an evaluation report leads with the prediction: what adding the mods will break."
         }
       ],
@@ -7845,8 +7871,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_evalreport_siblings.py",
-      "path": "_geometry-harness/tests/test_evalreport_siblings.py",
+      "id": "integration/housecarl/tests/test_evalreport_siblings.py",
+      "path": "integration/housecarl/tests/test_evalreport_siblings.py",
       "kind": "script",
       "answers": [
         "Does a report join several separate evaluations of the same order, each lending the setups it can stand in for, and refuse one it cannot use by name?"
@@ -7854,7 +7880,7 @@
       "useWhen": "Check evalreport plan with --sibling-bundle given more than once: which sibling fills each role, the order given changes nothing, and each sub-order join criterion refuses what it should.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_evalreport_siblings.py",
+          "path": "integration/housecarl/tests/test_evalreport_siblings.py",
           "anchor": "Checks that a report joins more than one separate evaluation of the same order"
         }
       ],
@@ -7887,8 +7913,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_evalspeech.py",
-      "path": "_geometry-harness/tests/test_evalspeech.py",
+      "id": "integration/housecarl/tests/test_evalspeech.py",
+      "path": "integration/housecarl/tests/test_evalspeech.py",
       "kind": "script",
       "answers": [
         "Does narration preparation enforce its contracts without model weights or network access?"
@@ -7896,7 +7922,7 @@
       "useWhen": "Exercise narration binding and refusal paths offline before testing a chosen speech engine.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_evalspeech.py",
+          "path": "integration/housecarl/tests/test_evalspeech.py",
           "anchor": "Narration preparation contracts, without model imports, weights or network access."
         }
       ],
@@ -8181,8 +8207,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_overlap_triage.py",
-      "path": "_geometry-harness/tests/test_overlap_triage.py",
+      "id": "integration/housecarl/tests/test_overlap_triage.py",
+      "path": "integration/housecarl/tests/test_overlap_triage.py",
       "kind": "script",
       "answers": [
         "Does overlap triage preserve locality, counterpart identity and incomplete reviews?"
@@ -8190,7 +8216,7 @@
       "useWhen": "Check incident grouping changes for lost members, incorrect counterparts, and false review completeness.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_overlap_triage.py",
+          "path": "integration/housecarl/tests/test_overlap_triage.py",
           "anchor": "# 1||2 groups with 1||3; 3||4 cannot join through a transitive 1||3 link because it does not"
         }
       ],
@@ -8359,8 +8385,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_same_name_variant.py",
-      "path": "_geometry-harness/tests/test_same_name_variant.py",
+      "id": "integration/housecarl/tests/test_same_name_variant.py",
+      "path": "integration/housecarl/tests/test_same_name_variant.py",
       "kind": "script",
       "answers": [
         "Is a same-named plugin from another folder planned and reported as itself, not as the measured copy?"
@@ -8368,7 +8394,7 @@
       "useWhen": "Qualify plan rows and report comparison kinds for arms that swap in an author's same-named variant.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_same_name_variant.py",
+          "path": "integration/housecarl/tests/test_same_name_variant.py",
           "anchor": "A same-named plugin from another folder is planned and reported as itself (cases 451-459)."
         }
       ],
@@ -8380,8 +8406,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_subject_gate.py",
-      "path": "_geometry-harness/tests/test_subject_gate.py",
+      "id": "integration/housecarl/tests/test_subject_gate.py",
+      "path": "integration/housecarl/tests/test_subject_gate.py",
       "kind": "script",
       "answers": [
         "Does subject qualification refuse wrong identities, invisible features and invalid evidence?"
@@ -8389,7 +8415,7 @@
       "useWhen": "Check capture acceptance rules with deliberately misbound subjects and unusable visual witnesses.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_subject_gate.py",
+          "path": "integration/housecarl/tests/test_subject_gate.py",
           "anchor": "*case[\"viewArgs\"]]"
         }
       ],
@@ -8632,8 +8658,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_switchflip_outcome.py",
-      "path": "_geometry-harness/tests/test_switchflip_outcome.py",
+      "id": "integration/housecarl/tests/test_switchflip_outcome.py",
+      "path": "integration/housecarl/tests/test_switchflip_outcome.py",
       "kind": "script",
       "answers": [
         "Does the runtime switch reading rule classify crashes, stalls and completions correctly?"
@@ -8641,7 +8667,7 @@
       "useWhen": "Qualify a change to the live classifier against known crash, stall, short-window and unreached-target streams.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_switchflip_outcome.py",
+          "path": "integration/housecarl/tests/test_switchflip_outcome.py",
           "anchor": "Known answers for the runtime state-switch reading rule"
         }
       ],
@@ -8653,8 +8679,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_switchflip_scope.py",
-      "path": "_geometry-harness/tests/test_switchflip_scope.py",
+      "id": "integration/housecarl/tests/test_switchflip_scope.py",
+      "path": "integration/housecarl/tests/test_switchflip_scope.py",
       "kind": "script",
       "answers": [
         "Does the live switch check's population rule keep unknowns open and answer not-applicable only when nothing driven touches a target?"
@@ -8662,7 +8688,7 @@
       "useWhen": "Qualify a change to which switches the runtime switch check is about.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_switchflip_scope.py",
+          "path": "integration/housecarl/tests/test_switchflip_scope.py",
           "anchor": "Known answers for which switches the runtime state-switch check is about"
         }
       ],
@@ -8674,8 +8700,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_machineidle.py",
-      "path": "_geometry-harness/tests/test_machineidle.py",
+      "id": "integration/housecarl/tests/test_machineidle.py",
+      "path": "integration/housecarl/tests/test_machineidle.py",
       "kind": "script",
       "answers": [
         "Does the idle gate refuse probes by command line and blockers by name?"
@@ -8683,7 +8709,7 @@
       "useWhen": "Qualify a change to the launch idle gate before it decides whether the game may start.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_machineidle.py",
+          "path": "integration/housecarl/tests/test_machineidle.py",
           "anchor": "Known answers for the idle gate (machineidle.py)."
         }
       ],
@@ -8821,8 +8847,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_order_geometry.py",
-      "path": "_geometry-harness/tests/test_order_geometry.py",
+      "id": "integration/housecarl/tests/test_order_geometry.py",
+      "path": "integration/housecarl/tests/test_order_geometry.py",
       "kind": "script",
       "answers": [
         "Does a placed-object geometry row that holds in one order of a free pair and not the other reach the report as a load-order risk, with rows in both orders left out, unmeasured rows counted, drifted plugins named and mismatched orders refused?"
@@ -8830,7 +8856,7 @@
       "useWhen": "Qualify a change to the order-geometry enrichment (bundleenrich.order_geometry_rows, enrich_order_geometry) or to evalreport's order-geometry lines and load-order geometry fact.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_order_geometry.py",
+          "path": "integration/housecarl/tests/test_order_geometry.py",
           "anchor": "Known answers: a geometry row that holds in one order of a free pair and not in the other is said as a load-order risk"
         }
       ],
@@ -8842,8 +8868,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_switchflip_plan.py",
-      "path": "_geometry-harness/tests/test_switchflip_plan.py",
+      "id": "integration/housecarl/tests/test_switchflip_plan.py",
+      "path": "integration/housecarl/tests/test_switchflip_plan.py",
       "kind": "script",
       "answers": [
         "Does the live driver refuse a bad flip plan and export one arm's reading correctly?"
@@ -8851,7 +8877,7 @@
       "useWhen": "Check flip-plan validation, the block lock and the export before any launch.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_switchflip_plan.py",
+          "path": "integration/housecarl/tests/test_switchflip_plan.py",
           "anchor": "Known answers for switchflip.py's launch-free parts"
         }
       ],
@@ -8968,8 +8994,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_stategen.py",
-      "path": "_geometry-harness/tests/test_stategen.py",
+      "id": "integration/housecarl/tests/test_stategen.py",
+      "path": "integration/housecarl/tests/test_stategen.py",
       "kind": "script",
       "answers": [
         "Does a Deep evaluation judge every census state and name every one it cannot?"
@@ -8977,7 +9003,7 @@
       "useWhen": "Qualify the state generator and the evaluation depth through the real controller.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_stategen.py",
+          "path": "integration/housecarl/tests/test_stategen.py",
           "anchor": "Known answers for the Deep evaluation's state generator (stategen.py) and evalrun's evaluation depth."
         }
       ],
@@ -8989,8 +9015,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_flipplan.py",
-      "path": "_geometry-harness/tests/test_flipplan.py",
+      "id": "integration/housecarl/tests/test_flipplan.py",
+      "path": "integration/housecarl/tests/test_flipplan.py",
       "kind": "script",
       "answers": [
         "Does the flip-plan generator keep branches apart, keep source order and name every call it does not plan?"
@@ -8998,7 +9024,7 @@
       "useWhen": "Qualify a change to the flip-plan generator.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_flipplan.py",
+          "path": "integration/housecarl/tests/test_flipplan.py",
           "anchor": "Known answers for the flip-plan generator (flipplan.py)."
         }
       ],
@@ -9010,8 +9036,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_evalsettings.py",
-      "path": "_geometry-harness/tests/test_evalsettings.py",
+      "id": "integration/housecarl/tests/test_evalsettings.py",
+      "path": "integration/housecarl/tests/test_evalsettings.py",
       "kind": "script",
       "answers": [
         "Does a fresh user get the settings window once, and is a saved choice honoured?"
@@ -9019,7 +9045,7 @@
       "useWhen": "Qualify the first-run settings, the window's server and the plan's frozen copy.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_evalsettings.py",
+          "path": "integration/housecarl/tests/test_evalsettings.py",
           "anchor": "Known answers for the evaluation's first-run settings and window (evalsettings.py), PROPOSAL section 7."
         }
       ],
@@ -9031,8 +9057,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/fixtures/evalsettings/stub_opener.py",
-      "path": "_geometry-harness/tests/fixtures/evalsettings/stub_opener.py",
+      "id": "integration/housecarl/tests/fixtures/evalsettings/stub_opener.py",
+      "path": "integration/housecarl/tests/fixtures/evalsettings/stub_opener.py",
       "kind": "script",
       "answers": [
         "How can a test stand in for the browser on the settings window?"
@@ -9040,7 +9066,7 @@
       "useWhen": "Drive the settings window's Save, close and refusal paths without a browser.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/fixtures/evalsettings/stub_opener.py",
+          "path": "integration/housecarl/tests/fixtures/evalsettings/stub_opener.py",
           "anchor": "The browser stand-in for test_evalsettings.py: `evalsettings.py ensure|window --opener THIS` runs `python THIS URL`."
         }
       ],
@@ -9199,8 +9225,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_navown_edge_identity.py",
-      "path": "_geometry-harness/tests/test_navown_edge_identity.py",
+      "id": "integration/housecarl/tests/test_navown_edge_identity.py",
+      "path": "integration/housecarl/tests/test_navown_edge_identity.py",
       "kind": "script",
       "answers": [
         "Does navownprobe write one EDGE-IDX row per broken edge link, and does every identity-keyed reader (conflictdiff, ordersweep, evalreport) keep and credit each link?"
@@ -9208,7 +9234,7 @@
       "useWhen": "Qualify a change to navownprobe's dangling-link rows (DanglingLinks.cs), to ConflictIo.RowIdentity or to a reader that keys rows by it.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_navown_edge_identity.py",
+          "path": "integration/housecarl/tests/test_navown_edge_identity.py",
           "anchor": "navownprobe writes one EDGE-IDX row per broken edge link, and every identity-keyed reader keeps each one (1390-1405)."
         }
       ],
@@ -9493,8 +9519,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_evalpipeline.py",
-      "path": "_geometry-harness/tests/test_evalpipeline.py",
+      "id": "integration/housecarl/tests/test_evalpipeline.py",
+      "path": "integration/housecarl/tests/test_evalpipeline.py",
       "kind": "script",
       "answers": [
         "Does the driver of the stages after the bundle reuse a stage only when nothing changed, continue a run folder the built-in controller carried through the bundle, and refuse one it did not?"
@@ -9502,7 +9528,7 @@
       "useWhen": "Check changes to evalpipeline.py, the driver of the stages after the bundle.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_evalpipeline.py",
+          "path": "integration/housecarl/tests/test_evalpipeline.py",
           "anchor": "Known answers for evalpipeline.py, the driver of the stages after the bundle"
         }
       ],
@@ -9514,8 +9540,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_reader_rules.py",
-      "path": "_geometry-harness/tests/test_reader_rules.py",
+      "id": "integration/housecarl/tests/test_reader_rules.py",
+      "path": "integration/housecarl/tests/test_reader_rules.py",
       "kind": "script",
       "answers": [
         "Do the report and reel give a verdict and next step per patch, say unfinished testing first, name one patch per outcome, show every produced picture, and plan the reel's counts, labels, pages and closing in the report's terms?"
@@ -9523,7 +9549,7 @@
       "useWhen": "Qualify changes to the report's patch verdict, incompleteness, attribution, figure, missing-asset and setup wording, the reel's stills and labels, or the record-rows enrichment's masters.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_reader_rules.py",
+          "path": "integration/housecarl/tests/test_reader_rules.py",
           "anchor": "Known answers for the report and reel rules a mod user acts on"
         }
       ],
@@ -9535,8 +9561,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_report_figures.py",
-      "path": "_geometry-harness/tests/test_report_figures.py",
+      "id": "integration/housecarl/tests/test_report_figures.py",
+      "path": "integration/housecarl/tests/test_report_figures.py",
       "kind": "script",
       "answers": [
         "Does the report show the frame that states a clash (the marked view, both halves of a split), and does the reel drop capital mod prefixes from names?"
@@ -9544,7 +9570,7 @@
       "useWhen": "Check figure selection and spoken-name changes against synthetic media rows.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_report_figures.py",
+          "path": "integration/housecarl/tests/test_report_figures.py",
           "anchor": "Known answers for the report's figure units and the reel's spoken names and removals (Missives review, 2026-10-30)."
         }
       ],
@@ -9556,8 +9582,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_capture_fallbacks.py",
-      "path": "_geometry-harness/tests/test_capture_fallbacks.py",
+      "id": "integration/housecarl/tests/test_capture_fallbacks.py",
+      "path": "integration/housecarl/tests/test_capture_fallbacks.py",
       "kind": "script",
       "answers": [
         "Do the capture fallbacks (cutaway, top-down, see-through marks) give their known answers on a real render, and do the reuse, reel and caption rules hold?",
@@ -9566,7 +9592,7 @@
       "useWhen": "Qualify changes to capture_points, capture_acquire, shotplan --top-down-only, viewprobe --hide/--protect/--contacts-of/--occluders-of/--coverage-of, the capture reuse rule or the buried-clash words; render cases need HOUSECARL_FIXTURE_GAME (else NOT RUN, exit 3); --code-only runs the code cases alone and exits 0 when they pass.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_capture_fallbacks.py",
+          "path": "integration/housecarl/tests/test_capture_fallbacks.py",
           "anchor": "Known answers for the capture fallbacks: cutaway, top-down and see-through marks"
         }
       ],
@@ -9578,8 +9604,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_eye_inside_solid.py",
-      "path": "_geometry-harness/tests/test_eye_inside_solid.py",
+      "id": "integration/housecarl/tests/test_eye_inside_solid.py",
+      "path": "integration/housecarl/tests/test_eye_inside_solid.py",
       "kind": "script",
       "answers": [
         "Does the planner refuse a camera eye inside a solid of any thickness on a real render, and accept one beside a thin wall?"
@@ -9587,7 +9613,7 @@
       "useWhen": "Qualify changes to viewprobe --inside-at (its rays or facing) or shotplan's inside test; needs HOUSECARL_FIXTURE_GAME (else NOT RUN, exit 3).",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_eye_inside_solid.py",
+          "path": "integration/housecarl/tests/test_eye_inside_solid.py",
           "anchor": "Known answers for the planner's inside test on a real render"
         }
       ],
@@ -9725,8 +9751,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_report_reel_batch.py",
-      "path": "_geometry-harness/tests/test_report_reel_batch.py",
+      "id": "integration/housecarl/tests/test_report_reel_batch.py",
+      "path": "integration/housecarl/tests/test_report_reel_batch.py",
       "kind": "script",
       "answers": [
         "Do the report and reel say a single case in the singular, one reason per unchecked check, offline renders as renders, the location list's share of the load order, places by name or grid, forward-versus-carry-both, worse patch placements, a patch's lines on its own pair only, and relative PDF links?"
@@ -9734,7 +9760,7 @@
       "useWhen": "Qualify changes to the report's and reel's wording rules from regeneration 3 and item 18 (C1780-C1798); C1785 needs a browser and pypdf.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_report_reel_batch.py",
+          "path": "integration/housecarl/tests/test_report_reel_batch.py",
           "anchor": "Known answers for the report and reel wording batch"
         }
       ],
@@ -9746,8 +9772,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_report_reel_batch_2.py",
-      "path": "_geometry-harness/tests/test_report_reel_batch_2.py",
+      "id": "integration/housecarl/tests/test_report_reel_batch_2.py",
+      "path": "integration/housecarl/tests/test_report_reel_batch_2.py",
       "kind": "script",
       "answers": [
         "Do the report lane and orderleads read the shared record-flag table, do the report and reel name a mod the same way, does the patch search keep its unread listings, hub paths and build, does the author-advice count include stated clashes, and does the reel read media from every joined sibling?"
@@ -9755,7 +9781,7 @@
       "useWhen": "Qualify changes to the record-flag rule in the report lane, the reel's mod and patch names, the patch-search recorder and sentences, the author-advice count, or the reel's sibling media (C1800-C1814).",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_report_reel_batch_2.py",
+          "path": "integration/housecarl/tests/test_report_reel_batch_2.py",
           "anchor": "Known answers for the second report and reel batch"
         }
       ],
@@ -9767,8 +9793,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_capture_follow_ups.py",
-      "path": "_geometry-harness/tests/test_capture_follow_ups.py",
+      "id": "integration/housecarl/tests/test_capture_follow_ups.py",
+      "path": "integration/housecarl/tests/test_capture_follow_ups.py",
       "kind": "script",
       "answers": [
         "Does the capture ring stand on the navmesh storey rather than a floor high up a tall focus, does a flat partner box still find the floor, does the reel say how many camera spots a buried clash rests on, is a see-through partner never said to bury the other object, and does the reel picture a group's strongest crossing?"
@@ -9776,7 +9802,7 @@
       "useWhen": "Qualify changes to capture_points' ground cast or focus storey, the eye-level step's see-through field, the buried wording in the reel and report, or the reel's choice of example within a group and a buried clash in a pictured group (C1830-C1836); offline, no game.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_capture_follow_ups.py",
+          "path": "integration/housecarl/tests/test_capture_follow_ups.py",
           "anchor": "Known answers for the capture follow-ups after item 28"
         }
       ],
@@ -9788,8 +9814,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_alpha_card_capture.py",
-      "path": "_geometry-harness/tests/test_alpha_card_capture.py",
+      "id": "integration/housecarl/tests/test_alpha_card_capture.py",
+      "path": "integration/housecarl/tests/test_alpha_card_capture.py",
       "kind": "script",
       "answers": [
         "When a plant made of alpha cards misses its mark at the composed camera, is the witness station's own camera tried before the top-down and kept only when the plant's point lands in its mark, is such a picture captioned as a station view, is a clash a station saw never said to be one no camera could see, does a kept image key never stand for a capture with other frames, are plugin names in capture requests compared without case, is a one-mark marked view named, does the report stage's media bundle use the frozen check registry, does the reel narration speak no form key or editor ID, do capture frames address the cell by its form key, and does every capture refusal code have its own reason?"
@@ -9797,7 +9823,7 @@
       "useWhen": "Qualify changes to capture_acquire's routing after a refused composed pose (the alpha-card witness step), the station-view caption, the reel's reasons for refused clashes, the capture reuse rule for older pose refusals, the image-observations key, report_scenes' plugin-name comparisons, the marked-view and station-view captions, the report stage's media-bundle frozen inputs, a vignette's own capture request, the still pages' spoken wording, or the capture cell and its refusal reasons (C1890-C1899, C1930-C1933, C1935-C1939, C1960-C1961); offline, no game.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_alpha_card_capture.py",
+          "path": "integration/housecarl/tests/test_alpha_card_capture.py",
           "anchor": "Known answers for the interim alpha-card capture rule and the stale image key"
         }
       ],
@@ -9809,8 +9835,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_navmesh_reel.py",
-      "path": "_geometry-harness/tests/test_navmesh_reel.py",
+      "id": "integration/housecarl/tests/test_navmesh_reel.py",
+      "path": "integration/housecarl/tests/test_navmesh_reel.py",
       "kind": "script",
       "answers": [
         "Is a navmesh clash item 24's camera can draw pictured in the review reel as a vignette of its two navmesh states, bound to its capture request, captured by the pipeline with its control in the setup without the mod, refused without a clean control at the same camera, held for its narration, shown as one report figure with its own captions, and said with the control's result and no form key?"
@@ -9818,7 +9844,7 @@
       "useWhen": "Qualify changes to reel_plan's navmesh vignette (camera shape, states, words, labels), report_scenes' reel-mode navmesh binding, evalpipeline.capture_request's navmesh branch, capture_acquire capture's --control gate, evalreel's vignette holds or evalreport's navmesh figure (C1970-C1978); offline, no game.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_navmesh_reel.py",
+          "path": "integration/housecarl/tests/test_navmesh_reel.py",
           "anchor": "Known answers for a navmesh clash pictured in the review reel"
         }
       ],
@@ -9830,8 +9856,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_report_reel_wording.py",
-      "path": "_geometry-harness/tests/test_report_reel_wording.py",
+      "id": "integration/housecarl/tests/test_report_reel_wording.py",
+      "path": "integration/housecarl/tests/test_report_reel_wording.py",
       "kind": "script",
       "answers": [
         "Does the report and reel say why a clash was not captured (no camera for its kind, or the capture limit), say each patch fact in one wording, list each Nexus patch page once in What to do, keep form keys and editor IDs off still pages and report places, name both objects of a one-mark view, count navmesh links and groups in the intro, resolve evalpipeline's path arguments at parse time, and read the needs-some sentence in short sentences, and say in the reel the place the report names?"
@@ -9839,7 +9865,7 @@
       "useWhen": "Qualify changes to reel_plan's unpictured reasons, patch phrasing, navmesh intro or marked-view label, report_scenes.capturable_checks, reel_stills' drawn page text, evalreport's patch_search_leads, said_place or highlight_caption, pluginread.cell_grids, evalpipeline's path arguments, or the reporting skill's words for them (C2120-C2131); offline, no game.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_report_reel_wording.py",
+          "path": "integration/housecarl/tests/test_report_reel_wording.py",
           "anchor": "Known answers for the report and reel wording batch"
         }
       ],
@@ -9914,8 +9940,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_reel_names.py",
-      "path": "_geometry-harness/tests/test_reel_names.py",
+      "id": "integration/housecarl/tests/test_reel_names.py",
+      "path": "integration/housecarl/tests/test_reel_names.py",
       "kind": "script",
       "answers": [
         "Does the reel say and show a declared mod name or plugin file name as written (the round 2 subjects' patches, one with an all-capital word), still put an undeclared editor ID into words, and leave a count of 0 out of the unpictured line?"
@@ -9923,7 +9949,7 @@
       "useWhen": "Qualify changes to reel_stills' spoken_text, shown_text or keep_names, evalreel's storyboard and render speech, reel_plan.account_counts or the reporting skill's unpicturedAccount and unpicturedCounts words (C2166-C2167); offline, no game.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_reel_names.py",
+          "path": "integration/housecarl/tests/test_reel_names.py",
           "anchor": "Known answers for declared names in the reel and the unpictured count line"
         }
       ],
@@ -9935,8 +9961,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_report_record_labels.py",
-      "path": "_geometry-harness/tests/test_report_record_labels.py",
+      "id": "integration/housecarl/tests/test_report_record_labels.py",
+      "path": "integration/housecarl/tests/test_report_record_labels.py",
       "kind": "script",
       "answers": [
         "Does the report say each record in words (a placed object by its kind and base, a name, an editor ID in words, a navmesh by its place), keep two different values apart and number records named alike, say once per check across mod pairs what to check in game, keep a patch verdict's names out of the reel, say why a cell could not be read, and say a long mod name in full once and then by its own short form?"
@@ -9944,7 +9970,7 @@
       "useWhen": "Qualify changes to evalreport's said_record, say_form_keys, record_object_name, said_place's unread cell, what_to_do's next steps or patch_acts, reel_plan's short_mod_names or say_short_forms, test_reel_vignettes' code-known-answer and code-split-left-arm arms, or the reporting skill's words for them (C2200-C2208); offline, no game.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_report_record_labels.py",
+          "path": "integration/housecarl/tests/test_report_record_labels.py",
           "anchor": "Known answers for report record labels and What-to-do length"
         }
       ],
@@ -9956,8 +9982,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_report_words.py",
-      "path": "_geometry-harness/tests/test_report_words.py",
+      "id": "integration/housecarl/tests/test_report_words.py",
+      "path": "integration/housecarl/tests/test_report_words.py",
       "kind": "script",
       "answers": [
         "Does the report and reel say a name ending in s with a bare apostrophe (\"Interesting NPCs'\"), a landscape record by the ground of its cell, a patch named after the evaluated mod by the rest of its name, a long plugin file name in full once with a gloss and short after, and a buried object by its item's words?"
@@ -9965,7 +9991,7 @@
       "useWhen": "Qualify changes to reel_plan's fill, possessive, short_mod_names or say_short_forms, evalreport's bind, said_record's landscape words, say_report_short_forms or buried_lines, readerdoc's bind, pluginread.record_cells, or the reporting skill's words for them (C2310-C2319); offline, no game.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_report_words.py",
+          "path": "integration/housecarl/tests/test_report_words.py",
           "anchor": "Known answers for report and reel words"
         }
       ],
@@ -9977,8 +10003,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_patch_clash_pictures.py",
-      "path": "_geometry-harness/tests/test_patch_clash_pictures.py",
+      "id": "integration/housecarl/tests/test_patch_clash_pictures.py",
+      "path": "integration/housecarl/tests/test_patch_clash_pictures.py",
       "kind": "script",
       "answers": [
         "Is a clash that appears only with the supplied patches loaded pictured with them loaded, beside the setup without them, and said as such in the reel and the report; is one world-state check's new clashes counted once; and does a terrain station's label reach the picture's caption and reel note?"
@@ -9986,7 +10012,7 @@
       "useWhen": "Qualify changes to reel_plan's patch vignettes or view_kind_line, evalreport's problems_text, SAY_SKIP_KEYS, patch_captions or view_kind_caption, the report templates' new-clashes figures, capture_acquire's standing or keep_refused_points, or the reporting skill's words for them (C2340-C2349); offline, no game.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_patch_clash_pictures.py",
+          "path": "integration/housecarl/tests/test_patch_clash_pictures.py",
           "anchor": "Known answers for pictures of clashes new with the supplied patches"
         }
       ],
@@ -9998,8 +10024,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_navmesh_caption.py",
-      "path": "_geometry-harness/tests/test_navmesh_caption.py",
+      "id": "integration/housecarl/tests/test_navmesh_caption.py",
+      "path": "integration/housecarl/tests/test_navmesh_caption.py",
       "kind": "script",
       "answers": [
         "Does a navmesh vignette's earlier-version caption, on the reel strip and in the report, name the plugin the historical frame's own --nav-version draws (never the plan's re-cut history, and none when the frame names none), say which mod replaced that version, and keep a name ending in s free of an \"s's\" possessive, in the narration too?"
@@ -10007,7 +10033,7 @@
       "useWhen": "Qualify changes to reel_plan's frame_label for navmesh frames, navmesh_earlier_plugin (shared with evalreport's figure captions), navmesh_sentence, or the reporting skill's navmesh caption, label or narration words (C2240-C2244); offline, no game.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_navmesh_caption.py",
+          "path": "integration/housecarl/tests/test_navmesh_caption.py",
           "anchor": "Known answers for the navmesh context caption"
         }
       ],
@@ -10040,8 +10066,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_evalreport_verify_in_place.py",
-      "path": "_geometry-harness/tests/test_evalreport_verify_in_place.py",
+      "id": "integration/housecarl/tests/test_evalreport_verify_in_place.py",
+      "path": "integration/housecarl/tests/test_evalreport_verify_in_place.py",
       "kind": "script",
       "answers": [
         "Does evalreport plan verify --bundle and --sibling-bundle in place without writing a byte or mtime into either, without a copy in proportion to the bundle even when its evidence is hard-linked, leave no tree after a failure mid-verify, refuse a verify that wrote no result, does runcontrol verify-bundle --out write its result only to the named file, and does every caller check a bundle with runcontrol rather than Python?"
@@ -10049,7 +10075,7 @@
       "useWhen": "Qualify changes to evalreport's run_verify_bundle, plan's --verify-copy, runcontrol verify-bundle's --out, or which program a caller starts to check a bundle (C2230-C2235); offline, no game.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_evalreport_verify_in_place.py",
+          "path": "integration/housecarl/tests/test_evalreport_verify_in_place.py",
           "anchor": "Known answers for evalreport plan verifying a bundle without copying it"
         }
       ],
@@ -10061,8 +10087,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_capture_every_state.py",
-      "path": "_geometry-harness/tests/test_capture_every_state.py",
+      "id": "integration/housecarl/tests/test_capture_every_state.py",
+      "path": "integration/housecarl/tests/test_capture_every_state.py",
       "kind": "script",
       "answers": [
         "Does a vignette's capture camera pass the measured state's camera checks (inside test, the sightlines of the participants that setup places) in every other state it renders, try the next pose of the chain when one fails, refuse naming the state and the object when none passes, and keep its single camera when every state is clear?"
@@ -10070,7 +10096,7 @@
       "useWhen": "Qualify changes to capture_acquire's state_checks, --state-order, the pose, witness and top-down fallback chain, the cell each other state is rendered by, evalpipeline's acquire arguments or the state-camera-blocked reason (C2168-C2172); offline, no game.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_capture_every_state.py",
+          "path": "integration/housecarl/tests/test_capture_every_state.py",
           "anchor": "Known answers for a capture camera checked in every state it renders"
         }
       ],
@@ -10082,8 +10108,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_narration_fidelity.py",
-      "path": "_geometry-harness/tests/test_narration_fidelity.py",
+      "id": "integration/housecarl/tests/test_narration_fidelity.py",
+      "path": "integration/housecarl/tests/test_narration_fidelity.py",
       "kind": "script",
       "answers": [
         "Does the narration packet ask for plain words and carry the glossary, does narrate-apply accept a rewrite only where a fidelity judgement made for its exact text says it keeps the meaning, and does the judge's model setting never resolve to a Fable model?"
@@ -10091,7 +10117,7 @@
       "useWhen": "Qualify changes to evalreport narrate-packet (instructions, glossary, the judge's packet), narrate-apply's judgement gate, the reporting skill's narration.json, or evalsettings models.checkExplanations and route --session-model, the judge packet's bound rows and the narrator's completion rule (C2020-C2029, C2050-C2053); offline, no game, no model call.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_narration_fidelity.py",
+          "path": "integration/housecarl/tests/test_narration_fidelity.py",
           "anchor": "Known answers: the narration packet asks for plain words"
         }
       ],
@@ -10103,8 +10129,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_exterior_stations.py",
-      "path": "_geometry-harness/tests/test_exterior_stations.py",
+      "id": "integration/housecarl/tests/test_exterior_stations.py",
+      "path": "integration/housecarl/tests/test_exterior_stations.py",
       "kind": "script",
       "answers": [
         "Does an exterior camera station stand on navmesh at its own level, eye at that level plus the eye height, while interiors keep one floor?"
@@ -10112,7 +10138,7 @@
       "useWhen": "Qualify changes to capture_points' station placement or shotplan's exterior eye; offline, no game.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_exterior_stations.py",
+          "path": "integration/housecarl/tests/test_exterior_stations.py",
           "anchor": "Offline known answers for exterior camera stations"
         }
       ],
@@ -10124,8 +10150,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_terrain_stations.py",
-      "path": "_geometry-harness/tests/test_terrain_stations.py",
+      "id": "integration/housecarl/tests/test_terrain_stations.py",
+      "path": "integration/housecarl/tests/test_terrain_stations.py",
       "kind": "script",
       "answers": [
         "Where no navmesh stands an exterior camera, does it stand on bare terrain only when the LAND footprint is planar and at most the measured 43.7 degrees, with nothing beside, overhead or under it but the ground, while navmesh stations keep today's rule?"
@@ -10133,7 +10159,7 @@
       "useWhen": "Qualify changes to the terrain station rule in capture_points or shotplan (terrain_slope, terrain_verdict) (C1980-C1989); offline, no game.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_terrain_stations.py",
+          "path": "integration/housecarl/tests/test_terrain_stations.py",
           "anchor": "Offline known answers for terrain stations"
         }
       ],
@@ -10208,8 +10234,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_capture_results_unreadable.py",
-      "path": "_geometry-harness/tests/test_capture_results_unreadable.py",
+      "id": "integration/housecarl/tests/test_capture_results_unreadable.py",
+      "path": "integration/housecarl/tests/test_capture_results_unreadable.py",
       "kind": "script",
       "answers": [
         "Does evalreport's reel refuse a capture-results file it cannot read, and still plan without one?"
@@ -10217,7 +10243,7 @@
       "useWhen": "Qualify a change to how evalreport plan reads --capture-results.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_capture_results_unreadable.py",
+          "path": "integration/housecarl/tests/test_capture_results_unreadable.py",
           "anchor": "evalreport's reel refuses a --capture-results file it cannot read"
         }
       ],
@@ -10292,8 +10318,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_switchflip_rule_unavailable.py",
-      "path": "_geometry-harness/tests/test_switchflip_rule_unavailable.py",
+      "id": "integration/housecarl/tests/test_switchflip_rule_unavailable.py",
+      "path": "integration/housecarl/tests/test_switchflip_rule_unavailable.py",
       "kind": "script",
       "answers": [
         "Does the live driver keep a launch's cleanup when the reading rule's owner cannot be asked?"
@@ -10301,7 +10327,7 @@
       "useWhen": "Qualify a change to switchflip.py or switchflip_outcome.py around runcontrol failures.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_switchflip_rule_unavailable.py",
+          "path": "integration/housecarl/tests/test_switchflip_rule_unavailable.py",
           "anchor": "Known answers for the live driver when the reading rule's owner cannot be asked"
         }
       ],
