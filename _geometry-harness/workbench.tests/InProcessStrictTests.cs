@@ -95,6 +95,26 @@ public sealed class InProcessStrictTests
         Assert.Contains(Path.Combine(w.Instance, "mods", "stray.esp"), Changed(mark, Listing(w.Instance, game, o)), StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>A dry run, through the app's commit and through the raw tool with and without an Output Folder, writes
+    /// nothing anywhere (instance, game, Output Folder, data folder aside), and still answers what it would write.
+    /// Rejects a dry run that writes (the plant the Gate B review used: the binding dropping dry_run).</summary>
+    [Fact]
+    public async Task A_dry_run_writes_nothing_anywhere_and_says_what_it_would_write()
+    {
+        using var w = new TiltedRefWorld();
+        var o = NewOut(w.Root);
+        var game = Path.GetDirectoryName(w.DataDir)!;
+        await using var p = Open(w, o);
+        var before = Listing(w.Instance, game, o);
+        var said = await p.CommitAsync(new[] { new PendingEdit(TiltedRefWorld.Ref, Drawn, Drawn with { Position = new Vec3(600, -256, 64) }) }, "WbDry", dryRun: true);
+        Assert.Contains("DRY RUN", said);
+        var op = new[] { new Dictionary<string, object?> { ["formid"] = TiltedRefWorld.Ref.ToString(), ["field_path"] = "Placement.Position", ["value"] = "1,2,3" } };
+        Assert.Contains("DRY RUN", await p.CallAsync("housecarl_apply", new() { ["ops"] = op, ["patch"] = "WbDry2", ["out_path"] = o, ["dry_run"] = true }));
+        Assert.Contains("DRY RUN", await p.CallAsync("housecarl_apply", new() { ["ops"] = op, ["patch"] = "WbDry3", ["dry_run"] = true }));
+        var wrote = Changed(before, Listing(w.Instance, game, o));
+        Assert.True(wrote.Count == 0, "a dry run wrote " + string.Join(", ", wrote));
+    }
+
     /// <summary>Undo removes the reference's override from the patch, keeps the file, and leaves the load order's own
     /// placement as the winner again. Rejects an undo that writes the old pose back (an override would remain).</summary>
     [Fact]
