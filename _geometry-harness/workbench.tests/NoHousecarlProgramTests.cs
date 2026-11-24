@@ -89,11 +89,25 @@ public sealed class NoHousecarlProgramTests
         Assert.Contains(started, p => Path.GetFileName(p.Image ?? "") == "runcontrol.exe");
     }
 
-    /// <summary>The control: the same flows on the server path are caught, once per writer they start.</summary>
+    /// <summary>The control, since the server path is gone (step 4): a program named housecarl-mcp.exe, started by a
+    /// descendant of this process and ending at once, is caught by name. Before, the same flows on the server path were
+    /// the control, caught three times (GATE-B.md).</summary>
     [Fact]
-    public async Task The_same_flows_on_the_server_path_are_caught_starting_it()
+    public void A_program_named_housecarl_mcp_started_by_a_descendant_is_caught()
     {
-        var started = await Flows((t, hc) => PatchWriter.StartAsync(TestBuild.Server, t, hc, TestCorpus.Path, _ => { }), namesRead: false);
-        Assert.Equal(3, started.Count(p => ProcessWatch.IsHousecarlServer(p.Image)));
+        var dir = Path.Combine(Path.GetTempPath(), "hc-wb-watch-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var named = Path.Combine(dir, "housecarl-mcp.exe");
+            File.Copy(Path.Combine(Environment.SystemDirectory, "whoami.exe"), named);
+            var mark = ProcessWatch.Mark();
+            var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe")) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
+            foreach (var a in new[] { "/d", "/c", named }) psi.ArgumentList.Add(a);
+            using (var p = Process.Start(psi)!) { p.StandardOutput.ReadToEnd(); p.WaitForExit(); }
+            var started = ProcessWatch.After(mark);
+            Assert.Contains(started, p => ProcessWatch.IsHousecarlServer(p.Image));
+        }
+        finally { try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
     }
 }

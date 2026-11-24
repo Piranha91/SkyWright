@@ -858,9 +858,7 @@ public class TrialPatchWriteTests : IClassFixture<TiltedRefWorld>
     [Fact]
     public async Task P8o_commit_with_out_path_writes_a_new_patch_in_that_folder()
     {
-        var exe = TestBuild.Server;
-        Assert.True(File.Exists(exe), $"build src/housecarl-mcp in Release first: {exe}");
-        await using var w = await PatchWriter.StartAsync(exe, new WriteTarget(_w.Instance, "Default", _w.DataDir, Path.Combine(_w.Instance, "mods")),
+        await using var w = PatchWriter.OpenInProcess(new WriteTarget(_w.Instance, "Default", _w.DataDir, Path.Combine(_w.Instance, "mods")),
             Path.Combine(_w.Root, "hcdata-" + Guid.NewGuid().ToString("N")), TestCorpus.Path, _ => { });
         var before = new RefPlacementEdit.Pose(TiltedRefWorld.Pos, TiltedRefWorld.Rot, 1f);
         var trial = Path.Combine(_w.Root, "work", "trials", "1");

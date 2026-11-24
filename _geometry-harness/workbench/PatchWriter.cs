@@ -1,8 +1,5 @@
 using System.Globalization;
-using System.Security.Cryptography;
 using System.Text.Json;
-using ModelContextProtocol.Client;
-using ModelContextProtocol.Protocol;
 
 namespace Workbench;
 
@@ -19,28 +16,22 @@ internal sealed record WriteTarget(string Instance, string Profile, string DataD
     public override string ToString() => $"instance '{Instance}', profile '{Profile}'" + (Output is null ? "" : $", output '{Output}'");
 }
 
-/// <summary>Writes the staged edits as placement overrides through the houseCARL server's own write path
-/// (<c>housecarl_apply</c>; <c>housecarl_records</c> to check and read back). The app is an MCP client of the
-/// <c>housecarl-mcp.exe</c> it was built with, started over stdio (ModelContextProtocol.Core 2.2.0:
-/// <c>StdioClientTransport</c> + <c>McpClient.CreateAsync</c> + <c>CallToolAsync</c>), or, opened with <see cref="OpenInProcess"/>,
-/// houseCARL's same tool code compiled in (<see cref="HousecarlLibrary"/>), with no program started.</summary>
+/// <summary>Writes the staged edits as placement overrides through houseCARL's own write path (<c>housecarl_apply</c>;
+/// <c>housecarl_records</c> to check and read back), its tool code compiled in (<see cref="HousecarlLibrary"/>): no
+/// houseCARL program is started. Opened by <see cref="OpenInProcess"/>; the app's callers get one from
+/// <see cref="HousecarlWriters"/>.</summary>
 internal sealed class PatchWriter : IAsyncDisposable
 {
-    // exactly one of the two answers the calls: the started server (stdio), or houseCARL's code in process
-    readonly McpClient? _client;
-    readonly HousecarlLibrary? _library;
+    readonly HousecarlLibrary _library;
     internal WriteTarget Target { get; }
     internal string ServerExe { get; }
     internal string ServerSha256 { get; }
     internal Action<string> Log { get; }
-    /// <summary>True when the calls go to houseCARL's code in this process and no program is started.</summary>
-    internal bool InProcess => _library is not null;
 
-    PatchWriter(McpClient? client, HousecarlLibrary? library, WriteTarget target, string exe, string sha, Action<string> log)
-    { _client = client; _library = library; Target = target; ServerExe = exe; ServerSha256 = sha; Log = log; }
+    PatchWriter(HousecarlLibrary library, WriteTarget target, string exe, string sha, Action<string> log)
+    { _library = library; Target = target; ServerExe = exe; ServerSha256 = sha; Log = log; }
 
-    /// <summary>The refusals <see cref="StartAsync"/> gives before it starts a server, less the server's own: the Output
-    /// Folder rule, the rulebook, the profile. StartAsync keeps its own, untouched, until the server path goes.</summary>
+    /// <summary>The refusals before anything opens: the Output Folder rule, the rulebook, the profile.</summary>
     static void Preflight(WriteTarget target, string corpusPath)
     {
         if (target.Output is null)
@@ -53,78 +44,18 @@ internal sealed class PatchWriter : IAsyncDisposable
             throw new InvalidOperationException($"the profile folder '{target.ProfileDir}' does not exist; name a profile of that instance.");
     }
 
-    /// <summary>houseCARL's code in this process against <paramref name="target"/>, with no program started; the same
-    /// refusals as <see cref="StartAsync"/> before it opens. <paramref name="dataDir"/> holds its store and spilled results.</summary>
+    /// <summary>houseCARL's code in this process against <paramref name="target"/>, with no program started, after the
+    /// refusals of <see cref="Preflight"/>. <paramref name="dataDir"/> holds its store and spilled results.</summary>
     internal static PatchWriter OpenInProcess(WriteTarget target, string dataDir, string corpusPath, Action<string> log)
     {
         Preflight(target, corpusPath);
         var lib = HousecarlLibrary.Open(target, dataDir, corpusPath);
         log($"houseCARL in process: {HousecarlLibrary.AssemblyPath} ({HousecarlLibrary.Identity}); writes go to {target}");
-        return new PatchWriter(null, lib, target, HousecarlLibrary.AssemblyPath, HousecarlLibrary.Identity, log);
+        return new PatchWriter(lib, target, HousecarlLibrary.AssemblyPath, HousecarlLibrary.Identity, log);
     }
 
-    /// <summary>Start the server at <paramref name="serverExe"/> against <paramref name="target"/>. Refused when the
-    /// target's patch folder is one the output-folder rule refuses, whatever the instance.</summary>
-    internal static async Task<PatchWriter> StartAsync(string serverExe, WriteTarget target,
-                                                       string dataDir, string corpusPath, Action<string> log, CancellationToken ct = default)
-    {
-        if (target.Output is null)
-            throw new InvalidOperationException($"writes to {target} are refused: no Output Folder is chosen; choose one in the launcher or set WB_OUTPUT (the instance's mods folder itself is allowed).");
-        if (OutputFolderRule.Check(target.PatchRoot, target.Instance, target.Profile, target.Game) is { } why)
-            throw new InvalidOperationException($"writes to {target} are refused: {why}");
-        if (!File.Exists(serverExe))
-            throw new InvalidOperationException($"the houseCARL server is not at '{serverExe}'; build the solution (scripts\\build.ps1), or set WB_SERVER.");
-        if (!File.Exists(corpusPath))
-            throw new InvalidOperationException($"the houseCARL rulebook is not at '{corpusPath}'; run scripts\\build.ps1 -Rulebook, or set WB_CORPUS.");
-        if (!Directory.Exists(target.ProfileDir))
-            throw new InvalidOperationException($"the profile folder '{target.ProfileDir}' does not exist; name a profile of that instance.");
-        string sha;
-        using (var fs = File.OpenRead(serverExe)) sha = Convert.ToHexString(SHA256.HashData(fs)).ToLowerInvariant();
-        var dll = Path.ChangeExtension(serverExe, ".dll");
-        string dllSha = File.Exists(dll) ? Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(dll))).ToLowerInvariant() : "(no dll)";
-        Directory.CreateDirectory(dataDir);
-        var transport = new StdioClientTransport(new StdioClientTransportOptions
-        {
-            Name = "housecarl",
-            Command = serverExe,
-            Arguments = new[]
-            {
-                $"--HouseCarl:DataDir={target.DataDir}",
-                $"--HouseCarl:ModsDir={target.ModsDir}",
-                $"--HouseCarl:ProfileDir={target.ProfileDir}",
-                $"--HouseCarl:CorpusPath={corpusPath}",
-            },
-            // A data folder of the workbench's own: no saved user config in it, so the explicit paths above are what
-            // the server reads (a saved instance would otherwise win), and its run log stays beside it.
-            EnvironmentVariables = new Dictionary<string, string?>
-            {
-                ["HOUSECARL_DATA_DIR"] = dataDir,
-                ["HOUSECARL_RUNLOG_DIR"] = Path.Combine(dataDir, "runs"),
-            },
-        });
-        var client = await McpClient.CreateAsync(transport, cancellationToken: ct);
-        log($"houseCARL server: {serverExe} (exe sha256 {sha}, dll sha256 {dllSha}); writes go to {target}");
-        return new PatchWriter(client, null, target, serverExe, sha, log);
-    }
-
-    /// <summary>Test seam: each call's tool, whether houseCARL flagged it an error, and its text, as answered (the
-    /// equivalence tests compare the two ways of writing call by call).</summary>
-    internal Action<string, bool, string>? Answered;
-
-    internal async Task<string> CallAsync(string tool, Dictionary<string, object?> args, CancellationToken ct = default)
-    {
-        if (_library is not null)
-        {
-            var said = await _library.CallAsync(tool, args, ct);
-            Answered?.Invoke(tool, false, said);
-            return said;
-        }
-        var r = await _client!.CallToolAsync(tool, args, cancellationToken: ct);
-        var text = string.Join("\n", r.Content.OfType<TextContentBlock>().Select(c => c.Text));
-        Answered?.Invoke(tool, r.IsError == true, text);
-        if (r.IsError == true) throw new InvalidOperationException($"{tool} refused: {text}");
-        return text;
-    }
+    /// <summary>One houseCARL tool call: the tool's own answer, a refusal included (houseCARL refuses in its text).</summary>
+    internal Task<string> CallAsync(string tool, Dictionary<string, object?> args, CancellationToken ct = default) => _library.CallAsync(tool, args, ct);
 
     static string F(float v) => v.ToString("R", CultureInfo.InvariantCulture);
     static string V(HousecarlCore.Vec3 v) => $"{F(v.X)},{F(v.Y)},{F(v.Z)}";
@@ -378,9 +309,6 @@ internal sealed class PatchWriter : IAsyncDisposable
                + (left == 0 ? "; the patch now holds no placed reference, and the file is kept (delete it yourself if you no longer want it)." : left > 0 ? $"; {left} placed reference(s) remain in it." : ".");
     }
 
-    public async ValueTask DisposeAsync()
-    {
-        if (_client is not null) await _client.DisposeAsync();
-        _library?.Dispose();
-    }
+    /// <summary>Closes the service, waiting for its calls; never on a window's thread (<see cref="HousecarlLibrary.Dispose"/>).</summary>
+    public ValueTask DisposeAsync() { _library.Dispose(); return ValueTask.CompletedTask; }
 }

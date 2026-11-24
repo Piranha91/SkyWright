@@ -89,10 +89,9 @@ public class ServerContextSourceTests : IClassFixture<DoorWorld>
     readonly DoorWorld _w;
     public ServerContextSourceTests(DoorWorld w) => _w = w;
 
-    Task<PatchWriter> Start() => PatchWriter.StartAsync(
-        TestBuild.Server,
+    Task<PatchWriter> Start() => Task.FromResult(PatchWriter.OpenInProcess(
         new WriteTarget(_w.Instance, "Default", _w.DataDir, Path.Combine(_w.Instance, "mods")),
-        Path.Combine(_w.Root, "hcdata-" + Guid.NewGuid().ToString("N")), TestCorpus.Path, _ => { });
+        Path.Combine(_w.Root, "hcdata-" + Guid.NewGuid().ToString("N")), TestCorpus.Path, _ => { }));
 
     [Fact]
     public async Task C1a_the_server_reads_name_the_door_its_far_side_the_far_doors_destination_what_names_it_and_base_types()

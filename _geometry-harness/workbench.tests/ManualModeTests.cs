@@ -107,7 +107,7 @@ public sealed class OutputFolderRuleTests : IDisposable
         Assert.Null(Check(Path.Combine(_root, rel)));
 }
 
-/// <summary>B3, B3b, B3c: the houseCARL server writes a patch under the chosen output folder, extends it there and drops
+/// <summary>B3, B3b, B3c: houseCARL (compiled in since step 4) writes a patch under the chosen output folder, extends it there and drops
 /// an override from it; and the workbench has no lab constant left as its write guard.</summary>
 [Trait("tier", "integration")]
 public sealed class OutputWriteTests : IClassFixture<TiltedRefWorld>
@@ -115,31 +115,22 @@ public sealed class OutputWriteTests : IClassFixture<TiltedRefWorld>
     readonly TiltedRefWorld _w;
     public OutputWriteTests(TiltedRefWorld w) => _w = w;
 
-    static string ServerExe()
+    /// <summary>houseCARL's tools compiled into the app over this world (rewritten from the started server at step 4):
+    /// the same tool calls, the tool's own answer back.</summary>
+    sealed class Library : IAsyncDisposable
     {
-        var exe = TestBuild.Server;
-        Assert.True(File.Exists(exe), $"build src/housecarl-mcp in Release first: {exe}");
-        return exe;
+        internal readonly HousecarlLibrary Lib;
+        internal Library(HousecarlLibrary lib) => Lib = lib;
+        public async ValueTask DisposeAsync() => await Task.Run(Lib.Dispose);
     }
 
-    async Task<McpClient> Server()
-    {
-        var data = Path.Combine(_w.Root, "hcdata-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(data);
-        return await McpClient.CreateAsync(new StdioClientTransport(new StdioClientTransportOptions
-        {
-            Name = "housecarl", Command = ServerExe(),
-            Arguments = new[] { $"--HouseCarl:DataDir={_w.DataDir}", $"--HouseCarl:ModsDir={Path.Combine(_w.Instance, "mods")}",
-                                $"--HouseCarl:ProfileDir={Path.Combine(_w.Instance, "profiles", "Default")}", $"--HouseCarl:CorpusPath={TestCorpus.Path}" },
-            EnvironmentVariables = new Dictionary<string, string?> { ["HOUSECARL_DATA_DIR"] = data, ["HOUSECARL_RUNLOG_DIR"] = Path.Combine(data, "runs") },
-        }));
-    }
+    Task<Library> Server() => Task.FromResult(new Library(HousecarlLibrary.Open(
+        new WriteTarget(_w.Instance, "Default", _w.DataDir, Path.Combine(_w.Instance, "mods")),
+        Path.Combine(_w.Root, "hcdata-" + Guid.NewGuid().ToString("N")), TestCorpus.Path)));
 
-    static async Task<(bool Error, string Text)> Call(McpClient c, string tool, Dictionary<string, object?> args)
-    {
-        var r = await c.CallToolAsync(tool, args);
-        return (r.IsError == true, string.Join("\n", r.Content.OfType<TextContentBlock>().Select(b => b.Text)));
-    }
+    /// <summary>A refusal in process is houseCARL's own text (it never sets the flag the server's argument shim set), so
+    /// the flag here is always false and the tests read the text, as they did for most of the server's refusals.</summary>
+    static async Task<(bool Error, string Text)> Call(Library c, string tool, Dictionary<string, object?> args) => (false, await c.Lib.CallAsync(tool, args));
 
     static List<Dictionary<string, object?>> Move(float z) => new()
     {
@@ -1010,7 +1001,6 @@ public sealed class OutputFolderLayoutTests : IDisposable
 public sealed class ManualWriteTests
 {
     static string Checkout() => R3Bundle.Checkout();
-    static string ServerExe() => TestBuild.Server;
 
     static Dictionary<string, (long, DateTime)> Listing(params string[] roots) =>
         roots.Where(Directory.Exists).SelectMany(r => Directory.EnumerateFileSystemEntries(r, "*", SearchOption.AllDirectories))
@@ -1027,19 +1017,20 @@ public sealed class ManualWriteTests
         return ctor.Invoke(args);
     }
 
-    static async Task<PatchWriter> Start(TiltedRefWorld w, string output)
+    // step 4: the writer is houseCARL's code compiled in (OpenInProcess); the server it started before is gone
+    static Task<PatchWriter> Start(TiltedRefWorld w, string output)
     {
-        var m = typeof(PatchWriter).GetMethod("StartAsync", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)!;
+        var m = typeof(PatchWriter).GetMethod("OpenInProcess", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)!;
         var args = m.GetParameters().Select(p => p.Name switch
         {
-            "serverExe" => (object?)ServerExe(), "target" => Target(w, output),
+            "target" => (object?)Target(w, output),
             "allowedInstances" => Array.Empty<string>(),            // the base's lab guard: no instance named as allowed
             "dataDir" => Path.Combine(w.Root, "hcdata-" + Guid.NewGuid().ToString("N")), "corpusPath" => TestCorpus.Path,
             "log" => (Action<string>)(_ => { }), "ct" => CancellationToken.None,
             _ => throw new Xunit.Sdk.XunitException($"PatchWriter.StartAsync has a parameter {p.Name} this test does not know"),
         }).ToArray();
-        try { return await (Task<PatchWriter>)m.Invoke(null, args)!; }
-        catch (InvalidOperationException ex) { throw new Xunit.Sdk.XunitException("the write on a non-lab instance in a manual session was refused: " + ex.Message); }
+        try { return Task.FromResult((PatchWriter)m.Invoke(null, args)!); }
+        catch (TargetInvocationException ex) when (ex.InnerException is InvalidOperationException ioe) { throw new Xunit.Sdk.XunitException("the write on a non-lab instance in a manual session was refused: " + ioe.Message); }
     }
 
     [Fact]
@@ -1076,22 +1067,15 @@ public sealed class ManualWriteTests
         File.WriteAllText(Path.Combine(w.Instance, "ModOrganizer.ini"), "[General]\r\ngameName=Skyrim Special Edition\r\ngamePath=@ByteArray(" + game.Replace("\\", "\\\\") + ")\r\nselected_profile=@ByteArray(Default)\r\n");
         Directory.CreateDirectory(Path.Combine(w.Instance, "overwrite"));
         var o = Path.Combine(w.Root, "out");
-        // the patch, written under the Output Folder by the server's out_path lane
-        var data = Path.Combine(w.Root, "hcdata"); Directory.CreateDirectory(data);
-        await using (var c = await McpClient.CreateAsync(new StdioClientTransport(new StdioClientTransportOptions
+        // the patch, written under the Output Folder by houseCARL's out_path lane (in process since step 4)
+        using (var lib = HousecarlLibrary.Open(new WriteTarget(w.Instance, "Default", w.DataDir, o), Path.Combine(w.Root, "hcdata"), TestCorpus.Path))
         {
-            Name = "housecarl", Command = ServerExe(),
-            Arguments = new[] { $"--HouseCarl:DataDir={w.DataDir}", $"--HouseCarl:ModsDir={Path.Combine(w.Instance, "mods")}",
-                                $"--HouseCarl:ProfileDir={Path.Combine(w.Instance, "profiles", "Default")}", $"--HouseCarl:CorpusPath={TestCorpus.Path}" },
-            EnvironmentVariables = new Dictionary<string, string?> { ["HOUSECARL_DATA_DIR"] = data, ["HOUSECARL_RUNLOG_DIR"] = Path.Combine(data, "runs") },
-        })))
-        {
-            var r = await c.CallToolAsync("housecarl_apply", new Dictionary<string, object?>
+            var said = await lib.CallAsync("housecarl_apply", new Dictionary<string, object?>
             {
                 ["ops"] = new[] { new Dictionary<string, object?> { ["formid"] = TiltedRefWorld.Ref.ToString(), ["field_path"] = "Placement.Position", ["value"] = "600,-256,64" } },
                 ["patch"] = "WbRe", ["out_path"] = o,
             });
-            Assert.False(r.IsError == true, string.Join("\n", r.Content.OfType<TextContentBlock>().Select(b => b.Text)));
+            Assert.False(said.TrimStart().StartsWith("error:"), said);
         }
         var folder = Path.Combine(o, "houseCARL - WbRe");
         Assert.True(File.Exists(Path.Combine(folder, "WbRe.esp")));

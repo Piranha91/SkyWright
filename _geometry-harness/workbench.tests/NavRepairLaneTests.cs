@@ -32,7 +32,6 @@ public sealed class NavRepairWorld : IDisposable
         return dir?.FullName ?? throw new InvalidOperationException("no SkyWright.sln above the test's folder");
     }
     internal static string Probe => NavRepairLane.ProbeExe(TestBuild.Layout.Root);
-    internal static string Server => TestBuild.Server;
 
     public NavRepairWorld()
     {
@@ -116,7 +115,7 @@ public sealed class NavRepairLaneTests : IClassFixture<NavRepairWorld>, IAsyncLi
         {
             Rows = new[] { new RankedFinding(1, row, false, "", 0) },
             Desk = new RepairDesk(() => (_w.Candidate, new WriteTarget(_w.Instance, "P", _w.DataDir, _w.Output), NavRepairWorld.Probe, Path.Combine(_w.Root, "work")),
-                                  t => PatchWriter.StartAsync(NavRepairWorld.Server, t, Path.Combine(_w.Root, "hcdata"), TestCorpus.Path, _ => { })),
+                                  t => Task.FromResult(PatchWriter.OpenInProcess(t, Path.Combine(_w.Root, "hcdata"), TestCorpus.Path, _ => { }))),
         };
         var l = new TcpListener(IPAddress.Loopback, 0); l.Start(); int port = ((IPEndPoint)l.LocalEndpoint).Port; l.Stop();
         _server = await StateServer.StartAsync(port, new StateHub(_ui, _surface));

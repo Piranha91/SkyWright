@@ -26,7 +26,6 @@ public sealed class HousecarlLibraryTests : IClassFixture<TiltedRefWorld>
     {
         var o = Output();
         await using var w = Open(o);
-        Assert.True(w.InProcess);
         var after = Drawn with { Position = new Vec3(640f, -256f, 64f) };
         var answer = await w.CommitAsync(new[] { new PendingEdit(TiltedRefWorld.Ref, Drawn, after) }, "WbLib", dryRun: false);
         var esp = Path.Combine(o, "houseCARL - WbLib", "WbLib.esp");
