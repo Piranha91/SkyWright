@@ -58,8 +58,11 @@ internal static class Equiv
         // the longer path first, so a data folder under the Output Folder is not half replaced
         foreach (var (path, token, which) in new[] { (arm.Out, "<OUT>", 0), (arm.Hc, "<HC>", 1) }.OrderByDescending(x => x.Item1.Length))
             text = which == 0 ? Sub(text, path, token, ref o) : Sub(text, path, token, ref h);
-        r = Regex.Matches(text, "\"render_ms\": *[0-9]+").Count;
-        text = Regex.Replace(text, "\"render_ms\": *[0-9]+", "\"render_ms\": 0");
+        // as an answer spells it ("render_ms"), and as an outcome that re-serialised a raw answer into a JSON string spells
+        // it ("render_ms" from System.Text.Json, or \"render_ms\")
+        const string renderMs = @"(\\u0022|\\?"")render_ms(\\u0022|\\?""): *[0-9]+";
+        r = Regex.Matches(text, renderMs).Count;
+        text = Regex.Replace(text, renderMs, "${1}render_ms${2}: 0");
         const string noteMs = @"\bin [0-9]+ ms\b";
         int m = Regex.Matches(text, noteMs).Count;
         text = Regex.Replace(text, noteMs, "in 0 ms");

@@ -125,6 +125,18 @@ public sealed class EquivalenceTests
         ib.Answers[1] = ("housecarl_remove", false, "removed 1 record");
         Assert.Empty(Equiv.CompareAnswers(sa, ib));
 
+        // a timing masked both as an answer spells it and as an outcome holding that answer as an escaped JSON string
+        var plainArm = new Arm { Name = "inproc", Out = "", Hc = "" };
+        Assert.Equal(("{\"render_ms\": 0}", 1), (Equiv.Normalise("{\"render_ms\": 616}", plainArm).Text, Equiv.Normalise("{\"render_ms\": 616}", plainArm).Counts.RenderMs));
+        var escaped = JsonSerializer.Serialize("{\"render_ms\": 616, \"x\": 1}");
+        var (maskedEscaped, escCounts) = Equiv.Normalise(escaped, plainArm);
+        Assert.Equal(1, escCounts.RenderMs);
+        Assert.Equal(JsonSerializer.Serialize("{\"render_ms\": 0, \"x\": 1}"), maskedEscaped);
+        Assert.Equal(("{\\\"render_ms\\\": 0}", 1), (Equiv.Normalise("{\\\"render_ms\\\": 616}", plainArm).Text, Equiv.Normalise("{\\\"render_ms\\\": 616}", plainArm).Counts.RenderMs));
+        Assert.Empty(Equiv.CompareAnswers(
+            new Arm { Name = "server", Out = "", Hc = "", Outcomes = { "a: " + JsonSerializer.Serialize("{\"render_ms\": 616}") } },
+            new Arm { Name = "inproc", Out = "", Hc = "", Outcomes = { "a: " + JsonSerializer.Serialize("{\"render_ms\": 12}") } }));
+
         // the server path's block join: a line break exactly at a 1 MiB boundary is taken out, nothing else is
         var whole = new string('a', 1 << 20) + "bcd";
         Assert.Equal((whole, 1), Equiv.UndoBlockJoin(new string('a', 1 << 20) + "\n" + "bcd"));
