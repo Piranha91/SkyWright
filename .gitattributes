@@ -2,3 +2,4 @@
 # Generated data formats stay LF; source files keep git's normal handling; binary fixtures are never converted.
 *.jsonl text eol=lf
 *.bsa binary
+docs/TOOLS.md text eol=lf
