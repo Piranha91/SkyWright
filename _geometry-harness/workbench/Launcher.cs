@@ -150,6 +150,8 @@ internal sealed class Launcher : IAsyncDisposable
         else g = GamePathFromIni(inst) ?? throw new InvalidOperationException($"'{inst}' names no game folder in its ModOrganizer.ini (gamePath); give game, the game's folder.");
         var lines = File.ReadAllLines(modlist).Where(l => l.Length > 1 && (l[0] == '+' || l[0] == '-' || l[0] == '*')).ToList();
         await DropBoundAsync();
+        // a new profile: every houseCARL writer of the old one is closed (on the pool), and the next use opens the new one
+        await HousecarlWriters.RetireAll();
         lock (_gate)
         {
             Mode = m; Instance = inst; Profile = prof; Game = g;

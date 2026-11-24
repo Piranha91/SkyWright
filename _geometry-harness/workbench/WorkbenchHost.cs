@@ -416,7 +416,6 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         if (Shell.Closed && Frames.Logging) Say(Frames.StopLog());
         if (Shell.Closed && Environment.GetEnvironmentVariable("WB_DUMP") is { Length: > 0 } dump) Shell.Dump(this, dump);
         System.Windows.Media.CompositionTarget.Rendering -= tick;
-        if (_writer is not null) _writer.DisposeAsync().AsTask().GetAwaiter().GetResult();
         Shell.Current = null;
         SceneDirector.SceneClosed();
         Shell.Unmount();
@@ -2090,19 +2089,21 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         return ManualTarget ?? (inst is { Length: > 0 } && prof is { Length: > 0 } && data is { Length: > 0 } ? new WriteTarget(inst, prof, data, output) : null);
     }
 
-    internal async Task<PatchWriter> WriterAsync()
+    /// <summary>The houseCARL writer for the write target the scene has now, from its one owner (<see cref="HousecarlWriters"/>):
+    /// houseCARL's code in this process, no program started; asked for on every use, never kept past a profile change.</summary>
+    internal Task<PatchWriter> WriterAsync()
     {
-        if (_writer is not null) return _writer;
-        var target = TargetFromEnv()
-            ?? throw new InvalidOperationException("no write target: set WB_INSTANCE, WB_PROFILE and WB_GAME_DATA to the MO2 instance, profile and game Data folder the scene was built from.");
-        var exe = Program.ServerExe();
-        var dataDir = Path.Combine(_outDir, "housecarl-data");
-        var corpus = Program.Corpus();
-        _writer = await PatchWriter.StartAsync(exe, target, dataDir, corpus, Say);
-        // the await may resume off the window's thread (the context read waits on this task from the pool), and the status
-        // line belongs to the window: it is updated there
-        if (_window?.Dispatcher is { } d && !d.CheckAccess()) _ = d.BeginInvoke(UpdateStatus); else UpdateStatus();
-        return _writer;
+        try
+        {
+            var target = TargetFromEnv()
+                ?? throw new InvalidOperationException("no write target: set WB_INSTANCE, WB_PROFILE and WB_GAME_DATA to the MO2 instance, profile and game Data folder the scene was built from.");
+            var fresh = _writer?.Target != target;
+            _writer = HousecarlWriters.For(target, Path.Combine(_outDir, "housecarl-data"), Program.Corpus(), Say);
+            // the status line belongs to the window: it is updated there
+            if (fresh) { if (_window?.Dispatcher is { } d && !d.CheckAccess()) _ = d.BeginInvoke(UpdateStatus); else UpdateStatus(); }
+            return Task.FromResult(_writer);
+        }
+        catch (Exception ex) { return Task.FromException<PatchWriter>(ex); }
     }
 
     /// <summary>Dry-run or write the staged edits (the bar's buttons, the script's <c>commit</c>, the MCP <c>commit</c> verb).

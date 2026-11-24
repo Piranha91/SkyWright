@@ -29,9 +29,7 @@ internal static class Shell
         var b = Bundle ?? throw new InvalidOperationException("no bundle is open, so the repair has no order to plan on.");
         var t = WorkbenchHost.TargetFromEnv() ?? throw new InvalidOperationException("no write target is set (the launcher's profile, or WB_INSTANCE, WB_PROFILE and WB_GAME_DATA), so the order cannot be read.");
         return (BundleConflicts.CandidateFile(b.Dir, b.Arm), t, NavRepairLane.ProbeExe(Launcher.Engine.HarnessDir()), RepairWork());
-    }, t => PatchWriter.StartAsync(Program.ServerExe(), t,
-                                   Path.Combine(RepairWork(), "housecarl-data-repair"),
-                                   Program.Corpus(), WorkbenchHost.Say));
+    }, t => Task.FromResult(HousecarlWriters.For(t, Path.Combine(RepairWork(), "housecarl-data"), Program.Corpus(), WorkbenchHost.Say)));
     static string RepairWork() => Environment.GetEnvironmentVariable("WB_OUT") is { Length: > 0 } o ? o : Path.Combine(Path.GetTempPath(), "workbench");
 
     /// <summary>Each view by name: the group tab it sits in, and its tab inside the group (null for Start, a group of its

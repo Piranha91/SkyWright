@@ -49,9 +49,13 @@ internal sealed class HousecarlLibrary : IDisposable
     /// <summary>A fingerprint of houseCARL's code (<see cref="HousecarlCalls.IdentityOf"/>).</summary>
     internal static string IdentityOf(params string[] assemblies) => HousecarlCalls.IdentityOf(assemblies);
 
-    /// <summary>Waits for the calls under way, then closes the service; a later call is refused in one sentence.</summary>
+    /// <summary>Waits for the calls under way, then closes the service; a later call is refused in one sentence. Refused
+    /// on a window's thread, which must not wait on a read or an index build (<see cref="HousecarlWriters.RetireAll"/>
+    /// closes on the pool).</summary>
     public void Dispose()
     {
+        if (System.Windows.Threading.Dispatcher.FromThread(Thread.CurrentThread) is not null)
+            throw new InvalidOperationException("houseCARL's service was closed on a window's thread, where it would freeze the window until its calls end; this is a fault in SkyWright.");
         _use.EnterWriteLock();
         try { if (_disposed != 0) return; _disposed = 1; _svc.Dispose(); }
         finally { _use.ExitWriteLock(); }
