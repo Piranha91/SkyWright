@@ -13344,7 +13344,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "records each fetch in evidence/mod-names.json; a failed fetch leaves the folder name with its reason")
     p.add_argument("--nexus-reader-cmd", default=None, metavar="CMD",
                    help="the houseCARL server --nexus-names fetch asks through (default HOUSECARL_RECORD_READER_CMD, else "
-                        "this checkout's built server)")
+                        "the module's built server)")
     p.add_argument("--captures-final", action="store_true",
                    help="the capture stage is closed: the review reel pictures only clashes with captured frames and "
                         "says in one sentence when a kind has none (the report's own plan after the last capture round)")

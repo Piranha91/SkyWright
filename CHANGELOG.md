@@ -5,7 +5,9 @@ most one more saying how to check it.
 
 ## Unreleased
 
-- **SkyWright saves, undoes and repairs a navmesh, reads placements and a reference's context, and reads a run's names with houseCARL's code compiled in: it starts no houseCARL program, and its endpoint serves `workbench_state` and `workbench_act` only (the forwarded `housecarl_*` tools are gone).** Delete `Tools\housecarl-mcp\housecarl-mcp.exe` from a copy of the build and save, undo and repair there.
+- **SkyWright's build holds no houseCARL program: `Tools\housecarl-mcp\` is gone (a rebuild removes an older one), and houseCARL's server program, for the AI-facing tools, is built into the integration module's `integration\housecarl\bin\<Configuration>\Tools\housecarl-mcp\`.** Run `BuildLayoutTests` in `workbench.tests` and `integration/housecarl/tests/test_navmesh_repair_write.py`.
+- **`evalrun.py` refuses the names step in one sentence when no reader is named (`--reader-cmd` or `HOUSECARL_RECORD_READER_CMD`) instead of starting a server from the build; `runcontrol` reads the names in process.** Run `_geometry-harness/tests/test_evalrun.py case-566`.
+- **SkyWright saves, undoes and repairs a navmesh, reads placements and a reference's context, and reads a run's names with houseCARL's code compiled in: it starts no houseCARL program, and its endpoint serves `workbench_state` and `workbench_act` only (the forwarded `housecarl_*` tools are gone).** Run `NoHousecarlProgramTests` in `workbench.tests`.
 - **A houseCARL refusal reaches you as one sentence with houseCARL's own reason: an undo it refused no longer reads as removed, and a refused navmesh-repair write stops the repair at once.** Run `HousecarlAnswerTests` in `workbench.tests`.
 - **A read of more than 1 MiB of records is read whole: the server path broke such an answer with a line break every 1 MiB, so a long decision or context read could fail or read a wrong value.** It went with the server path.
 - **A navmesh repair after you switch profiles is written under the new profile's Output Folder (it went through the first profile's houseCARL before).** Run `HousecarlWritersTests` in `workbench.tests`.

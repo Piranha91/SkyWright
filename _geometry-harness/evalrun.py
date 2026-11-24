@@ -305,7 +305,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sweep", action="append", default=[],
                    help="order-geometry: an ordersweep out folder over the measured order and its reversal (repeatable)")
     p.add_argument("--reader-cmd", help="names: the houseCARL MCP server command line to read records with (default: "
-                                        f"{READER_ENV}, else this checkout's built server)")
+                                        f"{READER_ENV}; with neither the names step is refused)")
     p.add_argument("--reader-env", action="append", metavar="KEY=VALUE",
                    help="names: an environment variable for the reader, such as a private HOUSECARL_DATA_DIR")
     p.add_argument("--mod-name", action="append", metavar="PLUGIN=NAME", help="names: a mod's declared ordinary name")

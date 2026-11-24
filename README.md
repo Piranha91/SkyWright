@@ -24,14 +24,15 @@ bin\Debug\net9.0-windows10.0.19041.0\SkyWright.exe        (and bin\Release\... t
 | `SkyWright.exe` | The app |
 | `Probes\<name>\<name>.exe` | Every probe, and conflictdiff, navedit, ordermap and viewprobe |
 | `Tools\runcontrol\runcontrol.exe` | The run controller |
-| `Tools\housecarl-mcp\` | houseCARL's server program, built from the pin; the app and the run controller do not start it (they run houseCARL's code compiled in, `housecarl-mcp.dll` beside `SkyWright.exe` and runcontrol), and it leaves this folder for the integration module's |
-| `Data\` | The check registry, the severity table, the rest of `data\`, and houseCARL's scene policy |
+| `Data\` | The check registry, the severity table, the rest of `data\`, houseCARL's rulebook (`corpus.json`) and its scene policy |
 | `Tests\workbench.tests\` | The app's tests, which run against this build |
 | `skywright-layout.json` | The marker: which configuration, and where each piece is |
 
+The build holds no houseCARL program: the app and the run controller run houseCARL's code compiled in (`housecarl-mcp.dll` beside `SkyWright.exe` and runcontrol). houseCARL's server program belongs to the integration module, in `integration\housecarl\bin\<Configuration>\Tools\housecarl-mcp\` with its rulebook beside it.
+
 Debug is for working on the app; Release is optimized, so evaluations and anything timed use it. `dotnet build SkyWright.sln -c Debug` (or `-c Release`) builds one configuration of the app alone.
 
-**How each program finds its pieces.** First a `WB_*` override (`WB_SERVER`, `WB_CORPUS`, `WB_REGISTRY`, `WB_SEVERITY`, `WB_RUNCONTROL`, `WB_HARNESS`, `WB_SCENE_POLICY`, and `WB_NAVOWNPROBE`, `WB_CONFLICTDIFF`, `WB_PROBE_DIRS`), which the app names in its log when it starts. Then the build the program sits in: its own folder (the app) or two folders up (a probe, a tool), where `skywright-layout.json` is. There is no other search, so pieces of two builds never mix unless an override names one. A rebuild replaces the programs of that build, so do not rebuild a checkout while it runs an evaluation; parallel work uses its own git worktree, which has its own `bin\`.
+**How each program finds its pieces.** First a `WB_*` override (`WB_CORPUS`, `WB_REGISTRY`, `WB_SEVERITY`, `WB_RUNCONTROL`, `WB_HARNESS`, `WB_SCENE_POLICY`, and `WB_NAVOWNPROBE`, `WB_CONFLICTDIFF`, `WB_PROBE_DIRS`), which the app names in its log when it starts. Then the build the program sits in: its own folder (the app) or two folders up (a probe, a tool), where `skywright-layout.json` is. There is no other search, so pieces of two builds never mix unless an override names one. A rebuild replaces the programs of that build, so do not rebuild a checkout while it runs an evaluation; parallel work uses its own git worktree, which has its own `bin\`.
 
 Set `WB_MCP_PORT` to a port number to serve the app's state tools (`workbench_state`, `workbench_act`) on `http://127.0.0.1:<port>/`.
 
@@ -44,7 +45,7 @@ Set `WB_MCP_PORT` to a port number to serve the app's state tools (`workbench_st
 | `_geometry-harness/*probe/`, `_shared/` | The probes and the code they share |
 | `_geometry-harness/viewprobe/` | The renderer host the 3D view uses (on SkyRender) |
 | `_geometry-harness/*.py`, `tests/`, `planeassess/` | Detector development tools, the record capture and bundle enrichment, and their tests; not shipped in the app. They find built programs through `buildlayout.py` |
-| `integration/housecarl/` | The houseCARL integration module: tools for an AI that drives SkyWright (the report, reel, narration and capture Python, the in-game switch flips, `lookprobe`) and their tests. It uses SkyWright; nothing outside it refers into it (the `fence` guard). Its own solution builds to `integration\housecarl\bin\<Configuration>\`, never into the app's build folder, and its Python finds SkyWright through `skywright_paths.py` |
+| `integration/housecarl/` | The houseCARL integration module: tools for an AI that drives SkyWright (the report, reel, narration and capture Python, the in-game switch flips, `lookprobe`) and their tests. It uses SkyWright; nothing outside it refers into it (the `fence` guard). Its own solution builds to `integration\housecarl\bin\<Configuration>\` (with houseCARL's server program, built from the pin, in `Tools\housecarl-mcp\`), never into the app's build folder, and its Python finds SkyWright and the module's own build through `skywright_paths.py` |
 | `src/SkyWright.Engine/`, `src/SkyWright.Engine.Tests/` | The engine the probes share (geometry, contact, navmesh, Havok, reach), on houseCARL's core, and its tests |
 | `src/SkyWright.Guards/` | Checks a build and the unit tests do not reach: `harness-suites` runs the Python suites and the probes' self-tests (the module's too); `run-coverage` and `tool-index` check `docs/run-coverage.json` and `docs/TOOLS.md` through houseCARL's generator; `fence` checks that nothing outside `integration/housecarl/` refers into it |
 | `data/` | The check registry, the severity table, the record field scope and the overlap triage policy |

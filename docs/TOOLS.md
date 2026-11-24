@@ -2965,7 +2965,7 @@ Modifiers (do not select a separate mode):
 - `--mod-name` — the name the review reel speaks for a plugin's mod (PLUGIN=NAME), over its Nexus page's name and its MO2 mod folder
 - `--mode` — Set mode for this invocation; consult the linked parser for accepted values.
 - `--nexus-names` — the review reel's mod names from the Nexus catalogue: offline reads stored pages only, fetch also asks once for each page the catalogue lacks and records each fetch in evidence/mod-names.json
-- `--nexus-reader-cmd` — the houseCARL server --nexus-names fetch asks through (default HOUSECARL_RECORD_READER_CMD, else this checkout's built server)
+- `--nexus-reader-cmd` — the houseCARL server --nexus-names fetch asks through (default HOUSECARL_RECORD_READER_CMD, else the module's built server)
 - `--no-print` — skip the browser; print.status is not-rendered
 - `--order-setup` — bind the record lane's rows measured on the setup without the patch with its plugins in another order (ARM@PLAN=ROWS); changes lost there between a pair whose order differs are said as a load-order risk
 - `--out` — Set out for this invocation; consult the linked parser for accepted values.
@@ -3015,7 +3015,7 @@ Modifiers (do not select a separate mode):
 - `--bundle` — enrich: the bundle to add derived evidence to (a copy, for retained evidence)
 - `--kind` — enrich: record-rows (lost edits from the record imports' transcripts) or names (in-game and mod names)
 - `--mod-name` — enrich names: a mod's declared ordinary name, PLUGIN=NAME (repeatable)
-- `--reader-cmd` — enrich names: the houseCARL MCP server command line the records are read with (default: HOUSECARL_RECORD_READER_CMD, else this checkout's built server)
+- `--reader-cmd` — enrich names: the houseCARL MCP server command line the records are read with (default: HOUSECARL_RECORD_READER_CMD; with neither the names step is refused)
 - `--reader-env` — enrich names: KEY=VALUE for the reader's environment; absent, a private instance with no setup plugin active is made
 - `--sweep` — enrich order-geometry: an ordersweep out folder over the measured order and its reversal (repeatable; a probe is taken from the first folder that ran it)
 
@@ -7589,7 +7589,7 @@ Modifiers (do not select a separate mode):
 
 **How do I browse any load order's worldspaces, cells and placed objects as a tree with each record's winning plugin, from an MO2 profile or a game Data folder, and open a cell in 3D?**
 
-Judge a placed-object conflict by eye and fix it by moving or turning a reference, with the edit written to a new patch plugin through the houseCARL server.
+Judge a placed-object conflict by eye and fix it by moving or turning a reference, with the edit written to a new patch plugin through houseCARL's code, run in process.
 
 Inputs: With no arguments: the launcher (Start tab; workbench_act open_profile, select_mods, select_probes, set_output, set_work_folder, run), in free mode on any MO2 instance or houseCARL mode (WB_HOUSECARL_LAUNCH or the housecarl entry of ~/.claude.json); WB_MACHINE for the pipeline's machine file. Or --bundle DIR [--arm A] (a verified evaluation bundle; WB_OUTPUT names the Output Folder writes go under), then viewprobe's command line; optionally WB_SCRIPT steps for a headless run, and WB_MCP_PORT for the MCP state tools on 127.0.0.1.
 
