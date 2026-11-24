@@ -1,6 +1,7 @@
 using System.Text.Json;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Skyrim;
 
 // `navownprobe --navgrid-oracle OUT_DIR PLUGIN...`: rebuild every navmesh's grid with NavGrid and compare it with the grid the

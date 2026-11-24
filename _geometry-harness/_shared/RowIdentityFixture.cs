@@ -62,7 +62,7 @@ public static class RowIdentityFixture
     static byte[] Cube(float halfUnits)
     {
         var f = NifBoxFixture.NewFile();
-        NifBoxFixture.Attach(f, new bhkBoxShape { Dimensions = new Vector3(halfUnits / HousecarlCore.HavokCollision.SkyrimUnitsPerHavokUnit) });
+        NifBoxFixture.Attach(f, new bhkBoxShape { Dimensions = new Vector3(halfUnits / SkyWright.Engine.HavokCollision.SkyrimUnitsPerHavokUnit) });
         return NifBoxFixture.Save(f);
     }
 

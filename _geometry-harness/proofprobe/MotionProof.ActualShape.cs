@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Text.Json;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 
 /// <summary>Known answers for the actual-shape relation (SurfaceQueryOutcome.QueryPlaced) on placed members with zero-area triangles
 /// (2026-10-13, lane B item 2). The relation used to refuse a whole pair at the first triangle with zero area, while --surface (MeshSurface)

@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Text.Json;
 using HousecarlCore;
+using SkyWright.Engine;
 using NiflySharp;
 using NiflySharp.Blocks;
 using NiflySharp.Enums;

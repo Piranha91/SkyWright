@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
+    <ProjectReference Include="$(SkyWrightSrc)SkyWright.Engine\SkyWright.Engine.csproj" />
     <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
     <Compile Include="..\_shared\CheckoutLayout.cs" Link="CheckoutLayout.cs" />
     <Compile Include="..\_shared\NavGrid.cs" Link="NavGrid.cs" />

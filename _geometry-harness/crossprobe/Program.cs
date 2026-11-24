@@ -1,5 +1,6 @@
 using System.Numerics;
 using HousecarlCore;
+using SkyWright.Engine;
 using HousecarlCore.Progress;
 
 // Milestone 4c — SYNTHETIC PROOF for the surface-crossing narrow phase.

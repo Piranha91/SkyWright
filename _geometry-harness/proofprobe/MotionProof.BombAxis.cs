@@ -2,6 +2,7 @@ using NiflySharp;
 using NiflySharp.Blocks;
 using NiflySharp.Enums;
 using HousecarlCore;
+using SkyWright.Engine;
 
 /// <summary>Known answers for the bomb modifier's axis (2026-10-13, lane B item 4). The Gamebryo 2.3 SDK's NiPSysBombModifier::Update
 /// adds fDecay x DeltaV x dt x kForce to a particle's velocity, where kForce is the bomb axis under PLANAR_SYMMETRY (sign by the side of

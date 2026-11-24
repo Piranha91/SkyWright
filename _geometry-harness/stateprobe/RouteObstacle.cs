@@ -1,6 +1,7 @@
 using System.Numerics;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 
 // THE ROUTE ORACLE'S PER-OBSTACLE DECISIONS (Program.cs's oracle): whether an obstacle is set aside by its base type before
 // any measurement, and whether its solid enters an actor column over a walkable (not Deleted-flagged) navmesh triangle at

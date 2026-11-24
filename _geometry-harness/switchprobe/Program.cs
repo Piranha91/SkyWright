@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda;
 using Mutagen.Bethesda.Pex;
 using Mutagen.Bethesda.Plugins;

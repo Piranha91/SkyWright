@@ -3,13 +3,14 @@ using System.Collections.Generic;
 using System.Numerics;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
 
 // ======================================================================
 //  FloorFeed — one cell's FloorField, built the way every probe builds it.
 //
-//  The floor rule is core's (HousecarlCore.NavmeshFloor; the field that
+//  The floor rule is core's (SkyWright.Engine.NavmeshFloor; the field that
 //  answers it point by point is FloorField). This is the harness's plumbing
 //  so that navprobe, blockprobe, corridorprobe, stateprobe and floorgapprobe
 //  stand the route rule on ONE floor: the refs that can be a floor (a cell's

@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Text;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using NiflySharp;
 using NiflySharp.Blocks;
 using NiflySharp.Enums;

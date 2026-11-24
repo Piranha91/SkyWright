@@ -1,8 +1,9 @@
 using System.Numerics;
 using HousecarlCore;
+using SkyWright.Engine;
 
 // Column clearance (2026-10-15): the shared reader of how far the nearest surface stands from a standing body's column
-// (HousecarlCore.ColumnClearance). Known answers on hand-built soups, cases cc 4300-4310.
+// (SkyWright.Engine.ColumnClearance). Known answers on hand-built soups, cases cc 4300-4310.
 static class ColumnClearanceProof
 {
     static void Case(Action<string, bool, string> check, string name, Func<(bool Ok, string Detail)> body)

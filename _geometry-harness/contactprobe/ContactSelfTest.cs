@@ -57,7 +57,7 @@ static class ContactSelfTest
             RefGeometry? Decode(string path, byte[] bytes, bool first)
             {
                 allCalls++; if (first) firstCalls++;
-                var box = new HousecarlCore.Aabb(new HousecarlCore.Vec3(0, 0, 0), new HousecarlCore.Vec3(bytes[0], bytes[1], bytes[2]), false);
+                var box = new SkyWright.Engine.Aabb(new HousecarlCore.Vec3(0, 0, 0), new HousecarlCore.Vec3(bytes[0], bytes[1], bytes[2]), false);
                 return new RefGeometry(box, ContactIndex.BoxSoup(box), ContactIndex.BoxSoup(box), 'c', 'c', HostUsable: true, Array.Empty<(string, string)>(), false);
             }
             var reader = new MeshGeometryReader(path => File.Exists(path) ? File.ReadAllBytes(path) : null, Decode);
@@ -144,8 +144,8 @@ static class ContactSelfTest
             Mutagen.Bethesda.Plugins.FormKey LargestOf(bool stable, params (Mutagen.Bethesda.Plugins.FormKey, int, Mutagen.Bethesda.Plugins.FormKey)[] keys)
             {
                 var pool = new CacheBudget(1L << 20) { StableLargestTie = stable };
-                var tied = new PlacementCache<HousecarlCore.TriangleSoup>(pool, "tied", PlacementCache<HousecarlCore.TriangleSoup>.SoupBytes);
-                foreach (var k in keys) tied[k] = HousecarlCore.TriangleSoup.Empty;
+                var tied = new PlacementCache<SkyWright.Engine.TriangleSoup>(pool, "tied", PlacementCache<SkyWright.Engine.TriangleSoup>.SoupBytes);
+                foreach (var k in keys) tied[k] = SkyWright.Engine.TriangleSoup.Empty;
                 return tied.Largest!.Value.Key.Key;
             }
             Check("CP-5 a tie for the largest entry: by key whichever arrives first when stable, first arrival when not",

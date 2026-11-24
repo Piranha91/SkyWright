@@ -13,6 +13,7 @@
   <ItemGroup>
     <Compile Include="..\_shared\LastSighting.cs" Link="LastSighting.cs" />
     <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
+    <ProjectReference Include="$(SkyWrightSrc)SkyWright.Engine\SkyWright.Engine.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- Reused unchanged: the placement history and the load-time enable chain (OverlapIndex, EnableArms),

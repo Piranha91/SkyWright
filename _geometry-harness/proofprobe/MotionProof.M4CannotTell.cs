@@ -1,5 +1,6 @@
 using System.Numerics;
 using HousecarlCore;
+using SkyWright.Engine;
 using NiflySharp.Enums;
 
 // Usage-week M4 (2026-10-14): G1's last cannot-tell clusters. Plan: _claude/runs/2026-10-14-g1-cannot-tell/GATE-A.md, reviewed in

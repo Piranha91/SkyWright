@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Numerics;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 namespace HarnessShared;

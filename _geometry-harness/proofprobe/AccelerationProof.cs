@@ -1,6 +1,7 @@
 using System.Numerics;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 /// <summary>Known answers that hold the evaluator speedups to today's results (AX-*): ties and traversal order in the triangle grid,

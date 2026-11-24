@@ -93,7 +93,7 @@ internal interface IWorkbenchScene
     /// <summary>Item 8: the trial lane; null where the scene cannot run trials.</summary>
     TrialLane? Trials => null;
     /// <summary>Item 8: the boxes of a reference and the open row's other reference, Skyrim space; null when not drawn.</summary>
-    (HousecarlCore.Aabb Subject, HousecarlCore.Aabb Other)? PairBoxes(FormKey key) => null;
+    (SkyWright.Engine.Aabb Subject, SkyWright.Engine.Aabb Other)? PairBoxes(FormKey key) => null;
     /// <summary>The scene takes no edits (opened from the Results or World tab).</summary>
     bool ReadOnly => false;
     /// <summary>The camera as [x, y, z, yaw, pitch]; null where there is none.</summary>

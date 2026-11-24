@@ -1,6 +1,7 @@
 using System.Numerics;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 /// <summary>contactprobe --box-contact, usage-week M4 (2026-10-14, g1-0040): a placed actor whose base has no model path is tested

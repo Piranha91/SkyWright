@@ -1,5 +1,6 @@
 using System.Numerics;
 using HousecarlCore;
+using SkyWright.Engine;
 
 /// <summary>Known answers for triangles that collapse to zero area only once placed (2026-10-10, lane D). A member's sliver has
 /// area in its own model space but its height is below the float spacing of the coordinates it is placed at, so it rounds to

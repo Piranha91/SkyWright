@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 /// <summary>contactprobe's per-object trace file (schema housecarl.probe-trace/1; patch-miss packet, GATE-A §2). Keyed

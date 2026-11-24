@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Numerics;
 using System.Text;
 using HousecarlCore;
+using SkyWright.Engine;
 using NiflySharp;
 using NiflySharp.Blocks;
 using NiflySharp.Enums;

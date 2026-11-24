@@ -1,6 +1,7 @@
 using System.Numerics;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 namespace LeftBehind;
@@ -13,7 +14,7 @@ namespace LeftBehind;
 //
 // What an arm answers:
 //   - a reference's state: winning base, deletion, pose, and its LOAD-TIME enable state through the XESP chain
-//     (EnableArms.Winner -> HousecarlCore.EnableState, opposite-state honoured; an unresolved chain is Unknown);
+//     (EnableArms.Winner -> SkyWright.Engine.EnableState, opposite-state honoured; an unresolved chain is Unknown);
 //   - whether a base can back a panel (an occluder type): not marker-flagged, Physical by ClassifyDependent (so not a
 //     trigger or FX), and one of the backing base types;
 //   - its geometry in the world (through a caller-supplied per-base provider), and the occluders near a box;

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- SkyWright's engine: the geometry, contact, navmesh, Havok and reach code its probes and app share. It was
+       home-made in Piranha's houseCARL branches and moved here in the split's M2; it builds on houseCARL's core
+       (records, assets, NIF reading) through the pin, and houseCARL calls none of it. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>SkyWright.Engine</RootNamespace>
+    <AssemblyName>SkyWright.Engine</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Pinned to match housecarl-core; they move together on a bump. -->
+    <PackageReference Include="Mutagen.Bethesda.Skyrim" Version="0.54.4" />
+    <PackageReference Include="Nifly" Version="1.1.0-housecarl.4" />
+    <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
+  </ItemGroup>
+
+</Project>

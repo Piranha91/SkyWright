@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Xml.Linq;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Plugins.Records;
@@ -3017,7 +3018,7 @@ Console.WriteLine("\nPROOF — the actor band (ActorBand: the measured bottom, t
 
 
 // ---------------------------------------------------------------------------------------
-// THE NAVMESH-TO-FLOOR OFFSET (Q24, 2026-09-05 — HousecarlCore.NavmeshFloor): the floor under a navmesh point is the
+// THE NAVMESH-TO-FLOOR OFFSET (Q24, 2026-09-05 — SkyWright.Engine.NavmeshFloor): the floor under a navmesh point is the
 // HIGHEST up-facing actor-solid surface within the depth bound below and the step reach above; the terrain competes
 // on the same rule; nothing within reach is "no floor" with its reason; the navmesh inside a solid is a diagnostic,
 // not a refusal. Calibrated on the Ratway corridor against 718 recorded walker positions (feet − floor within 2 u

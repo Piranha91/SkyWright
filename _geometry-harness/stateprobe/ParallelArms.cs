@@ -1,6 +1,7 @@
 using System.Runtime.ExceptionServices;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 // THE ARMS ACROSS CORES (--threads): each arm's work runs on a worker, and its result is merged on the calling thread in

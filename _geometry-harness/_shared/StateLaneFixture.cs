@@ -98,7 +98,7 @@ public static class StateLaneFixture
     /// <summary>A box collision mesh of the given half extents in Skyrim units.</summary>
     static byte[] BoxMesh(float hx, float hy, float hz)
     {
-        float u = HousecarlCore.HavokCollision.SkyrimUnitsPerHavokUnit;
+        float u = SkyWright.Engine.HavokCollision.SkyrimUnitsPerHavokUnit;
         var f = NifBoxFixture.NewFile();
         NifBoxFixture.Attach(f, new bhkBoxShape { Dimensions = new Vector3(hx / u, hy / u, hz / u) });
         return NifBoxFixture.Save(f);

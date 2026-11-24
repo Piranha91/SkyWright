@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using HousecarlCore.Progress;
 using Mutagen.Bethesda;
 using Mutagen.Bethesda.Pex;

@@ -3,6 +3,7 @@ using System.Text.Json;
 using Mutagen.Bethesda.Plugins;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 
 static class SceneCapture
 {

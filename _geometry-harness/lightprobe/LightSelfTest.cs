@@ -1,5 +1,6 @@
 using System.Numerics;
 using HousecarlCore;
+using SkyWright.Engine;
 
 // lightprobe --self-test: known answers for the light readings (src/housecarl-core/LightReach.cs). Each case names the
 // wrong answer it rejects. Prints PASS/FAIL per case and a summary line; exit 1 on any FAIL. A case that throws is a FAIL.

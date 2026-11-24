@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using HousecarlCore.Progress;
 using LeftBehind;
 using Mutagen.Bethesda.Plugins;

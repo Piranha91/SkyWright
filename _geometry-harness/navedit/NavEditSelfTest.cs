@@ -1,5 +1,6 @@
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 // `navedit --selftest`: known answers for NavEdit.MoveVertices on small in-memory navmeshes (tests/test_navedit.py runs it

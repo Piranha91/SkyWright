@@ -178,13 +178,13 @@ internal sealed class WorldMap
         var clock = System.Diagnostics.Stopwatch.StartNew();
         Task.Run<(BitmapSource Picture, int Boxes)?>(() =>
         {
-            var solids = new List<HousecarlCore.TriangleSoup>();
+            var solids = new List<SkyWright.Engine.TriangleSoup>();
             var boxes = new List<float[]>();
             foreach (int i in inView)
             {
                 if (ask != _shapeAsk) return null;
                 var b = f.Buildings[i];
-                if (meshes?.SoupOf(b.Mesh) is { } soup) solids.Add(HousecarlCore.SpatialOverlap.TransformSoup(soup, b.Position, b.Rotation, b.Scale));
+                if (meshes?.SoupOf(b.Mesh) is { } soup) solids.Add(SkyWright.Engine.SpatialOverlap.TransformSoup(soup, b.Position, b.Rotation, b.Scale));
                 else boxes.Add(f.Outlines[i]);
             }
             var px = BuildingRaster.Paint(w, h, west, north, upp, solids, boxes);

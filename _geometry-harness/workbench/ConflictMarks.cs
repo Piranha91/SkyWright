@@ -1,5 +1,6 @@
 using System.Numerics;
 using HousecarlCore;
+using SkyWright.Engine;
 using SkyRender;
 using GlVec3 = OpenTK.Mathematics.Vector3;
 using ViewProbe;

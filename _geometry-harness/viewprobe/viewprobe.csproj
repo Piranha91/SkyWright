@@ -27,6 +27,7 @@
     <Compile Include="..\_shared\NifBoxFixture.cs" Link="NifBoxFixture.cs" />
     <Using Include="System.IO" />
     <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
+    <ProjectReference Include="$(SkyWrightSrc)SkyWright.Engine\SkyWright.Engine.csproj" />
     <!-- SkyRender.Character (which brings core SkyRender; viewprobe uses both) is the published
          NuGet package, restored from nuget.org. -->
     <PackageReference Include="SkyRender.Character" Version="$(SkyRenderVersion)" />

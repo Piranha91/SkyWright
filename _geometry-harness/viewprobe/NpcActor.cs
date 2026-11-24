@@ -2,6 +2,7 @@ using System.Numerics;
 using SkyRender;
 using SkyRender.Character;
 using HousecarlCore;
+using SkyWright.Engine;
 using OpenTK.Graphics.OpenGL4;
 using ReactiveUI.Builder;               // WithWpf()/BuildApp() are extension methods here
 

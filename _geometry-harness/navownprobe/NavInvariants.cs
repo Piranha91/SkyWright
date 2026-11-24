@@ -1,8 +1,9 @@
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Skyrim;
 
 // `navownprobe --nav-invariants OUT.json PLUGIN...`: what a navmesh repair must keep true, measured on each plugin's own NAVM
-// records through Mutagen's model and the one grid decode (HousecarlCore.NavmeshGridDecode). Gate B of the navmesh repair
+// records through Mutagen's model and the one grid decode (SkyWright.Engine.NavmeshGridDecode). Gate B of the navmesh repair
 // task re-measures here the five figures its Gate A survey took with a scratch decoder:
 //   1. the grid is 2-D (row = y, column = x): each cell entry's triangle overlaps its cell in plan, against the other reading;
 //      no triangle in no cell; no entry past the triangle count;

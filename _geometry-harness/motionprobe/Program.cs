@@ -40,6 +40,7 @@ using System.Numerics;
 using System.Text.Json;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using HousecarlCore.Progress;
 
 using var __run = RunLog.BeginProcess("motionprobe", args);

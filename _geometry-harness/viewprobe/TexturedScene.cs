@@ -3,6 +3,7 @@ using SkyRender;
 using SkyRender.Character;
 using SkyRender.World;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 using OpenTK.Graphics.OpenGL4;
 using SixLabors.ImageSharp;

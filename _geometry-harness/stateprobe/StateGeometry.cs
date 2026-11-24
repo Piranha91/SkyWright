@@ -1,5 +1,6 @@
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 // THE CONTACT GEOMETRY per base record (Program.cs's resolver): the actor-solid collision as the host surface, every solid

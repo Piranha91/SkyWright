@@ -1,5 +1,6 @@
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 /// <summary>Known answers for the byte-budgeted per-placement contact caches (_shared/PlacementCache.cs, 2026-10-05): the key

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 /// <summary>Decoded meshes. In the default pass bounded: the decoded geometry is held in the shared contact cache budget (least

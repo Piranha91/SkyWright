@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HousecarlCore;
+using SkyWright.Engine;
 using HousecarlMcpTests;
 using Mutagen.Bethesda;
 using Mutagen.Bethesda.Plugins;

@@ -1,5 +1,6 @@
 using System.Numerics;
 using HousecarlCore;
+using SkyWright.Engine;
 using NiflySharp.Enums;
 
 /// <summary>Known answers for the shared sampling loop (MemberMotion.SampleRegion, task 2026-11-05-shared-sampling-loop-unguarded).

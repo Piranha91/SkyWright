@@ -1,5 +1,6 @@
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 // NAVMESH LEFT ON GROUND ANOTHER PLUGIN MOVED (NAV-GROUND; task 2026-11-16-navmesh-repair, repair class 3). The measure is the

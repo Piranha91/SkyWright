@@ -1,5 +1,6 @@
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 // THE PHYSICAL PREDICATE of an overlap row under this run's order (Program.cs): does the pair's actual-surface intersection

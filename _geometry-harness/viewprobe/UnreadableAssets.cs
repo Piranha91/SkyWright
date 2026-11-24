@@ -2,6 +2,7 @@ using System.Text.Json;
 using SkyRender;
 using SkyRender.Character;
 using HousecarlCore;
+using SkyWright.Engine;
 using HousecarlCore.Progress;
 
 namespace ViewProbe;

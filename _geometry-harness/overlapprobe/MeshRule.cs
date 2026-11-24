@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 // THE FOLDER RULE (mesh-responsibility/GATE-A.md, GATE-B.md): a crossing that exists only because of the mesh a mod folder

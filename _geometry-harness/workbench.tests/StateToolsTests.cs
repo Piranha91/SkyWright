@@ -78,8 +78,8 @@ public sealed class StateToolsTests : IAsyncLifetime
         public float[]? Camera { get; set; } = { 1f, 2f, 3f, 90f, 10f };
         public IContextSource? ContextSource { get; set; }
         public TrialLane? Trials { get; set; }
-        internal (HousecarlCore.Aabb Subject, HousecarlCore.Aabb Other)? PairBoxesValue;
-        public (HousecarlCore.Aabb Subject, HousecarlCore.Aabb Other)? PairBoxes(FormKey key) => PairBoxesValue;
+        internal (SkyWright.Engine.Aabb Subject, SkyWright.Engine.Aabb Other)? PairBoxesValue;
+        public (SkyWright.Engine.Aabb Subject, SkyWright.Engine.Aabb Other)? PairBoxes(FormKey key) => PairBoxesValue;
     }
 
     sealed class FakeSurface : IWorkbenchSurface
@@ -1232,8 +1232,8 @@ public sealed class StateToolsTests : IAsyncLifetime
         await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
         var before = _scene.Session.Current(FormKey.Factory(RefKey));
         await Ok("workbench_act", A(("verb", "stage"), ("turn_degrees", 22f), ("angle_snap", 15f)));
-        var want = HousecarlCore.SpatialOverlap.RefrRotation(RefPlacementEdit.Turned(before.Rotation, System.Numerics.Vector3.UnitZ, float.DegreesToRadians(15)));   // 22 rounds to 15 on a 15 step
-        var got = HousecarlCore.SpatialOverlap.RefrRotation(_scene.Session.Current(FormKey.Factory(RefKey)).Rotation);
+        var want = SkyWright.Engine.SpatialOverlap.RefrRotation(RefPlacementEdit.Turned(before.Rotation, System.Numerics.Vector3.UnitZ, float.DegreesToRadians(15)));   // 22 rounds to 15 on a 15 step
+        var got = SkyWright.Engine.SpatialOverlap.RefrRotation(_scene.Session.Current(FormKey.Factory(RefKey)).Rotation);
         for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) Assert.Equal(want[i, j], got[i, j], 3);
     }
 
@@ -1366,8 +1366,8 @@ public sealed class StateToolsTests : IAsyncLifetime
         var writes = new List<string>();
         _scene.Trials = new TrialLane(work, (e, patch, outPath) => { writes.Add(outPath); return Task.FromResult("wrote " + patch); },
             (patch, folder, dir) => Task.FromResult(ReviewSpeedPart2Tests.Recheck("resolved")), p => (p, "lowered it 1 unit onto the terrain"), _ => Array.Empty<string>());
-        _scene.PairBoxesValue = (new HousecarlCore.Aabb(new HousecarlCore.Vec3(990, 10, 0), new HousecarlCore.Vec3(1010, 30, 20), false),
-                                 new HousecarlCore.Aabb(new HousecarlCore.Vec3(1000, 0, 0), new HousecarlCore.Vec3(1040, 40, 40), false));
+        _scene.PairBoxesValue = (new SkyWright.Engine.Aabb(new HousecarlCore.Vec3(990, 10, 0), new HousecarlCore.Vec3(1010, 30, 20), false),
+                                 new SkyWright.Engine.Aabb(new HousecarlCore.Vec3(1000, 0, 0), new HousecarlCore.Vec3(1040, 40, 40), false));
         await Ok("workbench_act", A(("verb", "select"), ("conflict", 1)));
         var asked = await Ok("workbench_act", A(("verb", "find_clear")));
         Assert.True(At(asked, out var said, "said") && (said.GetString() ?? "").Contains("3 positions"), "no cost sentence: " + asked);
@@ -1470,8 +1470,8 @@ public sealed class StateToolsTests : IAsyncLifetime
         _scene.View = new ViewState(_scene.Session, () => Array.Empty<ViewProbe.RefOcclusion>());
         _scene.Trials = new TrialLane(work, (e, patch, outPath) => Task.FromResult("wrote " + patch),
             (patch, folder, dir) => Task.FromResult(ReviewSpeedPart2Tests.Recheck("resolved")), p => (p, "lowered it 1 unit onto the terrain"), _ => Array.Empty<string>());
-        _scene.PairBoxesValue = (new HousecarlCore.Aabb(new HousecarlCore.Vec3(980, -20, 0), new HousecarlCore.Vec3(1020, 20, 40), false),
-                                 new HousecarlCore.Aabb(new HousecarlCore.Vec3(1000, -10, 0), new HousecarlCore.Vec3(1060, 30, 60), false));
+        _scene.PairBoxesValue = (new SkyWright.Engine.Aabb(new HousecarlCore.Vec3(980, -20, 0), new HousecarlCore.Vec3(1020, 20, 40), false),
+                                 new SkyWright.Engine.Aabb(new HousecarlCore.Vec3(1000, -10, 0), new HousecarlCore.Vec3(1060, 30, 60), false));
         await Ok("workbench_act", A(("verb", "select"), ("conflict", 1)));
         await Ok("workbench_act", A(("verb", "find_clear")));
         await Ok("workbench_state", A(("project", new[] { "placements" }), ("wait_seconds", 30)));
@@ -1505,8 +1505,8 @@ public sealed class StateToolsTests : IAsyncLifetime
     {
         _scene.Trials = new TrialLane(null, (e, p, o) => Task.FromResult(""), (p, f, d) => Task.FromResult(ReviewSpeedPart2Tests.Recheck("resolved")),
                                       p => (p, ""), _ => Array.Empty<string>());
-        _scene.PairBoxesValue = (new HousecarlCore.Aabb(new HousecarlCore.Vec3(0, 0, 0), new HousecarlCore.Vec3(1, 1, 1), false),
-                                 new HousecarlCore.Aabb(new HousecarlCore.Vec3(0, 0, 0), new HousecarlCore.Vec3(2, 2, 2), false));
+        _scene.PairBoxesValue = (new SkyWright.Engine.Aabb(new HousecarlCore.Vec3(0, 0, 0), new HousecarlCore.Vec3(1, 1, 1), false),
+                                 new SkyWright.Engine.Aabb(new HousecarlCore.Vec3(0, 0, 0), new HousecarlCore.Vec3(2, 2, 2), false));
         await Ok("workbench_act", A(("verb", "select"), ("conflict", 1)));
         Assert.Contains("set_work_folder", await Refused("workbench_act", A(("verb", "find_clear"))));
     }

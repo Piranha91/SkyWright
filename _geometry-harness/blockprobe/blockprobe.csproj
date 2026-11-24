@@ -38,6 +38,7 @@
     <Compile Include="..\_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />
     <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
     <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
+    <ProjectReference Include="$(SkyWrightSrc)SkyWright.Engine\SkyWright.Engine.csproj" />
     <Compile Include="..\_shared\ContactIndex.cs" Link="ContactIndex.cs" />
     <Compile Include="..\_shared\PlacementCache.cs" Link="PlacementCache.cs" />
     <Compile Include="..\_shared\WorldState.cs" Link="WorldState.cs" />

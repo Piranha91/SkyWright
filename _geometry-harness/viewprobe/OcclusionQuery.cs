@@ -5,7 +5,7 @@ namespace ViewProbe;
 /// <summary>
 /// --occlusion-query (with --depth-measurement): count a shape's covered and visible pixels on the GPU instead of
 /// reading its isolated depth back. The isolated draw is unchanged; its depth is copied into a texture and a
-/// full-screen pass evaluates <see cref="HousecarlCore.ShapeVisibility.Compare"/>'s per-pixel rule against the scene
+/// full-screen pass evaluates <see cref="SkyWright.Engine.ShapeVisibility.Compare"/>'s per-pixel rule against the scene
 /// depth (copied the same way), with one SamplesPassed query per count. One triangle covers each pixel exactly once and
 /// the pass writes nothing, so a passed sample is a pixel the rule accepts.
 ///

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 
 /// <summary>Known answers for contact evidence on placed members with zero-area triangles (2026-10-13, day lane 1 item 2).
 /// MeshIntersection.MeasureContactEvidence refuses a pair at its first zero-area triangle, where the actual-shape relation

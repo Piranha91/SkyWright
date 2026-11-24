@@ -1,6 +1,6 @@
 # SkyWright
 
-SkyWright finds where Skyrim mods clash in the 3D world, shows each clash, and writes the modder's fixes into a patch plugin. It is a WPF app (`_geometry-harness/workbench`) over a run controller (`runcontrol`) and a set of probe programs, with houseCARL pinned as the submodule `external/houseCARL` for its core, its patch-writing server and its rulebook generator. Users start at [README.md](README.md).
+SkyWright finds where Skyrim mods clash in the 3D world, shows each clash, and writes the modder's fixes into a patch plugin. It is a WPF app (`_geometry-harness/workbench`) over a run controller (`runcontrol`) and a set of probe programs that share an engine library (`src/SkyWright.Engine`), with houseCARL pinned as the submodule `external/houseCARL` for its core, its patch-writing server and its rulebook generator. Users start at [README.md](README.md).
 
 ## Rules
 
@@ -19,6 +19,7 @@ git submodule update --init
 powershell -File scripts\build.ps1
 bin\Release\net9.0-windows10.0.19041.0\Tools\runcontrol\runcontrol.exe --self-test
 dotnet test bin\Release\net9.0-windows10.0.19041.0\Tests\workbench.tests\workbench.tests.dll
+dotnet test bin\Release\net9.0-windows10.0.19041.0\Tests\SkyWright.Engine.Tests\SkyWright.Engine.Tests.dll
 ```
 
 `scripts\build.ps1` builds both configurations; build both after every change. Each is one folder, `bin\<Configuration>\net9.0-windows10.0.19041.0\`: `SkyWright.exe`, `Probes\<name>\`, `Tools\runcontrol\`, `Tools\housecarl-mcp\` (with the rulebook), `Data\`, `Tests\` and the marker `skywright-layout.json`. `Directory.Build.props` owns that layout and writes the marker; programs read it through `_geometry-harness/_shared/CheckoutLayout.cs` and the Python tools through `_geometry-harness/buildlayout.py`. Never spell a program's path anywhere else.

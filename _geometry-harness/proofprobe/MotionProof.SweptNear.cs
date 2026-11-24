@@ -3,6 +3,7 @@
 // compact tree, and gives the combined mesh's answer on every cell.
 using System.Numerics;
 using HousecarlCore;
+using SkyWright.Engine;
 using NiflySharp;
 using NiflySharp.Blocks;
 

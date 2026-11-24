@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using HousecarlCore.Progress;
 using Mutagen.Bethesda.Plugins;
 

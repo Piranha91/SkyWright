@@ -3,6 +3,8 @@
   <PropertyGroup>
     <HousecarlRoot>$(MSBuildThisFileDirectory)external\houseCARL\</HousecarlRoot>
     <HousecarlSrc>$(HousecarlRoot)src\</HousecarlSrc>
+    <!-- SkyWright's own libraries: SkyWright.Engine (the geometry and reach code its probes share) and its tests. -->
+    <SkyWrightSrc>$(MSBuildThisFileDirectory)src\</SkyWrightSrc>
     <!-- The SkyRender package version every program builds on. A build can override it (for example
          -p:SkyRenderVersion=4.1.0-cutouttint.2 to test a prerelease from a local feed). -->
     <SkyRenderVersion Condition="'$(SkyRenderVersion)' == ''">4.0.0</SkyRenderVersion>
@@ -40,6 +42,11 @@
     <_SwFolder Condition="'$(MSBuildProjectName)' == 'runcontrol'">$(SkyWrightTools)\runcontrol\</_SwFolder>
     <_SwFolder Condition="'$(MSBuildProjectName)' == 'workbench.tests'">Tests\workbench.tests\</_SwFolder>
     <OutputPath>$(SkyWrightLayoutRoot)$(_SwFolder)</OutputPath>
+  </PropertyGroup>
+  <!-- The engine's tests go beside the app's, in Tests\<name>\. -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'SkyWright.Engine.Tests'">
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>$(SkyWrightLayoutRoot)Tests\$(MSBuildProjectName)\</OutputPath>
   </PropertyGroup>
 
   <!-- After the app builds: houseCARL's server and its rulebook into Tools\housecarl-mcp\, the app data into Data\, and

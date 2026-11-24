@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
 using HousecarlCore.Progress;

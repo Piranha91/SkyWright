@@ -1,4 +1,5 @@
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 namespace HarnessShared;
@@ -21,7 +22,7 @@ namespace HarnessShared;
 //   WITHOUT p   each chain element's flag at its authoring snap (the last one not on p's side) and
 //               its XESP as last set outside p's side. Memoised per mover.
 //
-// The rule itself is HousecarlCore.EnableState and is not touched here; this file only decides WHICH
+// The rule itself is SkyWright.Engine.EnableState and is not touched here; this file only decides WHICH
 // facts each arm hands it.
 
 /// <summary>Per-arm runtime enable state over an <see cref="OverlapIndex"/>'s history and XESP change log.</summary>

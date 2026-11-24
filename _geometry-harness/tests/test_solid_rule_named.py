@@ -11,7 +11,7 @@ their results, but their own policy strings do not change with it. Each output t
                       else "none" (no --geometry, --list-interiors, or no light inside any placed box).
 A field that is absent is an output written before this change; "none" is a run that applied no solid rule.
 
-The expected strings are read from src/housecarl-core/MeshIntersection.cs and MeshAnchor.cs, never from a probe, so a probe built from
+The expected strings are read from src/SkyWright.Engine/MeshIntersection.cs and MeshAnchor.cs, never from a probe, so a probe built from
 another core, or one that writes a fixed string, fails here.
 
 Fixtures: `proofprobe --write-motion-fixture` (MotionProof.SolidRuleFixture.cs: a sliding closed box, the same slide with an open
@@ -50,7 +50,7 @@ HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
 sys.path.append(str(HARNESS))
 import buildlayout  # noqa: E402  where the build put each program
-CORE = HARNESS.parent / "external" / "houseCARL" / "src" / "housecarl-core"
+CORE = HARNESS.parent / "src" / "SkyWright.Engine"   # the engine the probes are built from
 PROBES = Path(os.environ.get("HC_SR_HARNESS") or buildlayout.root())
 FIXTURES = Path(os.environ.get("HC_SR_FIXTURES") or buildlayout.root())
 FAILURES, PASSED = [], []

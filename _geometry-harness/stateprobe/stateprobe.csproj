@@ -32,6 +32,7 @@
     <Compile Include="..\_shared\PopulationRules.cs" Link="PopulationRules.cs" />
     <Compile Include="..\_shared\WinStateDump.cs" Link="WinStateDump.cs" />
     <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
+    <ProjectReference Include="$(SkyWrightSrc)SkyWright.Engine\SkyWright.Engine.csproj" />
     <Compile Include="..\_shared\EnablePopulation.cs" Link="EnablePopulation.cs" />
     <Compile Include="..\_shared\EnableArms.cs" Link="EnableArms.cs" />
   </ItemGroup>

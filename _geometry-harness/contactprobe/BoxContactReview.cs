@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 /// <summary>contactprobe --box-contact OUTPUT (with --overlap-json INPUT; lane 3b, gap e): for each input <c>boxContact</c> row

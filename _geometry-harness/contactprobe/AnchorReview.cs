@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 /// <summary>contactprobe --anchor OUTPUT (with --overlap-json INPUT; G1 build list, Stage A, row 2): for each supplied pair,

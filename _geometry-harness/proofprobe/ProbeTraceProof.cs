@@ -1,5 +1,6 @@
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 /// <summary>Known answers for contactprobe's per-object trace (patch-miss packet, GATE-A §2 and §12; GATE-B §2), on the

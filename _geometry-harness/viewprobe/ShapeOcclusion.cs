@@ -2,6 +2,7 @@ using System.Numerics;
 using SkyRender;
 using SkyRender.Character;
 using HousecarlCore;
+using SkyWright.Engine;
 
 namespace ViewProbe;
 

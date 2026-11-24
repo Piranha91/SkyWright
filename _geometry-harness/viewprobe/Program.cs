@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Numerics;
 using HousecarlCore;
+using SkyWright.Engine;
 using HousecarlCore.Progress;
 
 using Mutagen.Bethesda;                 // ToImmutableLinkCache over the --npc overlays

@@ -69,7 +69,7 @@ static class PlanesReportCandidates
     /// <summary>An assessed shape's overlay: the reference plus the five plane-dependent values.
     /// A record rather than an anonymous type so the five keys have one declaration to drift from.</summary>
     sealed record ShapeOverlay(int candidate, string relation, bool predictedCulled,
-        HousecarlCore.ShapeVisibility? visibility, string? visibilityMask, string? isolatedDepthSha256);
+        SkyWright.Engine.ShapeVisibility? visibility, string? visibilityMask, string? isolatedDepthSha256);
 
     /// <summary>One plane's overlays, in body order; overlay N references body N.</summary>
     public static object[] Overlays(IReadOnlyList<RefOcclusion> refs, PlaneRender p, int bodyCount)
@@ -200,8 +200,8 @@ static class PlanesReportCandidatesSelfTest
     static ShapeOcclusion Shape(string name, int block, string? issue = null) => new()
     {
         Name = name, Block = block, AssetHash = "SH" + block, Issue = issue,
-        Stored = new HousecarlCore.NifShapeBound(new HousecarlCore.Vec3(1, 2, 3), 40, new HousecarlCore.Vec3(1, 2, 3), 40, new[] { 0, 3 }, -1),
-        World = new HousecarlCore.SphereBound(new System.Numerics.Vector3(5, 6, 7), 44),
+        Stored = new SkyWright.Engine.NifShapeBound(new HousecarlCore.Vec3(1, 2, 3), 40, new HousecarlCore.Vec3(1, 2, 3), 40, new[] { 0, 3 }, -1),
+        World = new SkyWright.Engine.SphereBound(new System.Numerics.Vector3(5, 6, 7), 44),
     };
 
     /// <summary>Two planes; a shape culled by both; one culled by one with null visibility; a real
@@ -212,7 +212,7 @@ static class PlanesReportCandidatesSelfTest
         var both = Shape("Wall", 7);
         both.CulledBy.Add(pa); both.CulledBy.Add(pb);
         both.Relations[pa] = "Inside"; both.Relations[pb] = "Inside";
-        both.Visibility = new HousecarlCore.ShapeVisibility(100, 12, 88, null);
+        both.Visibility = new SkyWright.Engine.ShapeVisibility(100, 12, 88, null);
         both.VisibilityMask = @"C:\evidence\shape-0001-block-7.png"; both.IsolatedDepthHash = "D1";
         var oneNullVis = Shape("Roof", 2);
         oneNullVis.CulledBy.Add(pa); oneNullVis.Relations[pa] = "Inside"; oneNullVis.Relations[pb] = "Outside";

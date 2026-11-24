@@ -1,5 +1,6 @@
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 /// <summary>contactprobe --alpha-visibility (with --surface): a render pair whose crossing lies on an alpha-tested or alpha-blended

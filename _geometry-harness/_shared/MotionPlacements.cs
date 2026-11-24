@@ -1,5 +1,6 @@
 using System.Reflection;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 namespace HarnessShared;

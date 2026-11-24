@@ -1,5 +1,6 @@
 using System.Numerics;
 using HousecarlCore;
+using SkyWright.Engine;
 
 /// <summary>Rest rule implementation (2026-10-13; plan runs/2026-10-13-rest-rule-implementation/GATE-A.md): held embedded items read
 /// `lifted` (part 1), weapon racks mount their default linked reference (part 2), loose items that hold are drop supports (part 3),

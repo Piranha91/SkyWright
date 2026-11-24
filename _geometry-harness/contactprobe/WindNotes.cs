@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using HousecarlCore;
+using SkyWright.Engine;
 
 /// <summary>The wind label on contactprobe's static results (animated motion follow-ups, item 1, decision E1, option L:
 /// on by default). A render geometry entry whose member's mesh has a visible Tree_Anim shape gains <c>windA</c> /

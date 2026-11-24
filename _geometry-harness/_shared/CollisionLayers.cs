@@ -47,12 +47,12 @@ internal static class CollisionLayers
     /// <summary>A decoded mesh's two contact roles. The HOST surface: the solid bodies on the layers an actor (and a dropped item)
     /// meets. The DEPENDENT solid: every solid body but NONCOLLIDABLE. Either falls back to the render soup ('r') when the collision
     /// is incomplete or empty; '-' when there is neither. 'c' marks collision.</summary>
-    public static (HousecarlCore.TriangleSoup Host, char HostSrc, HousecarlCore.TriangleSoup Dep, char DepSrc) RoleSoups(HousecarlCore.NifGeometryModel m)
+    public static (SkyWright.Engine.TriangleSoup Host, char HostSrc, SkyWright.Engine.TriangleSoup Dep, char DepSrc) RoleSoups(SkyWright.Engine.NifGeometryModel m)
     {
         var hc = m.CollisionSoupFor(b => b.Solid && IsActorSolid(b.Layer));
         var dc = m.CollisionSoupFor(b => b.Solid && b.Layer != "SKYL_NONCOLLIDABLE");
-        (HousecarlCore.TriangleSoup, char) Pick(HousecarlCore.TriangleSoup? c) => m.CollisionComplete && c is { TriangleCount: > 0 } ? (c, 'c')
-            : m.Soup is { TriangleCount: > 0 } ? (m.Soup, 'r') : (HousecarlCore.TriangleSoup.Empty, '-');
+        (SkyWright.Engine.TriangleSoup, char) Pick(SkyWright.Engine.TriangleSoup? c) => m.CollisionComplete && c is { TriangleCount: > 0 } ? (c, 'c')
+            : m.Soup is { TriangleCount: > 0 } ? (m.Soup, 'r') : (SkyWright.Engine.TriangleSoup.Empty, '-');
         var (h, hs) = Pick(hc);
         var (d, ds) = Pick(dc);
         return (h, hs, d, ds);

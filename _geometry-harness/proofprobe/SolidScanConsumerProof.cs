@@ -6,6 +6,7 @@
 // W1c gives the fan the lower indices and must agree on any build.
 using System.Numerics;
 using HousecarlCore;
+using SkyWright.Engine;
 
 static class SolidScanConsumerProof
 {

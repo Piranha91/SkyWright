@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Numerics;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 // overlapprobe --self-test, overlap acceleration (Track P): the pair-loop timers observe and never decide (P0).

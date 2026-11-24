@@ -1,5 +1,6 @@
 using System.Numerics;
 using HousecarlCore;
+using SkyWright.Engine;
 
 /// <summary>Known answers for the surface crossing envelope (2026-10-05, task surface-envelope-offset): EnvelopeMin / EnvelopeMax
 /// must bound the crossing curve itself. The interior-segment endpoints were formed from a triangle vertex that is off the

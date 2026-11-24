@@ -4,6 +4,7 @@ using HarnessShared;
 using System.Diagnostics;
 using System.Numerics;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
 using HousecarlCore.Progress;

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 /// <summary>contactprobe --volume OUTPUT (with --overlap-json INPUT): the measured overlap volume of each supplied pair

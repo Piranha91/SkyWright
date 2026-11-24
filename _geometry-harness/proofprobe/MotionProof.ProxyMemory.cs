@@ -7,6 +7,7 @@
 using System.Diagnostics;
 using System.Numerics;
 using HousecarlCore;
+using SkyWright.Engine;
 using NiflySharp.Enums;
 
 static partial class MotionProof

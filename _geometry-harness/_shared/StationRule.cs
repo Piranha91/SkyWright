@@ -1,5 +1,6 @@
 using System.Numerics;
 using HousecarlCore;
+using SkyWright.Engine;
 
 namespace HarnessShared;
 
@@ -40,7 +41,7 @@ namespace HarnessShared;
 //
 //  The services this rule stands on, named where each defect is marked:
 //  CellBoundaryIndex.Resolve (THE water resolver - one, not two) reading
-//  DetectorModel.HeightKind / SurfaceHeight; HousecarlCore.NavmeshFloor and
+//  DetectorModel.HeightKind / SurfaceHeight; SkyWright.Engine.NavmeshFloor and
 //  FloorField, fed by FloorFeed, for the physical floor. The composer does
 //  not re-derive either.
 // ======================================================================

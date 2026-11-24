@@ -11,6 +11,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
+    <ProjectReference Include="$(SkyWrightSrc)SkyWright.Engine\SkyWright.Engine.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />

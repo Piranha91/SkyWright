@@ -1,4 +1,5 @@
 using HousecarlCore;
+using SkyWright.Engine;
 
 /// <summary>Known answers for ReachOptions.ParticlesAside (2026-11-08): the region of the render shapes alone, for a consumer that
 /// needs a body (particles are runtime state that nothing rests on or meets). Fixture: ParticleNif(withCube: true), a cube

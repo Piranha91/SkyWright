@@ -1,5 +1,6 @@
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 // THE NAVCUT BOXES THAT CAN CUT ONE TARGET CELL'S NAVMESH (Program.cs, the navcut pass). Held in its own class so

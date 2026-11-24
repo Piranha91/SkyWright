@@ -3,6 +3,7 @@ using PluginUnreadableException = HarnessShared.PluginUnreadableException;
 using HarnessShared;
 using System.Diagnostics;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
 using HousecarlCore.Progress;

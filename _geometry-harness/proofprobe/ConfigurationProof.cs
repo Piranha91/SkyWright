@@ -1,5 +1,6 @@
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
@@ -160,16 +161,16 @@ public static class ConfigurationProof
         var samePolicy = ConfigurationGate.Check(overlap, overlap with { Configuration = moved });
         check("gate: matching overlap policy permits a named plugin configuration difference",
               !samePolicy.Refused && samePolicy.Delta.Count == 1, string.Join(" ", samePolicy.Lines));
-        var historicalBounds = overlap with { MeasurementPolicy = HousecarlCore.NifOverlapGeometry.MeasurementPolicy };
-        var actualShape = overlap with { MeasurementPolicy = HousecarlCore.NifOverlapGeometry.SurfaceMeasurementIdentity(1e-5), Configuration = moved };
+        var historicalBounds = overlap with { MeasurementPolicy = SkyWright.Engine.NifOverlapGeometry.MeasurementPolicy };
+        var actualShape = overlap with { MeasurementPolicy = SkyWright.Engine.NifOverlapGeometry.SurfaceMeasurementIdentity(1e-5), Configuration = moved };
         var shapeGate = ConfigurationGate.Check(historicalBounds, actualShape);
         check("gate: historical bounds and actual-shape results cannot receive cross-method repair credit",
               shapeGate.Refused, string.Join(" ", shapeGate.Lines));
         check("gate: actual-shape identity includes the reader and independent mesh predicate",
-              actualShape.MeasurementPolicy!.Contains(HousecarlCore.NifOverlapGeometry.ReaderVersion, StringComparison.Ordinal)
-              && actualShape.MeasurementPolicy.Contains(HousecarlCore.MeshIntersection.PolicyVersion, StringComparison.Ordinal),
+              actualShape.MeasurementPolicy!.Contains(SkyWright.Engine.NifOverlapGeometry.ReaderVersion, StringComparison.Ordinal)
+              && actualShape.MeasurementPolicy.Contains(SkyWright.Engine.MeshIntersection.PolicyVersion, StringComparison.Ordinal),
               actualShape.MeasurementPolicy!);
-        var changedTolerance = actualShape with { MeasurementPolicy = HousecarlCore.NifOverlapGeometry.SurfaceMeasurementIdentity(.1) };
+        var changedTolerance = actualShape with { MeasurementPolicy = SkyWright.Engine.NifOverlapGeometry.SurfaceMeasurementIdentity(.1) };
         check("gate: changing contact tolerance cannot manufacture repair credit",
               ConfigurationGate.Check(actualShape, changedTolerance).Refused
               && !ConfigurationGate.Check(actualShape, actualShape).Refused,

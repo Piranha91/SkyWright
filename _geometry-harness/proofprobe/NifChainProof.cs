@@ -1,5 +1,6 @@
 using System.Numerics;
 using HousecarlCore;
+using SkyWright.Engine;
 using NiflySharp;
 using NiflySharp.Blocks;
 using NiflySharp.Structs;

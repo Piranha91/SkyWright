@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Numerics;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
 using HousecarlCore.Progress;
@@ -16,7 +17,7 @@ using HousecarlCore.Progress;
 // 2026-09-05) the navmesh floats 10 u above the floor, 5 u at 64 u west and 17 u at 64 u east. This measures the
 // offset from the records — for every navmesh triangle the route rule can stand on, the vertical distance from the
 // navmesh surface down (or up) to the floor a walker's feet rest on: the highest up-facing actor-solid collision
-// surface within reach (HousecarlCore.NavmeshFloor, asked through a FloorField built by _shared/FloorFeed.cs — the
+// surface within reach (SkyWright.Engine.NavmeshFloor, asked through a FloorField built by _shared/FloorFeed.cs — the
 // same field the route rule stands on), read from the same collision soup the route rules run on (CollisionLayers: the
 // layers an actor meets; a mesh whose decode is incomplete falls back to its render soup) and, in an exterior, the
 // cell's LAND heightmap. Positive δ = the navmesh above the floor.
@@ -40,7 +41,7 @@ using HousecarlCore.Progress;
 //   reach     (G1 build list, Stage A, row 4) `reach <Cell> <subjects.json> --json OUT`: for each subject reference
 //             ({"subjects":[{"id":"FORMKEY"}]}), the exact 3D distance from its placed render geometry at the stored
 //             pose (its position when the mesh is unreadable, partial or has no model) to the nearest winning navmesh
-//             triangle of the cell not flagged Deleted (HousecarlCore.NavmeshReach), with its horizontal and vertical
+//             triangle of the cell not flagged Deleted (SkyWright.Engine.NavmeshReach), with its horizontal and vertical
 //             parts, the triangle, and the floor under that point (this probe's floor rule). A navmesh triangle is where
 //             NPCs path, not every place a player can stand. Interior: the cell's navmesh is the whole set. Exterior:
 //             only the cell's own navmesh is searched, so the distance is an upper bound and says so.
@@ -430,7 +431,7 @@ if (mode == "reach")
 // floorZ + HI (--band; default the humanoid band ActorBand.PhysicalStep .. PhysicalControllerTop(ScaleOneHeight)), against
 // the floor rule's own population and geometry: every reference of the cell's 3x3 neighbourhood that is there at load
 // (the enable chain, or the flag under --flags), by its actor-solid collision where complete, else its render soup
-// (labelled fallback). HousecarlCore.ColumnClearance clips each triangle to the column's heights and reads the horizontal
+// (labelled fallback). SkyWright.Engine.ColumnClearance clips each triangle to the column's heights and reads the horizontal
 // distance; the nearest reference is named. --within R reads "blocked" below R and caps the search at R.
 if (mode == "clear")
 {

@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Text.Json;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 
 // The station rule's known answers, stated as synthetic geometry in the fixture's own frame.
 //
