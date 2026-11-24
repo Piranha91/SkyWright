@@ -84,8 +84,8 @@ public sealed class InProcessStrictTests
             Assert.Equal(new[] { Path.Combine(o, "houseCARL - WbWhere", "meta.ini"), Path.Combine(o, "houseCARL - WbWhere", "WbWhere.esp") }.Order(StringComparer.OrdinalIgnoreCase), wrote, StringComparer.OrdinalIgnoreCase);
             foreach (var bad in new[] { w.Instance, w.DataDir, Path.Combine(w.Instance, "mods", "WorldMod"), game })
             {
-                var said = await p.CallAsync("housecarl_apply", new() { ["ops"] = new[] { new Dictionary<string, object?> { ["formid"] = TiltedRefWorld.Ref.ToString(), ["field_path"] = "Placement.Position", ["value"] = "1,2,3" } }, ["patch"] = "WbBad", ["out_path"] = bad });
-                Assert.StartsWith("error:", said.TrimStart());
+                var refused = await Assert.ThrowsAsync<InvalidOperationException>(() => p.CallAsync("housecarl_apply", new() { ["ops"] = new[] { new Dictionary<string, object?> { ["formid"] = TiltedRefWorld.Ref.ToString(), ["field_path"] = "Placement.Position", ["value"] = "1,2,3" } }, ["patch"] = "WbBad", ["out_path"] = bad }));
+                Assert.StartsWith("houseCARL refused the write: ", refused.Message);
             }
             Assert.Empty(Changed(mid, Listing(w.Instance, game, o)));
         }

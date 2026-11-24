@@ -54,8 +54,10 @@ internal sealed class PatchWriter : IAsyncDisposable
         return new PatchWriter(lib, target, HousecarlLibrary.AssemblyPath, HousecarlLibrary.Identity, log);
     }
 
-    /// <summary>One houseCARL tool call: the tool's own answer, a refusal included (houseCARL refuses in its text).</summary>
-    internal Task<string> CallAsync(string tool, Dictionary<string, object?> args, CancellationToken ct = default) => _library.CallAsync(tool, args, ct);
+    /// <summary>One houseCARL tool call: the tool's own answer, or its refusal as one sentence keeping houseCARL's reason
+    /// (<see cref="HousecarlAnswer"/>, the app's one reading of a refusal).</summary>
+    internal async Task<string> CallAsync(string tool, Dictionary<string, object?> args, CancellationToken ct = default) =>
+        HousecarlAnswer.Checked(tool, await _library.CallAsync(tool, args, ct));
 
     static string F(float v) => v.ToString("R", CultureInfo.InvariantCulture);
     static string V(HousecarlCore.Vec3 v) => $"{F(v.X)},{F(v.Y)},{F(v.Z)}";
