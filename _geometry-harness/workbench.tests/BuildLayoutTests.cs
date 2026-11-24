@@ -33,7 +33,7 @@ public sealed class BuildLayoutTests : IDisposable
     const string Marker = """
         { "kind": "skywright-build", "configuration": "Debug", "framework": "net9.0-windows10.0.19041.0", "app": "SkyWright.exe",
           "program": "Probes/{name}/{name}.exe", "tool": "Tools/{name}/{name}.exe", "tools": ["runcontrol", "housecarl-mcp"],
-          "server": "Tools/housecarl-mcp/housecarl-mcp.exe", "corpus": "Tools/housecarl-mcp/corpus.json",
+          "server": "Tools/housecarl-mcp/housecarl-mcp.exe", "corpus": "Data/corpus.json",
           "registry": "Data/check-registry.json", "severity": "Data/workbench-severity.json", "scenePolicy": "Data/scene-policy.json" }
         """;
 
@@ -60,7 +60,7 @@ public sealed class BuildLayoutTests : IDisposable
         }
         var l = L.Locate(Path.Combine(root, "Tools", "runcontrol"), out _)!;
         Assert.Equal(N(Path.Combine(root, "Tools", "housecarl-mcp", "housecarl-mcp.exe")), N(l.PathOf(L.Piece.Server)));
-        Assert.Equal(N(Path.Combine(root, "Tools", "housecarl-mcp", "corpus.json")), N(l.PathOf(L.Piece.Corpus)));
+        Assert.Equal(N(Path.Combine(root, "Data", "corpus.json")), N(l.PathOf(L.Piece.Corpus)));
         Assert.Equal(N(Path.Combine(root, "Data", "check-registry.json")), N(l.PathOf(L.Piece.Registry)));
         Assert.Equal(N(Path.Combine(root, "Data", "workbench-severity.json")), N(l.PathOf(L.Piece.Severity)));
         Assert.Equal(N(Path.Combine(root, "Data", "scene-policy.json")), N(l.PathOf(L.Piece.ScenePolicy)));
@@ -140,6 +140,20 @@ public sealed class BuildLayoutTests : IDisposable
         foreach (var p in new[] { L.Piece.Server, L.Piece.Runcontrol, L.Piece.Registry, L.Piece.Severity })
             Assert.True(File.Exists(TestBuild.Layout.PathOf(p)), $"the build has no {p} at {TestBuild.Layout.PathOf(p)}");
         Assert.True(File.Exists(TestBuild.Program("overlapprobe")), "the build has no overlapprobe");
+    }
+
+    /// <summary>The rulebook the app's houseCARL reads is Data\corpus.json, the pin's generated rulebook byte for byte, so
+    /// what keys on its content (runcontrol's tools digest, keyed corpus.json and hashed) reads the same rulebook as when
+    /// it lay in Tools\housecarl-mcp\. Rejects a stale or partial copy.</summary>
+    [Fact]
+    public void The_rulebook_is_in_Data_and_is_the_pins_generated_one()
+    {
+        var corpus = TestBuild.Layout.PathOf(L.Piece.Corpus);
+        Assert.Equal(N(Path.Combine(TestBuild.Layout.Root, "Data", "corpus.json")), N(corpus));
+        var generated = Path.Combine(TestBuild.Layout.Checkout!, "external", "houseCARL", "generated", "corpus.json");
+        Assert.True(File.Exists(corpus) && File.Exists(generated), $"no rulebook at {corpus} or {generated}");
+        static string Sha(string f) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(f)));
+        Assert.Equal(Sha(generated), Sha(corpus));
     }
 
     /// <summary>houseCARL's server code sits beside the app as a library: its assembly is there, and nothing that would

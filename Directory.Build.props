@@ -66,13 +66,14 @@
     </ItemGroup>
   </Target>
 
-  <!-- After the app builds: houseCARL's server and its rulebook into Tools\housecarl-mcp\, the app data into Data\, and
-       the marker that names the layout. The app's project references the server project so it is built first. -->
+  <!-- After the app builds: houseCARL's server and its rulebook into Tools\housecarl-mcp\, the app data and the
+       rulebook the app's in-process houseCARL reads (corpus.json) into Data\, and the marker that names the layout. The
+       app's project references the server project so it is built first. -->
   <Target Name="SkyWrightLayout" AfterTargets="Build" Condition="'$(MSBuildProjectName)' == 'workbench'">
     <PropertyGroup>
       <_SwCorpus>$(HousecarlRoot)generated\corpus.json</_SwCorpus>
       <_SwScenePolicy>$(HousecarlRoot).claude\skills\evaluation-reporting\references\scene-policy.json</_SwScenePolicy>
-      <_SwJson>{ "kind": "skywright-build", "configuration": "$(SkyWrightConfiguration)", "framework": "$(SkyWrightFramework)", "app": "SkyWright.exe", "program": "$(SkyWrightProbes)/{name}/{name}.exe", "tool": "$(SkyWrightTools)/{name}/{name}.exe", "tools": ["runcontrol", "housecarl-mcp"], "server": "$(SkyWrightTools)/housecarl-mcp/housecarl-mcp.exe", "corpus": "$(SkyWrightTools)/housecarl-mcp/corpus.json", "registry": "$(SkyWrightData)/check-registry.json", "severity": "$(SkyWrightData)/workbench-severity.json", "scenePolicy": "$(SkyWrightData)/scene-policy.json" }</_SwJson>
+      <_SwJson>{ "kind": "skywright-build", "configuration": "$(SkyWrightConfiguration)", "framework": "$(SkyWrightFramework)", "app": "SkyWright.exe", "program": "$(SkyWrightProbes)/{name}/{name}.exe", "tool": "$(SkyWrightTools)/{name}/{name}.exe", "tools": ["runcontrol", "housecarl-mcp"], "server": "$(SkyWrightTools)/housecarl-mcp/housecarl-mcp.exe", "corpus": "$(SkyWrightData)/corpus.json", "registry": "$(SkyWrightData)/check-registry.json", "severity": "$(SkyWrightData)/workbench-severity.json", "scenePolicy": "$(SkyWrightData)/scene-policy.json" }</_SwJson>
     </PropertyGroup>
     <MSBuild Projects="$(HousecarlSrc)housecarl-mcp\housecarl-mcp.csproj" Targets="GetTargetPath" Properties="Configuration=$(SkyWrightConfiguration)">
       <Output TaskParameter="TargetOutputs" PropertyName="_SwServerDll" />
@@ -91,6 +92,8 @@
     <Delete Condition="!Exists('$(_SwCorpus)')" Files="$(SkyWrightLayoutRoot)$(SkyWrightTools)\housecarl-mcp\corpus.json" />
     <Copy Condition="Exists('$(_SwCorpus)')" SourceFiles="$(_SwCorpus)" DestinationFolder="$(SkyWrightLayoutRoot)$(SkyWrightTools)\housecarl-mcp\" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_SwDataFiles)" DestinationFolder="$(SkyWrightLayoutRoot)$(SkyWrightData)\" SkipUnchangedFiles="true" />
+    <Delete Condition="!Exists('$(_SwCorpus)')" Files="$(SkyWrightLayoutRoot)$(SkyWrightData)\corpus.json" />
+    <Copy Condition="Exists('$(_SwCorpus)')" SourceFiles="$(_SwCorpus)" DestinationFolder="$(SkyWrightLayoutRoot)$(SkyWrightData)\" SkipUnchangedFiles="true" />
     <Copy Condition="Exists('$(_SwScenePolicy)')" SourceFiles="$(_SwScenePolicy)" DestinationFolder="$(SkyWrightLayoutRoot)$(SkyWrightData)\" SkipUnchangedFiles="true" />
     <WriteLinesToFile File="$(SkyWrightLayoutRoot)$(SkyWrightLayoutMarker)" Lines="$(_SwJson)" Overwrite="true" WriteOnlyWhenDifferent="true" />
   </Target>

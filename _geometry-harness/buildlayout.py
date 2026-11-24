@@ -119,7 +119,7 @@ def piece_under(build_root: Path | str, key: str) -> Path:
 _FALLBACK_MARKER = {
     "kind": "skywright-build", "configuration": "Release", "framework": "net9.0-windows10.0.19041.0", "app": "SkyWright.exe", "program": "Probes/{name}/{name}.exe",
     "tool": "Tools/{name}/{name}.exe", "tools": ["runcontrol", "housecarl-mcp"],
-    "server": "Tools/housecarl-mcp/housecarl-mcp.exe", "corpus": "Tools/housecarl-mcp/corpus.json",
+    "server": "Tools/housecarl-mcp/housecarl-mcp.exe", "corpus": "Data/corpus.json",
     "registry": "Data/check-registry.json", "severity": "Data/workbench-severity.json",
     "scenePolicy": "Data/scene-policy.json",
 }

@@ -44,7 +44,7 @@ internal static class CheckoutLayout
         /// <summary>The names used only to say where a piece was expected when a folder has no marker. A test holds
         /// them equal to the marker a build writes.</summary>
         public static readonly Spec Expected = new("", "Probes/{name}/{name}.exe", "Tools/{name}/{name}.exe", ["runcontrol", "housecarl-mcp"],
-            "Tools/housecarl-mcp/housecarl-mcp.exe", "Tools/housecarl-mcp/corpus.json", "Data/check-registry.json",
+            "Tools/housecarl-mcp/housecarl-mcp.exe", "Data/corpus.json", "Data/check-registry.json",
             "Data/workbench-severity.json", "Data/scene-policy.json");
 
         public static Spec Read(string path)
