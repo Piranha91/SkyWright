@@ -3,7 +3,7 @@ using System.Numerics;
 namespace RunControl;
 
 /// <summary>The reading rule for the runtime state-switch check (`runtime.state-switch-flip`), its one owner. The live
-/// driver (switchflip.py, through `runcontrol switchflip-outcome`) and the live import (LiveImport) both call it, so a
+/// driver (through `runcontrol switchflip-outcome`) and the live import (LiveImport) both call it, so a
 /// receipt's stored classification can always be re-derived from its recorded events and is never trusted on its own.
 ///
 /// One launch's events after the flip starts:
@@ -150,7 +150,7 @@ public static class SwitchFlipOutcome
         catch (PyError ex)
         {
             throw new Refusal($"switchflip-outcome: the request holds a value of a shape the rule cannot read ({ex.Message}); "
-                              + "the events file is damaged or was not written by switchflip.py.");
+                              + "the events file is damaged or was not written by the live switch check.");
         }
         throw new Refusal("switchflip-outcome reads one JSON object on standard input: {\"classify\": {\"events\", \"flipStart\", \"windowSeconds\"?}}, "
                           + "{\"armReading\": [classifications]} or {\"rules\": true}.");

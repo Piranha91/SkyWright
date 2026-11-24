@@ -217,7 +217,7 @@ public static class EvaluateRun
                             extra: new PyDict { ["switchScope"] = Prerequisites.LiveSwitchScopeRecord(scopeRead) });
                     else
                         ex.Account(check, arm, "live-import", null,
-                            "opted in and waiting for a live receipt: run switchflip.py for this arm, then "
+                            "opted in and waiting for a live receipt: run the live switch check for this arm, then "
                             + "`import-results --file` its export; the controller itself never launches the game"
                             + (PyValue.Truthy(scopeRead) ? $" ({SwitchFlipScope.Sentence(scopeRead!)})" : ""));
                 }

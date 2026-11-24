@@ -210,7 +210,7 @@ public static partial class SelfTest
                 return $"exit {exit}, status {PyJson.Dumps(status)}, said {stdout}";
             var (exit2, _, stderr) = Drive(driver, new PipelineArgs(Entry: "e.json", Out: t.At("run2"), Through: null));
             status = D(PyJson.ReadPipelineFile(t.At("run2/status.json")));
-            return exit2 == Exit.Refused && stderr.Contains("evalpipeline.py") && stderr.Contains("deliver") && status.Get("stoppedAt") as string == "census"
+            return exit2 == Exit.Refused && stderr.Contains("the AI-driven evaluation") && stderr.Contains("--through bundle") && stderr.Contains("deliver") && status.Get("stoppedAt") as string == "census"
                 ? null : $"exit {exit2}: {stderr}";
         });
         Case("driver: a non-blocking refusal lets the run go on and keeps it incomplete; an awaited judgement stops it", () =>

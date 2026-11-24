@@ -10,8 +10,8 @@ public sealed record PipelineArgs(string? Entry = null, string? Out = null, stri
 /// its inputs and outputs. An accepted stage whose bindings are unchanged is reused; a changed one runs again.</summary>
 public sealed class Driver
 {
-    /// <summary>Every stage of the pipeline, in order. This controller runs the first of them; the stages from
-    /// report-plan on are the Python pipeline's.</summary>
+    /// <summary>Every stage of the pipeline, in order. This controller runs census to bundle; the stages from report-plan
+    /// on belong to the AI-driven evaluation, which starts this controller for the first ones.</summary>
     public static readonly string[] Stages =
     [
         "census", "prepare", "scope", "plan", "evaluate", "records", "scenes", "bundle", "precedent",
@@ -71,7 +71,7 @@ public sealed class Driver
         if (At(through) >= At("report-plan"))
         {
             string why = $"the run goes through {through}, and this controller runs census to bundle only; the stages from report-plan on "
-                         + "run in the Python pipeline (evalpipeline.py run with the same --entry and --out) on the same run folder, "
+                         + "belong to the AI-driven evaluation, which runs this controller for census to bundle itself on the same run folder, "
                          + "so give --through bundle or an earlier stage here.";
             WriteStatus(outDir, new PyDict { ["status"] = "incomplete", ["stoppedAt"] = Stages[0], ["sentence"] = why, ["at"] = PyText.UtcNowPlus() });
             Report.Error($"REFUSED: {why}");
