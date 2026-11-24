@@ -46,6 +46,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Do viewprobe's point queries (--nav-at, --clear-at, --inside-at, --refs-at) answer or refuse in one sentence, never print nothing, on a run without an eye or with a malformed value?](#tool-_geometry-harness-tests-test_point_queries_answer_or_refuse.py) — `_geometry-harness/tests/test_point_queries_answer_or_refuse.py`
 - [Do winning cell records lose water data or disagree at a water boundary?](#tool-waterprobe) — `waterprobe`
 - [Does a Deep evaluation judge every census state and name every one it cannot?](#tool-integration-housecarl-tests-test_stategen.py) — `integration/housecarl/tests/test_stategen.py`
+- [Does a bundle the built-in controller makes with its names step get reported with no hand step (C567)?](#tool-integration-housecarl-tests-test_report_plan_reads_names.py) — `integration/housecarl/tests/test_report_plan_reads_names.py`
 - [Does a buried clash read as buried in the reel and the report, and does a top-down hide what covers the pair from above by the cutaway's rule?](#tool-integration-housecarl-tests-test_capture_fallbacks.py) — `integration/housecarl/tests/test_capture_fallbacks.py`
 - [Does a fresh user get the settings window once, and is a saved choice honoured?](#tool-integration-housecarl-tests-test_evalsettings.py) — `integration/housecarl/tests/test_evalsettings.py`
 - [Does a lab run's record capture read the open arms, take the machine slot, import only rows that were open, and refuse in one sentence?](#tool-integration-housecarl-tests-test_record_capture.py) — `integration/housecarl/tests/test_record_capture.py`
@@ -3932,6 +3933,21 @@ Inputs: Controlled fixtures for test_report_figures.
 Outputs: Assertion results for: Does the report show the frame that states a clash (the marked view, both halves of a split), and does the reel drop capital mod prefixes from names?
 
 Source: [integration/housecarl/tests/test_report_figures.py](../integration/housecarl/tests/test_report_figures.py) — `Known answers for the report's figure units and the reel's spoken names and removals (Missives review, 2026-10-30).`
+
+
+<a id="tool-integration-housecarl-tests-test_report_plan_reads_names.py"></a>
+
+### integration/housecarl/tests/test_report_plan_reads_names.py
+
+**Does a bundle the built-in controller makes with its names step get reported with no hand step (C567)?**
+
+Qualify a change to the bundle's names step or to how evalreport plan reads it.
+
+Inputs: Controlled fixtures for test_record_capture.
+
+Outputs: Assertion results or generated fixture data for: Does a bundle the built-in controller makes with its names step get reported with no hand step (C567)?
+
+Source: [integration/housecarl/tests/test_report_plan_reads_names.py](../integration/housecarl/tests/test_report_plan_reads_names.py) — `C567, moved from the controller oracle's case 560`
 
 
 <a id="tool-integration-housecarl-tests-test_report_record_labels.py"></a>

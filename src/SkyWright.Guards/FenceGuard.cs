@@ -104,9 +104,6 @@ internal static class FenceGuard
             new("data/record-field-scope.json", ["test_recordrows.py"],
                 "prose only: its about text names the module's suite that checks every field it lists exists in the schema; no program follows it",
                 "not named in the task file; proposed with the split of the mixed suites (test_recordrows' outside cases return outside), or a prose edit in step 3's registry work"),
-            new("_geometry-harness/tests/test_evalrun.py", ["integration/housecarl", "evalreport.py"],
-                "the controller oracle's case C567 starts evalreport.py plan on the controller's bundle; the suite stays outside because make_report_fixtures.py, which workbench.tests runs, imports it",
-                "not named in the task file; proposed for step 3, when the bundle contract becomes SkyWright's and the case joins the module's suites"),
         ],
         SkillReadsOutside:
         [

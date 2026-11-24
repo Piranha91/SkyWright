@@ -4948,16 +4948,8 @@ def case_560(tmp):
     expect(st.get("reader"), "HOUSECARL_RECORD_READER_CMD", f"{case}: the statement says where the reader came from",
            "C560")
     expect(evalrun(["verify-bundle", bundle]).returncode, 0, f"{case}: the bundle verifies", "C560")
-    # C567: the report then needs no hand step: its plan finds the names in the bundle as made
-    out = tmp / f"{case}-report"
-    # the report is the houseCARL integration module's (a named crossing in SkyWright.Guards' fence check)
-    r = subprocess.run([sys.executable, str(HARNESS.parent / "integration/housecarl" / "evalreport.py"), "plan", "--bundle", str(bundle), "--out",
-                        str(out), "--verify-copy"], capture_output=True, text=True, encoding="utf-8", errors="replace")
-    plans = [p for p in out.glob("*.json") if (load(p) or {}).get("reader") is not None] if out.is_dir() else []
-    reader = (load(plans[0]) or {}).get("reader") if plans else {}
-    check(r.returncode == 0 and isinstance((reader or {}).get("names"), dict),
-          f"{case}: evalreport plan reads the names from the bundle with no hand step (C567; exit {r.returncode}, "
-          f"{r.stderr.strip()[-200:]!r})")
+    # C567 (the report reads these names with no hand step) is the houseCARL integration module's suite
+    # test_report_plan_reads_names.py, on a bundle made the same way
 
 
 def case_561(tmp):

@@ -8804,6 +8804,27 @@
       ]
     },
     {
+      "id": "integration/housecarl/tests/test_report_plan_reads_names.py",
+      "path": "integration/housecarl/tests/test_report_plan_reads_names.py",
+      "kind": "script",
+      "answers": [
+        "Does a bundle the built-in controller makes with its names step get reported with no hand step (C567)?"
+      ],
+      "useWhen": "Qualify a change to the bundle's names step or to how evalreport plan reads it.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/tests/test_report_plan_reads_names.py",
+          "anchor": "C567, moved from the controller oracle's case 560"
+        }
+      ],
+      "inputs": [
+        "Controlled fixtures for test_record_capture."
+      ],
+      "outputs": [
+        "Assertion results or generated fixture data for: Does a bundle the built-in controller makes with its names step get reported with no hand step (C567)?"
+      ]
+    },
+    {
       "id": "integration/housecarl/tests/test_switchflip_scope.py",
       "path": "integration/housecarl/tests/test_switchflip_scope.py",
       "kind": "script",
