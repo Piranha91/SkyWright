@@ -22,17 +22,46 @@ internal sealed record WriteTarget(string Instance, string Profile, string DataD
 /// <summary>Writes the staged edits as placement overrides through the houseCARL server's own write path
 /// (<c>housecarl_apply</c>; <c>housecarl_records</c> to check and read back). The app is an MCP client of the
 /// <c>housecarl-mcp.exe</c> it was built with, started over stdio (ModelContextProtocol.Core 2.2.0:
-/// <c>StdioClientTransport</c> + <c>McpClient.CreateAsync</c> + <c>CallToolAsync</c>).</summary>
+/// <c>StdioClientTransport</c> + <c>McpClient.CreateAsync</c> + <c>CallToolAsync</c>), or, opened with <see cref="OpenInProcess"/>,
+/// houseCARL's same tool code compiled in (<see cref="HousecarlLibrary"/>), with no program started.</summary>
 internal sealed class PatchWriter : IAsyncDisposable
 {
-    readonly McpClient _client;
+    // exactly one of the two answers the calls: the started server (stdio), or houseCARL's code in process
+    readonly McpClient? _client;
+    readonly HousecarlLibrary? _library;
     internal WriteTarget Target { get; }
     internal string ServerExe { get; }
     internal string ServerSha256 { get; }
     internal Action<string> Log { get; }
+    /// <summary>True when the calls go to houseCARL's code in this process and no program is started.</summary>
+    internal bool InProcess => _library is not null;
 
-    PatchWriter(McpClient client, WriteTarget target, string exe, string sha, Action<string> log)
-    { _client = client; Target = target; ServerExe = exe; ServerSha256 = sha; Log = log; }
+    PatchWriter(McpClient? client, HousecarlLibrary? library, WriteTarget target, string exe, string sha, Action<string> log)
+    { _client = client; _library = library; Target = target; ServerExe = exe; ServerSha256 = sha; Log = log; }
+
+    /// <summary>The refusals <see cref="StartAsync"/> gives before it starts a server, less the server's own: the Output
+    /// Folder rule, the rulebook, the profile. StartAsync keeps its own, untouched, until the server path goes.</summary>
+    static void Preflight(WriteTarget target, string corpusPath)
+    {
+        if (target.Output is null)
+            throw new InvalidOperationException($"writes to {target} are refused: no Output Folder is chosen; choose one in the launcher or set WB_OUTPUT (the instance's mods folder itself is allowed).");
+        if (OutputFolderRule.Check(target.PatchRoot, target.Instance, target.Profile, target.Game) is { } why)
+            throw new InvalidOperationException($"writes to {target} are refused: {why}");
+        if (!File.Exists(corpusPath))
+            throw new InvalidOperationException($"the houseCARL rulebook is not at '{corpusPath}'; run scripts\\build.ps1 -Rulebook, or set WB_CORPUS.");
+        if (!Directory.Exists(target.ProfileDir))
+            throw new InvalidOperationException($"the profile folder '{target.ProfileDir}' does not exist; name a profile of that instance.");
+    }
+
+    /// <summary>houseCARL's code in this process against <paramref name="target"/>, with no program started; the same
+    /// refusals as <see cref="StartAsync"/> before it opens. <paramref name="dataDir"/> holds its store and spilled results.</summary>
+    internal static PatchWriter OpenInProcess(WriteTarget target, string dataDir, string corpusPath, Action<string> log)
+    {
+        Preflight(target, corpusPath);
+        var lib = HousecarlLibrary.Open(target, dataDir, corpusPath);
+        log($"houseCARL in process: {HousecarlLibrary.AssemblyPath} ({HousecarlLibrary.Identity}); writes go to {target}");
+        return new PatchWriter(null, lib, target, HousecarlLibrary.AssemblyPath, HousecarlLibrary.Identity, log);
+    }
 
     /// <summary>Start the server at <paramref name="serverExe"/> against <paramref name="target"/>. Refused when the
     /// target's patch folder is one the output-folder rule refuses, whatever the instance.</summary>
@@ -75,12 +104,13 @@ internal sealed class PatchWriter : IAsyncDisposable
         });
         var client = await McpClient.CreateAsync(transport, cancellationToken: ct);
         log($"houseCARL server: {serverExe} (exe sha256 {sha}, dll sha256 {dllSha}); writes go to {target}");
-        return new PatchWriter(client, target, serverExe, sha, log);
+        return new PatchWriter(client, null, target, serverExe, sha, log);
     }
 
     internal async Task<string> CallAsync(string tool, Dictionary<string, object?> args, CancellationToken ct = default)
     {
-        var r = await _client.CallToolAsync(tool, args, cancellationToken: ct);
+        if (_library is not null) return await _library.CallAsync(tool, args, ct);
+        var r = await _client!.CallToolAsync(tool, args, cancellationToken: ct);
         var text = string.Join("\n", r.Content.OfType<TextContentBlock>().Select(c => c.Text));
         if (r.IsError == true) throw new InvalidOperationException($"{tool} refused: {text}");
         return text;
@@ -90,6 +120,7 @@ internal sealed class PatchWriter : IAsyncDisposable
     /// after the manual-mode rule, and the server's own answer.</summary>
     internal async Task<CallToolResult> ForwardAsync(string tool, IReadOnlyDictionary<string, System.Text.Json.JsonElement> args, CancellationToken ct = default)
     {
+        if (_client is null) throw new InvalidOperationException($"{tool} is not forwarded: this writer runs houseCARL's code in process, not a server.");
         Log($"forwarded {tool} to the houseCARL server of {Target}");
         return await _client.CallToolAsync(new CallToolRequestParams { Name = tool, Arguments = args.ToDictionary(kv => kv.Key, kv => kv.Value) }, ct);
     }
@@ -346,5 +377,9 @@ internal sealed class PatchWriter : IAsyncDisposable
                + (left == 0 ? "; the patch now holds no placed reference, and the file is kept (delete it yourself if you no longer want it)." : left > 0 ? $"; {left} placed reference(s) remain in it." : ".");
     }
 
-    public async ValueTask DisposeAsync() => await _client.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        if (_client is not null) await _client.DisposeAsync();
+        _library?.Dispose();
+    }
 }
