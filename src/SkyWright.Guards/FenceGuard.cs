@@ -36,12 +36,28 @@ namespace SkyWright.Guards;
 /// depth and printed on every run with the reason). The allowed
 /// observers and the recorded outputs (<see cref="Exempt"/>) are read by name, printed on every run with their reason, and
 /// an exemption that names nothing fails like a stale crossing. The direction module to outside is never a finding.
+///
+/// A second fence, about houseCARL's AI-facing skill data: its two evaluation skills' folders
+/// (<c>.claude/skills/evaluation-reporting</c>, <c>.claude/skills/world-edit-compatibility</c>) and its agent definitions
+/// (<c>plugin/agents</c>). Their data lives in the module now, so
+///   (1) outside the module, any reference to them is a finding: the app and the scan read none of it;
+///   (2) inside the module, any reference to them is a finding too: the module reads its own copy, never the old place.
+/// What counts: in a .py or .cs string literal (comments and docstrings removed, as above), a literal holding
+/// <c>skills/&lt;either skill&gt;</c> or <c>plugin/agents</c> with any separator, or a literal that is exactly one of the
+/// two skill names (a path piece, <c>Path.Combine(".claude", "skills", "evaluation-reporting")</c>), or a literal
+/// <c>"agents"</c> in a file that also holds a literal <c>"plugin"</c> (this pair rule reads the one file, not the code
+/// that joins them, so a file naming both for other reasons is a finding too); in build
+/// files, .json and scripts, the path forms only (a skill's bare name in data or prose is a name, not a read). What they
+/// cannot see: a path built from variables or across lines, a skill named in a data value a program later joins, prose
+/// files, and what houseCARL's own programs read (the pin is not walked). Each fence has its own named list, printed with
+/// the step that removes each entry; an entry that matches nothing fails.
 /// </summary>
 internal static class FenceGuard
 {
     internal sealed record Crossing(string File, string[] Names, string Why, string Step);
     internal sealed record Exemption(string Path, string Why);
-    internal sealed record Config(string Module, Exemption[] Exempt, Crossing[] Crossings);
+    internal sealed record Config(string Module, Exemption[] Exempt, Crossing[] Crossings,
+                                  Crossing[]? SkillReadsOutside = null, Crossing[]? SkillReadsInside = null, Exemption[]? SkillExempt = null);
     internal sealed record Finding(string File, int Line, string Name, string Kind);
 
     /// <summary>Folders not walked: not SkyWright's source (the pin, build output, git, editors, nested worktrees,
@@ -97,7 +113,32 @@ internal static class FenceGuard
             new("_geometry-harness/tests/test_evalrun.py", ["integration/housecarl", "evalreport.py"],
                 "the controller oracle's case C567 starts evalreport.py plan on the controller's bundle; the suite stays outside because make_report_fixtures.py, which workbench.tests runs, imports it",
                 "not named in the task file; proposed for step 3, when the bundle contract becomes SkyWright's and the case joins the module's suites"),
+        ],
+        SkillReadsOutside:
+        [
+            new("Directory.Build.props", ["skills/evaluation-reporting"],
+                "the build copies the reporting skill's scene-policy.json into Data\\ for the app's grouping",
+                "step 2(a), after step 4 lands: the app reads SkyWright's own data/scene-policy.json"),
+            new("_geometry-harness/workbench/Scenes.cs", ["evaluation-reporting"],
+                "the app's grouping names the skill's file as a path relative to a checkout (RelativePath)",
+                "step 2(a), after step 4 lands"),
+            new("_geometry-harness/workbench.tests/ReviewSpeedPart2Tests.cs", ["evaluation-reporting"],
+                "the grouping tests open the skill's copy in the pin",
+                "step 2(a), after step 4 lands"),
+            new("_geometry-harness/runcontrol/EvalSettings.cs", ["plugin + agents"],
+                "the plan's settings reader looks for plugin/agents above its own program to validate model IDs",
+                "step 2(b), when EvalSettings leaves runcontrol"),
+            new("_geometry-harness/tests/fixtures/evalrun/make_fixtures.py", ["skills/world-edit-compatibility"],
+                "a dead fallback that reads an old houseCARL ref's registry when data/check-registry.json is missing",
+                "step 2, with the fallback removed"),
+        ],
+        SkillReadsInside: null,   // rule (2) is applied once the module reads its own copy of the data
+        SkillExempt:
+        [
+            new("src/SkyWright.Guards/", "the guard names the folders it fences"),
         ]);
+
+    static readonly string[] SkillNames = ["evaluation-reporting", "world-edit-compatibility"];
 
     public static int RunGuard(string[] args)
     {
@@ -127,8 +168,127 @@ internal static class FenceGuard
         var listed = findings.Where(f => Listed(SkyWright, f)).ToList();
         foreach (var f in listed) Console.WriteLine($"  named     {f.File}:{f.Line} {f.Kind} {f.Name}");
         foreach (var f in findings.Except(listed)) Check(false, Sentence(f));
-        Console.WriteLine(fail == 0 ? $"\n  fence: holds ({listed.Count} references on the named crossing list)" : $"\n  fence: {fail} failed");
+
+        // the second fence: houseCARL's two evaluation skills and its agent definitions
+        foreach (var e in SkyWright.SkillExempt ?? []) Console.WriteLine($"  skill-exempt {e.Path} — {e.Why}");
+        foreach (var c in SkyWright.SkillReadsOutside ?? []) Console.WriteLine($"  skill read (outside) {c.File} [{string.Join(", ", c.Names)}] — {c.Why}; removed in {c.Step}");
+        foreach (var c in SkyWright.SkillReadsInside ?? []) Console.WriteLine($"  skill read (module)  {c.File} [{string.Join(", ", c.Names)}] — {c.Why}; removed in {c.Step}");
+        var (outside, inside, skillProblems) = ScanSkills(repo, SkyWright);
+        foreach (var p in skillProblems) Check(false, p);
+        var outsideListed = outside.Where(f => ListedIn(SkyWright.SkillReadsOutside, f)).ToList();
+        var insideListed = inside.Where(f => ListedIn(SkyWright.SkillReadsInside, f)).ToList();
+        foreach (var f in outsideListed.Concat(insideListed)) Console.WriteLine($"  named     {f.File}:{f.Line} {f.Kind} {f.Name}");
+        foreach (var f in outside.Except(outsideListed)) Check(false, SkillSentence(f, inside: false));
+        foreach (var f in inside.Except(insideListed)) Check(false, SkillSentence(f, inside: true));
+        int skillNamed = outsideListed.Count + insideListed.Count;
+        Console.WriteLine(fail == 0
+            ? $"\n  fence: holds ({listed.Count} references on the named crossing list; {skillNamed} reads of houseCARL's skill data on the named skill lists)"
+            : $"\n  fence: {fail} failed");
         return fail == 0 ? 0 : 1;
+    }
+
+    internal static string SkillSentence(Finding f, bool inside) => inside
+        ? $"{f.File}:{f.Line} reads houseCARL's {f.Name} from inside the integration module; that data lives in the module now: read the module's own copy, or name the read with its reason and step in FenceGuard."
+        : $"{f.File}:{f.Line} reads houseCARL's {f.Name} from outside the integration module; the app and the scan read no AI-facing skill data: take it from SkyWright's data/ or move the reader into the module, or name it with its reason and step in FenceGuard.";
+
+    static bool ListedIn(Crossing[]? list, Finding f) =>
+        (list ?? []).Any(c => Same(c.File, f.File) && c.Names.Contains(f.Name, StringComparer.Ordinal));
+
+    /// <summary>Every reference to houseCARL's two skills or plugin/agents: outside the module (less the skill
+    /// exemptions), inside it, and every reason the two named lists are unsound.</summary>
+    internal static (List<Finding> Outside, List<Finding> Inside, List<string> Problems) ScanSkills(string root, Config cfg)
+    {
+        var problems = new List<string>();
+        var module = Path.Combine(root, cfg.Module);
+        var outside = new List<Finding>();
+        var inside = new List<Finding>();
+        foreach (var e in cfg.SkillExempt ?? [])
+        {
+            var p = Path.Combine(root, e.Path);
+            if (!(e.Path.EndsWith('/') ? Directory.Exists(p) : File.Exists(p)))
+                problems.Add($"the skill exemption {e.Path} names nothing in this tree: a moved file would hide behind it");
+        }
+        void ReadFile(string file, List<Finding> into)
+        {
+            var rel = Norm(Path.GetRelativePath(root, file));
+            var kind = Path.GetExtension(file).ToLowerInvariant();
+            if (!Read.Contains(kind)) return;
+            into.AddRange(SkillsIn(rel, kind, File.ReadAllText(file)));
+        }
+        if (Directory.Exists(module))
+            foreach (var file in Walk(root, module))
+            {
+                var rel = Norm(Path.GetRelativePath(root, file));
+                if ((cfg.SkillExempt ?? []).Any(e => e.Path.EndsWith('/') ? rel.StartsWith(e.Path, StringComparison.OrdinalIgnoreCase) : Same(e.Path, rel))) continue;
+                ReadFile(file, outside);
+            }
+        if (Directory.Exists(module) && cfg.SkillReadsInside != null)
+            foreach (var file in WalkModule(module)) ReadFile(file, inside);
+        outside = outside.Distinct().ToList();
+        inside = inside.Distinct().ToList();
+        foreach (var (list, found, label) in new[] { (cfg.SkillReadsOutside, outside, "outside"), (cfg.SkillReadsInside, inside, "module") })
+            foreach (var c in list ?? [])
+            {
+                if (!File.Exists(Path.Combine(root, c.File))) { problems.Add($"the skill read ({label}) {c.File} names no file: a closed read leaves the list"); continue; }
+                foreach (var n in c.Names)
+                    if (!found.Any(f => Same(f.File, c.File) && f.Name == n))
+                        problems.Add($"the skill read ({label}) {c.File} [{n}] matches nothing: a closed read leaves the list");
+            }
+        return (outside, inside, problems);
+    }
+
+    /// <summary>The module's own files, but its build output and caches.</summary>
+    static IEnumerable<string> WalkModule(string module)
+    {
+        var stack = new Stack<string>();
+        stack.Push(module);
+        while (stack.Count > 0)
+        {
+            var dir = stack.Pop();
+            foreach (var f in Directory.EnumerateFiles(dir)) yield return f;
+            foreach (var d in Directory.EnumerateDirectories(dir))
+                if (!NotSource.Any(x => string.Equals(x.Path, Path.GetFileName(d), StringComparison.OrdinalIgnoreCase))) stack.Push(d);
+        }
+    }
+
+    /// <summary>The skill forms one piece of text holds: a path form, and (for a code literal) the bare piece.</summary>
+    static IEnumerable<string> SkillForms(string s, bool literal)
+    {
+        var t = Regex.Replace(s.Replace('\\', '/'), "/{2,}", "/");
+        foreach (var n in SkillNames)
+            if (Regex.IsMatch(t, @"(?<![\w.-])skills/" + Regex.Escape(n) + @"(?![\w-])", RegexOptions.IgnoreCase)) yield return "skills/" + n;
+        if (Regex.IsMatch(t, @"(?<![\w.-])plugin/agents(?![\w-])", RegexOptions.IgnoreCase)) yield return "plugin/agents";
+        if (literal)
+            foreach (var n in SkillNames)
+                if (string.Equals(s.Trim(), n, StringComparison.OrdinalIgnoreCase)) yield return n;
+    }
+
+    internal static IEnumerable<Finding> SkillsIn(string rel, string kind, string text)
+    {
+        const string Kind = "reads";
+        List<(int Line, string Text)>? lits = kind switch
+        {
+            ".py" => PythonParts(text).Literals,
+            ".cs" => CSharpParts(text).Literals,
+            _ => null,
+        };
+        if (lits != null)
+        {
+            foreach (var (line, s) in lits) foreach (var hit in SkillForms(s, literal: true)) yield return new(rel, line, hit, Kind);
+            // the pair rule: a literal "agents" in a file that also holds a literal "plugin" (Path.Combine pieces, or
+            // PLUGIN = root / "plugin" then PLUGIN / "agents"); the finding is on the "agents" line
+            if (lits.Any(l => l.Text == "plugin"))
+                foreach (var (line, _) in lits.Where(l => l.Text == "agents")) yield return new(rel, line, "plugin + agents", Kind);
+            yield break;
+        }
+        var lines = text.Split('\n');
+        bool script = kind is ".ps1" or ".cmd" or ".bat" or ".sh";
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var t = lines[i].TrimStart();
+            if (script && (t.StartsWith('#') || t.StartsWith("::") || t.StartsWith("REM ", StringComparison.OrdinalIgnoreCase))) continue;
+            foreach (var hit in SkillForms(lines[i], literal: false)) yield return new(rel, i + 1, hit, Kind);
+        }
     }
 
     internal static string Sentence(Finding f) =>
@@ -478,7 +638,7 @@ internal static class FenceGuard
             Touch("mod/m/probe/probe.csproj", "<Project />");
             Touch("app/clean.py", "\"\"\"tool.py is mentioned in a docstring\"\"\"\n# and import tool in a comment\nimport base\nx = 'base.py'\n");
             Touch("app/Clean.cs", "// tool.py in a comment\n/* probe too */ var s = \"base.py\";\n");
-            var cfg = new Config("mod/m", [], []);
+            var cfg = new Config("mod/m", [], [], SkillReadsInside: []);
             var (f0, p0, _) = Scan(root, cfg);
             yield return (f0.Count == 0 && p0.Count == 0, "a tree whose outside mentions the module only in comments and docstrings, and whose module imports outside code, holds: " + Describe(f0, p0));
 
@@ -556,6 +716,39 @@ internal static class FenceGuard
             var (f7, p7, _) = Scan(root, c7);
             yield return (p7.Count == 0 && f7.All(f => Listed(c7, f)) && f7.Count == 1, "a reference on the named list passes and its entry is not stale: " + Describe(f7, p7));
             File.Delete(Path.Combine(root, "app/listed.py"));
+
+            // the second fence: houseCARL's two evaluation skills and plugin/agents
+            (string Rel, string Text, string Name, bool Inside, string Label)[] skill =
+            [
+                ("app/Bad.cs", "var p = \".claude\\\\skills\\\\evaluation-reporting\\\\references\\\\x.json\";\n", "skills/evaluation-reporting", false, "C#: a literal holding a skill's path"),
+                ("app/bad.py", "p = root / \".claude\" / \"skills\" / \"world-edit-compatibility\"\n", "world-edit-compatibility", false, "Python: a skill's name as a path piece"),
+                ("app/Bad.cs", "var a = Path.Combine(at, \"plugin\", \"agents\");\n", "plugin + agents", false, "C#: \"plugin\" and \"agents\" as pieces on one line"),
+                ("app/app.props", "<P>$(Root).claude\\skills\\evaluation-reporting\\x.json</P>\n", "skills/evaluation-reporting", false, "a build file naming a skill's path"),
+                ("app/data.json", "{ \"from\": \"external/houseCARL/plugin/agents/model-x.md\" }\n", "plugin/agents", false, "a data file naming plugin/agents"),
+                ("mod/m/reader.py", "P = HC / \".claude/skills/evaluation-reporting/references/report-priorities.json\"\n", "skills/evaluation-reporting", true, "inside the module: a moved file at its old place"),
+            ];
+            foreach (var (rel, text, name, inside, label) in skill)
+            {
+                Touch(rel, text);
+                var (so, si, _) = ScanSkills(root, cfg);
+                var got = inside ? si : so;
+                yield return (got.Any(f => f.File == rel && f.Name == name && f.Line == 1), $"skills: {label} fails: " + Describe(got, []));
+                File.Delete(Path.Combine(root, rel));
+            }
+            Touch("app/registry.json", "{ \"skill\": \"world-edit-compatibility\", \"about\": \"read under the evaluation-reporting skill's rules\" }\n");
+            Touch("app/Agents.cs", "var a = \"agents\"; // plugin/agents in a comment\n");
+            Touch("app/two.py", "PLUGIN = ROOT / \"plugin\"\nx = 1\nAGENTS = PLUGIN / \"agents\"\n");
+            var (sp0, _, _) = ScanSkills(root, cfg);
+            yield return (sp0.Any(f => f.File == "app/two.py" && f.Name == "plugin + agents" && f.Line == 3), "skills: Python: \"plugin\" and \"agents\" as pieces on two lines of one file fails on the agents line: " + Describe(sp0, []));
+            File.Delete(Path.Combine(root, "app/two.py"));
+            var (sh, sih, sph) = ScanSkills(root, cfg);
+            yield return (sh.Count == 0 && sih.Count == 0 && sph.Count == 0, "skills: a skill's bare name in data or prose, a lone \"agents\" and a comment hold: " + Describe(sh.Concat(sih).ToList(), sph));
+            File.Delete(Path.Combine(root, "app/registry.json"));
+            File.Delete(Path.Combine(root, "app/Agents.cs"));
+            var (_, _, sp1) = ScanSkills(root, cfg with { SkillReadsOutside = [new("app/clean.py", ["plugin/agents"], "fixture", "never")] });
+            yield return (sp1.Any(p => p.Contains("matches nothing")), "skills: a named outside read that matches nothing fails: " + string.Join("; ", sp1));
+            var (_, _, sp2) = ScanSkills(root, cfg with { SkillReadsInside = [new("mod/m/tool.py", ["skills/evaluation-reporting"], "fixture", "never")] });
+            yield return (sp2.Any(p => p.Contains("matches nothing")), "skills: a named module read that matches nothing fails: " + string.Join("; ", sp2));
         }
         finally { try { Directory.Delete(root, true); } catch { /* temp cleanup best-effort */ } }
     }
