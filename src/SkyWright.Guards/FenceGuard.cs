@@ -27,12 +27,13 @@ namespace SkyWright.Guards;
 ///          found even when it names no file;
 ///   .csproj .props .targets .sln .xaml .json   any text that names any of those (a project or linked source, a
 ///          registry adapter's program), and in a build file the module's layout properties, $(SkyWrightIntegration...);
-///   .ps1 .cmd .bat   a line that is not a comment and names any of those.
+///   .ps1 .cmd .bat .sh   a line that is not a comment and names any of those.
 ///
 /// What it does not read, and why: comments and docstrings, and files of every other kind (.md, .txt, .html, .j2, .css,
 /// images, binaries) are prose or data no program starts, imports or follows as a path; C# type use is left to the
 /// compiler, which refuses a type the outside code has no project or source for (project references and linked sources
-/// are read above). Folders that are not SkyWright's source are not walked (<see cref="NotSource"/>). The allowed
+/// are read above). Folders that are not SkyWright's source are not walked (<see cref="NotSource"/>, matched by name at any
+/// depth and printed on every run with the reason). The allowed
 /// observers and the recorded outputs (<see cref="Exempt"/>) are read by name, printed on every run with their reason, and
 /// an exemption that names nothing fails like a stale crossing. The direction module to outside is never a finding.
 /// </summary>
@@ -45,7 +46,20 @@ internal static class FenceGuard
 
     /// <summary>Folders not walked: not SkyWright's source (the pin, build output, git, editors, nested worktrees,
     /// generated test output).</summary>
-    internal static readonly string[] NotSource = ["external", "bin", "obj", ".git", ".vs", ".idea", "worktrees", "_generated", "__pycache__", "artifacts", "_claude"];
+    internal static readonly Exemption[] NotSource =
+    [
+        new("external", "the houseCARL pin, read-only here; its own code is not SkyWright's"),
+        new("bin", "build output"),
+        new("obj", "build output"),
+        new(".git", "git's own store"),
+        new(".vs", "editor state"),
+        new(".idea", "editor state"),
+        new("worktrees", "nested git worktrees: other checkouts with their own fence"),
+        new("_generated", "output the suites generate while they run"),
+        new("__pycache__", "Python's compiled cache"),
+        new("artifacts", "install and packaging output (ignored by git)"),
+        new("_claude", "the owner's notes repository (ignored by git)"),
+    ];
 
     internal static readonly Config SkyWright = new(
         Module: "integration/housecarl",
@@ -113,6 +127,7 @@ internal static class FenceGuard
             return 1;
         }
         Console.WriteLine($"  tree      {repo}");
+        foreach (var e in NotSource) Console.WriteLine($"  not walked {e.Path}/ (a folder of this name at any depth) — {e.Why}");
         foreach (var e in SkyWright.Exempt) Console.WriteLine($"  exempt    {e.Path} — {e.Why}");
         foreach (var c in SkyWright.Crossings) Console.WriteLine($"  crossing  {c.File} [{string.Join(", ", c.Names)}] — {c.Why}; removed in {c.Step}");
         var (findings, problems, read) = Scan(repo, SkyWright);
@@ -172,7 +187,7 @@ internal static class FenceGuard
         return (findings, problems, read);
     }
 
-    static readonly HashSet<string> Read = [".py", ".cs", ".csproj", ".props", ".targets", ".sln", ".xaml", ".json", ".ps1", ".cmd", ".bat"];
+    static readonly HashSet<string> Read = [".py", ".cs", ".csproj", ".props", ".targets", ".sln", ".xaml", ".json", ".ps1", ".cmd", ".bat", ".sh"];
 
     internal sealed record Names(HashSet<string> Python, HashSet<string> Tokens, string ModulePath);
 
@@ -209,7 +224,7 @@ internal static class FenceGuard
             foreach (var f in Directory.EnumerateFiles(dir)) yield return f;
             foreach (var d in Directory.EnumerateDirectories(dir))
             {
-                if (NotSource.Contains(Path.GetFileName(d), StringComparer.OrdinalIgnoreCase)) continue;
+                if (NotSource.Any(x => string.Equals(x.Path, Path.GetFileName(d), StringComparison.OrdinalIgnoreCase))) continue;
                 if (string.Equals(Path.GetFullPath(d).TrimEnd('\\', '/'), mod, StringComparison.OrdinalIgnoreCase)) continue;
                 stack.Push(d);
             }
@@ -237,7 +252,7 @@ internal static class FenceGuard
                 foreach (Match m in Regex.Matches(csCode, @"\bCheckout\.Integration\b"))
                     yield return new(rel, LineOf(csCode, m.Index), "Checkout.Integration", "uses");
                 break;
-            case ".ps1" or ".cmd" or ".bat":
+            case ".ps1" or ".cmd" or ".bat" or ".sh":
                 var lines = text.Split('\n');
                 for (int i = 0; i < lines.Length; i++)
                 {
