@@ -45,7 +45,7 @@ internal static class ModTint
         static string Names(List<FormKey> ks) => string.Join(", ", ks.Take(10)) + (ks.Count > 10 ? $" and {ks.Count - 10} more" : "");
         var parts = new List<string>();
         if (bos.Count > 0) parts.Add($"{bos.Count} Base Object Swapper reference(s) of it, drawn with the swap's transform ({Names(bos)})");
-        if (off.Count > 0) parts.Add($"{off.Count} whose placement on the server is not the one the scene drew, so their winner is not used ({Names(off)})");
+        if (off.Count > 0) parts.Add($"{off.Count} whose placement in the load order is not the one the scene drew, so their winner is not used ({Names(off)})");
         return (refs, parts.Count == 0 ? "" : "left out " + string.Join("; and ", parts) + ".");
     }
 

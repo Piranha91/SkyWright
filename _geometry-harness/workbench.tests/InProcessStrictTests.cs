@@ -146,11 +146,11 @@ public sealed class InProcessStrictTests
     {
         using var w = new TiltedRefWorld();
         await using var p = Open(w, NewOut(w.Root));
-        Assert.Equal(HarnessShared.HousecarlCalls.Identity, p.ServerSha256);
+        Assert.Equal(HarnessShared.HousecarlCalls.Identity, p.ReaderBuild);
         var objects = await p.ReadObjectsAsync(new[] { (TiltedRefWorld.Ref, Drawn) });
         var row = new RowState("Holds", "s", "b");
-        var stored = new Decision(w.Instance, "Default", "geometry.object-overlap", "k", "intentional", "r", DateTimeOffset.UtcNow, row, objects, p.ServerSha256);
-        var same = Decisions.Compare(stored, row, objects, p.ServerSha256);
+        var stored = new Decision(w.Instance, "Default", "geometry.object-overlap", "k", "intentional", "r", DateTimeOffset.UtcNow, row, objects, p.ReaderBuild);
+        var same = Decisions.Compare(stored, row, objects, p.ReaderBuild);
         Assert.DoesNotContain("reader changed", same.Sentence);
         var other = Decisions.Compare(stored, row, objects, "in-process houseCARL 0000000000000000 (another build)");
         Assert.Contains("reader changed", other.Sentence);

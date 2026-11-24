@@ -24,12 +24,12 @@ internal sealed class PatchWriter : IAsyncDisposable
 {
     readonly HousecarlLibrary _library;
     internal WriteTarget Target { get; }
-    internal string ServerExe { get; }
-    internal string ServerSha256 { get; }
+    internal string CodePath { get; }
+    internal string ReaderBuild { get; }
     internal Action<string> Log { get; }
 
     PatchWriter(HousecarlLibrary library, WriteTarget target, string exe, string sha, Action<string> log)
-    { _library = library; Target = target; ServerExe = exe; ServerSha256 = sha; Log = log; }
+    { _library = library; Target = target; CodePath = exe; ReaderBuild = sha; Log = log; }
 
     /// <summary>The refusals before anything opens: the Output Folder rule, the rulebook, the profile.</summary>
     static void Preflight(WriteTarget target, string corpusPath)
@@ -97,7 +97,7 @@ internal sealed class PatchWriter : IAsyncDisposable
             else if (path == "Placement.Rotation") rot = Parse(v);
         }
         if (pos is null || rot is null)
-            throw new InvalidOperationException($"the server's answer for {formKey} carried no Placement.Position and Placement.Rotation; read it with housecarl_records to see why.");
+            throw new InvalidOperationException($"houseCARL's answer for {formKey} carried no Placement.Position and Placement.Rotation; reopen the scene to read it again.");
         return (pos.Value, rot.Value);
 
         static HousecarlCore.Vec3 Parse(JsonElement v)
@@ -164,7 +164,7 @@ internal sealed class PatchWriter : IAsyncDisposable
     internal string? Mismatch(Mutagen.Bethesda.Plugins.FormKey key, HousecarlCore.Vec3 pos, HousecarlCore.Vec3 rot, ViewProbe.RefPlacementEdit.Pose drawn,
                               float tolerance = 0.01f)
         => Near(pos, drawn.Position, tolerance) && NearAngles(rot, drawn.Rotation, 1e-4f) ? null
-         : $"{key}'s winning placement on the server ({V(pos)} / {V(rot)}) is not the one the scene drew "
+         : $"{key}'s winning placement in the load order ({V(pos)} / {V(rot)}) is not the one the scene drew "
            + $"({V(drawn.Position)} / {V(drawn.Rotation)}); the scene and {Target} are not the same configuration.";
 
     /// <summary>Null when the server's winning placement of <paramref name="key"/> is the one the scene drew, else the one
@@ -191,15 +191,15 @@ internal sealed class PatchWriter : IAsyncDisposable
         }, ct);
         using var doc = JsonDocument.Parse(text);
         if (!doc.RootElement.TryGetProperty("records", out var recs))
-            throw new InvalidOperationException("the server's records answer carried no records; read it with housecarl_records to see why.");
+            throw new InvalidOperationException("houseCARL's records answer carried no records; reopen the scene to read it again.");
         if (doc.RootElement.TryGetProperty("truncated", out var cut) && cut.ValueKind == JsonValueKind.True)
-            throw new InvalidOperationException($"the server cut its records answer for {chunk.Length} references short; read them with housecarl_records to see why.");
+            throw new InvalidOperationException($"houseCARL cut its records answer for {chunk.Length} references short; reopen the scene to read it again.");
         foreach (var r in recs.EnumerateArray())
         {
             var fid = r.TryGetProperty("formid", out var f) ? f.GetString() : null;
             if (fid is null || !Mutagen.Bethesda.Plugins.FormKey.TryFactory(fid, out var k)) continue;
             if (r.TryGetProperty("error", out var err))
-                throw new InvalidOperationException($"the server could not read {fid}: {err.GetString()}");
+                throw new InvalidOperationException($"houseCARL could not read {fid}: {err.GetString()}");
             var fields = new List<FieldValue>();
             if (r.TryGetProperty("fields", out var fs))
                 foreach (var x in fs.EnumerateArray())
@@ -209,7 +209,7 @@ internal sealed class PatchWriter : IAsyncDisposable
         }
         }
         foreach (var k in list)
-            if (!result.ContainsKey(k)) throw new InvalidOperationException($"the server's answer had no row for {k}; read it with housecarl_records to see why.");
+            if (!result.ContainsKey(k)) throw new InvalidOperationException($"houseCARL's answer had no row for {k}; reopen the scene to read it again.");
         return result;
     }
 
@@ -232,7 +232,7 @@ internal sealed class PatchWriter : IAsyncDisposable
         foreach (var (k, drawn) in refs)
         {
             if (PlacementOf(read[k].Fields) is not { } pr)
-                throw new InvalidOperationException($"the server's answer for {k} carried no Placement.Position and Placement.Rotation; read it with housecarl_records to see why.");
+                throw new InvalidOperationException($"houseCARL's answer for {k} carried no Placement.Position and Placement.Rotation; reopen the scene to read it again.");
             if (Mismatch(k, pr.Pos, pr.Rot, drawn) is { } why) throw new InvalidOperationException(why);
         }
     }

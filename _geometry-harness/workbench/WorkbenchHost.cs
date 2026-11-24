@@ -1912,7 +1912,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _contextRows.Children.Clear();
         if (_session.Selected is not { } k) { Line("Select a reference to see its doors, what names it, what rests on it and the navmesh under it."); _viewState.HighlightNav(Array.Empty<(Vector3, Vector3, Vector3)>()); return; }
         var key = k.ToString();
-        if (ContextCache.Read(scene, key) is not { } read) { Line("This scene has no houseCARL server to read the context from."); return; }
+        if (ContextCache.Read(scene, key) is not { } read) { Line("This scene has no write target to read the context from; open it from the launcher's profile."); return; }
         if (!read.IsCompleted)
         {
             Line($"{key}: reading its doors, what names it, what rests on it and the navmesh under it", System.Windows.Media.Brushes.DimGray);
@@ -2042,7 +2042,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         if (notDrawn.Count > 0)
             throw new InvalidOperationException($"{string.Join(" and ", notDrawn)} is not drawn in this scene, so its objects are not compared until its cell is open.");
         var objects = await w.ReadObjectsAsync(keys.Select(k => (k, RefPlacementEdit.BakedPose(_session.RefOf(k).Ref))).ToList());
-        return (((IWorkbenchSurface)new LiveSurface()).RowStateOf(row), objects, w.ServerSha256);
+        return (((IWorkbenchSurface)new LiveSurface()).RowStateOf(row), objects, w.ReaderBuild);
     }
 
     /// <summary>The session file follows every change; a failed write is said, never silent.</summary>
