@@ -742,7 +742,7 @@ public sealed class InPlaceRunTests
              .ToDictionary(p => p, p => File.Exists(p) ? (new FileInfo(p).Length, File.GetLastWriteTimeUtc(p)) : (-1L, Directory.GetLastWriteTimeUtc(p)));
 
     /// <summary>The synthetic world with a selection: mod folder SelMod, whose plugin places one reference in the master's cell.</summary>
-    static ModKey SelWorld(TiltedRefWorld w)
+    internal static ModKey SelWorld(TiltedRefWorld w)
     {
         var sel = new ModKey("HcWbSel", ModType.Plugin);
         var m = new SkyrimMod(sel, SkyrimRelease.SkyrimSE);

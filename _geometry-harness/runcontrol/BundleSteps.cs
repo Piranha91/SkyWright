@@ -57,11 +57,17 @@ public static class BundleSteps
     public static PyDict NamesStep(string d, string? cmd, string source, PyDict mods, PyDict env)
     {
         var elapsed = Timer();
-        PyDict Done(string status, string sentence, object? result = null, object? counts = null) => new()
+        PyDict Done(string status, string sentence, object? result = null, object? counts = null)
         {
-            ["status"] = status, ["sentence"] = string.Join(' ', PyText.Split(sentence)), ["reader"] = cmd != null ? source : null,
-            ["counts"] = counts, ["seconds"] = PyText.Round(elapsed(), 1), ["result"] = result,
-        };
+            var d = new PyDict
+            {
+                ["status"] = status, ["sentence"] = string.Join(' ', PyText.Split(sentence)), ["reader"] = cmd != null ? source : null,
+                ["counts"] = counts, ["seconds"] = PyText.Round(elapsed(), 1), ["result"] = result,
+            };
+            // read in process, no program ran: which houseCARL build read the names, by its assemblies' bytes
+            if (cmd == InProcessReader.Command) d["readerIdentity"] = InProcessReader.Identity;
+            return d;
+        }
         if (cmd == null) return Done("refused", "The names enrichment was not run because " + source);
         PyDict made;
         try { made = NamesEnrichment.Run(d, cmd, mods, env.Count > 0 ? env : null); }

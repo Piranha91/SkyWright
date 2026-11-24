@@ -8,10 +8,16 @@
     <AssemblyName>runcontrol</AssemblyName>
     <RootNamespace>RunControl</RootNamespace>
     <NoWarn>CA1416</NoWarn>
+    <!-- houseCARL's server code compiled in as a library (Directory.Build.props), never its program: the names read -->
+    <SkyWrightHousecarlLibrary>true</SkyWrightHousecarlLibrary>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
     <ProjectReference Include="$(SkyWrightSrc)SkyWright.Engine\SkyWright.Engine.csproj" />
+    <!-- built first, its program not referenced: SkyWrightHousecarlLibrary references its assembly alone -->
+    <ProjectReference Include="$(HousecarlSrc)housecarl-mcp\housecarl-mcp.csproj" ReferenceOutputAssembly="false" Private="false" />
+    <PackageReference Include="ModelContextProtocol.Core" Version="2.2.0" />
+    <Compile Include="..\_shared\HousecarlCalls.cs" Link="HousecarlCalls.cs" />
     <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
     <Compile Include="..\_shared\CheckoutLayout.cs" Link="CheckoutLayout.cs" />
     <Compile Include="..\_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />

@@ -76,7 +76,7 @@ public sealed class HousecarlLibraryTests : IClassFixture<TiltedRefWorld>
         var other = Path.Combine(_w.Root, "other-corpus.json");
         File.Copy(TestCorpus.Path, other, overwrite: true);
         var ex = Assert.Throws<InvalidOperationException>(() => HousecarlLibrary.Open(Target(Output()), Path.Combine(_w.Root, "hcdata-r2"), other));
-        Assert.Contains("restart SkyWright", ex.Message);
+        Assert.Contains("start the program again", ex.Message);
         Assert.Equal(Path.GetFullPath(TestCorpus.Path), CorpusRulebook.CorpusPath, ignoreCase: true);
     }
 

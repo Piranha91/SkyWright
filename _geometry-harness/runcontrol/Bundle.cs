@@ -7,7 +7,7 @@ public sealed class BundleArgs
 {
     public string Run = "";
     public string? Out, Media, Registry, Scope, Search, ReaderCmd;
-    public bool NoNames;
+    public bool NoNames, InProcessReader;
     public List<string> ReaderEnv = [], ModName = [];
 }
 
@@ -213,7 +213,7 @@ public static class Bundle
                     });
                 else
                 {
-                    var (cmd, source) = BundleSteps.DefaultReaderCmd(a.ReaderCmd);
+                    var (cmd, source) = a.InProcessReader ? (RunControl.InProcessReader.Command, RunControl.InProcessReader.Source) : BundleSteps.DefaultReaderCmd(a.ReaderCmd);
                     st = BundleSteps.NamesStep(outDir, cmd, source, BundleSteps.ModNames(a.ModName), BundleSteps.ReaderEnv(a.ReaderEnv));
                     BundleSteps.WriteNamesStatus(outDir, st);
                     if (st["status"] is "enriched" or "partial" && VerifyBundle.Run(outDir, quiet: true) != Exit.Ok)

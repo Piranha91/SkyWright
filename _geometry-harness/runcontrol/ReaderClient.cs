@@ -71,7 +71,8 @@ public sealed class ProcessWire : IReaderWire
 public sealed class ReaderClient
 {
     /// <summary>How a reader is started from its command line and environment; a test replaces it with a replay.</summary>
-    public static Func<string, PyDict, IReaderWire> Open = (commandLine, env) => new ProcessWire(commandLine, env);
+    public static Func<string, PyDict, IReaderWire> Open = (commandLine, env) =>
+        commandLine == InProcessReader.Command ? new InProcessWire(env) : new ProcessWire(commandLine, env);
 
     readonly IReaderWire _wire;
     long _n;

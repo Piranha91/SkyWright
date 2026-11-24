@@ -28,7 +28,10 @@ public static class StageBundle
         string bundle = BundleDir(ctx);
         if (Ev.Exists(bundle))
             throw new Refusal($"{PyOrder.Fwd(bundle)} exists from an earlier bundle; move it aside rather than overwrite it.");
-        var bundleArgs = new List<string> { "--run", PyOrder.Fwd(run), "--out", PyOrder.Fwd(bundle), "--reader-cmd", ReaderCmd(ctx) };
+        // the machine file's readerInProcess reads the names with houseCARL's code compiled in; else the named reader program
+        var bundleArgs = new List<string> { "--run", PyOrder.Fwd(run), "--out", PyOrder.Fwd(bundle) };
+        if (Py.Truthy(ctx.Machine.Get("readerInProcess")) && !Py.Truthy(ctx.Machine.Get("readerCmd"))) bundleArgs.Add(InProcessReader.Flag);
+        else bundleArgs.AddRange(["--reader-cmd", ReaderCmd(ctx)]);
         foreach (var (k, v) in NamesEnv(ctx)) bundleArgs.AddRange(["--reader-env", $"{k}={v}"]);
         foreach (var (p, n) in Py.DictOrEmpty(Py.Truthy(ctx.Entry.Presentation("bundle", "modNames")) ? ctx.Entry.Presentation("bundle", "modNames") : null))
             bundleArgs.AddRange(["--mod-name", $"{p}={PyText.Str(n)}"]);
