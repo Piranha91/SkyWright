@@ -5,8 +5,9 @@ SkyWright finds where Skyrim mods clash in the 3D world, shows each clash, and w
 ## Rules
 
 - **Probes stay separate programs,** so a crash stays isolated and Abort works per probe.
-- **Each rule has one owner.** Never copy a rule from houseCARL or between C# and Python; call its owner. houseCARL's data (its skills' references, its run log) is read from the submodule, never copied in.
-- **Do not edit `external/houseCARL`.** It is a pin. A core fix goes to houseCARL's own checkout; then the pin moves in one SkyWright commit.
+- **Each rule has one owner.** Never copy a rule between C# and Python or between SkyWright and houseCARL; call its owner. houseCARL's data (its skills' references, its run log) is read from the submodule, never copied in.
+- **Upstream houseCARL is houseCARL's; home-made code SkyWright may own.** Code that comes from upstream houseCARL (`Avick3110/houseCARL`, `origin/main` in houseCARL's checkout) stays there and is called through the pin. Code that exists only in Piranha's houseCARL branches, never upstream, SkyWright may claim: it moves into SkyWright in one change and SkyWright owns it from then on. If houseCARL's own code still calls it, ask before moving it.
+- **Do not edit `external/houseCARL`.** It is a pin. A fix to upstream code goes to houseCARL's own checkout; then the pin moves in one SkyWright commit. Home-made code is claimed (above), not edited in place.
 - **Errors are one plain sentence: what went wrong and what to try.** No silently wrong answer and no silently degraded mode.
 - **Tests:** proportional. Strict checks for file destinations, patch contents, undo, configuration identity and any "resolved" claim; UI-only work gets a build and a screenshot.
 - **Wording** in the app uses the modder's words (load order, priority, mod, plugin), not internal terms.
