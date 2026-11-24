@@ -26,7 +26,7 @@ namespace SkyWright.Guards;
 ///          module's source folder, <c>Checkout.Integration</c>, in code, so a caller that builds the path from it is
 ///          found even when it names no file;
 ///   .csproj .props .targets .sln .xaml .json   any text that names any of those (a project or linked source, a
-///          registry adapter's program);
+///          registry adapter's program), and in a build file the module's layout properties, $(SkyWrightIntegration...);
 ///   .ps1 .cmd .bat   a line that is not a comment and names any of those.
 ///
 /// What it does not read, and why: comments and docstrings, and files of every other kind (.md, .txt, .html, .j2, .css,
@@ -248,7 +248,13 @@ internal static class FenceGuard
                 break;
             default:
                 var all = text.Split('\n');
-                for (int i = 0; i < all.Length; i++) foreach (var hit in InText(all[i], n, lone: false)) yield return new(rel, i + 1, hit, "names");
+                for (int i = 0; i < all.Length; i++)
+                {
+                    foreach (var hit in InText(all[i], n, lone: false)) yield return new(rel, i + 1, hit, "names");
+                    // a build file can reach the module through the layout's own properties without naming a file
+                    if (kind is ".csproj" or ".props" or ".targets" && Regex.IsMatch(all[i], @"\$\(SkyWrightIntegration\w*\)"))
+                        yield return new(rel, i + 1, "$(SkyWrightIntegration)", "uses");
+                }
                 break;
         }
     }
@@ -430,6 +436,9 @@ internal static class FenceGuard
             Touch("app/app.csproj", "<ItemGroup><ProjectReference Include=\"..\\mod\\m\\probe\\probe.csproj\" /></ItemGroup>");
             var (f3, _, _) = Scan(root, cfg);
             yield return (f3.Any(f => f.File == "app/app.csproj"), "an outside project reference into the module fails: " + Describe(f3, []));
+            Touch("app/app.csproj", "<ItemGroup><Compile Include=\"$(SkyWrightIntegrationLayoutRoot)x.cs\" /></ItemGroup>");
+            var (f3b, _, _) = Scan(root, cfg);
+            yield return (f3b.Any(f => f.File == "app/app.csproj" && f.Name == "$(SkyWrightIntegration)"), "an outside build file using the module's layout properties fails: " + Describe(f3b, []));
             File.Delete(Path.Combine(root, "app/app.csproj"));
 
             Touch("x.sln", "Project(\"{FAE04EC0}\") = \"probe\", \"mod\\m\\probe\\probe.csproj\", \"{1}\"\n");
