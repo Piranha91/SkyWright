@@ -15,7 +15,6 @@ import argparse
 import hashlib
 import json
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -233,12 +232,9 @@ def main() -> int:
         real = json.loads(Path(a.registry_from).read_text(encoding="utf-8"))
     else:
         src = REPO / "data/check-registry.json"
-        if src.exists():
-            real = json.loads(src.read_text(encoding="utf-8"))
-        else:
-            real = json.loads(subprocess.run(
-                ["git", "show", "q42-agent-a:.claude/skills/world-edit-compatibility/references/check-registry.json"],
-                cwd=REPO, capture_output=True, text=True, check=True).stdout)
+        if not src.is_file():
+            raise SystemExit(f"the shipped check registry is not at {src}; give --registry-from FILE, or run from a checkout.")
+        real = json.loads(src.read_text(encoding="utf-8"))
     def trim(ids, name, extra_about=""):
         keep = [c for c in real["checks"] if c["id"] in ids]
         absent = [k for k in ids if k not in {c["id"] for c in keep}]

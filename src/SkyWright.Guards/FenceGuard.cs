@@ -128,9 +128,6 @@ internal static class FenceGuard
             new("_geometry-harness/runcontrol/EvalSettings.cs", ["plugin + agents"],
                 "the plan's settings reader looks for plugin/agents above its own program to validate model IDs",
                 "step 2(b), when EvalSettings leaves runcontrol"),
-            new("_geometry-harness/tests/fixtures/evalrun/make_fixtures.py", ["skills/world-edit-compatibility"],
-                "a dead fallback that reads an old houseCARL ref's registry when data/check-registry.json is missing",
-                "step 2, with the fallback removed"),
         ],
         SkillReadsInside: null,   // rule (2) is applied once the module reads its own copy of the data
         SkillExempt:
