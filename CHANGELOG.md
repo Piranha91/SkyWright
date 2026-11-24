@@ -5,6 +5,12 @@ most one more saying how to check it.
 
 ## Unreleased
 
+- **SkyWright saves, undoes and repairs a navmesh, reads placements and a reference's context, and reads a run's names with houseCARL's code compiled in: it starts no houseCARL program, and its endpoint serves `workbench_state` and `workbench_act` only (the forwarded `housecarl_*` tools are gone).** Delete `Tools\housecarl-mcp\housecarl-mcp.exe` from a copy of the build and save, undo and repair there.
+- **A houseCARL refusal reaches you as one sentence with houseCARL's own reason: an undo it refused no longer reads as removed, and a refused navmesh-repair write stops the repair at once.** Run `HousecarlAnswerTests` in `workbench.tests`.
+- **A read of more than 1 MiB of records is read whole: the server path broke such an answer with a line break every 1 MiB, so a long decision or context read could fail or read a wrong value.** It went with the server path.
+- **A navmesh repair after you switch profiles is written under the new profile's Output Folder (it went through the first profile's houseCARL before).** Run `HousecarlWritersTests` in `workbench.tests`.
+- **A stored decision now names the houseCARL build that read it by that build's code, so it says "the houseCARL reader changed" once after an update; the old name was the server's launcher, the same for every build.** Run `InProcessStrictTests` in `workbench.tests`.
+- **houseCARL's rulebook is `Data\corpus.json` in the build.**
 - **The report, reel, narration and capture tools, the in-game switch flips and `lookprobe` now live in the houseCARL integration module, `integration/housecarl/`, which builds to its own folder and which nothing in the app, the probes or the run controller refers into.** Run `bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.exe fence`; an evaluation run folder made before this change re-runs its stages after the bundle, because their tools' recorded paths moved.
 
 ## From houseCARL, before the split

@@ -24,7 +24,7 @@ bin\Debug\net9.0-windows10.0.19041.0\SkyWright.exe        (and bin\Release\... t
 | `SkyWright.exe` | The app |
 | `Probes\<name>\<name>.exe` | Every probe, and conflictdiff, navedit, ordermap and viewprobe |
 | `Tools\runcontrol\runcontrol.exe` | The run controller |
-| `Tools\housecarl-mcp\` | houseCARL's server, built from the pin, with the rulebook `corpus.json` beside it |
+| `Tools\housecarl-mcp\` | houseCARL's server program, built from the pin; the app and the run controller do not start it (they run houseCARL's code compiled in, `housecarl-mcp.dll` beside `SkyWright.exe` and runcontrol), and it leaves this folder for the integration module's |
 | `Data\` | The check registry, the severity table, the rest of `data\`, and houseCARL's scene policy |
 | `Tests\workbench.tests\` | The app's tests, which run against this build |
 | `skywright-layout.json` | The marker: which configuration, and where each piece is |
