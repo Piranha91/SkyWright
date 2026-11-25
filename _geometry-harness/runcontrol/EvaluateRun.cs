@@ -134,9 +134,6 @@ public static class EvaluateRun
         bool AlreadyDone(object? cid, object? aid) => EvaluateRun.AlreadyDone(ledger, cid, aid, null);
         void MarkReused(object? cid, object? aid) => EvaluateRun.MarkReused(ledger, cid, aid, null);
 
-        string ImportNote(object? st) => !Import(st) ? ""
-            : ". The imported evidence stays under imports/ but is no longer credited; import it again once the prerequisite is settled on this arm";
-
         // one child for every swept check, at the position of the first: a prerequisite ahead of it has run before
         // it, and a check behind it can read its receipts
         var sweepChecks = SweepRows.Planned(plan);
@@ -172,24 +169,7 @@ public static class EvaluateRun
                     continue;
                 }
                 if (AccountPlanStatus(ex, check, arm, st)) { }
-                else if (Import(st) && Prerequisites.UncreditedImportStillBlocked(ex, check, aid))
-                {
-                    // an import this gate un-credited earlier stays blocked, by name, while its prerequisite still fails
-                    string pre = Prerequisites.Satisfied(ex, check, aid)!;
-                    ex.Account(check, arm, $"blocked(prerequisite:{pre})", "blocked-prerequisite",
-                        Prerequisites.BlockDetail(ex, pre, aid) + ImportNote(st), extra: Prerequisites.SupersededImport(ex, check, arm));
-                }
-                else if (Import(st) && Prerequisites.UncreditedImportCause(ex, check, aid) is { } was)
-                {
-                    // an import whose entry was invalidated or refused reuse keeps that cause
-                    string? also = Prerequisites.Satisfied(ex, check, aid);
-                    ex.Account(check, arm, was, "stale-inputs",
-                        "an accepted import of this check is no longer credited: " + was
-                        + ". Its copied evidence stays under imports/ but backs no receipt; import it again "
-                        + "(the re-import is copied beside the old folder) once its inputs are what it states"
-                        + (also == null ? "" : $". A re-import is refused until {also} is settled on this arm as well: " + Prerequisites.BlockDetail(ex, also, aid)),
-                        extra: Prerequisites.SupersededImport(ex, check, arm));
-                }
+                else if (Import(st) && AccountUncreditedImport(ex, check, arm)) { }
                 else if (Ev.Eq(st, "live-import"))
                 {
                     var scopeRead = cid == RunControl.Plan.LiveCheckId ? Prerequisites.LiveSwitchScope(ex.Run, plan, ledger, aid) : null;
@@ -254,6 +234,33 @@ public static class EvaluateRun
     /// take, a held-back arm, a missing payload, an opt-in check not opted in), accounted by its plan status; false for
     /// a status this rule does not answer. runcontrol's evaluation and another program evaluating a plan of its own
     /// use the same rule.</summary>
+    /// <summary>An import row whose import is no longer credited, accounted with its cause: blocked by name while its
+    /// prerequisite still fails on this arm, else the cause an earlier gate recorded (invalidated or refused reuse).
+    /// False when the row's import was never un-credited.</summary>
+    public static bool AccountUncreditedImport(Executor ex, PyDict check, PyDict arm)
+    {
+        object? aid = arm["armId"];
+        object? st = Ev.Items(check["arms"]).Select(PyValue.Dict).FirstOrDefault(r => Ev.Eq(r["armId"], aid))?.Get("status");
+        if (Prerequisites.UncreditedImportStillBlocked(ex, check, aid))
+        {
+            // an import this gate un-credited earlier stays blocked, by name, while its prerequisite still fails
+            string pre = Prerequisites.Satisfied(ex, check, aid)!;
+            ex.Account(check, arm, $"blocked(prerequisite:{pre})", "blocked-prerequisite",
+                Prerequisites.BlockDetail(ex, pre, aid) + ImportNote(st), extra: Prerequisites.SupersededImport(ex, check, arm));
+            return true;
+        }
+        if (Prerequisites.UncreditedImportCause(ex, check, aid) is not { } was) return false;
+        // an import whose entry was invalidated or refused reuse keeps that cause
+        string? also = Prerequisites.Satisfied(ex, check, aid);
+        ex.Account(check, arm, was, "stale-inputs",
+            "an accepted import of this check is no longer credited: " + was
+            + ". Its copied evidence stays under imports/ but backs no receipt; import it again "
+            + "(the re-import is copied beside the old folder) once its inputs are what it states"
+            + (also == null ? "" : $". A re-import is refused until {also} is settled on this arm as well: " + Prerequisites.BlockDetail(ex, also, aid)),
+            extra: Prerequisites.SupersededImport(ex, check, arm));
+        return true;
+    }
+
     public static bool AccountPlanStatus(Executor ex, PyDict check, PyDict arm, object? st)
     {
         var plan = ex.Plan;
@@ -300,5 +307,8 @@ public static class EvaluateRun
     }
 
     // st in IMPORT_ROW_STATUSES.
+    static string ImportNote(object? st) => !Import(st) ? ""
+        : ". The imported evidence stays under imports/ but is no longer credited; import it again once the prerequisite is settled on this arm";
+
     static bool Import(object? st) => st is string s && EvalStore.ImportRowStatuses.Contains(s);
 }

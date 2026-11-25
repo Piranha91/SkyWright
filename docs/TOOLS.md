@@ -34,6 +34,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Do simultaneous runs of the same render command produce the same output?](#tool-renderagree) — `renderagree`
 - [Do stateprobe, contactprobe and its empty-space mode leave out a light whose base record has no model, and keep a light with a model or with a model that could not be read?](#tool-_geometry-harness-tests-test_modelless_light.py) — `_geometry-harness/tests/test_modelless_light.py`
 - [Do synthetic depth arrays produce the expected projection and clearance results?](#tool-depthsurvey.selftest) — `depthsurvey.selftest`
+- [Do the AI-side checks run end to end over the controller suite's fixtures, by evalcontrol over a finished app run?](#tool-integration-housecarl-tests-test_evalcontrol_run.py) — `integration/housecarl/tests/test_evalcontrol_run.py`
 - [Do the capture fallbacks (cutaway, top-down, see-through marks) give their known answers on a real render, and do the reuse, reel and caption rules hold?](#tool-integration-housecarl-tests-test_capture_fallbacks.py) — `integration/housecarl/tests/test_capture_fallbacks.py`
 - [Do the depth-measurement mode's texture keep rule and mask rule give their known answers?](#tool-viewprobe.depth-measurement-selftest) — `viewprobe.depth-measurement-selftest`
 - [Do the frustum test and the occlusion rule's shape classes still give their known answers?](#tool-planeassess.selftest) — `planeassess.selftest`
@@ -73,6 +74,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does contactprobe take the fast memory route when the memory is there, lean under a limit or when other programs hold the memory (warning by name, unattended default recorded), stop with exit 5 under --memory-route ask, and leave no emit or rows behind when it refuses or runs out of memory?](#tool-_geometry-harness-tests-test_contact_memory_route.py) — `_geometry-harness/tests/test_contact_memory_route.py`
 - [Does depth-survey projection and lookup math satisfy its synthetic controls?](#tool-_geometry-harness-viewprobe-tools-test_depthsurvey.py) — `_geometry-harness/viewprobe/tools/test_depthsurvey.py`
 - [Does each frame's embedded replay command reproduce that frame?](#tool-_geometry-harness-tests-test_replay_command.py) — `_geometry-harness/tests/test_replay_command.py`
+- [Does evalcontrol accept a judged-0 record import only when it states no members on an arm without the targets, and refuse every other?](#tool-integration-housecarl-tests-test_import_empty_population.py) — `integration/housecarl/tests/test_import_empty_population.py`
 - [Does evalreport plan verify --bundle and --sibling-bundle in place without writing a byte or mtime into either, without a copy in proportion to the bundle even when its evidence is hard-linked, leave no tree after a failure mid-verify, refuse a verify that wrote no result, does runcontrol verify-bundle --out write its result only to the named file, and does every caller check a bundle with runcontrol rather than Python?](#tool-integration-housecarl-tests-test_evalreport_verify_in_place.py) — `integration/housecarl/tests/test_evalreport_verify_in_place.py`
 - [Does evalreport's reel refuse a capture-results file it cannot read, and still plan without one?](#tool-integration-housecarl-tests-test_capture_results_unreadable.py) — `integration/housecarl/tests/test_capture_results_unreadable.py`
 - [Does evalsettings.load still give the recorded record, path, values, sentences and refusals, and do a lab run's ask, opt-in and invalid-file cases hold?](#tool-integration-housecarl-tests-test_evalsettings_known_answers.py) — `integration/housecarl/tests/test_evalsettings_known_answers.py`
@@ -102,7 +104,6 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does planeassess class plane edits, read placed primitives and test the frustum and rule shapes correctly?](#tool-_geometry-harness-planeassess-test_planeassess.py) — `_geometry-harness/planeassess/test_planeassess.py`
 - [Does reading a capture's arms side by side keep each arm's evidence its own, choose workers from memory, and report failure, stop and resume as one worker does?](#tool-integration-housecarl-tests-test_records_parallel.py) — `integration/housecarl/tests/test_records_parallel.py`
 - [Does render-batch readiness enforce the offline planning and refusal contracts?](#tool-_geometry-harness-viewprobe-tools-test_renderbatch.py) — `_geometry-harness/viewprobe/tools/test_renderbatch.py`
-- [Does runcontrol accept a judged-0 import only when it states no members on an arm without the targets, and refuse every other?](#tool-_geometry-harness-tests-test_import_empty_population.py) — `_geometry-harness/tests/test_import_empty_population.py`
 - [Does runcontrol plan refuse an arm that overlapprobe's scene preflight would refuse?](#tool-_geometry-harness-tests-test_plan_scene_preflight.py) — `_geometry-harness/tests/test_plan_scene_preflight.py`
 - [Does runcontrol population write, byte for byte, the population file the schema names for the delta, print its identity, refuse a delta mod folder with a Base Object Swapper ini in one sentence, and write nothing but --out?](#tool-_geometry-harness-tests-test_evalrun_population_verb.py) — `_geometry-harness/tests/test_evalrun_population_verb.py`
 - [Does shotplan resolve a usable viewprobe and explain unavailable builds?](#tool-_geometry-harness-viewprobe-tools-test_shotplan_vp.py) — `_geometry-harness/viewprobe/tools/test_shotplan_vp.py`
@@ -186,6 +187,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does this camera point sit inside placed physical geometry?](#tool-viewprobe.inside-at) — `viewprobe.inside-at`
 - [Does this captured subject satisfy the identity, visibility and normal-view witness requirements?](#tool-subject-gate) — `subject-gate`
 - [Does this existing camera satisfy the subject visibility contract?](#tool-shotplan.check) — `shotplan.check`
+- [Does verify-bundle list, not judge, the rows of kinds it no longer checks in an older bundle, and refuse them in a current one?](#tool-_geometry-harness-tests-test_verify_old_kinds.py) — `_geometry-harness/tests/test_verify_old_kinds.py`
 - [Does viewprobe --route-solve accept a solved leg that drops down a walked ledge, across the ledge's plan gap, and still refuse a leg that really leaves the mesh?](#tool-_geometry-harness-tests-test_route_solve_ledge_drop.py) — `_geometry-harness/tests/test_route_solve_ledge_drop.py`
 - [Does viewprobe --route-solve report the ledge, enable/disable, unknown-type and held cross-mesh link counts, and name the held links when a pair has no path?](#tool-_geometry-harness-tests-test_ledge_link_counts.py) — `_geometry-harness/tests/test_ledge_link_counts.py`
 - [Does viewprobe judge a shape solid by its own data rather than by an effects\ folder, on a real render: lit effects meshes solid, hidden and refraction shapes not, an unreadable effects mesh counted?](#tool-_geometry-harness-tests-test_effects_path_rule.py) — `_geometry-harness/tests/test_effects_path_rule.py`
@@ -194,6 +196,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Has a moved or missing support stranded another object, and what contact or overlap-volume evidence exists?](#tool-contactprobe) — `contactprobe`
 - [Has another mod's terrain left a placed object floating in the air or buried in the ground?](#tool-contactprobe) — `contactprobe`
 - [Has this machine chosen its evaluation settings, and if not, can the user choose now?](#tool-evalsettings.ensure) — `evalsettings.ensure`
+- [How are the report fixtures' AI-side overlays (R5's supplied media) made by the module's evalcontrol?](#tool-integration-housecarl-tests-ai_report_fixtures.py) — `integration/housecarl/tests/ai_report_fixtures.py`
 - [How are the review reel's opening, load-order, unpictured-count and closing stills and a split's label strip drawn, and in which font?](#tool-reel-stills) — `reel-stills`
 - [How can I acquire a verified camera for one evidence-bound reporting request?](#tool-capture-acquire) — `capture-acquire`
 - [How can I answer shotplan's geometry queries from a declared toy scene?](#tool-shotplan-test-fixture) — `shotplan-test-fixture`
@@ -232,6 +235,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [How can the record capture be tested without a houseCARL server?](#tool-integration-housecarl-tests-fixtures-record_capture-fake_capture_mcp.py) — `integration/housecarl/tests/fixtures/record_capture/fake_capture_mcp.py`
 - [How do I add derived evidence to an evaluation bundle in Python?](#tool-evalrun) — `evalrun`
 - [How do I add record rows or in-game names to an evaluation bundle without changing its results?](#tool-evalrun.enrich) — `evalrun.enrich`
+- [How do I add the rows derived from a record import (record rows, the reversed order's) to an AI-side overlay bundle?](#tool-recordenrich) — `recordenrich`
 - [How do I browse any load order's worldspaces, cells and placed objects as a tree with each record's winning plugin, from an MO2 profile or a game Data folder, and open a cell in 3D?](#tool-workbench) — `workbench`
 - [How do I build SkyWright and its rulebook into the bin layout?](#tool-build) — `build`
 - [How do I capture an evaluation's record checks (dangling references, contested fields, cell attributes, registration and dialogue, missing assets) for every arm?](#tool-evalrecords) — `evalrecords`
@@ -241,10 +245,12 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [How do I derive an evaluation's disposition and STATUS.md with the C# controller?](#tool-runcontrol.finalize) — `runcontrol.finalize`
 - [How do I derive and freeze an evaluation's check plan?](#tool-runcontrol.plan) — `runcontrol.plan`
 - [How do I get top-down pictures of cells, as the renderer draws them, for a map?](#tool-viewprobe.map-tiles) — `viewprobe.map-tiles`
+- [How do I import a record reader's evidence for a record check the overlay left open?](#tool-evalcontrol) — `evalcontrol`
 - [How do I look at a cell's placed references in a window, move or turn one, and write the change as a placement override?](#tool-workbench) — `workbench`
 - [How do I make a narrated diagnostic reel or storyboard from an evaluation presentation?](#tool-evalreel) — `evalreel`
 - [How do I open a finished evaluation's results in a window and see what the patches addressed, did not address and changed that nothing predicted, each in its cell before or after the patch?](#tool-workbench) — `workbench`
 - [How do I open an MO2 profile in place, pick mod folders and probes, run them and review the results in the workbench, writing only under an Output Folder I choose?](#tool-workbench) — `workbench`
+- [How do I plan, measure, bundle and verify the AI-side checks of an evaluation over a finished app scan?](#tool-evalcontrol) — `evalcontrol`
 - [How do I plan, write and read back a navmesh edit or a navownprobe repair plan as a new patch plugin?](#tool-navedit) — `navedit`
 - [How do I prepare local narration audio for the diagnostic reel?](#tool-evalspeech) — `evalspeech`
 - [How do I produce Markdown, HTML, PDF, and an evidence index from the presentation plan?](#tool-evalreport.report) — `evalreport.report`
@@ -292,6 +298,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Is a navmesh clash item 24's camera can draw pictured in the review reel as a vignette of its two navmesh states, bound to its capture request, captured by the pipeline with its control in the setup without the mod, refused without a clean control at the same camera, held for its narration, shown as one report figure with its own captions, and said with the control's result and no form key?](#tool-integration-housecarl-tests-test_navmesh_reel.py) — `integration/housecarl/tests/test_navmesh_reel.py`
 - [Is a same-named plugin from another folder planned and reported as itself, not as the measured copy?](#tool-integration-housecarl-tests-test_same_name_variant.py) — `integration/housecarl/tests/test_same_name_variant.py`
 - [Is a selection whose only effect is its meshes evaluated in place: do object overlap and placement contact apply when a selected folder's mesh wins for a placed object and differs (with a plugin that places nothing or none), does a mesh-only mod get its new crossings, and is the scope line built from the mesh reach?](#tool-_geometry-harness-tests-test_asset_only_selection.py) — `_geometry-harness/tests/test_asset_only_selection.py`
+- [Is an AI-side evaluation complete, and does its overlay bundle still bind to the app bundle it was made over?](#tool-evalcontrol) — `evalcontrol`
 - [Is the machine idle enough to launch the game or time a heavy job?](#tool-machineidle) — `machineidle`
 - [Is this evaluation settings file valid?](#tool-evalsettings.validate) — `evalsettings.validate`
 - [Is this flip plan one the live driver can honour?](#tool-switchflip.validate) — `switchflip.validate`
@@ -395,6 +402,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Which occlusion planes will hide a mod's content when it is added to an order, and which of its planes will hide content already there?](#tool-planeassess.predict) — `planeassess.predict`
 - [Which occlusion-plane edits does a plane patch make (new, moved or resized, disabled, restored), and over whose version?](#tool-planeassess) — `planeassess`
 - [Which occlusion-plane edits does this patch make, and over whose version?](#tool-planeassess.patch) — `planeassess.patch`
+- [Which of the controller suite's record cases (imports and rows derived from them) hold on the AI-side overlay?](#tool-integration-housecarl-tests-evalrun_record_cases.py) — `integration/housecarl/tests/evalrun_record_cases.py`
 - [Which overlap findings require both mods rather than already occurring in a source setup?](#tool-overlap-attribution) — `overlap-attribution`
 - [Which patches sit on disk not enabled, which runtime files point at plugins or records the order lacks, which two mods' swaps meet on one base, which scripts lack a parent or called class, and what names an empty dummy plugin?](#tool-lookprobe) — `lookprobe`
 - [Which placed objects overlap across mods under this configuration?](#tool-overlapprobe) — `overlapprobe`
@@ -1065,21 +1073,6 @@ Outputs: Assertion results for: Does the configuration fingerprint have one owne
 Source: [_geometry-harness/tests/test_fingerprint_owner.py](../_geometry-harness/tests/test_fingerprint_owner.py) — `Known answers for the configuration fingerprint's one owner`
 
 
-<a id="tool-_geometry-harness-tests-test_import_empty_population.py"></a>
-
-### _geometry-harness/tests/test_import_empty_population.py
-
-**Does runcontrol accept a judged-0 import only when it states no members on an arm without the targets, and refuse every other?**
-
-Qualify a change to how runcontrol import-results reads an import's coverage.
-
-Inputs: The evalrun fixtures, a trim of the shipped registry, and the fixture scopeprobe stand-in.
-
-Outputs: Assertion results for: Does runcontrol accept a judged-0 import only when it states no members on an arm without the targets, and refuse every other?
-
-Source: [_geometry-harness/tests/test_import_empty_population.py](../_geometry-harness/tests/test_import_empty_population.py) — `A judged-0 import is "nothing to judge" only on two independent facts (cases 1340-1346).`
-
-
 <a id="tool-_geometry-harness-tests-test_imported_reference_accounting.py"></a>
 
 ### _geometry-harness/tests/test_imported_reference_accounting.py
@@ -1673,6 +1666,21 @@ Inputs: The Release motionprobe and contactprobe (or HC_OOM_HARNESS); the test_c
 Outputs: Assertion results for: When motionprobe sweep or deltacheck, or contactprobe's swept review, runs out of memory, does it say so in one sentence that says what to try, and does that advice work?
 
 Source: [_geometry-harness/tests/test_swept_oom_sentence.py](../_geometry-harness/tests/test_swept_oom_sentence.py) — `Running out of memory on the swept paths ends in one sentence that says what to try (cases 1880-1885).`
+
+
+<a id="tool-_geometry-harness-tests-test_verify_old_kinds.py"></a>
+
+### _geometry-harness/tests/test_verify_old_kinds.py
+
+**Does verify-bundle list, not judge, the rows of kinds it no longer checks in an older bundle, and refuse them in a current one?**
+
+Qualify a change to verify-bundle's handling of evidence rows of kinds this SkyWright does not check (the registry-version rule).
+
+Inputs: tests/fixtures/old-bundles/lab-record-rows (copies), its plan's registry version edited for the current-version cases.
+
+Outputs: Assertion results for: Does verify-bundle list, not judge, the rows of kinds it no longer checks in an older bundle, and refuse them in a current one?
+
+Source: [_geometry-harness/tests/test_verify_old_kinds.py](../_geometry-harness/tests/test_verify_old_kinds.py) — `Known answers for what 'runcontrol verify-bundle' does with evidence rows of kinds this SkyWright does not`
 
 
 <a id="tool-_geometry-harness-tests-test_workbench_manual_names.py"></a>
@@ -2535,6 +2543,40 @@ Outputs: A header dict, the controller's path, or the verify-bundle command; Ref
 Source: [_geometry-harness/evalbase.py](../_geometry-harness/evalbase.py) — `evalbase - what the evaluation tools on both sides of the houseCARL integration fence share.`
 
 
+<a id="tool-evalcontrol"></a>
+
+### evalcontrol
+
+**How do I plan, measure, bundle and verify the AI-side checks of an evaluation over a finished app scan?**
+
+**Is an AI-side evaluation complete, and does its overlay bundle still bind to the app bundle it was made over?**
+
+**How do I import a record reader's evidence for a record check the overlay left open?**
+
+Run or check the rows only an AI-driven evaluation serves (ai-checks.json), after runcontrol has bundled the app scan; evalpipeline.py does this for a lab entry.
+
+Inputs: An app scan's evaluation folder and its bundle (plan --app, --app-bundle); the overlay's run folder (--run) for evaluate, import, finalize and bundle; an import document (--file) for import; a media list (--media) for bundle; an overlay bundle folder for verify. Nothing for --self-test.
+
+Outputs: The overlay's run folder (plan.json, ledger.json, receipts, disposition.json, STATUS.md) and bundle (manifest.json with its overlay binding, media copies); verify.json with bundle, evaluation and aiEvaluation blocks; exit 0, 2 or 3. For --self-test one GREEN, RED or SKIP line per case and a count.
+
+Source: [integration/housecarl/evalcontrol/Program.cs](../integration/housecarl/evalcontrol/Program.cs) — `// evalcontrol: the AI-side evaluation's own checks, as an overlay on a finished app scan.`
+
+
+Modifiers (do not select a separate mode):
+
+- `--app` — plan: the app scan's evaluation folder (its plan.json); verify: the app bundle, when it is not the one the overlay names
+- `--app-bundle` — plan: the app scan's bundle the overlay binds to
+- `--file` — import: the import document (schema 1) to bind to one arm the overlay left open
+- `--media` — bundle: the supplied pictures and clips (media item schema 2), each checked against the configurations the app scan's accepted receipts measured
+- `--opt-in` — plan: plan an opt-in check of the list (repeatable)
+- `--out` — plan: the new overlay run folder; bundle: the overlay bundle folder; verify: the verify.json to write
+- `--rebuild-ledger` — evaluate: rebuild the ledger from the journal and the receipts first (runcontrol's rule)
+- `--registry` — bundle: the list file the overlay plan froze, when it has moved
+- `--run` — evaluate, import, finalize, bundle: the overlay run folder
+- `--scope` — bundle: the scope file the overlay plan froze, when it has moved
+- `--search` — bundle: the candidate search the overlay plan froze, when it has moved
+- `--self-test` — Run every known answer and case; exit 0 when all pass.
+
 <a id="tool-evalpipeline"></a>
 
 ### evalpipeline
@@ -2867,6 +2909,7 @@ Source: [integration/housecarl/evalreport.py](../integration/housecarl/evalrepor
 
 Modifiers (do not select a separate mode):
 
+- `--ai-bundle` — plan, verify: the AI-side overlay bundle (evalcontrol's, bound to --bundle) whose rows, media and aiEvaluation verdict join the app bundle's in the report
 - `--also-bundle` — name a further evaluation of the same mods (repeatable); the report names it with the setups it measured, and its results are not joined into the counts
 - `--answers` — narrate-apply: the narrator's answers; narrate-packet: write the fidelity judge's packet for these answers instead of the narrator's
 - `--bundle` — Set bundle for this invocation; consult the linked parser for accepted values.
@@ -3272,6 +3315,36 @@ Outputs: Reading copies, pixel differences and embedded metadata.
 Source: [_geometry-harness/viewprobe/tools/imgcheck.py](../_geometry-harness/viewprobe/tools/imgcheck.py) — `imgcheck — the verification half of viewprobe's render discipline.`
 
 
+<a id="tool-integration-housecarl-tests-ai_report_fixtures.py"></a>
+
+### integration/housecarl/tests/ai_report_fixtures.py
+
+**How are the report fixtures' AI-side overlays (R5's supplied media) made by the module's evalcontrol?**
+
+Refresh the report fixtures' overlay half when evalcontrol's bundle or the media rule changes; make_report_fixtures.py calls it as its ai_hook.
+
+Inputs: An app run and bundle made by make_report_fixtures.py.
+
+Outputs: Assertion results or generated fixture data for: How are the report fixtures' AI-side overlays (R5's supplied media) made by the module's evalcontrol?
+
+Source: [integration/housecarl/tests/ai_report_fixtures.py](../integration/housecarl/tests/ai_report_fixtures.py) — `The AI-side half of the report fixtures: what an AI-side evaluation adds to an app bundle the app-side maker`
+
+
+<a id="tool-integration-housecarl-tests-evalrun_record_cases.py"></a>
+
+### integration/housecarl/tests/evalrun_record_cases.py
+
+**Which of the controller suite's record cases (imports and rows derived from them) hold on the AI-side overlay?**
+
+Read or change the record cases test_evalcontrol_run.py runs (moved from test_evalrun.py in step 3 of the boundary), or their helpers test_records_keep_work.py uses.
+
+Inputs: test_evalrun.py's engine (fixtures, fake probes, helpers); evalcontrol for every step on the overlay.
+
+Outputs: Assertion results for: Which of the controller suite's record cases (imports and rows derived from them) hold on the AI-side overlay?
+
+Source: [integration/housecarl/tests/evalrun_record_cases.py](../integration/housecarl/tests/evalrun_record_cases.py) — `The controller suite's record cases (test_evalrun.py's cases 17, 18, 42, 43, 44, 61, 65 and 800`
+
+
 <a id="tool-integration-housecarl-tests-fixtures-evalsettings-stub_opener.py"></a>
 
 ### integration/housecarl/tests/fixtures/evalsettings/stub_opener.py
@@ -3437,6 +3510,21 @@ Inputs: Synthetic capture-results files.
 Outputs: Assertion results for: Does evalreport's reel refuse a capture-results file it cannot read, and still plan without one?
 
 Source: [integration/housecarl/tests/test_capture_results_unreadable.py](../integration/housecarl/tests/test_capture_results_unreadable.py) — `evalreport's reel refuses a --capture-results file it cannot read`
+
+
+<a id="tool-integration-housecarl-tests-test_evalcontrol_run.py"></a>
+
+### integration/housecarl/tests/test_evalcontrol_run.py
+
+**Do the AI-side checks run end to end over the controller suite's fixtures, by evalcontrol over a finished app run?**
+
+Qualify a change to evalcontrol or to the controller suite's fixtures it reuses (test_evalrun.py), for the cases whose subject left the app's registry.
+
+Inputs: test_evalrun.py's generated fixtures and fake probes; the module's oracles in tests/fixtures/evalcontrol-run/.
+
+Outputs: Assertion results or generated fixture data for: Do the AI-side checks run end to end over the controller suite's fixtures, by evalcontrol over a finished app run?
+
+Source: [integration/housecarl/tests/test_evalcontrol_run.py](../integration/housecarl/tests/test_evalcontrol_run.py) — `The AI-side evaluation's checks run end to end over SkyWright's controller suite`
 
 
 <a id="tool-integration-housecarl-tests-test_evalpipeline.py"></a>
@@ -3651,6 +3739,21 @@ Inputs: Controlled fixtures for test_flipplan.
 Outputs: Assertion results or generated fixture data for: Does the flip-plan generator keep branches apart, keep source order and name every call it does not plan?
 
 Source: [integration/housecarl/tests/test_flipplan.py](../integration/housecarl/tests/test_flipplan.py) — `Known answers for the flip-plan generator (flipplan.py).`
+
+
+<a id="tool-integration-housecarl-tests-test_import_empty_population.py"></a>
+
+### integration/housecarl/tests/test_import_empty_population.py
+
+**Does evalcontrol accept a judged-0 record import only when it states no members on an arm without the targets, and refuse every other?**
+
+Qualify a change to how evalcontrol import reads an import's coverage.
+
+Inputs: The evalrun fixtures, SkyWright's registry trimmed to the record rows' app prerequisite, the AI-side overlay over the bundled app run, and the fixture scopeprobe stand-in.
+
+Outputs: Assertion results for: Does evalcontrol accept a judged-0 record import only when it states no members on an arm without the targets, and refuse every other?
+
+Source: [integration/housecarl/tests/test_import_empty_population.py](../integration/housecarl/tests/test_import_empty_population.py) — `A judged-0 import is "nothing to judge" only on two independent facts (cases 1340-1346).`
 
 
 <a id="tool-integration-housecarl-tests-test_machineidle.py"></a>
@@ -5278,6 +5381,26 @@ Outputs: reader.md, reader.html, reader.pdf, summary.txt and reader-manifest.jso
 Source: [integration/housecarl/readerdoc.py](../integration/housecarl/readerdoc.py) — `readerdoc - the reader's document: one or two pages in ordinary words, rendered from a presentation plan.`
 
 
+<a id="tool-recordenrich"></a>
+
+### recordenrich
+
+**How do I add the rows derived from a record import (record rows, the reversed order's) to an AI-side overlay bundle?**
+
+After evalcontrol bundle, to add rows derived from the overlay's record imports for the report.
+
+Inputs: An overlay bundle (evalcontrol bundle's --out) bound to an app bundle that is still where it names.
+
+Outputs: The enrichment's files and manifest rows in the overlay bundle, verify.json; one JSON line, or one REFUSED sentence (exit 2 or 3).
+
+Source: [integration/housecarl/recordenrich.py](../integration/housecarl/recordenrich.py) — `recordenrich - the rows derived after measurement from a record import, added to an AI-side overlay bundle.`
+
+
+Modifiers (do not select a separate mode):
+
+- `--bundle` — the overlay bundle to enrich
+- `--kind` — record-rows or order-variant
+
 <a id="tool-recordrows"></a>
 
 ### recordrows
@@ -5575,7 +5698,7 @@ Source: [integration/housecarl/reporting_data.py](../integration/housecarl/repor
 
 Evaluate a mod from census to a verified evidence bundle, qualify a change against the known answers, or print the identity an evaluation plan would freeze for a build folder.
 
-Inputs: A selection entry and a machine file for run and arms; a run folder for status; a registry, a candidates folder and a new run folder for plan; an evaluation's RUN folder (--run) for run, resume, status, import-results, finalize and bundle; an import document (--file) for import-results; a bundle folder for verify-bundle; plugin paths for population; ordersweep.py's arguments for ordersweep. Nothing for --self-test (the known answers are built in; Python on PATH adds the live cases with the Python tools that remain). A build folder for identity. A JSON document on standard input for canon. bundle takes, besides --run and --out: --media, --registry, --scope, --search, --reader-cmd, --reader-env NAME=VALUE, --mod-name PLUGIN=NAME and --no-names.
+Inputs: A selection entry and a machine file for run and arms; a run folder for status; a registry, a candidates folder and a new run folder for plan; an evaluation's RUN folder (--run) for run, resume, status, import-results, finalize and bundle; an import document (--file) for import-results; a bundle folder for verify-bundle; plugin paths for population; ordersweep.py's arguments for ordersweep. Nothing for --self-test (the known answers are built in; Python on PATH adds the live cases with the Python tools that remain). A build folder for identity. A JSON document on standard input for canon. bundle takes, besides --run and --out: --registry, --scope, --search, --reader-cmd, --reader-env NAME=VALUE, --mod-name PLUGIN=NAME and --no-names.
 
 Outputs: For run with --entry: the run folder through the stage named (arms.json, stages.json, status.json, preparation-key.json, disk-forecast.json, census/, prepare/, scope/, plan/, evaluate/, records/, evaluation/, bundle/, names-instance/, runlog/), the same stage lines, exit 0, 2 or 3. For arms and status: one line per arm or stage. For plan, run, resume, import-results, finalize, bundle, verify-bundle, population and ordersweep: the files the evaluation bundle standard names for that command, and its lines. For --self-test: one GREEN, RED or SKIP line per case and a count, exit 0 or 1. A package identity as JSON; the sha256 of a document's two canonical forms.
 

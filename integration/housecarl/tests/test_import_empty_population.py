@@ -1,6 +1,6 @@
 """A judged-0 import is "nothing to judge" only on two independent facts (cases 1340-1346).
 
-    python _geometry-harness/tests/test_import_empty_population.py
+    python integration/housecarl/tests/test_import_empty_population.py
 
 `evalrun import-results` refused every import whose coverage judged 0 as `extraction-failed`, so a check stayed open
 for ever on an arm that holds none of its population (a shakedown finding). evalrun cannot tell that from its own data
@@ -13,10 +13,11 @@ when both of these hold:
 
 Anything else stays refused, and the refusal names a step that can succeed.
 
-Drives the REAL evalrun.py over the evalrun fixtures:
-- the shipped registry, trimmed to loadability.masters-and-order (the prerequisite) and two mcp-only checks:
-  records.registration-and-dialogue (record-type trigger; the fixture target carries a QUST) and
-  loadability.missing-assets (trigger `always`);
+Drives SkyWright's controller and this module's evalcontrol over the evalrun fixtures:
+- the app scan: SkyWright's registry trimmed to loadability.masters-and-order (the record rows' app prerequisite), run,
+  finalized and bundled; the AI-side overlay over it (evalcontrol plan, evaluate) holds the two mcp-only checks of
+  ai-checks.json used here: records.registration-and-dialogue (record-type trigger; the fixture target carries a QUST)
+  and loadability.missing-assets (trigger `always`); every import is evalcontrol import, into the overlay;
 - the fixture scopeprobe stand-in;
 - three arms: the baseline and a reorder (both load FixtureTarget.esp) and one without it.
 
@@ -43,17 +44,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-HARNESS = HERE.parent
+sys.path.insert(0, str(HERE.parent))  # the module's folder
+import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is
+HARNESS = SW.HARNESS
 sys.path.append(str(HARNESS))
+sys.path.append(str(HARNESS / "tests"))
 import buildlayout  # noqa: E402  where the build put each program
 REPO = HARNESS.parent
 EVALRUN = HARNESS / "evalrun.py"
 from test_evalrun import CONTROLLER  # noqa: E402  (the built-in controller, runcontrol, as test_evalrun starts it)
-FIXT = HERE / "fixtures" / "evalrun"
-REGISTRY = REPO / "data" / "check-registry.json"
+FIXT = HARNESS / "tests" / "fixtures" / "evalrun"
+EVALCONTROL = SW.tool("evalcontrol")
+REGISTRY = SW.DATA / "check-registry.json"
 DIALOGUE = "records.registration-and-dialogue"
 ASSETS = "loadability.missing-assets"
-KEEP = ["loadability.masters-and-order", DIALOGUE, ASSETS]
+KEEP = ["loadability.masters-and-order"]   # the app scan's trim; the two record rows are the overlay's (ai-checks.json)
 NO_TARGET = "candidate-02-notarget"
 STATE_MEMBERS = "state Members: 0 on each coverage line and import again"
 RECAPTURE = "re-capture this arm's evidence and import it again"
@@ -69,7 +74,14 @@ def check(ok, label):
 
 
 def evalrun(args, env):
+    """SkyWright's controller (runcontrol), for the app scan."""
     return subprocess.run(CONTROLLER + [str(a) for a in args], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", env=env, timeout=300)
+
+
+def evalcontrol(args, env):
+    """This module's evalcontrol, for the AI-side overlay the record rows are planned in."""
+    return subprocess.run([str(EVALCONTROL)] + [str(a) for a in args], capture_output=True, text=True,
                           encoding="utf-8", errors="replace", env=env, timeout=300)
 
 
@@ -161,18 +173,28 @@ def main() -> int:
         rows = {(c.get("checkId"), a.get("armId")): a.get("status") for c in plan.get("checks") or []
                 if c.get("checkId") in (DIALOGUE, ASSETS) for a in c.get("arms") or []}
         r = evalrun(["run", "--run", run], env)
+        # the record rows are the AI-side overlay's, planned over the finished, bundled app scan
+        ok = [evalrun(["finalize", "--run", run], env).returncode,
+              evalrun(["bundle", "--run", run, "--out", run / "bundle", "--no-names"], env).returncode,
+              evalcontrol(["plan", "--app", run, "--app-bundle", run / "bundle", "--out", run / "ai"], env).returncode,
+              evalcontrol(["evaluate", "--run", run / "ai"], env).returncode]
+        run = run / "ai"
+        plan = json.loads((run / "plan.json").read_text(encoding="utf-8")) if (run / "plan.json").exists() else {}
+        arms = {a["armId"]: a for a in plan.get("arms") or []}
+        rows = {(c.get("checkId"), a.get("armId")): a.get("status") for c in plan.get("checks") or []
+                if c.get("checkId") in (DIALOGUE, ASSETS) for a in c.get("arms") or []}
         print("\n=== setup: both mcp-only checks wait for an import on all three arms ===")
         targets = [t.get("name") for t in plan.get("targets") or []]
         no_target = arms.get(NO_TARGET) or {}
-        check(p.returncode == 0 and r.returncode == 0 and targets == ["FixtureTarget.esp"] and len(rows) == 6
+        check(p.returncode == 0 and r.returncode == 0 and ok == [0, 0, 0, 0] and targets == ["FixtureTarget.esp"] and len(rows) == 6
               and set(rows.values()) == {"mcp-only"} and "FixtureTarget.esp" not in (no_target.get("plugins") or []),
-              f"setup: plan {p.returncode}, run {r.returncode}, targets {targets}, rows {rows}")
+              f"setup: plan {p.returncode}, run {r.returncode}, overlay {ok}, targets {targets}, rows {rows}")
         if not no_target:
             return 1
 
         def imp(tag, cid, arm, judged, unjudgeable, members=None):
             m = make_import(tmp / tag, plan, cid, arm, judged, unjudgeable, members)
-            return evalrun(["import-results", "--run", run, "--file", m], env)
+            return evalcontrol(["import", "--run", run, "--file", m], env)
 
         print("\n=== case-1345: dialogue, judged 0 on the arm without the target, members unstated ===")
         r = imp("i1345", DIALOGUE, no_target, 0, {})
@@ -227,11 +249,11 @@ def main() -> int:
               f"1340: a second import of the answered row is a duplicate (exit {r.returncode})")
 
         print("\n=== case-1343: resume keeps the answer; finalize holds it open only where the target loads ===")
-        r = evalrun(["resume", "--run", run], env)
+        r = evalcontrol(["evaluate", "--run", run], env)   # the overlay's resume: what is kept is re-checked and reused
         e = entry(run, DIALOGUE, NO_TARGET)
         check(r.returncode == 0 and e.get("status") == "not-applicable",
               f"1343: after resume the entry is still not-applicable (resume {r.returncode}; {e.get('status')})")
-        evalrun(["finalize", "--run", run], env)
+        evalcontrol(["finalize", "--run", run], env)
         disp = json.loads((run / "disposition.json").read_text(encoding="utf-8")) if (run / "disposition.json").exists() else {}
         missing = (disp.get("evaluation") or {}).get("missing")
         held = sorted(x.get("armId") for x in (missing or []) if x.get("checkId") == DIALOGUE)

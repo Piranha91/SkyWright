@@ -11,19 +11,20 @@ public static class AiList
     /// <summary>The list this build carries.</summary>
     public static string Shipped => Path.Combine(AppContext.BaseDirectory, FileName);
 
-    /// <summary>The adapter kinds an AI-side row may have. media: supplied pictures and clips, assessed at bundle.</summary>
+    /// <summary>The adapter kinds an AI-side row may have. media: supplied pictures and clips, assessed at bundle;
+    /// mcp-only: a check only houseCARL's record tools read, left open by the plan for `evalcontrol import`.</summary>
     public static readonly Registry.Vocabulary Vocabulary = new(
-        AdapterKinds: new HashSet<string>(StringComparer.Ordinal) { "media" },
-        KindsNeedingReason: new HashSet<string>(StringComparer.Ordinal),
+        AdapterKinds: new HashSet<string>(StringComparer.Ordinal) { "media", "mcp-only" },
+        KindsNeedingReason: new HashSet<string>(StringComparer.Ordinal) { "mcp-only" },
         ResultKinds: new HashSet<string>(StringComparer.Ordinal),
-        KindsWithoutOutput: new HashSet<string>(StringComparer.Ordinal) { "media" },
+        KindsWithoutOutput: new HashSet<string>(StringComparer.Ordinal) { "media", "mcp-only" },
         KindsRequiringOptIn: new HashSet<string>(StringComparer.Ordinal),
         KindsWithChild: new HashSet<string>(StringComparer.Ordinal),
-        EvidenceStrengths: new HashSet<string>(StringComparer.Ordinal) { "supplied-media" });
+        EvidenceStrengths: new HashSet<string>(StringComparer.Ordinal) { "supplied-media", "record-fact" });
 
-    /// <summary>The kinds the overlay plan records by their own name and never runs (none yet: a media row is planned
-    /// and accounted at evaluate, then assessed by bundle --media).</summary>
-    public static readonly string[] NeverRunKinds = [];
+    /// <summary>The kinds the overlay plan records by their own name and never runs: an mcp-only row waits for an
+    /// import. (A media row is planned and accounted at evaluate, then assessed by bundle --media.)</summary>
+    public static readonly string[] NeverRunKinds = ["mcp-only"];
 
     /// <summary>Every problem with the list: runcontrol's validator with this vocabulary, and each appPrerequisites
     /// entry naming a check of the app plan.</summary>

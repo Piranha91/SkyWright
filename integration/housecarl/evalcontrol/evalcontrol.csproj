@@ -26,6 +26,8 @@
     <PackageReference Include="ModelContextProtocol.Core" Version="2.2.0" />
     <None Include="ai-checks.json" CopyToOutputDirectory="PreserveNewest" />
     <EmbeddedResource Include="known-answers\media.json" LogicalName="media.json" />
+    <EmbeddedResource Include="known-answers\import.json" LogicalName="import.json" />
+    <EmbeddedResource Include="known-answers\records-verify.json" LogicalName="records-verify.json" />
   </ItemGroup>
 
   <!-- where the app's build is, seen from this program's folder: the module never spells it anywhere else -->

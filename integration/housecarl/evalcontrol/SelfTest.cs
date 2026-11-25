@@ -5,10 +5,10 @@ using RunControl;
 
 namespace EvalControl;
 
-/// <summary>`evalcontrol --self-test`: the known answers of the rules that moved here from runcontrol, each under the
-/// name it had there (known-answers/*.json, moved unchanged; the Python controller recorded them). The helpers are the
+/// <summary>`evalcontrol --self-test`: the known answers of the rules that moved here from runcontrol (the media rule,
+/// the record import), each under the name it had there (known-answers/*.json, moved unchanged; the Python controller recorded them). The helpers are the
 /// test harness's, not a rule. Prints one GREEN, RED or SKIP line per case and a total; exit 0 when nothing is red.</summary>
-public static class SelfTest
+public static partial class SelfTest
 {
     static int _green, _red;
 
@@ -27,6 +27,8 @@ public static class SelfTest
         var media = Load("media.json");
         MediaRuleCases(D(media["rule"]));
         foreach (var c in L(D(media["commands"])["cases"]).Select(D)) MediaCommandCase(c, D(media["commands"]));
+        ImportCases(Load("import.json"));
+        RecordsVerifyCases(Load("records-verify.json"));
         Console.WriteLine($"{_green} green, {_red} red, 0 skipped");
         return _red == 0 ? 0 : 1;
     }
@@ -108,12 +110,12 @@ public static class SelfTest
     {
         public string Base { get; }
         public string Root { get; }
-        public Temp(string sub)
+        public Temp(string? sub = null)
         {
             string made = Path.Combine(Path.GetTempPath(), "hc-evalcontrol-" + Guid.NewGuid().ToString("N")[..12]);
             Directory.CreateDirectory(made);
             Base = PyPath.Resolve(made);
-            Root = PyPath.Join(Base, sub);
+            Root = sub == null ? Base : PyPath.Join(Base, sub);
             Directory.CreateDirectory(Root);
         }
         public string At(string rel) => rel == "." ? Root : PyPath.Join(Root, rel);
@@ -170,7 +172,22 @@ public static class SelfTest
                     foreach (string f in Directory.GetFiles(t.At(S(op["from"])), "*", SearchOption.AllDirectories))
                         t.Write(S(op["path"]) + "/" + PyPath.RelativeTo(f, t.At(S(op["from"]))), File.ReadAllBytes(f));
                     break;
-                default: throw new ArgumentException($"no recorded change '{S(op["op"])}' in a media case");
+                case "json":
+                    object? doc = PyJson.LoadEvalFile(path);
+                    foreach (var e in L(t.Unmask(op["edits"])).Select(L))
+                    {
+                        var steps = L(e[1]);
+                        object? at = doc;
+                        for (int i = 0; i < (S(e[0]) == "append" ? steps.Count : steps.Count - 1); i++)
+                            at = steps[i] is string k ? ((PyDict)at!)[k] : ((List<object?>)at!)[(int)(long)steps[i]!];
+                        if (S(e[0]) == "append") ((List<object?>)at!).Add(e[2]);
+                        else if (S(e[0]) == "pop") ((PyDict)at!).Pop(S(steps[^1]));
+                        else if (steps[^1] is string key) ((PyDict)at!)[key] = e[2];
+                        else ((List<object?>)at!)[(int)(long)steps[^1]!] = e[2];
+                    }
+                    PyJson.WriteEvalFile(path, doc);
+                    break;
+                default: throw new ArgumentException($"no recorded change '{S(op["op"])}' in a moved case");
             }
         }
     }
@@ -227,13 +244,30 @@ public static class SelfTest
             recordedPlan["configuration"] = Py.Copy(Ev.OrEmpty(scopeDoc.Get("configuration")));
             PyJson.WriteEvalFile(t.At("plan.json"), recordedPlan);
             WritePlanSha(t);
+            // the recording's app run credits two record imports (r.contested, adapter kind mcp-import): an app scan
+            // holds none since the record checks left SkyWright's registry, so their entries, receipts and copied
+            // evidence are taken out and runcontrol finalizes the run again before it is bundled
+            var ledgerDoc = D(PyJson.LoadEvalFile(t.At("ledger.json")));
+            var imported = L(recordedPlan["checks"]).Select(D).Where(ch => Ev.Eq(Ev.G(ch["adapter"], "kind"), RecordEvidence.ImportKind))
+                .Select(ch => S(ch["checkId"])).ToHashSet(StringComparer.Ordinal);
+            var entries = D(ledgerDoc["entries"]);
+            foreach (string key in entries.Keys.Where(k => imported.Contains(S(D(entries[k])["checkId"]))).ToList())
+            {
+                entries.Pop(key);
+                File.Delete(t.At($"receipts/{key}.json"));
+                if (Directory.Exists(t.At($"imports/{key}"))) Directory.Delete(t.At($"imports/{key}"), recursive: true);
+            }
+            PyJson.WriteEvalFile(t.At("ledger.json"), ledgerDoc);
+            var (fin, _, finErr) = In(t.Root, () => Captured(() => Finalizer.Run(t.Root)));
+            if (fin is not (0 or 3)) return $"the app run did not finalize again (exit {fin}): {finErr.Trim()}";
             var args = Strings(c["args"]);
             string media = args[args.IndexOf("--media") + 1];
             string appBundle = PyPath.Join(t.Base, "app-bundle"), ai = PyPath.Join(t.Base, "ai"), aiBundle = PyPath.Join(t.Base, "ai-bundle");
             var steps = new (string what, Func<int> step)[]
             {
                 ("the app bundle", () => Bundle.Run(new BundleArgs { Run = t.Root, Out = appBundle, NoNames = true })),
-                ("the overlay plan", () => OverlayPlan.Run(t.Root, appBundle, ai, [])),
+                // the media rows of the shipped list (a case about media plans the media group alone)
+                ("the overlay plan", () => OverlayPlan.Run(t.Root, appBundle, ai, [], MediaList(t.Base))),
                 ("evaluate", () => OverlayEvaluate.Run(ai)),
                 ("finalize", () => Finalizer.Run(ai, OverlayFinalize.Amend)),
             };
@@ -260,6 +294,19 @@ public static class SelfTest
             var (v, vout, verr) = Captured(() => OverlayVerify.Run(aiBundle, null, null));
             return v == Exit.Ok ? null : $"the overlay bundle does not verify (exit {v}): {vout.Trim()} {verr.Trim()}";
         });
+
+    // The shipped list with only its media rows and their families, written beside the case's folders.
+    static string MediaList(string dir)
+    {
+        var list = D(PyJson.LoadEvalFile(AiList.Shipped));
+        var rows = L(list["checks"]).Select(D).Where(c => Ev.Eq(Ev.G(c["adapter"], "kind"), "media")).ToList();
+        var families = rows.Select(c => S(c["family"])).ToHashSet(StringComparer.Ordinal);
+        list["checks"] = rows.Cast<object?>().ToList();
+        list["families"] = L(list["families"]).Where(f => families.Contains(S(D(f)["id"]))).ToList();
+        string path = PyPath.Join(dir, AiList.FileName);
+        PyJson.WriteEvalFile(path, list);
+        return path;
+    }
 
     static object? Mask(this Temp t, object? v) => v switch
     {

@@ -160,7 +160,7 @@ public static class PyPath
 }
 
 /// <summary>What a file handle tells: the final path, and the volume and file index a hard link shares.</summary>
-static class NativeFile
+public static class NativeFile
 {
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
     struct ByHandleFileInformation

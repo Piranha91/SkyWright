@@ -7,14 +7,6 @@
     "applicability": "yes",
     "status": "planned"
    },
-   "loadability.dangling-references": {
-    "applicability": "yes",
-    "status": "mcp-only"
-   },
-   "records.cell-attributes": {
-    "applicability": "yes",
-    "status": "mcp-only"
-   },
    "geometry.navmesh-ownership": {
     "applicability": "yes",
     "status": "planned"
@@ -86,8 +78,6 @@
    "state.conditional-geometry",
    "patch.order-evaluation",
    "patch.author-advice",
-   "loadability.dangling-references",
-   "records.cell-attributes",
    "functional.collective-route-connectivity",
    "environment.generated-output-regeneration",
    "functional.linked-dependencies"

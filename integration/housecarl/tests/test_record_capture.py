@@ -1,5 +1,5 @@
-"""Known answers for a lab run's record capture (evalpipeline.capture_records), the step between runcontrol's evaluate
-and its records stage: which arms it reads, the capture's command line and machine slot, which documents it imports
+"""Known answers for a lab run's record capture (evalpipeline.capture_records), the step in the AI-side overlay between
+evalcontrol's evaluate and its finalize: which arms it reads, the capture's command line and machine slot, which documents it imports
 and in what order, what it writes, prints and refuses.
 
     python integration/housecarl/tests/test_record_capture.py
@@ -84,20 +84,23 @@ def run_row(c: dict):
     root = Root()
     try:
         run, sdir = root.path / "run", root.path / "run" / "records"
-        (run / "evaluation").mkdir(parents=True)
-        (run / "evaluation" / "ledger.json").write_text(json.dumps({"entries": c["entries"]}), encoding="utf-8")
+        (run / "ai").mkdir(parents=True)
+        (run / "ai" / "ledger.json").write_text(json.dumps({"entries": c["entries"]}), encoding="utf-8")
         sdir.mkdir(parents=True)
         for i in range(c["earlier"]):
             (sdir / f"capture-{i + 1:02d}").mkdir()
         # the capture's Python is a file of this test's own, so the row does not need one on this machine
         python = root.path / "python.exe"
         python.write_bytes(b"")
-        machine = dict(c["machine"], python=str(python))
+        # the importer, evalcontrol, likewise a stand-in file named in the machine file
+        evalcontrol = root.path / "evalcontrol.exe"
+        evalcontrol.write_bytes(b"")
+        machine = dict(c["machine"], python=str(python), evalcontrol=str(evalcontrol))
         ctx = context(root, c["entry"], machine)
         started, wrong = [], []
         imports = iter(c["importExits"])
         script = EP.fwd(HERE.parent / "evalrecords.py")
-        controller = EP.fwd(EP.runcontrol_exe(machine))
+        controller = EP.fwd(EP.evalcontrol_exe(machine))
 
         def child(ctx_, ledger_dir, op, argv, *, heavy=False, purpose=None, deadline_min=None, env=None, hold_min=None):
             more = {k: v for k, v in (("deadline_min", deadline_min), ("heavy", heavy), ("hold_min", hold_min), ("purpose", purpose)) if v}
@@ -108,8 +111,8 @@ def run_row(c: dict):
                 if argv[1] != script:
                     wrong.append(f"the capture's script was {argv[1]}")
             elif argv[0] != controller:
-                wrong.append(f"{op} was started with {argv[0]}, not runcontrol")
-            started.append({"op": op, "dir": root.mask(str(ledger_dir)), "script": "evalrecords.py" if capture else "evalrun.py",
+                wrong.append(f"{op} was started with {argv[0]}, not evalcontrol")
+            started.append({"op": op, "dir": root.mask(str(ledger_dir)), "script": "evalrecords.py" if capture else "evalcontrol",
                             "argv": root.mask(list(argv[2:] if capture else argv[1:])), "more": more})
             if capture:
                 cap = Path(argv[argv.index("--out") + 1])
@@ -167,9 +170,9 @@ def launch(arms: int, more_machine: dict | None = None):
     root = Root()
     try:
         run = root.path / "run"
-        (run / "evaluation").mkdir(parents=True)
+        (run / "ai").mkdir(parents=True)
         entries = {f"row{i}__{'baseline' if i == 0 else f'candidate-{i:02d}'}": {"status": "mcp-only"} for i in range(arms)}
-        (run / "evaluation" / "ledger.json").write_text(json.dumps({"entries": entries}), encoding="utf-8")
+        (run / "ai" / "ledger.json").write_text(json.dumps({"entries": entries}), encoding="utf-8")
         (run / "records").mkdir()
         machine = {"readerCmd": "reader", "python": str(root.path / "python.exe"), **(more_machine or {})}
         ctx = context(root, LAB, machine)
@@ -243,10 +246,11 @@ def case_capture_python():
 
 
 def case_measure_order():
-    """A lab entry's census to bundle, as the module measures it: runcontrol through evaluate, the capture, runcontrol
-    on through the bundle, then the AI-side overlay planned, evaluated, finalized, bundled and verified by evalcontrol; a run that stops before the records measures with one runcontrol run; a runcontrol stop is
-    refused with its own sentence. Wrong answers: the capture before evaluate, or after the bundle (the bundle would not
-    hold the imports), or a second runcontrol run that is not asked to go on."""
+    """A lab entry's census to bundle, as the module measures it: runcontrol once through the bundle, then the AI-side
+    overlay planned and evaluated by evalcontrol, the capture, and the overlay finalized, bundled and verified; a run
+    that stops before the bundle measures with one runcontrol run; a runcontrol stop is refused with its own sentence.
+    Wrong answers: the capture before the overlay's evaluate (no row is open yet), or after its bundle (the bundle would
+    not hold the imports), or a second runcontrol run."""
     root = Root()
     try:
         run = root.path / "run"
@@ -260,7 +264,7 @@ def case_measure_order():
             return {"exitCode": 0}
         saved_child, saved_capture = EP.child, EP.capture_records
         EP.child = child
-        EP.capture_records = lambda c, r, s: order.append("capture") or ({}, [])
+        EP.capture_records = lambda *a: order.append("capture") or ({}, [])
         try:
             EP.measure(ctx, "deliver")
             whole = list(order)
@@ -278,11 +282,10 @@ def case_measure_order():
             EP.child, EP.capture_records = saved_child, saved_capture
     finally:
         root.close()
-    return same("through the reel", whole, ["runcontrol-through-evaluate", "capture", "runcontrol-through-bundle",
-                                                 "overlay-plan", "overlay-evaluate", "overlay-finalize", "overlay-bundle",
-                                                 "overlay-verify"]) \
+    return same("through the reel", whole, ["runcontrol-through-bundle", "overlay-plan", "overlay-evaluate", "capture",
+                                                 "overlay-finalize", "overlay-bundle", "overlay-verify"]) \
         or same("through the plan", short, ["runcontrol-through-plan"]) \
-        or (None if stopped and "the census scope is incomplete." in stopped and "evaluate" in stopped else f"a runcontrol stop said: {stopped}")
+        or (None if stopped and "the census scope is incomplete." in stopped and "bundle" in stopped else f"a runcontrol stop said: {stopped}")
 
 
 def case_measure_lab_entry():
@@ -344,7 +347,7 @@ def main() -> int:
     check("case 58 the records stage keeps finished arms and scales its deadline", case_58)
     check("case 59 the records stage takes the machine slot for its backstop", case_59)
     check("records stage: the capture's Python is the machine file's, else this driver's own", case_capture_python)
-    check("measure: a lab entry runs runcontrol through evaluate, the capture, then runcontrol through the bundle", case_measure_order)
+    check("measure: a lab entry runs runcontrol through the bundle, then the overlay with the capture between its evaluate and its finalize", case_measure_order)
     check("measure: a lab run is measured from its measuring entry, its settings recorded beside it", case_measure_lab_entry)
     check("measure: an in-place entry is not measured by the module", case_in_place_not_measured)
     print(f"\n{len(PASSED)} passed, {len(FAILURES)} failed")

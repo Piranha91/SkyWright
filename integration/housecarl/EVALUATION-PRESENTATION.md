@@ -543,7 +543,7 @@ record contents or a complete provider history, not the generic A/B conflict fie
 or `diff` - never to X's `reverse` part, which is the baseline order measured with X as `--base` (the same
 principle as the bundle side's arm rule for accepted receipts).
 
-**Imported evidence and where it came from.** A result `runcontrol import-results` bound to a frozen arm declares an
+**Imported evidence and where it came from.** A result `evalcontrol import` bound to a frozen arm declares an
 origin, and the report says what that means for the reader beside the result it affects. Which imports are described
 comes from the disposition's `importedEvidence` list; a bundle finalized before that list existed has none, and then
 an accepted receipt carrying an `imported` block whose (check, arm) is a completed result in the disposition counts,

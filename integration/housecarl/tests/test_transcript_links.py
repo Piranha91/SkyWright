@@ -9,7 +9,8 @@ import hard-links the capture's own transcript when the volume allows, and the b
 writer that later rewrites a transcript writes a new file and moves it over, so bytes reachable through a link never
 change.
 
-Drives the REAL evalrun.py over the evalrun fixtures (the same set-up as test_import_empty_population.py), with
+Drives SkyWright's controller and this module's evalcontrol (the record rows are the AI-side overlay's, planned over
+the bundled app scan) over the evalrun fixtures (the same set-up as test_import_empty_population.py), with
 transcripts laid out as evalrecords lays them out (`sessions/<arm>/request.jsonl`, `response.jsonl`, and a rows file).
 
     2160  an accepted import links its request and response to the capture's files, with the recorded hashes; the rows
@@ -46,10 +47,11 @@ REPO = HARNESS.parent
 EVALRUN = HARNESS / "evalrun.py"
 from test_evalrun import CONTROLLER  # noqa: E402  (the built-in controller, runcontrol, as test_evalrun starts it)
 FIXT = HARNESS / "tests" / "fixtures" / "evalrun"
-REGISTRY = REPO / "data" / "check-registry.json"
+EVALCONTROL = SW.tool("evalcontrol")
+REGISTRY = SW.DATA / "check-registry.json"
 DIALOGUE = "records.registration-and-dialogue"
 ASSETS = "loadability.missing-assets"
-KEEP = ["loadability.masters-and-order", DIALOGUE, ASSETS]
+KEEP = ["loadability.masters-and-order"]   # the app scan's trim; the record rows are the overlay's (ai-checks.json)
 REORDER = "candidate-01-reorder"
 import evalrecords  # noqa: E402
 
@@ -62,7 +64,14 @@ def check(ok, label):
         FAILURES.append(label)
 
 
+def evalcontrol(args, env):
+    """This module's evalcontrol, for the AI-side overlay the record rows are planned in."""
+    return subprocess.run([str(EVALCONTROL)] + [str(a) for a in args], capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", env=env, timeout=300)
+
+
 def evalrun(args, env):
+    """SkyWright's controller (runcontrol), for the app scan."""
     pre = CONTROLLER
     return subprocess.run(pre + [str(a) for a in args], capture_output=True, text=True, encoding="utf-8",
                           errors="replace", env=env, timeout=300)
@@ -175,11 +184,17 @@ def main() -> int:
         p = evalrun(["plan", "--registry", fx["registry"], "--scope", fx["scope"], "--candidates", fx["cands"],
                      "--out", run, "--harness", buildlayout.root(), "--depth", "standard",
                      "--probe-cmd", f"scopeprobe={sys.executable} {FIXT / 'fakeprobes' / 'scopeprobe'}.py"], env)
+        r = evalrun(["run", "--run", run], env)
+        # the record rows are the AI-side overlay's, planned over the finished, bundled app scan
+        ok = [evalrun(["finalize", "--run", run], env).returncode,
+              evalrun(["bundle", "--run", run, "--out", run / "bundle", "--no-names"], env).returncode,
+              evalcontrol(["plan", "--app", run, "--app-bundle", run / "bundle", "--out", run / "ai"], env).returncode,
+              evalcontrol(["evaluate", "--run", run / "ai"], env).returncode]
+        run = run / "ai"
         plan = json.loads((run / "plan.json").read_text(encoding="utf-8")) if (run / "plan.json").exists() else {}
         arms = {a["armId"]: a for a in plan.get("arms") or []}
-        r = evalrun(["run", "--run", run], env)
-        check(p.returncode == 0 and r.returncode == 0 and "baseline" in arms and REORDER in arms,
-              f"setup: plan {p.returncode}, run {r.returncode}, arms {sorted(arms)}")
+        check(p.returncode == 0 and r.returncode == 0 and ok == [0, 0, 0, 0] and "baseline" in arms and REORDER in arms,
+              f"setup: plan {p.returncode}, run {r.returncode}, overlay {ok}, arms {sorted(arms)}")
         if "baseline" not in arms or REORDER not in arms:
             return 1
         home = tmp / "records" / "checkpoints"
@@ -188,7 +203,7 @@ def main() -> int:
 
         print("\n=== case-2160: an accepted import links its transcripts and copies its rows ===")
         m = make_import(home / "baseline", s_base, plan, DIALOGUE, arms["baseline"])
-        r = evalrun(["import-results", "--run", run, "--file", m], env)
+        r = evalcontrol(["import", "--run", run, "--file", m], env)
         imp = run / "imports" / f"{DIALOGUE}__baseline"
         outs = {Path(o["path"]).name: o["sha256"] for o in receipt(run, DIALOGUE, "baseline").get("outputs") or []}
         check(r.returncode == 0 and same(imp / "01-request.jsonl", s_base / "request.jsonl")
@@ -203,7 +218,7 @@ def main() -> int:
         m = make_import(home / REORDER, s_re, plan, DIALOGUE, arms[REORDER])
         with open(s_re / "response.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps({"late": True}) + "\n")
-        r = evalrun(["import-results", "--run", run, "--file", m], env)
+        r = evalcontrol(["import", "--run", run, "--file", m], env)
         check(r.returncode != 0 and "output-stale" in r.stderr
               and not any((run / "imports").glob(f"{DIALOGUE}__{REORDER}*"))
               and os.stat(s_re / "response.jsonl").st_nlink == 1,
@@ -211,15 +226,15 @@ def main() -> int:
               f"{r.stderr.strip()[-300:]!r})")
         capture(home / REORDER, plan, arms[REORDER])
         m = make_import(home / REORDER, s_re, plan, DIALOGUE, arms[REORDER])
-        r = evalrun(["import-results", "--run", run, "--file", m], env)
+        r = evalcontrol(["import", "--run", run, "--file", m], env)
         check(r.returncode == 0, f"C2162: the re-captured import is then accepted (exit {r.returncode}; "
                                  f"{r.stderr.strip()[-300:]!r})")
 
         print("\n=== case-2163: the bundle and a second (media) bundle link the import's transcripts ===")
-        evalrun(["finalize", "--run", run], env)
+        evalcontrol(["finalize", "--run", run], env)
         b1, b2 = run / "bundle", tmp / "media-bundle" / "evidence"
-        r1 = evalrun(["bundle", "--run", run], env)
-        r2 = evalrun(["bundle", "--run", run, "--out", b2], env)
+        r1 = evalcontrol(["bundle", "--run", run, "--out", b1], env)
+        r2 = evalcontrol(["bundle", "--run", run, "--out", b2], env)
         resp = f"evidence/imports/{DIALOGUE}__baseline/02-response.jsonl"
         check(r1.returncode == 0 and r2.returncode == 0
               and same(b1 / resp, s_base / "response.jsonl") and same(b2 / resp, s_base / "response.jsonl")
@@ -228,7 +243,7 @@ def main() -> int:
               f"{r2.returncode}; {(r1.stderr + r2.stderr).strip()[-300:]!r})")
 
         print("\n=== case-2164: verify-bundle passes on both linked bundles ===")
-        v1, v2 = evalrun(["verify-bundle", b1], env), evalrun(["verify-bundle", b2], env)
+        v1, v2 = evalcontrol(["verify", b1], env), evalcontrol(["verify", b2], env)
         check(v1.returncode == 0 and v2.returncode == 0 and same(b1 / resp, s_base / "response.jsonl"),
               f"C2164: both verify while linked (exit {v1.returncode}/{v2.returncode}; "
               f"{(v1.stdout + v1.stderr + v2.stderr).strip()[-300:]!r})")
@@ -253,8 +268,8 @@ def main() -> int:
         # write_imports rewrites its rows file in place
         (home / "baseline" / "imports" / f"{DIALOGUE}__baseline" / "rows.json").write_text(
             json.dumps({"Conflicts": [{"A": "x", "B": "y"}]}), encoding="utf-8")
-        rs = evalrun(["resume", "--run", run], env)
-        v1, v2 = evalrun(["verify-bundle", b1], env), evalrun(["verify-bundle", b2], env)
+        rs = evalcontrol(["evaluate", "--run", run], env)   # the overlay's resume: what is kept is re-checked and reused
+        v1, v2 = evalcontrol(["verify", b1], env), evalcontrol(["verify", b2], env)
         bad = recorded_ok(run, [b1, b2])
         changed = [str(p) for p, h in before.items() if sha(p) != h]
         check(linked and len(before) == 5 and rs.returncode == 0 and not bad and not changed

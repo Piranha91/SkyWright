@@ -6,7 +6,9 @@ from pathlib import Path
 OUT = Path(__file__).resolve().parent
 
 GEO = ["geometry.navmesh-ownership", "geometry.object-overlap", "geometry.placement-contact"]
-ALL_CHECKS = ["loadability.masters-and-order", "loadability.dangling-references", "records.cell-attributes",
+# (loadability.dangling-references and records.cell-attributes, the two record rows the trim held, left with the
+# record checks for the houseCARL integration module in step 3 of the boundary: 9B)
+ALL_CHECKS = ["loadability.masters-and-order",
               *GEO, "geometry.bos-overlay", "functional.linked-dependencies",
               "state.switch-census", "state.conditional-geometry",
               "functional.collective-route-connectivity", "environment.generated-output-regeneration",
@@ -17,8 +19,6 @@ ALL_CHECKS = ["loadability.masters-and-order", "loadability.dangling-references"
 # registry this fixture registry is trimmed from.
 APPLIC = {
     "loadability.masters-and-order": "yes",            # {"always": true}
-    "loadability.dangling-references": "yes",          # {"masters": true} - the target declares masters
-    "records.cell-attributes": "yes",                  # {"anyType": ["CELL"]}
     "geometry.navmesh-ownership": "yes",               # {"anyOf": [{"navmesh": true}, {"placed": true}]}
     "geometry.object-overlap": "yes",                  # {"placed": true}
     "geometry.placement-contact": "yes",               # {"placed": true}
@@ -35,13 +35,11 @@ APPLIC = {
 # The statuses that come from the adapter kind, not from the run (D3's status vocabulary; Q-2).
 KIND_STATUS = {
     "geometry.bos-overlay": "not-applicable",          # A-2: applicability `no` wins first
-    "loadability.dangling-references": "mcp-only", "records.cell-attributes": "mcp-only",
     "functional.collective-route-connectivity": "unsupported",
     "environment.generated-output-regeneration": "manual",
 }
 # Required checks no fixture case can ever complete: three families have no runnable adapter.
-NEVER_COMPLETE = ["loadability.dangling-references", "records.cell-attributes",
-                  "functional.collective-route-connectivity", "environment.generated-output-regeneration",
+NEVER_COMPLETE = ["functional.collective-route-connectivity", "environment.generated-output-regeneration",
                   "functional.linked-dependencies"]   # A-2/Q-7: unknown is listed under missing as well
 
 
@@ -76,8 +74,6 @@ led["patch.author-advice__baseline"] = {"execution": "completed", "detector": "c
 led["patch.order-evaluation__baseline"] = {"execution": "not-applicable", "detector": None, "rejection": None}
 led["patch.order-evaluation__candidate-01-reorder"] = {"execution": "completed", "detector": None,
                                                        "rejection": None}
-led["loadability.dangling-references__baseline"] = {"execution": "mcp-only", "detector": None, "rejection": None}
-led["records.cell-attributes__baseline"] = {"execution": "mcp-only", "detector": None, "rejection": None}
 led["geometry.bos-overlay__baseline"] = {"execution": "not-applicable", "detector": None, "rejection": None}
 led["functional.collective-route-connectivity__baseline"] = {"execution": "unsupported", "detector": None, "rejection": None}
 cases.append(case(

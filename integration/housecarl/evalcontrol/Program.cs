@@ -7,7 +7,11 @@
 //   evalcontrol plan     --app EVAL --app-bundle BUNDLE --out AI [--opt-in CHECK]...
 //                        freeze the overlay's plan: ai-checks.json's rows over the app plan's arms, bound to the app plan
 //                        and the app bundle's manifest
-//   evalcontrol evaluate --run AI      account every row of the overlay plan
+//   evalcontrol evaluate --run AI [--rebuild-ledger]
+//                        account every row of the overlay plan (what an earlier call settled is re-checked and reused);
+//                        --rebuild-ledger first rebuilds the ledger from the journal and the receipts
+//   evalcontrol import   --run AI --file DOC
+//                        bind a record reader's evidence (houseCARL's record tools) to one arm the overlay left open
 //   evalcontrol finalize --run AI      the overlay's disposition and STATUS.md
 //   evalcontrol bundle   --run AI --out DIR [--media FILE] [--registry FILE] [--scope FILE] [--search FILE]
 //                        the overlay's evidence bundle; --media adds supplied pictures and clips, each checked against
@@ -41,7 +45,7 @@ public static class Program
         if (args.Length == 1 && args[0] == "--self-test") return SelfTest.Run();
         if (args.Length == 0)
         {
-            Console.Error.WriteLine("REFUSED: evalcontrol needs a command: plan, evaluate, finalize, bundle, verify or --self-test (see Program.cs).");
+            Console.Error.WriteLine("REFUSED: evalcontrol needs a command: plan, evaluate, import, finalize, bundle, verify or --self-test (see Program.cs).");
             return Exit.Refused;
         }
         using var record = RunLog.BeginProcess("evalcontrol", args);
@@ -52,12 +56,13 @@ public static class Program
             return args[0] switch
             {
                 "plan" => OverlayPlan.Run(a.Need("--app"), a.Need("--app-bundle"), a.Need("--out"), a.Many("--opt-in")),
-                "evaluate" => OverlayEvaluate.Run(a.Need("--run")),
+                "evaluate" => OverlayEvaluate.Run(a.Need("--run"), a.Has("--rebuild-ledger")),
+                "import" => RecordImport.Run(a.Need("--run"), a.Need("--file")),
                 "finalize" => Finalizer.Run(a.Need("--run"), OverlayFinalize.Amend),
                 "bundle" => OverlayBundle.Run(a.Need("--run"), a.Need("--out"), a.One("--media"), a.One("--registry"), a.One("--scope"), a.One("--search")),
                 "verify" => OverlayVerify.Run(a.Positional ?? throw new Refusal("verify needs the overlay bundle's folder: evalcontrol verify DIR [--app BUNDLE] [--out FILE]."),
                     a.One("--app"), a.One("--out")),
-                _ => throw new Refusal($"evalcontrol has no command '{args[0]}'; the commands are plan, evaluate, finalize, bundle, verify and --self-test."),
+                _ => throw new Refusal($"evalcontrol has no command '{args[0]}'; the commands are plan, evaluate, import, finalize, bundle, verify and --self-test."),
             };
         }
         catch (Refusal r)
@@ -79,7 +84,8 @@ public sealed class Args
     static readonly Dictionary<string, string[]> Takes = new(StringComparer.Ordinal)
     {
         ["plan"] = ["--app", "--app-bundle", "--out", "--opt-in"],
-        ["evaluate"] = ["--run"],
+        ["evaluate"] = ["--run", "--rebuild-ledger"],
+        ["import"] = ["--run", "--file"],
         ["finalize"] = ["--run"],
         ["bundle"] = ["--run", "--out", "--media", "--registry", "--scope", "--search"],
         ["verify"] = ["--app", "--out"],
@@ -93,7 +99,7 @@ public sealed class Args
         {
             string flag = args[i], f = flag;
             // every option evalcontrol has (the tool index reads them from this line)
-            bool known = flag is "--app" or "--app-bundle" or "--out" or "--opt-in" or "--run" or "--media" or "--registry" or "--scope" or "--search";
+            bool known = flag is "--app" or "--app-bundle" or "--out" or "--opt-in" or "--run" or "--media" or "--registry" or "--scope" or "--search" or "--file" or "--rebuild-ledger";
             if (f.StartsWith("--", StringComparison.Ordinal) && !known) throw new Refusal($"evalcontrol has no option {f}.");
             if (!f.StartsWith("--", StringComparison.Ordinal))
             {
@@ -102,6 +108,12 @@ public sealed class Args
                 continue;
             }
             if (!takes.Contains(f)) throw new Refusal($"{args[0]} does not take {f}; it takes {string.Join(", ", takes)}.");
+            if (Switches.Contains(f))
+            {
+                if (!a._flags.TryGetValue(f, out var on)) a._flags[f] = on = [];
+                on.Add("");
+                continue;
+            }
             if (i + 1 >= args.Length) throw new Refusal($"{args[0]}: {f} needs a value after it.");
             if (!a._flags.TryGetValue(f, out var list)) a._flags[f] = list = [];
             list.Add(args[++i]);
@@ -109,6 +121,10 @@ public sealed class Args
         return a;
     }
 
+    /// <summary>The options that take no value.</summary>
+    static readonly HashSet<string> Switches = new(StringComparer.Ordinal) { "--rebuild-ledger" };
+
+    public bool Has(string flag) => _flags.ContainsKey(flag);
     public string Need(string flag) => One(flag) ?? throw new Refusal($"{_command} needs {flag}.");
     public string? One(string flag) => _flags.TryGetValue(flag, out var v) ? v[^1] : null;
     public List<string> Many(string flag) => _flags.TryGetValue(flag, out var v) ? v : [];

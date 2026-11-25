@@ -440,8 +440,8 @@ that runs it or the reason none can, what it may claim and where it stops. A ver
 EVERY applicable check in it: completed with a finding, completed with no finding, a catalogue,
 or — named, never dropped — unsupported, manual, skipped or not measurable. Several families have
 no detector behind them yet. Record-level checks are available through the MCP tools and must be run
-there; retain their tool requests/responses and import results through the controller's identity-bound
-`import-results` lane. A missing import is an execution omission, not an unavailable houseCARL capability.
+there; retain their tool requests/responses and import results through the identity-bound
+`evalcontrol import` lane (the AI-side overlay's). A missing import is an execution omission, not an unavailable houseCARL capability.
 The built route-cut check measures one object's obstruction; collective route connectivity across
 several changes and required destinations remains unbuilt. Listing absent results as unassessed is
 the honest state, and no wording in a verdict

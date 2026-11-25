@@ -11,6 +11,18 @@ public static class VerifyBundle
     /// <summary>Where a bundle keeps a file a receipt names: bundle-relative, under evidence/.</summary>
     public static string ReceiptEvidenceRel(string receiptPath) => $"evidence/{receiptPath}";
 
+    /// <summary>The registry version the AI-side checks left SkyWright's registry at: a bundle whose plan records an
+    /// older one (or none) may hold rows of kinds this SkyWright no longer checks.</summary>
+    public const int OldBundleBelow = 5;
+
+    const string NotCheckedWhy = "made before the AI-side checks left SkyWright's registry: hashed and chained, not judged here";
+
+    /// <summary>The one sentence verify-bundle prints for the rows it did not judge.</summary>
+    public static string NotCheckedSentence(IReadOnlyCollection<object?> rows) =>
+        $"verify: {rows.Count} evidence row(s) are of kinds this SkyWright does not check ("
+        + string.Join(", ", rows.Select(r => Ev.Str(PyValue.Dict(r)["kind"])).Distinct(StringComparer.Ordinal))
+        + "): they are hashed and chained, not judged; the houseCARL integration module checks them.";
+
     // (v or {}) of a loaded file.
     static PyDict Loaded(string path) => Ev.OrEmpty(PyJson.LoadEvalFile(path));
 
@@ -26,6 +38,8 @@ public static class VerifyBundle
         var memo = new HashMemo();
         object? guarantee = null;
         var receiptOutputs = new List<object?>();
+        var unjudged = new List<(object? path, string kind)>();
+        var notChecked = new List<object?>();
         void Defect(string kind, object? path, string detail) =>
             defects.Add(new PyDict { ["kind"] = kind, ["path"] = path, ["detail"] = detail });
 
@@ -64,6 +78,8 @@ public static class VerifyBundle
             // (3) the plan's own immutability and the planId every document agrees on
             var plan = Loaded(At("plan.json"));
             guarantee = IdentityChecks.Guarantee(plan)["guarantee"];
+            object? version = Ev.OrEmpty(plan.Get("registry")).Get("registryVersion");
+            bool older = !PyValue.IsIntOrBool(version) || PyValue.Int(version) < OldBundleBelow;
             string recordedPlan = At("plan.sha256");
             if (!Ev.Exists(At("plan.json")) || !Ev.Exists(recordedPlan))
                 Defect("plan-missing", "plan.json", "the bundle carries no plan and its recorded hash");
@@ -108,6 +124,11 @@ public static class VerifyBundle
                     continue;
                 }
                 string rid = Ev.Str(rec.Get("receiptId"));
+                // a receipt's acceptance, identity and outputs are checked below whatever its kind; in an older bundle
+                // one of an adapter kind this SkyWright's registry no longer has (a record import's) is named as well,
+                // since the rules of its kind were applied by the controller that made it and are not repeated here
+                if (older && (Ev.OrEmpty(rec.Get("adapter")).Get("kind") is not string rk || !Registry.App.AdapterKinds.Contains(rk)))
+                    unjudged.Add(($"receipts/{k}.json", $"receipt of adapter kind {Ev.Str(Ev.OrEmpty(rec.Get("adapter")).Get("kind"))}"));
                 if (PyValue.Truthy(e.Get("receiptId")) && !Ev.Eq(rec.Get("receiptId"), e.Get("receiptId")))
                     Defect("receipt-mismatch", $"receipts/{k}.json", $"the ledger names receipt {Ev.Str(e.Get("receiptId"))}, the file is {rid}");
                 if (!PyValue.Truthy(Ev.OrEmpty(rec.Get("validation")).Get("accepted")))
@@ -177,7 +198,18 @@ public static class VerifyBundle
                             $"disposition.evaluation.{label} names {key}, which the ledger does not hold as a terminal-ok {wantDetector} entry");
                 }
             // (7) evidence derived after measurement, and the disposition it was derived beside
-            EnrichmentVerify.Verify(d, manifest, plan, Defect, memo.Sha256);
+            EnrichmentVerify.Verify(d, manifest, plan, Defect, memo.Sha256,
+                e => unjudged.Add((e.Get("path"), $"enrichment {Ev.Str(e.Get("enrichment"))}")));
+            // (8) rows of kinds this SkyWright does not check: in a bundle whose plan records a registry older than the
+            // one the AI-side checks left, they are hashed and chained above and listed, not judged; in any other bundle
+            // this SkyWright made none can be there, so an enrichment of such a kind is a defect
+            foreach (var (path, kind) in unjudged)
+            {
+                if (older) notChecked.Add(new PyDict { ["path"] = path, ["kind"] = kind, ["why"] = NotCheckedWhy });
+                else Defect("evidence-kind-unknown", path,
+                    $"an evidence row of kind {kind}, which this SkyWright neither writes nor checks, in a bundle whose plan records "
+                    + $"registry version {Ev.Str(version)}: a bundle this SkyWright made holds none, so it is refused");
+            }
             if (PyValue.Truthy(ev.Get("complete")) && (PyValue.Truthy(ev.Get("missing")) || PyValue.Truthy(ev.Get("unknownApplicability"))))
                 Defect("disposition-complete-contradiction", "disposition.json",
                     "evaluation.complete is true while missing or unknownApplicability is non-empty");
@@ -212,11 +244,14 @@ public static class VerifyBundle
             ["note"] = "every path is bundle-relative, so a relocated bundle validates identically; bundle "
                 + "integrity and evaluation completion are two states and both are written here",
         };
+        // only a bundle that has such rows says so: every other bundle's verify.json is as it was
+        if (notChecked.Count > 0) PyValue.Dict(verify["bundle"])["notChecked"] = notChecked;
         PyJson.WriteEvalFile(PyValue.Truthy(outFile) ? outFile! : At("verify.json"), verify);
         if (!quiet)
         {
             Console.Out.WriteLine($"verify: {ok} file(s) verified, {missing.Count} missing, {mismatched.Count} mismatched, "
                 + $"{defects.Count} defect(s); bundle.complete: {Ev.Str(complete)}; evaluation.complete: {Ev.Str(evaluation.Get("complete"))}");
+            if (notChecked.Count > 0) Console.Out.WriteLine(NotCheckedSentence(notChecked));
             foreach (var x in defects.Take(20).Select(PyValue.Dict))
                 Console.Error.WriteLine($"   {Ev.Str(x["kind"])}: {(PyValue.Truthy(x["path"]) ? Ev.Str(x["path"]) : "-")} — {Ev.Str(x["detail"])}");
         }

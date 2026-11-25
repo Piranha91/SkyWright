@@ -7,14 +7,6 @@
     "applicability": "yes",
     "status": "planned"
    },
-   "loadability.dangling-references": {
-    "applicability": "yes",
-    "status": "mcp-only"
-   },
-   "records.cell-attributes": {
-    "applicability": "yes",
-    "status": "mcp-only"
-   },
    "geometry.navmesh-ownership": {
     "applicability": "yes",
     "status": "planned"
@@ -147,16 +139,6 @@
    "detector": null,
    "rejection": null
   },
-  "loadability.dangling-references__baseline": {
-   "execution": "mcp-only",
-   "detector": null,
-   "rejection": null
-  },
-  "records.cell-attributes__baseline": {
-   "execution": "mcp-only",
-   "detector": null,
-   "rejection": null
-  },
   "geometry.bos-overlay__baseline": {
    "execution": "not-applicable",
    "detector": null,
@@ -172,8 +154,6 @@
   "complete": false,
   "claim": "incomplete",
   "missingIncludes": [
-   "loadability.dangling-references",
-   "records.cell-attributes",
    "functional.collective-route-connectivity",
    "environment.generated-output-regeneration",
    "functional.linked-dependencies"

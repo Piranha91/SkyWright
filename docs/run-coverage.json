@@ -217,10 +217,11 @@
       "path": "integration/housecarl/evalcontrol/evalcontrol.csproj",
       "adapter": "csharp",
       "stageSource": "counted",
-      "note": "The AI-side evaluation's checks, as an overlay on a finished app scan: ai-checks.json's rows planned over the app plan's arms into RUN/ai, evaluated, finalized, bundled beside the app bundle and verified with it, all by runcontrol's own rules (runcontrol.dll from the app build is used as a library; evalcontrol holds no copy of a runcontrol rule), plus the rules only these rows need (the supplied-media rule). verify is the one owner of aiEvaluation.complete (both bundles verify and both evaluations are complete). Its run-log ops are evalcontrol-<command>; children it starts through runcontrol's launcher record under evalcontrol-<op>, never runcontrol-<op>. Its known answers are known-answers/*.json and its own cases (--self-test, run by the module's tests).",
+      "note": "The AI-side evaluation's checks, as an overlay on a finished app scan: ai-checks.json's rows planned over the app plan's arms into RUN/ai, evaluated, finalized, bundled beside the app bundle and verified with it, all by runcontrol's own rules (runcontrol.dll from the app build is used as a library; evalcontrol holds no copy of a runcontrol rule), plus the rules only these rows need (the supplied-media rule; the record import, `import`, moved from runcontrol's import-results with the record checks, its app prerequisites read from the bound app bundle's ledger; the checks of a record import's receipt and of the record-rows and order-variant rows derived from it, at verify). verify is the one owner of aiEvaluation.complete (both bundles verify and both evaluations are complete). Its run-log ops are evalcontrol-<command>; children it starts through runcontrol's launcher record under evalcontrol-<op>, never runcontrol-<op>. Its known answers are known-answers/*.json and its own cases (--self-test, run by the module's tests).",
       "answers": [
         "How do I plan, measure, bundle and verify the AI-side checks of an evaluation over a finished app scan?",
-        "Is an AI-side evaluation complete, and does its overlay bundle still bind to the app bundle it was made over?"
+        "Is an AI-side evaluation complete, and does its overlay bundle still bind to the app bundle it was made over?",
+        "How do I import a record reader's evidence for a record check the overlay left open?"
       ],
       "useWhen": "Run or check the rows only an AI-driven evaluation serves (ai-checks.json), after runcontrol has bundled the app scan; evalpipeline.py does this for a lab entry.",
       "evidence": [
@@ -230,7 +231,7 @@
         }
       ],
       "inputs": [
-        "An app scan's evaluation folder and its bundle (plan --app, --app-bundle); the overlay's run folder (--run) for evaluate, finalize and bundle; a media list (--media) for bundle; an overlay bundle folder for verify. Nothing for --self-test."
+        "An app scan's evaluation folder and its bundle (plan --app, --app-bundle); the overlay's run folder (--run) for evaluate, import, finalize and bundle; an import document (--file) for import; a media list (--media) for bundle; an overlay bundle folder for verify. Nothing for --self-test."
       ],
       "outputs": [
         "The overlay's run folder (plan.json, ledger.json, receipts, disposition.json, STATUS.md) and bundle (manifest.json with its overlay binding, media copies); verify.json with bundle, evaluation and aiEvaluation blocks; exit 0, 2 or 3. For --self-test one GREEN, RED or SKIP line per case and a count."
@@ -245,11 +246,13 @@
         "--app-bundle": "plan: the app scan's bundle the overlay binds to",
         "--out": "plan: the new overlay run folder; bundle: the overlay bundle folder; verify: the verify.json to write",
         "--opt-in": "plan: plan an opt-in check of the list (repeatable)",
-        "--run": "evaluate, finalize, bundle: the overlay run folder",
+        "--run": "evaluate, import, finalize, bundle: the overlay run folder",
         "--media": "bundle: the supplied pictures and clips (media item schema 2), each checked against the configurations the app scan's accepted receipts measured",
         "--registry": "bundle: the list file the overlay plan froze, when it has moved",
         "--scope": "bundle: the scope file the overlay plan froze, when it has moved",
-        "--search": "bundle: the candidate search the overlay plan froze, when it has moved"
+        "--search": "bundle: the candidate search the overlay plan froze, when it has moved",
+        "--file": "import: the import document (schema 1) to bind to one arm the overlay left open",
+        "--rebuild-ledger": "evaluate: rebuild the ledger from the journal and the receipts first (runcontrol's rule)"
       }
     },
     {
@@ -6612,7 +6615,7 @@
       "path": "integration/housecarl/evalrecords.py",
       "adapter": "python",
       "stageSource": "counted",
-      "note": "The record capture for an evaluation's mcp-only checks: one houseCARL server session per arm in explicit-paths mode, writing one schema-1 import document per check and arm for runcontrol import-results. Opens one Run per invocation. tests/test_evalrecords.py is its known-answer suite.",
+      "note": "The record capture for an evaluation's mcp-only checks: one houseCARL server session per arm in explicit-paths mode, writing one schema-1 import document per check and arm for evalcontrol import (the AI-side overlay's). Opens one Run per invocation. tests/test_evalrecords.py is its known-answer suite.",
       "answers": [
         "How do I capture an evaluation's record checks (dangling references, contested fields, cell attributes, registration and dialogue, missing assets) for every arm?"
       ],
@@ -6675,6 +6678,39 @@
           ]
         }
       ]
+    },
+    {
+      "id": "recordenrich",
+      "kind": "script",
+      "lang": "python",
+      "path": "integration/housecarl/recordenrich.py",
+      "adapter": "python",
+      "stageSource": "counted",
+      "note": "The record-rows and order-variant enrichments of an AI-side overlay bundle: SkyWright's bundleenrich derives them from the overlay's record imports, given the plugin header facts the bound app bundle's probe emits recorded; evalcontrol verify checks the bundle before anything is written and after. Opens one Run per invocation.",
+      "answers": [
+        "How do I add the rows derived from a record import (record rows, the reversed order's) to an AI-side overlay bundle?"
+      ],
+      "useWhen": "After evalcontrol bundle, to add rows derived from the overlay's record imports for the report.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/recordenrich.py",
+          "anchor": "recordenrich - the rows derived after measurement from a record import, added to an AI-side overlay bundle."
+        }
+      ],
+      "inputs": [
+        "An overlay bundle (evalcontrol bundle's --out) bound to an app bundle that is still where it names."
+      ],
+      "outputs": [
+        "The enrichment's files and manifest rows in the overlay bundle, verify.json; one JSON line, or one REFUSED sentence (exit 2 or 3)."
+      ],
+      "flagCoverage": {
+        "parser": "argparse",
+        "path": "integration/housecarl/recordenrich.py"
+      },
+      "modifiers": {
+        "--bundle": "the overlay bundle to enrich",
+        "--kind": "record-rows or order-variant"
+      }
     },
     {
       "id": "modcensus",
@@ -8039,6 +8075,27 @@
       ]
     },
     {
+      "id": "_geometry-harness/tests/test_verify_old_kinds.py",
+      "path": "_geometry-harness/tests/test_verify_old_kinds.py",
+      "kind": "script",
+      "answers": [
+        "Does verify-bundle list, not judge, the rows of kinds it no longer checks in an older bundle, and refuse them in a current one?"
+      ],
+      "useWhen": "Qualify a change to verify-bundle's handling of evidence rows of kinds this SkyWright does not check (the registry-version rule).",
+      "evidence": [
+        {
+          "path": "_geometry-harness/tests/test_verify_old_kinds.py",
+          "anchor": "Known answers for what `runcontrol verify-bundle` does with evidence rows of kinds this SkyWright does not"
+        }
+      ],
+      "inputs": [
+        "tests/fixtures/old-bundles/lab-record-rows (copies), its plan's registry version edited for the current-version cases."
+      ],
+      "outputs": [
+        "Assertion results for: Does verify-bundle list, not judge, the rows of kinds it no longer checks in an older bundle, and refuse them in a current one?"
+      ]
+    },
+    {
       "id": "integration/housecarl/tests/test_evalspeech.py",
       "path": "integration/housecarl/tests/test_evalspeech.py",
       "kind": "script",
@@ -8805,6 +8862,27 @@
       ]
     },
     {
+      "id": "integration/housecarl/tests/evalrun_record_cases.py",
+      "path": "integration/housecarl/tests/evalrun_record_cases.py",
+      "kind": "script",
+      "answers": [
+        "Which of the controller suite's record cases (imports and rows derived from them) hold on the AI-side overlay?"
+      ],
+      "useWhen": "Read or change the record cases test_evalcontrol_run.py runs (moved from test_evalrun.py in step 3 of the boundary), or their helpers test_records_keep_work.py uses.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/tests/evalrun_record_cases.py",
+          "anchor": "The controller suite's record cases (test_evalrun.py's cases 17, 18, 42, 43, 44, 61, 65 and 800"
+        }
+      ],
+      "inputs": [
+        "test_evalrun.py's engine (fixtures, fake probes, helpers); evalcontrol for every step on the overlay."
+      ],
+      "outputs": [
+        "Assertion results for: Which of the controller suite's record cases (imports and rows derived from them) hold on the AI-side overlay?"
+      ]
+    },
+    {
       "id": "integration/housecarl/tests/test_switchflip_outcome.py",
       "path": "integration/housecarl/tests/test_switchflip_outcome.py",
       "kind": "script",
@@ -9414,24 +9492,24 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_import_empty_population.py",
-      "path": "_geometry-harness/tests/test_import_empty_population.py",
+      "id": "integration/housecarl/tests/test_import_empty_population.py",
+      "path": "integration/housecarl/tests/test_import_empty_population.py",
       "kind": "script",
       "answers": [
-        "Does runcontrol accept a judged-0 import only when it states no members on an arm without the targets, and refuse every other?"
+        "Does evalcontrol accept a judged-0 record import only when it states no members on an arm without the targets, and refuse every other?"
       ],
-      "useWhen": "Qualify a change to how runcontrol import-results reads an import's coverage.",
+      "useWhen": "Qualify a change to how evalcontrol import reads an import's coverage.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_import_empty_population.py",
+          "path": "integration/housecarl/tests/test_import_empty_population.py",
           "anchor": "A judged-0 import is \"nothing to judge\" only on two independent facts (cases 1340-1346)."
         }
       ],
       "inputs": [
-        "The evalrun fixtures, a trim of the shipped registry, and the fixture scopeprobe stand-in."
+        "The evalrun fixtures, SkyWright's registry trimmed to the record rows' app prerequisite, the AI-side overlay over the bundled app run, and the fixture scopeprobe stand-in."
       ],
       "outputs": [
-        "Assertion results for: Does runcontrol accept a judged-0 import only when it states no members on an arm without the targets, and refuse every other?"
+        "Assertion results for: Does evalcontrol accept a judged-0 record import only when it states no members on an arm without the targets, and refuse every other?"
       ]
     },
     {

@@ -1,0 +1,99 @@
+{
+ "python": "3.12.6",
+ "placeholders": {
+  "backslash": "<ROOT\\>",
+  "forward": "<ROOT/>",
+  "doubled": "<ROOT\\\\>"
+ },
+ "recordsStage": [
+  {
+   "name": "an in-place entry: the note, no child",
+   "entry": {
+    "schema": 1,
+    "id": "m",
+    "inPlace": {
+     "instance": "I:/i",
+     "profile": "Default",
+     "game": "G:/g"
+    },
+    "selection": {
+     "mods": [
+      "S"
+     ]
+    }
+   },
+   "entries": {
+    "r.records__candidate-10": {
+     "status": "mcp-only"
+    },
+    "r.records__baseline": {
+     "status": "mcp-only"
+    },
+    "r.fields__baseline": {
+     "status": "mcp-only"
+    },
+    "r.records__candidate-2": {
+     "status": "mcp-only"
+    },
+    "g.overlap__candidate-3": {
+     "status": "completed"
+    },
+    "odd": {
+     "status": "mcp-only"
+    },
+    "r.none__candidate-4": {
+     "status": null
+    },
+    "r.done__candidate-5": {
+     "status": "completed",
+     "imported": true
+    }
+   },
+   "machine": {
+    "readerCmd": "\"R:/reader.exe\" --stdio"
+   },
+   "summary": {
+    "baseline": {
+     "imports": [
+      "{cap}/imports/r.records__baseline/result.json",
+      "{cap}/imports/r.fields__baseline/result.json"
+     ],
+     "seconds": 2.5
+    },
+    "candidate-10": {
+     "imports": [
+      "{cap}/imports/r.records__candidate-10/result.json",
+      "{cap}/imports/r.done__candidate-5/result.json",
+      "{cap}/imports/g.overlap__candidate-3/result.json",
+      "loose.json"
+     ]
+    },
+    "candidate-2": {
+     "imports": []
+    }
+   },
+   "workers": null,
+   "captureExit": 0,
+   "importExits": [
+    0,
+    0,
+    0
+   ],
+   "captureLog": null,
+   "importLogs": true,
+   "earlier": 0,
+   "envReader": null,
+   "bound": {
+    "openArms": 0
+   },
+   "outputs": [
+    "<ROOT\\>\\run\\records\\records.json"
+   ],
+   "refusal": null,
+   "printed": "",
+   "started": [],
+   "record": "{\n  \"note\": \"a manual run offers no model-driven record check; mcp-only rows stay open and the bundle says they were not assessed\"\n}\n",
+   "folders": []
+  }
+ ]
+}

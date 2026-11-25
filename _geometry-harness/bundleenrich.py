@@ -144,7 +144,7 @@ def configuration_masters(cfg: dict, recorded: dict | None = None) -> tuple[dict
     return ({n.lower(): set(masters_of(n)) for n in names}, {n.lower() for n in names if unread_of(n)})
 
 
-def enrich_record_rows(d: Path) -> dict:
+def enrich_record_rows(d: Path, recorded: dict | None = None) -> dict:
     import recordrows as RR
     manifest = _guard(d, "record-rows")
     scope = RR.load_scope()
@@ -179,7 +179,7 @@ def enrich_record_rows(d: Path) -> dict:
     containers = set()
     for _, _, _, resp, _ in todo:
         containers |= RR.persistent_cells(resp)
-    recorded = recorded_plugin_headers(d, manifest)
+    recorded = recorded_plugin_headers(d, manifest) if recorded is None else recorded
     for rc, by_role, req, resp, cfg in todo:
         masters, unread = configuration_masters(cfg, recorded)
         emit = RR.derive(req, resp, cfg, scope, rel={req: f"evidence/{by_role['request']}",
@@ -208,12 +208,12 @@ def is_master_file(name: str, head: dict | None) -> bool:
     return bool((head or {}).get("master")) or str(name).lower().endswith((".esm", ".esl"))
 
 
-def pair_headers(d: Path, manifest: dict, plan: dict, pair: list) -> dict:
+def pair_headers(d: Path, manifest: dict, plan: dict, pair: list, recorded: dict | None = None) -> dict:
     """{plugin lower: {name, sha256, masters, master, light, source}} for the evaluated pair, as the setup with both
     loads them: the master lists and flags the bundle's emits recorded for those bytes, else the file's header read at
     the recorded bytes, else absent."""
     import evalbase
-    recorded = recorded_plugin_headers(d, manifest)
+    recorded = recorded_plugin_headers(d, manifest) if recorded is None else recorded
     want = {}
     # the plan's setups first, then the record imports' own configurations (the bytes they read)
     sources = [(a_.get("requested") or {}).get("plugins") or [] for a_ in plan.get("arms") or []]
@@ -288,7 +288,7 @@ def _record_imports(d: Path, manifest: dict) -> list:
     return out
 
 
-def enrich_order_variant(d: Path) -> dict:
+def enrich_order_variant(d: Path, recorded: dict | None = None) -> dict:
     """The record lane's rows on each setup holding both evaluated mods, with the two mods' places in the load order
     swapped (phase 3 of roadmap 4.24): recordrows.derive on that setup's own transcripts with the swapped
     configuration, which is the engine's rule for which version wins. Refused, writing nothing, when the order is not a
@@ -300,7 +300,7 @@ def enrich_order_variant(d: Path) -> dict:
     pair = [str(t.get("name")) for t in plan.get("targets") or [] if isinstance(t, dict) and t.get("name")]
     if len(pair) != 2:
         raise Refused(f"the plan names {len(pair)} evaluated plugin(s), not a pair, so there is no pair's order to reverse")
-    heads = pair_headers(d, manifest, plan, pair)
+    heads = pair_headers(d, manifest, plan, pair, recorded)
     ch = order_choice(pair, heads)
     if ch["forced"] is None:
         raise Refused(f"the order of {pair[0]} and {pair[1]} was not reversed: {ch['missing'][0]}")
@@ -310,7 +310,7 @@ def enrich_order_variant(d: Path) -> dict:
                else f"{other} lists {ch['loadsFirst']} as a master")
         raise Refused(f"the order of {pair[0]} and {pair[1]} is not a choice ({why}), so no reversed setup was derived")
     scope = RR.load_scope()
-    recorded = recorded_plugin_headers(d, manifest)
+    recorded = recorded_plugin_headers(d, manifest) if recorded is None else recorded
     todo = []
     for rc, by_role, req, resp, cfg in _record_imports(d, manifest):
         names = [str(p.get("name")) for p in cfg.get("plugins") or [] if isinstance(p, dict)]

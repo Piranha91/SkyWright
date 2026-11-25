@@ -35,6 +35,6 @@
     <EmbeddedResource Include="known-answers\evaluate.json" LogicalName="evaluate.json" />
     <EmbeddedResource Include="known-answers\bundle.json" LogicalName="bundle.json" />
     <EmbeddedResource Include="known-answers\rows.json" LogicalName="rows.json" />
-    <EmbeddedResource Include="known-answers\import.json" LogicalName="import.json" />
+    <EmbeddedResource Include="known-answers\records-stage.json" LogicalName="records-stage.json" />
   </ItemGroup>
 </Project>

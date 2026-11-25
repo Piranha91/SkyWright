@@ -5,7 +5,8 @@ had in test_evalrun.py, so the accounting finds it here by name.
 
 `python integration/housecarl/tests/test_evalcontrol_run.py [case]` (SKYWRIGHT_CONFIG picks the build, else Release;
 both SkyWright's build and this module's must be built). The oracles are the hand-derived values the app suite held for
-these cases, moved unchanged into tests/fixtures/evalcontrol-run/.
+these cases, moved unchanged into tests/fixtures/evalcontrol-run/; the record checks' cases (RECORD_CASES) are
+evalrun_record_cases.py's, on the overlay.
 """
 from __future__ import annotations
 
@@ -180,9 +181,28 @@ def plan_oracles(tmp):
 CASES = {"case-10": case_10, "C1933": c1933, "plan-oracles": plan_oracles}
 
 
+# ------------------------------------------------------------------ the record checks (9B)
+# The app suite's cases about importing a record check's evidence (17, 42, 43, 44, 65, and case 18's import half) and
+# about the rows derived from an import (61, 800) moved here with the record checks (evalrun_record_cases.py), on the
+# AI-side overlay; they run under their names over the app suite's engine.
+RECORD_CASES = ["case-17", "case-18", "case-42", "case-43", "case-44", "case-61", "case-65", "case-800"]
+
+
+def run_record_cases(argv) -> int:
+    import evalrun_record_cases as RC
+    return ER.main({k: getattr(RC, "case_" + k.split("-")[1]) for k in RECORD_CASES}, argv)
+
+
 if __name__ == "__main__":
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
     if not EVALCONTROL.is_file():
         print(f"  FAIL  evalcontrol is not built at {EVALCONTROL}: {SW.why_no_build() or 'build the module (scripts/build.ps1)'}")
         raise SystemExit(1)
-    raise SystemExit(ER.main(CASES))
+    argv = sys.argv[1:]
+    want = argv[0] if argv else ""
+    def wanted(keys):
+        return not want or any(k.startswith(want) or want.startswith(k) for k in keys)
+    rc = 0 if wanted(RECORD_CASES) and not wanted(CASES) else ER.main(CASES, argv)
+    if wanted(RECORD_CASES):
+        rc = max(rc, run_record_cases(argv))
+    raise SystemExit(rc)

@@ -8,15 +8,18 @@ record rows derived from those reads, and supplied media. Paths are relative to 
 that produces them is run by `integration/housecarl/evalpipeline.py` and driven by the `world-edit-compatibility`
 skill (`integration/housecarl/claude-plugin/skills/`).
 
-**Where the checks are today.** The import, live-receipt and media rules below are still applied by `runcontrol`
-(`import-results`, `bundle --media`) in this version; the sections say which command applies each.
+**Where the checks are today.** The record import (§1) and the media rule are applied by this module's
+`evalcontrol` (`import`, `bundle --media`) on the AI-side overlay; the live receipts' rule is still applied by
+`runcontrol import-results` in this version; the sections say which command applies each.
 
 ## 1. Importing an existing MCP result
 
 
-`runcontrol import-results --run RUN --file result.json` completes one planned check whose registry adapter kind is
-`mcp-only`. It is a generic evidence lane, not an adapter for a particular tool. Runnable checks and checks whose
-detector is genuinely unsupported cannot be imported through it.
+`evalcontrol import --run RUN/ai --file result.json` completes one planned check of the AI-side overlay whose adapter
+kind is `mcp-only` (the record checks of `evalcontrol/ai-checks.json`). It is a generic evidence lane, not an adapter
+for a particular tool. Runnable checks and checks whose detector is genuinely unsupported cannot be imported through
+it. Besides the row's own prerequisites, its `appPrerequisites` (app checks such as `loadability.masters-and-order`)
+must be settled on the arm in the app bundle the overlay is bound to; an import is refused, by name, until they are.
 
 The schema-1 import document carries `planId`, `checkId`, `armId`, `state`, `capturedUtc`,
 `tool: {name, version?}`, the full emitted `configuration`, a `result`, and `outputs`. `tool.name` may name the

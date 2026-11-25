@@ -13,7 +13,9 @@ public static class OverlayEvaluate
         + "assessed by `evalcontrol bundle --media`, and an item whose fingerprint does not match an "
         + "accepted receipt of the app scan is unassessed, not an illustration of a verified result";
 
-    public static int Run(string aiRun)
+    /// <summary>rebuildLedger: the ledger is rebuilt from the journal and the receipts first (runcontrol's own
+    /// Ledger.Rebuild, as `runcontrol resume --rebuild-ledger` does).</summary>
+    public static int Run(string aiRun, bool rebuildLedger = false)
     {
         string run = PyPath.Resolve(aiRun);
         EvalStore.SetRunStore(run);
@@ -26,6 +28,7 @@ public static class OverlayEvaluate
         if (changed != null) throw new Refusal(changed);
         if (EvalStore.PremiseRefusal(plan) is { } premise) throw new Refusal(premise);
         var ledger = new Ledger(run, plan);
+        if (rebuildLedger) ledger.Rebuild();
         if (ledger.Refusal() is { } bad) throw new Refusal(bad);
 
         using (var parent = RunLog.Begin("evalcontrol-checks", new RunOptions { StageSource = StageSource.Counted }))
@@ -45,7 +48,13 @@ public static class OverlayEvaluate
                     object? st = armRow["status"];
                     if (EvaluateRun.AlreadyDone(ledger, check["checkId"], arm["armId"], null)) EvaluateRun.MarkReused(ledger, check["checkId"], arm["armId"], null);
                     else if (EvaluateRun.AccountPlanStatus(ex, check, arm, st)) { }
+                    // an import no longer credited (its evidence changed, its reuse refused) keeps its cause, by runcontrol's rule
+                    else if (Ev.Eq(st, "mcp-only") && EvaluateRun.AccountUncreditedImport(ex, check, arm)) { }
                     else if (kind == "media") ex.Account(check, arm, "blocked(no-identified-media)", null, NoMedia);
+                    else if (Ev.Eq(st, "mcp-only"))
+                        // open until `evalcontrol import` binds a record reader's evidence to it
+                        ex.Account(check, arm, "mcp-only", null,
+                            PyValue.Truthy(check.Get("unsupportedReason")) ? (string)check["unsupportedReason"]! : "the list records no command-line adapter for this check");
                     else throw new Refusal($"{Ev.Str(check["checkId"])}: adapter kind {PyText.Repr(kind)} is not one evalcontrol evaluates.");
                     parent.Advance();
                 }
@@ -67,7 +76,7 @@ public static class OverlayFinalize
         var un = PyValue.Dict(disposition["unassessed"]);
         var families = Ev.Items(un.Get("familiesUnsupportedOrManual")).Select(Ev.Str).ToHashSet(StringComparer.Ordinal);
         foreach (var c in Ev.Items(plan["checks"]).Select(PyValue.Dict))
-            if (Ev.Eq(Ev.OrEmpty(c["adapter"]).Get("kind"), "media")) families.Add(Ev.Str(c["family"]));
+            if (Ev.OrEmpty(c["adapter"]).Get("kind") is "media" or "mcp-only") families.Add(Ev.Str(c["family"]));
         un["familiesUnsupportedOrManual"] = PyOrder.SortedByCodePoint(families).Cast<object?>().ToList();
         un["mediaUnassessed"] = MediaSentence;
         disposition[OverlayPlan.Key] = plan[OverlayPlan.Key];

@@ -13,7 +13,9 @@ public static class OverlayPlan
     /// <summary>The block that binds an overlay to its app scan: the same in the plan and in the overlay bundle's manifest.</summary>
     public const string Key = "overlay";
 
-    public static int Run(string appRun, string appBundle, string outDir, List<string> optIn)
+    /// <summary>list: the list to plan from, for the self-test's cases about one row group; the program always plans
+    /// from the list it ships (AiList.Shipped).</summary>
+    public static int Run(string appRun, string appBundle, string outDir, List<string> optIn, string? list = null)
     {
         string app = PyPath.Resolve(appRun), bundle = PyPath.Resolve(appBundle), run = PyPath.Resolve(outDir);
         var (appPlan, why) = EvalStore.LoadPlan(app);
@@ -35,9 +37,9 @@ public static class OverlayPlan
                 && label is not ("registry" or "scope" or "search"))
                 throw new Refusal($"the app plan pins {label} ({Ev.Str(pin["path"])}), which the overlay does not know how to take from the app bundle; add it to OverlayPlan before planning the AI-side rows.");
 
-        string listSrc = AiList.Shipped;
-        var list = Registry.Load(listSrc);
-        var problems = AiList.Validate(list, appPlan);
+        string listSrc = list ?? AiList.Shipped;
+        var aiList = Registry.Load(listSrc);
+        var problems = AiList.Validate(aiList, appPlan);
         if (problems.Count > 0) throw new Refusal($"{listSrc} is invalid: " + string.Join("; ", problems));
 
         // the scope as the app bundle holds it (the copy its verify checks against the app plan's frozen hash)
@@ -57,7 +59,7 @@ public static class OverlayPlan
         var opted = new SortedSet<string>(PyOrder.CodePoint);
         foreach (string id in optIn)
         {
-            var c = Registry.CheckById(list, id) ?? throw new Refusal($"--opt-in {PyText.Repr(id)}: {AiList.FileName} defines no such check");
+            var c = Registry.CheckById(aiList, id) ?? throw new Refusal($"--opt-in {PyText.Repr(id)}: {AiList.FileName} defines no such check");
             if (!PyValue.Truthy(c.Get("optIn"))) throw new Refusal($"--opt-in {PyText.Repr(id)}: that check is not opt-in (it is planned by default)");
             opted.Add(id);
         }
@@ -65,8 +67,8 @@ public static class OverlayPlan
         var arms = Ev.Items(appPlan.Get("arms")).Select(PyValue.Dict).ToList();
         string singleArm = appPlan.Get("reviewArm") as string ?? "baseline";
         string harness = Ev.Str(Ev.OrEmpty(appPlan.Get("options")).Get("harness"));
-        var applic = Registry.Applicability(list, scope, meshReach);
-        var regChecks = Ev.Items(list.Get("checks")).Select(PyValue.Dict).ToList();
+        var applic = Registry.Applicability(aiList, scope, meshReach);
+        var regChecks = Ev.Items(aiList.Get("checks")).Select(PyValue.Dict).ToList();
         var (checks, unknown, _, touched, tools) = RunControl.Plan.FreezeChecks(
             regChecks, applic, arms, singleArm, opted, new PyDict(), null, harness, AiList.NeverRunKinds);
         foreach (var c in checks)
@@ -93,7 +95,7 @@ public static class OverlayPlan
         plan["createdUtc"] = EvalStore.UtcNow();
         plan["registry"] = new PyDict
         {
-            ["path"] = listCopy, ["registryVersion"] = PyValue.Whole(PyValue.Int(list.ContainsKey("registryVersion") ? list["registryVersion"] : 0L)), ["sha256"] = listSha,
+            ["path"] = listCopy, ["registryVersion"] = PyValue.Whole(PyValue.Int(aiList.ContainsKey("registryVersion") ? aiList["registryVersion"] : 0L)), ["sha256"] = listSha,
         };
         plan["tools"] = tools;
         plan["toolIdentity"] = new PyDict { ["contract"] = (long)PlanIdentity.Contract, ["rule"] = PlanIdentity.Rule, ["programs"] = programs };

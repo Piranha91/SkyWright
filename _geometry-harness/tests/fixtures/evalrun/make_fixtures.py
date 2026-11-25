@@ -52,7 +52,7 @@ MODLIST = ("# fixture modlist.txt: MO2 writes the highest-priority mod on the TO
 
 # The checks trimmed out of the real registry: one per family, plus the only real prerequisite chain
 # (state.conditional-geometry <- state.switch-census) and one check of each non-runnable kind.
-KEEP = ["loadability.masters-and-order", "loadability.dangling-references", "records.cell-attributes",
+KEEP = ["loadability.masters-and-order",
         "geometry.navmesh-ownership", "geometry.object-overlap", "geometry.placement-contact",
         "geometry.bos-overlay", "functional.linked-dependencies",
         "state.switch-census", "state.conditional-geometry",

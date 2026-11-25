@@ -228,7 +228,7 @@ For a real evaluation, run all applicable available checks before compiling; a s
 run is an explicitly partial evaluation. The process driver cannot invoke MCP tools itself.
 Run the registry's existing houseCARL record/asset checks through those tools, retaining requests,
 responses, tested configuration and scope. Import their identity-bound result receipts through
-`runcontrol import-results` before finalizing the bundle. Missing imported results mean “not checked
+`evalcontrol import` (into the AI-side overlay, `RUN/ai`) before finalizing its bundle. Missing imported results mean “not checked
 in this evaluation,” not “houseCARL cannot check this.” A review of only sampled asset paths is
 not an exhaustive missing-assets check. Follow the bundle contract for the receipt format.
 

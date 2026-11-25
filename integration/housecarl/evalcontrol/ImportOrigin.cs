@@ -1,7 +1,10 @@
-namespace RunControl;
+using RunControl;
 
-/// <summary>Where an import's evidence came from (evalrun.py's origin_refusals and what it reads): a capture made for
-/// this plan's arm, shown by the capture token in every MCP initialize request, or a declared reuse.</summary>
+namespace EvalControl;
+
+/// <summary>Where a record import's evidence came from (moved from runcontrol with the record checks; evalrun.py's
+/// origin_refusals and what it reads): a capture made for this plan's arm, shown by the capture token in every MCP
+/// initialize request, or a declared reuse.</summary>
 public static class ImportOrigin
 {
     /// <summary>What a capture made for a plan's arm puts in every MCP initialize request's clientInfo.name.</summary>

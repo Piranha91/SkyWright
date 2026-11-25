@@ -434,16 +434,19 @@ def case_e4_an_import_survives_a_raised_budget(tmp):
     """The path round 2's note left untested: imported evidence and a resume under another limit."""
     d = T.GEN / "cases" / "case-19-derived-prerequisites"
     plugins = json.loads((d / "candidates" / sorted(x.name for x in (d / "candidates").glob("candidate-*baseline*"))[0]).read_text(encoding="utf-8"))["Plugins"]
-    T.import_case_dir("keep-import", {"candidate-00-baseline": plugins})
-    run = tmp / "e4"
-    plan = T.import_plan(run, "keep-import", "e4")
-    r = T.evalrun(["run", "--run", run], T.GEN / "cases" / "keep-import" / "scenario.json")
+    import evalrun_record_cases as RC   # the record cases' helpers, moved here with the record checks (9B)
+    RC.import_case_dir("keep-import", {"candidate-00-baseline": plugins})
+    scen = T.GEN / "cases" / "keep-import" / "scenario.json"
+    app = tmp / "e4"
+    RC.import_plan(app, "keep-import", "e4")
+    r = T.evalrun(["run", "--run", app], scen)
     T.expect(r.returncode, 0, "e4: run exit")
+    run, plan = RC.import_overlay(app, scen, "e4")
     arm = plan["arms"][0]
-    manifest, _ = T.origin_import(tmp / "e4-import", plan, arm)
-    r = T.evalrun(["import-results", "--run", run, "--file", manifest], T.GEN / "cases" / "keep-import" / "scenario.json")
+    manifest, _ = RC.origin_import(tmp / "e4-import", plan, arm)
+    r = RC.evalrun(["import-results", "--run", run, "--file", manifest], scen)
     T.expect(r.returncode, 0, f"e4: import accepted ({r.stderr[-200:]})")
-    r = T.evalrun(["resume", "--run", run, "--budget-minutes", "5"], T.GEN / "cases" / "keep-import" / "scenario.json")
+    r = RC.evalrun(["resume", "--run", run, "--budget-minutes", "5"], scen)
     T.expect(r.returncode, 0, f"e4: resume under a raised limit exit ({r.stderr[-200:]})")
     led = json.loads((run / "ledger.json").read_text(encoding="utf-8"))["entries"]
     e = led.get(f"{T.IMPORT_CHECK}__{arm['armId']}") or {}

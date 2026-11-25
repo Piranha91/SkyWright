@@ -3,7 +3,7 @@
     python evalrun.py enrich --bundle DIR --kind record-rows|names|order-variant|order-geometry [...]
 
 What this is for. An evaluation is planned, run, finalized and bundled by the built-in controller, runcontrol
-(_geometry-harness/runcontrol; `runcontrol plan|run|resume|import-results|finalize|bundle|population`), which owns those
+(_geometry-harness/runcontrol; `runcontrol plan|run|resume|finalize|bundle|population`), which owns those
 rules, and `runcontrol verify-bundle`, which recomputes every hash from the bundle-relative paths. One command stays here
 until it is ported: `enrich`, which adds evidence derived after measurement to a bundle (record rows, names, the reversed
 order's record view, an order sweep's geometry); it checks the bundle with `runcontrol verify-bundle` before and after it

@@ -1,8 +1,10 @@
 namespace RunControl;
 
 /// <summary>verify-bundle's checks of evidence derived after measurement (bundleenrich.py's verify): sources present
-/// and hashing as cited, every row citing its reads, names read from bytes the plan records, the disposition unchanged
-/// since enrichment, and the names step's statement agreeing with the files.</summary>
+/// and hashing as cited, names read from bytes the plan records, the disposition unchanged since enrichment, and the
+/// names step's statement agreeing with the files. The record-rows and order-variant kinds, derived from record
+/// imports, are the houseCARL integration module's and are checked there; here they are kinds this SkyWright does not
+/// check, as any kind outside Kinds is.</summary>
 public static class EnrichmentVerify
 {
     static readonly string[] NamesStatuses = ["enriched", "partial", "refused", "skipped"];
@@ -10,7 +12,11 @@ public static class EnrichmentVerify
     // (v or "") as text.
     static string Text(object? v) => PyValue.Truthy(v) ? Ev.Str(v) : "";
 
-    public static void Verify(string d, PyDict manifest, PyDict plan, Action<string, object?, string> defect, Func<string, string?> sha)
+    /// <summary>The enrichment kinds this SkyWright derives and checks; a row of any other kind goes to `unknown`.</summary>
+    public static readonly string[] Kinds = ["names", "order-geometry"];
+
+    public static void Verify(string d, PyDict manifest, PyDict plan, Action<string, object?, string> defect, Func<string, string?> sha,
+        Action<PyDict> unknown)
     {
         var planShas = new HashSet<string>(StringComparer.Ordinal);
         foreach (var a in Ev.Items(plan.Get("arms")))
@@ -33,29 +39,7 @@ public static class EnrichmentVerify
             if (Ev.Eq(e.Get("role"), "capture")) continue;
             object? kind = e.Get("enrichment");
             object? src = dict?.Get("derivedFrom");
-            if (kind is "record-rows" or "order-variant")
-            {
-                if (!PyValue.Truthy(src))
-                {
-                    defect("enrichment-source-missing", e["path"], "the derived rows do not cite the bytes they came from");
-                    continue;
-                }
-                foreach (var x in PyValue.Iter(src))
-                {
-                    string p = PyPath.Join(d, Text(Ev.G(x, "path")));
-                    if (!PyValue.Truthy(Ev.G(x, "path")) || !File.Exists(p) || !Ev.Eq(sha(p), Ev.G(x, "sha256")))
-                        defect("enrichment-source-changed", e["path"],
-                            $"a cited source {Ev.Str(Ev.G(x, "path"))} is absent from the bundle or does not hash as cited");
-                }
-                long bare = 0;
-                foreach (var c in Ev.Items(dict!.Get("Conflicts")))
-                    foreach (var n in Ev.Items(Ev.G(c, "Necessary")))
-                        if (!PyValue.Truthy(Ev.G(n, "Reads"))) bare++;
-                // a reversed setup derived from a tree capture cites the transcripts, not single reads
-                if (bare > 0 && !(Ev.Eq(kind, "order-variant") && Ev.Eq(dict.Get("readForm"), "tree")))
-                    defect("enrichment-source-missing", e["path"], $"{bare} derived row(s) do not cite the reads they came from");
-            }
-            else if (Ev.Eq(kind, "order-geometry"))
+            if (Ev.Eq(kind, "order-geometry"))
             {
                 foreach (var x in PyValue.Truthy(src) ? PyValue.Iter(src) : new object?[] { null })
                 {
@@ -73,6 +57,8 @@ public static class EnrichmentVerify
                         defect("enrichment-source-foreign", e["path"],
                             $"names were read from {Ev.Str(Ev.G(x, "plugin"))} with bytes the plan does not record");
             }
+            // a kind this SkyWright neither derives nor checks: the caller says what that means for this bundle
+            else unknown(e);
         }
         VerifyNamesStatus(d, manifest, defect);
     }

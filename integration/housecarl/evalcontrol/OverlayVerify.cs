@@ -54,10 +54,16 @@ public static class OverlayVerify
 
         // (2) the overlay, by the same rule
         string overlayFile = PyPath.Join(Path.GetDirectoryName(appVerifyFile)!, "verify-overlay.json");
-        bool overlayComplete = VerifyBundle.Run(d, overlayFile, quiet: true) == Exit.Ok;
+        VerifyBundle.Run(d, overlayFile, quiet: true);
         var verify = Ev.OrEmpty(PyJson.LoadEvalFile(overlayFile));
         File.Delete(overlayFile);
         var plan = Ev.OrEmpty(PyJson.LoadEvalFile(PyPath.Join(d, "plan.json")));
+        // the rows runcontrol walked and hashed but did not judge are this module's: each is judged here
+        var rb = Ev.OrEmpty(verify.Get("bundle"));
+        var (kept, _) = RecordEvidence.Rejudge(d, rb, manifest, plan, Defect);
+        bool overlayComplete = PyValue.Truthy(rb.Get("schemaSupported")) && kept.Count == 0
+            && PyValue.Len(Ev.OrList(rb.Get("missing"))) == 0 && PyValue.Len(Ev.OrList(rb.Get("mismatched"))) == 0;
+        rb["structurallyValid"] = PyValue.Truthy(rb.Get("schemaSupported")) && kept.Count == 0;
         if (!Ev.Eq(plan.Get(OverlayPlan.Key), new PyDict(bound.Where(kv => kv.Key != "appBundleFromBundle"))))
             Defect("binding-changed", "manifest.json", "the manifest's overlay block is not the one the plan froze");
         if (!Ev.Eq(Ev.OrEmpty(plan.Get("registry")).Get("sha256"), bound.Get("listSha256")))

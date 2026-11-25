@@ -244,7 +244,7 @@
      "argv": [
       "capture",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--arm",
       "baseline",
       "--arm",
@@ -282,11 +282,11 @@
     {
      "op": "import-capture-01-00",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json"
      ],
@@ -295,11 +295,11 @@
     {
      "op": "import-capture-01-01",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json"
      ],
@@ -308,11 +308,11 @@
     {
      "op": "import-capture-01-02",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json"
      ],
@@ -425,7 +425,7 @@
      "argv": [
       "capture",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--arm",
       "baseline",
       "--arm",
@@ -463,11 +463,11 @@
     {
      "op": "import-capture-01-00",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json"
      ],
@@ -476,11 +476,11 @@
     {
      "op": "import-capture-01-01",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json"
      ],
@@ -489,11 +489,11 @@
     {
      "op": "import-capture-01-02",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json"
      ],
@@ -606,7 +606,7 @@
      "argv": [
       "capture",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--arm",
       "baseline",
       "--arm",
@@ -644,11 +644,11 @@
     {
      "op": "import-capture-03-00",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-03/imports/r.fields__baseline/result.json"
      ],
@@ -657,11 +657,11 @@
     {
      "op": "import-capture-03-01",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-03/imports/r.records__baseline/result.json"
      ],
@@ -670,11 +670,11 @@
     {
      "op": "import-capture-03-02",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-03/imports/r.records__candidate-10/result.json"
      ],
@@ -1557,7 +1557,7 @@
      "argv": [
       "capture",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--arm",
       "baseline",
       "--arm",
@@ -1595,11 +1595,11 @@
     {
      "op": "import-capture-01-00",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json"
      ],
@@ -1608,11 +1608,11 @@
     {
      "op": "import-capture-01-01",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json"
      ],
@@ -1621,11 +1621,11 @@
     {
      "op": "import-capture-01-02",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json"
      ],
@@ -1737,7 +1737,7 @@
      "argv": [
       "capture",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--arm",
       "baseline",
       "--arm",
@@ -1775,11 +1775,11 @@
     {
      "op": "import-capture-01-00",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json"
      ],
@@ -1788,11 +1788,11 @@
     {
      "op": "import-capture-01-01",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json"
      ],
@@ -1801,11 +1801,11 @@
     {
      "op": "import-capture-01-02",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json"
      ],
@@ -1929,7 +1929,7 @@
      "argv": [
       "capture",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--arm",
       "baseline",
       "--arm",
@@ -1967,11 +1967,11 @@
     {
      "op": "import-capture-01-00",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json"
      ],
@@ -1980,11 +1980,11 @@
     {
      "op": "import-capture-01-01",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json"
      ],
@@ -1993,11 +1993,11 @@
     {
      "op": "import-capture-01-02",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json"
      ],
@@ -2096,7 +2096,7 @@
      "argv": [
       "capture",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--arm",
       "baseline",
       "--arm",
@@ -2134,11 +2134,11 @@
     {
      "op": "import-capture-01-00",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json"
      ],
@@ -2235,7 +2235,7 @@
      "argv": [
       "capture",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--arm",
       "baseline",
       "--arm",
@@ -2366,7 +2366,7 @@
      "argv": [
       "capture",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--arm",
       "baseline",
       "--arm",
@@ -2404,11 +2404,11 @@
     {
      "op": "import-capture-01-00",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-01/imports/r.fields__baseline/result.json"
      ],
@@ -2417,11 +2417,11 @@
     {
      "op": "import-capture-01-01",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-01/imports/r.records__baseline/result.json"
      ],
@@ -2430,11 +2430,11 @@
     {
      "op": "import-capture-01-02",
      "dir": "<ROOT\\>\\run\\records\\commands",
-     "script": "evalrun.py",
+     "script": "evalcontrol",
      "argv": [
-      "import-results",
+      "import",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--file",
       "<ROOT/>/run/records/capture-01/imports/r.records__candidate-10/result.json"
      ],
@@ -2518,7 +2518,7 @@
      "argv": [
       "capture",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--arm",
       "baseline",
       "--arm",
@@ -2629,7 +2629,7 @@
      "argv": [
       "capture",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--arm",
       "baseline",
       "--arm",
@@ -2740,7 +2740,7 @@
      "argv": [
       "capture",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--arm",
       "baseline",
       "--arm",
@@ -2863,7 +2863,7 @@
      "argv": [
       "capture",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--arm",
       "baseline",
       "--arm",
@@ -2975,7 +2975,7 @@
      "argv": [
       "capture",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--arm",
       "baseline",
       "--arm",
@@ -3098,7 +3098,7 @@
      "argv": [
       "capture",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--arm",
       "baseline",
       "--arm",
@@ -3210,7 +3210,7 @@
      "argv": [
       "capture",
       "--run",
-      "<ROOT/>/run/evaluation",
+      "<ROOT/>/run/ai",
       "--arm",
       "baseline",
       "--arm",

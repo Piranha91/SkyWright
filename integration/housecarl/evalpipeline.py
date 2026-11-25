@@ -8,8 +8,9 @@ controller made.
 What this is for. Census to bundle (census, prepare, scope, plan, evaluate, records, scenes, bundle) are run by the
 built-in controller, runcontrol (_geometry-harness/runcontrol), which derives the arms and their order from the entry and
 writes RUN/stages.json, RUN/arms.json and RUN/prepare/preparation.json. For a lab entry this driver starts runcontrol
-itself: through evaluate, then the record capture (the lab's mcp-only rows read with houseCARL's record reader and
-imported with runcontrol import-results), then on through the bundle. An in-place entry (the app's) is carried through
+itself through the bundle, then the AI-side overlay over it (evalcontrol plan and evaluate), the record capture (the
+overlay's mcp-only rows read with houseCARL's record reader and imported with evalcontrol import), and evalcontrol's
+finalize, bundle and verify of the overlay. An in-place entry (the app's) is carried through
 the bundle by the app. This driver then runs what follows on the same run folder: precedent, report-plan, capture,
 image-observations, report, reel, deliver.
 
@@ -503,12 +504,12 @@ def capture_python(ctx) -> str:
     return str(ctx.machine.get("python") or sys.executable)
 
 
-def capture_records(ctx, res: dict, sdir: Path) -> tuple[dict, list]:
-    """A lab run's record capture, between runcontrol's evaluate and its records stage: every arm with an mcp-only row
-    open in the ledger is read by evalrecords.py capture under the machine slot, then each document of a row that was
-    open is imported by runcontrol's own import-results. Writes RUN/records/records.json (runcontrol's records stage
-    leaves it and lists the rows still open). Returns (bound, outputs) as the stage it was."""
-    run = ctx.out / "evaluation"
+def capture_records(ctx, res: dict, sdir: Path, run: Path | None = None) -> tuple[dict, list]:
+    """A lab run's record capture, in the AI-side overlay between evalcontrol's evaluate and its finalize: every arm
+    with an mcp-only row open in the overlay's ledger is read by evalrecords.py capture under the machine slot, then
+    each document of a row that was open is imported by evalcontrol import. Writes RUN/records/records.json.
+    Returns (bound, outputs)."""
+    run = run or ai_dir(ctx)
     led = read_json(run / "ledger.json").get("entries") or {}
     open_arms = sorted({k.split("__")[1] for k, v in led.items() if str(v.get("status")) == "mcp-only" and "__" in k})
     if not open_arms:
@@ -553,7 +554,7 @@ def capture_records(ctx, res: dict, sdir: Path) -> tuple[dict, list]:
     imports = [d for d in imports if str((led.get(Path(d).parent.name) or {}).get("status")) == "mcp-only"]
     for i, doc in enumerate(sorted(imports)):
         rr = child(ctx, sdir / "commands", f"import-{cap.name}-{i:02d}",
-                   [fwd(runcontrol_exe(ctx.machine)), "import-results", "--run", fwd(run), "--file", doc])
+                   evalcontrol_argv(ctx.machine, "import", "--run", run, "--file", doc))
         log = sdir / "commands" / f"import-{cap.name}-{i:02d}.txt"
         results.append({"file": doc, "exitCode": rr.get("exitCode"),
                         "log": fwd(log) if log.is_file() else None})
@@ -609,9 +610,10 @@ def settings_record(settings) -> dict:
 
 
 def measure(ctx, through: str) -> None:
-    """A lab entry's census to bundle: runcontrol through evaluate, the record capture, then runcontrol on through the
-    bundle (each part only as far as `through`). runcontrol reuses every stage whose inputs and outputs are unchanged, so
-    a run folder already measured starts no probe again. Raises Refusal with runcontrol's own sentence when it stops."""
+    """A lab entry's census to bundle: runcontrol as far as `through`, then, when that is the bundle, the AI-side
+    overlay with its record capture (measure_overlay). runcontrol reuses every stage whose inputs and outputs are
+    unchanged, so a run folder already measured starts no probe again. Raises Refusal with runcontrol's own sentence
+    when it stops."""
     last = STAGES[min(STAGES.index(through), STAGES.index("bundle"))]
     rc = [fwd(runcontrol_exe(ctx.machine)), "run", "--entry", fwd(ctx.entry_path), "--out", fwd(ctx.out)]
     if ctx.machine_path:
@@ -623,13 +625,6 @@ def measure(ctx, through: str) -> None:
             st = ctx.out / "status.json"
             said = (read_json(st).get("sentence") if st.is_file() else None) or f"read {fwd(ctx.out / 'measure')}"
             raise Refusal(f"the built-in controller stopped before {upto} (exit {r.get('exitCode')}): {said}")
-    if STAGES.index(last) < STAGES.index("records"):
-        controller(last)
-        return
-    controller("evaluate")
-    sdir = ctx.out / "records"
-    sdir.mkdir(parents=True, exist_ok=True)
-    capture_records(ctx, {}, sdir)
     controller(last)
     if last == "bundle":
         measure_overlay(ctx)
@@ -660,8 +655,9 @@ def ai_bundle_dir(ctx) -> Path:
 
 def measure_overlay(ctx) -> None:
     """The AI-side rows of a lab run, after the app's bundle: evalcontrol plans them over the app plan (once per app
-    bundle: an overlay bound to an earlier app bundle is planned again), evaluates, finalizes, bundles beside the app
-    bundle and verifies the pair. Raises Refusal with evalcontrol's sentence when a step stops."""
+    bundle: an overlay bound to an earlier app bundle is planned again), evaluates, the record capture reads and
+    imports the record rows it left open, and evalcontrol finalizes, bundles beside the app bundle and verifies the pair.
+    Raises Refusal with evalcontrol's sentence when a step stops."""
     run, app = ai_dir(ctx), bundle_dir(ctx)
     plan = read_json(run / "plan.json") if (run / "plan.json").is_file() else None
     if plan is not None and (plan.get("overlay") or {}).get("appManifestSha256") != sha256_file(app / "manifest.json"):
@@ -672,10 +668,16 @@ def measure_overlay(ctx) -> None:
     if ai_bundle_dir(ctx).exists():
         shutil.rmtree(ai_bundle_dir(ctx))
     steps += [("overlay-evaluate", evalcontrol_argv(ctx.machine, "evaluate", "--run", run)),
+              ("records", None),
               ("overlay-finalize", evalcontrol_argv(ctx.machine, "finalize", "--run", run)),
               ("overlay-bundle", evalcontrol_argv(ctx.machine, "bundle", "--run", run, "--out", ai_bundle_dir(ctx))),
               ("overlay-verify", evalcontrol_argv(ctx.machine, "verify", ai_bundle_dir(ctx)))]
     for name, argv in steps:
+        if argv is None:
+            sdir = ctx.out / "records"
+            sdir.mkdir(parents=True, exist_ok=True)
+            capture_records(ctx, {}, sdir, run)
+            continue
         r = child(ctx, ctx.out / "measure", name, argv)
         if r.get("exitCode") != 0:
             raise Refusal(f"evalcontrol stopped at {name} (exit {r.get('exitCode')}); read {fwd(ctx.out / 'measure' / (name + '.txt'))}.")
