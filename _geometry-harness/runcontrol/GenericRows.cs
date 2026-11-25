@@ -89,10 +89,13 @@ public static class GenericRows
     /// when it cannot be built. `launch` receives what RunChild takes.</summary>
     public static void Run(Executor ex, PyDict check, PyDict arm) => Run(ex, check, arm, null);
 
-    /// <summary>As above, with the caller's own argument placeholders beside the registry's (runcontrol's own
-    /// evaluation passes none).</summary>
-    public static void Run(Executor ex, PyDict check, PyDict arm, IReadOnlyDictionary<string, Placeholder>? placeholders) =>
-        Build(ex, check, arm, (argv, outputs, states) => ex.RunChild(check, arm, null, argv, outputs, states: states), placeholders);
+    /// <summary>As above, with the caller's own argument placeholders beside the registry's, its own rules over the
+    /// built command line after runcontrol's, and its own rules for where the row's output lands before runcontrol's
+    /// (runcontrol's own evaluation passes none).</summary>
+    public static void Run(Executor ex, PyDict check, PyDict arm, IReadOnlyDictionary<string, Placeholder>? placeholders,
+        IReadOnlyList<Placeholder>? argvRules = null, IReadOnlyList<OutputsRule>? outputRules = null) =>
+        Build(ex, check, arm, (argv, outputs, states) => ex.RunChild(check, arm, null, argv, outputs, states: states), placeholders,
+            argvRules, outputRules);
 
     /// <summary>A caller's argument placeholder: it appends its tokens to <c>args</c> (the arguments so far, whose last
     /// may be the flag it repeats) and returns null, or returns the status and the sentence the row is accounted
@@ -109,6 +112,22 @@ public static class GenericRows
     /// <summary>runcontrol's own rules over a built command line (each may add to it, or refuse the row with a status
     /// and a sentence), run after the common flags and before the outputs are named.</summary>
     public static readonly IReadOnlyList<Placeholder> OwnArgvRules = [AdviceArgv];
+
+    /// <summary>A rule for where a row's result lands: the files the probe writes, given the built command line and
+    /// the row's output folder, or null when the rule does not apply (the next one is asked; the default is
+    /// <c>outputs/CHECK/ARM.json</c>).</summary>
+    public delegate List<string>? OutputsRule(PyDict plan, PyDict check, List<string> argv, string outDir);
+
+    /// <summary>runcontrol's own output rules, asked after a caller's.</summary>
+    public static readonly IReadOnlyList<OutputsRule> OwnOutputRules = [NexusReport];
+
+    /// <summary>A json row run with --out names its report by the target's Nexus id (adviceprobe's report-ID.json).</summary>
+    static List<string>? NexusReport(PyDict plan, PyDict check, List<string> argv, string outDir)
+    {
+        if (!argv.Contains("--out") || !Ev.Eq(Ev.OrEmpty(check.Get("adapter")).Get("output"), "json")) return null;
+        object? nid = PlanNexusId(plan);
+        return PyValue.Truthy(nid) ? [PyPath.Join(outDir, $"report-{Ev.Str(nid)}.json")] : null;
+    }
 
     static (string status, string why)? NexusIdPlaceholder(Executor ex, PyDict plan, PyDict check, PyDict arm, List<string> args)
     {
@@ -162,7 +181,8 @@ public static class GenericRows
     }
 
     public static void Build(Executor ex, PyDict check, PyDict arm, Action<List<string>, List<string>, object?> launch,
-        IReadOnlyDictionary<string, Placeholder>? placeholders = null)
+        IReadOnlyDictionary<string, Placeholder>? placeholders = null, IReadOnlyList<Placeholder>? argvRules = null,
+        IReadOnlyList<OutputsRule>? outputRules = null)
     {
         var adapter = PyValue.Dict(check["adapter"]);
         object? kind = adapter.Get("kind");
@@ -321,7 +341,7 @@ public static class GenericRows
             argv.AddRange([(string)adapter["primitiveSolidityFlag"]!, tfile]);
         }
 
-        foreach (var rule in OwnArgvRules)
+        foreach (var rule in OwnArgvRules.Concat(argvRules ?? []))
             if (rule(ex, plan, check, arm, argv) is { } refused)
             {
                 ex.Account(check, arm, refused.status, null, refused.why);
@@ -334,11 +354,13 @@ public static class GenericRows
             // a text probe prints its answer: the log is the output, recorded first by RunChild; adapter.files are
             // what it writes besides, each required and fresh
             outputs = Ev.Items(adapter.Get("files")).Select(f => PyPath.Str(((string)f!).Replace("{out}", outDir).Replace("{run}", ex.Run).Replace("{arm}", armId))).ToList();
-        else if (argv.Contains("--out") && Ev.Eq(outKind, "json"))
-        {
-            object? nid = PlanNexusId(plan);
-            if (PyValue.Truthy(nid)) outputs = [PyPath.Join(outDir, $"report-{Ev.Str(nid)}.json")];
-        }
+        else
+            foreach (var rule in (outputRules ?? []).Concat(OwnOutputRules))
+                if (rule(plan, check, argv, outDir) is { } named)
+                {
+                    outputs = named;
+                    break;
+                }
 
         launch(argv, outputs, statesFile is { } made ? made.record : states);
     }
