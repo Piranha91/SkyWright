@@ -15,7 +15,8 @@ public static class OverlayPlan
 
     /// <summary>list: the list to plan from, for the self-test's cases about one row group; the program always plans
     /// from the list it ships (AiList.Shipped).</summary>
-    public static int Run(string appRun, string appBundle, string outDir, List<string> optIn, string? list = null)
+    public static int Run(string appRun, string appBundle, string outDir, List<string> optIn, string? list = null,
+        List<string>? probeCmds = null)
     {
         string app = PyPath.Resolve(appRun), bundle = PyPath.Resolve(appBundle), run = PyPath.Resolve(outDir);
         var (appPlan, why) = EvalStore.LoadPlan(app);
@@ -66,11 +67,12 @@ public static class OverlayPlan
 
         var arms = Ev.Items(appPlan.Get("arms")).Select(PyValue.Dict).ToList();
         string singleArm = appPlan.Get("reviewArm") as string ?? "baseline";
-        string harness = Ev.Str(Ev.OrEmpty(appPlan.Get("options")).Get("harness"));
         var applic = Registry.Applicability(aiList, scope, meshReach);
         var regChecks = Ev.Items(aiList.Get("checks")).Select(PyValue.Dict).ToList();
+        // the module's probes are its own build's, so their records and identities are taken there (ModuleRows.ProbeBuild)
+        string probeBuild = ModuleRows.ProbeBuild();
         var (checks, unknown, _, touched, tools) = RunControl.Plan.FreezeChecks(
-            regChecks, applic, arms, singleArm, opted, new PyDict(), null, harness, AiList.NeverRunKinds);
+            regChecks, applic, arms, singleArm, opted, new PyDict(), null, probeBuild, AiList.NeverRunKinds);
         foreach (var c in checks)
         {
             var row = regChecks.First(r => Ev.Eq(r["id"], c["checkId"]));
@@ -82,7 +84,34 @@ public static class OverlayPlan
         File.Copy(listSrc, listCopy, overwrite: false);
         string listSha = Registry.Sha256(listCopy);
 
+        // the identity of every program this overlay can launch, frozen with it, by runcontrol's rule (PlanIdentity):
+        // the controller, and each module probe a planned row starts, measured where the overlay will launch it
         var programs = new PyDict { [PlanIdentity.Controller] = ToolIdentity.Controller() };
+        var armKinds = arms.ToDictionary(x => Ev.Str(x["armId"]), x => Ev.Str(x["kind"]), StringComparer.Ordinal);
+        // the app plan's options, with a stand-in for each of this module's probes the caller named (its suites)
+        var appOptions = (PyDict)Py.Copy(Ev.OrEmpty(appPlan.Get("options")))!;
+        var ownExes = checks.Where(c => Ev.OrEmpty(c["adapter"]).Get("kind") is string k && ModuleRows.LaunchKinds.Contains(k))
+            .Select(c => Ev.Str(Ev.OrEmpty(c["adapter"]).Get("exe"))).ToHashSet(StringComparer.Ordinal);
+        foreach (string spec in probeCmds ?? [])
+        {
+            int eq = spec.IndexOf('=');
+            string name = eq > 0 ? spec[..eq].Trim() : "", cmd = eq > 0 ? spec[(eq + 1)..].Trim() : "";
+            if (name.Length == 0 || cmd.Length == 0) throw new Refusal($"--probe-cmd {PyText.Repr(spec)} is not NAME=COMMAND.");
+            if (!ownExes.Contains(name))
+                throw new Refusal($"--probe-cmd {name}: no row of {AiList.FileName} launches a probe of that name, and the overlay stands in only its own probes (runcontrol's --probe-cmd stands in the app's).");
+            if (appOptions.Get("probeCmd") is not PyDict standIns) appOptions["probeCmd"] = standIns = new PyDict();
+            standIns[name] = cmd;
+        }
+        try
+        {
+            foreach (string pid in PyOrder.SortedByCodePoint(PlanIdentity.Launchable(checks, armKinds, ModuleRows.LaunchKinds)))
+                if (pid != PlanIdentity.Controller) programs[pid] = PlanIdentity.Measure(appOptions, probeBuild, pid);
+        }
+        catch (Unreadable ex)
+        {
+            throw new Refusal($"tool-unreadable: {ex.FilePath} could not be read ({ex.Error.Message}), so this plan cannot record which program "
+                              + "would run. Make the file readable and plan again.");
+        }
         var statesNotExplored = checks.Where(c => Ev.Eq(Ev.OrEmpty(c["inputs"]).Get("states"), "all"))
             .Select(c => (object?)new PyDict
             {
@@ -91,6 +120,7 @@ public static class OverlayPlan
             }).ToList();
 
         var plan = (PyDict)Py.Copy(appPlan)!;
+        plan["options"] = appOptions;
         plan["planId"] = null;
         plan["createdUtc"] = EvalStore.UtcNow();
         plan["registry"] = new PyDict

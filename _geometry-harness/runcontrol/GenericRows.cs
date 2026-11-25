@@ -1,7 +1,7 @@
 namespace RunControl;
 
 /// <summary>One row of a check whose probe is launched as a child (evalrun.py's run_generic): scopeprobe,
-/// probe-emit, probe-json, probe-target, adviceprobe, patchprobe. The probe's flags come from the registry as data,
+/// probe-emit, probe-json, probe-target, patchprobe. The probe's flags come from the registry as data,
 /// with placeholders filled from named sources; a placeholder whose source is absent blocks the row by name.</summary>
 public static class GenericRows
 {
@@ -24,48 +24,6 @@ public static class GenericRows
     {
         if (!Ev.Eq(Ev.OrEmpty(check.Get("inputs")).Get("states"), "selected")) return [];
         return Ev.Items(PyValue.Dict(plan["states"])["selected"]).Where(s => PyText.Lower(Ev.Str(s)) != "baseline").ToList();
-    }
-
-    /// <summary>The first target's Nexus id the scope records, or null.</summary>
-    public static object? PlanNexusId(PyDict plan)
-    {
-        foreach (var t in Ev.Items(plan.Get("targets")).OfType<PyDict>())
-        {
-            object? nid = Ev.OrEmpty(t.Get("footprint")).Get("nexusId");
-            if (!PyValue.Truthy(nid)) nid = t.Get("nexusId");
-            if (PyValue.Truthy(nid)) return nid;
-        }
-        return null;
-    }
-
-    /// <summary>adviceprobe's --with list: the Nexus id of every instance mod folder the plan's configuration loads a
-    /// plugin from, other than a target's own folder and the target's own id, in number order.</summary>
-    public static List<long> AdviceNeighbourIds(PyDict plan)
-    {
-        object? inst = Ev.OrEmpty(plan.Get("options")).Get("instance");
-        if (!PyValue.Truthy(inst)) return [];
-        string instance = Ev.Str(inst);
-        string mods = PyPath.NormCase(Path.GetFullPath(Path.Combine(instance, "mods")));
-        var own = Ev.Items(plan.Get("targets")).OfType<PyDict>()
-            .Select(t => PyText.Lower(PyValue.Truthy(t.Get("provider")) ? Ev.Str(t["provider"]) : "")).ToHashSet(StringComparer.Ordinal);
-        object? nid = PlanNexusId(plan);
-        string nidText = PyValue.Truthy(nid) ? Ev.Str(nid) : "";
-        long? target = PyValue.IsDigit(nidText) && PyValue.IntText(nidText) is { } n ? (long)n : null;
-        var ids = new SortedSet<long>();
-        foreach (var p in Ev.Items(Ev.OrEmpty(plan.Get("configuration")).Get("plugins")))
-        {
-            object? path = (p as PyDict)?.Get("path");
-            if (!PyValue.Truthy(path)) continue;
-            string abs = Path.GetFullPath(Ev.Str(path));
-            string full = PyPath.NormCase(abs);
-            // only a plugin at the root of an instance mod folder
-            if (!full.StartsWith(mods + "\\", StringComparison.Ordinal) || full[(mods.Length + 1)..].Split('\\').Length != 2) continue;
-            string folder = PyPath.Name(Path.GetDirectoryName(abs)!);
-            if (own.Contains(PyText.Lower(folder))) continue;
-            int? mid = ModNexus.ModNexusId(PyPath.Join(instance, "mods", folder));
-            if (mid is { } id && id != target) ids.Add(id);
-        }
-        return ids.ToList();
     }
 
     static List<string> TargetNames(PyDict plan) =>
@@ -105,13 +63,12 @@ public static class GenericRows
     /// <summary>runcontrol's own placeholders beyond the plain substitutions; a caller's entry of the same token wins.</summary>
     public static readonly IReadOnlyDictionary<string, Placeholder> OwnPlaceholders = new Dictionary<string, Placeholder>(StringComparer.Ordinal)
     {
-        ["{nexusId}"] = NexusIdPlaceholder,
         ["{pair}"] = PairPlaceholder,
     };
 
     /// <summary>runcontrol's own rules over a built command line (each may add to it, or refuse the row with a status
     /// and a sentence), run after the common flags and before the outputs are named.</summary>
-    public static readonly IReadOnlyList<Placeholder> OwnArgvRules = [AdviceArgv];
+    public static readonly IReadOnlyList<Placeholder> OwnArgvRules = [];
 
     /// <summary>A rule for where a row's result lands: the files the probe writes, given the built command line and
     /// the row's output folder, or null when the rule does not apply (the next one is asked; the default is
@@ -119,25 +76,7 @@ public static class GenericRows
     public delegate List<string>? OutputsRule(PyDict plan, PyDict check, List<string> argv, string outDir);
 
     /// <summary>runcontrol's own output rules, asked after a caller's.</summary>
-    public static readonly IReadOnlyList<OutputsRule> OwnOutputRules = [NexusReport];
-
-    /// <summary>A json row run with --out names its report by the target's Nexus id (adviceprobe's report-ID.json).</summary>
-    static List<string>? NexusReport(PyDict plan, PyDict check, List<string> argv, string outDir)
-    {
-        if (!argv.Contains("--out") || !Ev.Eq(Ev.OrEmpty(check.Get("adapter")).Get("output"), "json")) return null;
-        object? nid = PlanNexusId(plan);
-        return PyValue.Truthy(nid) ? [PyPath.Join(outDir, $"report-{Ev.Str(nid)}.json")] : null;
-    }
-
-    static (string status, string why)? NexusIdPlaceholder(Executor ex, PyDict plan, PyDict check, PyDict arm, List<string> args)
-    {
-        object? nid = PlanNexusId(plan);
-        if (!PyValue.Truthy(nid))
-            return ("blocked(no-nexus-id)",
-                "the scope records no Nexus id for any target (the mod folder's meta.ini carries none), so there is no page to read offline");
-        args.Add(Ev.Str(nid));
-        return null;
-    }
+    public static readonly IReadOnlyList<OutputsRule> OwnOutputRules = [];
 
     static (string status, string why)? PairPlaceholder(Executor ex, PyDict plan, PyDict check, PyDict arm, List<string> args)
     {
@@ -157,26 +96,6 @@ public static class GenericRows
             args.RemoveAt(args.Count - 1);
         }
         foreach (var (a, b) in pairs) args.AddRange([flag, a, b]);
-        return null;
-    }
-
-    /// <summary>adviceprobe's command line: offline only, and the evaluated mod's neighbours by Nexus id.</summary>
-    static (string status, string why)? AdviceArgv(Executor ex, PyDict plan, PyDict check, PyDict arm, List<string> argv)
-    {
-        if (!Ev.Eq(Ev.OrEmpty(check.Get("adapter")).Get("kind"), "adviceprobe")) return null;
-        int at = argv.IndexOf("--refresh");
-        if (at >= 0)
-        {
-            string word = at + 1 < argv.Count ? argv[at + 1] : "";
-            if (word != "offline")
-                return ("blocked(network-refused)",
-                    $"the registry adapter asks for --refresh {PyText.Repr(word)}; evalrun never fetches. "
-                    + "Use --refresh offline, or run adviceprobe yourself and supply its output.");
-        }
-        else if (!argv.Contains("--offline")) argv.Add("--offline");
-        if (!argv.Contains("--with"))
-            // the evaluated mod's neighbours: a clash stated on their page is author advice for the pair
-            foreach (long id in AdviceNeighbourIds(plan)) argv.AddRange(["--with", id.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
         return null;
     }
 

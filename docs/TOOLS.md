@@ -63,7 +63,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does a scene import skip a declared cell whose owning plugin the setup neither loads nor masters?](#tool-_geometry-harness-tests-test_declared_cell_presence.py) — `_geometry-harness/tests/test_declared_cell_presence.py`
 - [Does a shot in a batch equal the same shot rendered in a fresh process?](#tool-rendertwin) — `rendertwin`
 - [Does a vignette's capture camera pass the measured state's camera checks (inside test, the sightlines of the participants that setup places) in every other state it renders, try the next pose of the chain when one fails, refuse naming the state and the object when none passes, and keep its single camera when every state is clear?](#tool-integration-housecarl-tests-test_capture_every_state.py) — `integration/housecarl/tests/test_capture_every_state.py`
-- [Does adviceprobe find a clash stated on a neighbour's page, and does the evaluation pass the neighbours and record the clash rows?](#tool-_geometry-harness-tests-test_adviceprobe.py) — `_geometry-harness/tests/test_adviceprobe.py`
+- [Does adviceprobe find a clash stated on a neighbour's page, and does the evaluation pass the neighbours and record the clash rows?](#tool-integration-housecarl-tests-test_adviceprobe.py) — `integration/housecarl/tests/test_adviceprobe.py`
 - [Does an evaluation plan run the same way from any working folder?](#tool-_geometry-harness-tests-test_plan_paths.py) — `_geometry-harness/tests/test_plan_paths.py`
 - [Does an exterior camera station stand on navmesh at its own level, eye at that level plus the eye height, while interiors keep one floor?](#tool-integration-housecarl-tests-test_exterior_stations.py) — `integration/housecarl/tests/test_exterior_stations.py`
 - [Does any record of a plugin file refer to a given object (its FormID through the plugin's masters, compressed records and script properties included)?](#tool-refscan) — `refscan`
@@ -215,7 +215,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [How can I read world coordinates from a top-down view?](#tool-viewprobe.grid) — `viewprobe.grid`
 - [How can I render report evidence without inspection overlays?](#tool-viewprobe.report-mode) — `viewprobe.report-mode`
 - [How can I render the same declared shots reproducibly?](#tool-viewprobe.worklist) — `viewprobe.worklist`
-- [How can I substitute adviceprobe in evaluation-controller fixture tests?](#tool-_geometry-harness-tests-fixtures-evalrun-fakeprobes-adviceprobe.py) — `_geometry-harness/tests/fixtures/evalrun/fakeprobes/adviceprobe.py`
+- [How can I substitute adviceprobe in the AI-side overlay's fixture tests?](#tool-integration-housecarl-tests-fixtures-fakeprobes-adviceprobe.py) — `integration/housecarl/tests/fixtures/fakeprobes/adviceprobe.py`
 - [How can I substitute blockprobe in evaluation-controller fixture tests?](#tool-_geometry-harness-tests-fixtures-evalrun-fakeprobes-blockprobe.py) — `_geometry-harness/tests/fixtures/evalrun/fakeprobes/blockprobe.py`
 - [How can I substitute bosprobe in evaluation-controller fixture tests?](#tool-_geometry-harness-tests-fixtures-evalrun-fakeprobes-bosprobe.py) — `_geometry-harness/tests/fixtures/evalrun/fakeprobes/bosprobe.py`
 - [How can I substitute contactprobe in evaluation-controller fixture tests?](#tool-_geometry-harness-tests-fixtures-evalrun-fakeprobes-contactprobe.py) — `_geometry-harness/tests/fixtures/evalrun/fakeprobes/contactprobe.py`
@@ -374,6 +374,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Which clashes between mods did a whole-order pass find for an added mod, at a place, or between two plugins, and where do I look first?](#tool-orderleads) — `orderleads`
 - [Which clashes does the review reel show, as vignettes or data stills, and what does it say about each?](#tool-reel-plan) — `reel-plan`
 - [Which code adds evidence derived after measurement to an evaluation bundle, and how is it verified?](#tool-bundleenrich) — `bundleenrich`
+- [Which commands stand in the module's own probes when its suites plan the AI-side overlay?](#tool-integration-housecarl-tests-module_fakes.py) — `integration/housecarl/tests/module_fakes.py`
 - [Which conflicts did a candidate patch remove, preserve or introduce?](#tool-conflictdiff) — `conflictdiff`
 - [Which contact and route findings change in the selected state?](#tool-stateprobe.selected) — `stateprobe.selected`
 - [Which contact or route findings appear or disappear when a world-state switch flips?](#tool-stateprobe) — `stateprobe`
@@ -634,21 +635,6 @@ Outputs: Assertion results or generated fixture data for: How can I make control
 Source: [_geometry-harness/tests/fixtures/evalrun/fakeprobe.py](../_geometry-harness/tests/fixtures/evalrun/fakeprobe.py) — `The fixture probe engine — a fake detector that writes the REAL conflict-file format.`
 
 
-<a id="tool-_geometry-harness-tests-fixtures-evalrun-fakeprobes-adviceprobe.py"></a>
-
-### _geometry-harness/tests/fixtures/evalrun/fakeprobes/adviceprobe.py
-
-**How can I substitute adviceprobe in evaluation-controller fixture tests?**
-
-Route the controller's ordering-advice invocation to controlled data during offline evaluation tests.
-
-Inputs: Controlled fixtures for adviceprobe.
-
-Outputs: Assertion results or generated fixture data for: How can I substitute adviceprobe in evaluation-controller fixture tests?
-
-Source: [_geometry-harness/tests/fixtures/evalrun/fakeprobes/adviceprobe.py](../_geometry-harness/tests/fixtures/evalrun/fakeprobes/adviceprobe.py) — `Fixture stand-in for adviceprobe — see ../fakeprobe.py.`
-
-
 <a id="tool-_geometry-harness-tests-fixtures-evalrun-fakeprobes-blockprobe.py"></a>
 
 ### _geometry-harness/tests/fixtures/evalrun/fakeprobes/blockprobe.py
@@ -818,21 +804,6 @@ Modifiers (do not select a separate mode):
 
 - `--out` — where to write the generated fixtures (never the tracked tree)
 - `--registry-from` — Set registry from for this invocation; consult the linked parser for accepted values.
-
-<a id="tool-_geometry-harness-tests-test_adviceprobe.py"></a>
-
-### _geometry-harness/tests/test_adviceprobe.py
-
-**Does adviceprobe find a clash stated on a neighbour's page, and does the evaluation pass the neighbours and record the clash rows?**
-
-Qualify a change to adviceprobe's --with pages, to S4 in _shared/OrderAdvice.cs (the controller's advice wiring is runcontrol's own `advice:` cases).
-
-Inputs: adviceprobe built from this checkout; a scratch MO2 instance of two mods and two hand-written archived pages.
-
-Outputs: Assertion results for: Does adviceprobe find a clash stated on a neighbour's page, and does the evaluation pass the neighbours and record the clash rows?
-
-Source: [_geometry-harness/tests/test_adviceprobe.py](../_geometry-harness/tests/test_adviceprobe.py) — `Known answers for adviceprobe's neighbour pages ('--with') and the evaluation's wiring of them.`
-
 
 <a id="tool-_geometry-harness-tests-test_asset_only_selection.py"></a>
 
@@ -1852,7 +1823,7 @@ Inputs: Catalogued or archived author page and target mod identity.
 
 Outputs: OrderRules advice with source evidence and unresolved constraints.; Clashes the author states (S4), on the page or on a --with neighbour's page, each with its source page.
 
-Source: [_geometry-harness/adviceprobe/Program.cs](../_geometry-harness/adviceprobe/Program.cs) — `// ADVICEPROBE — turn a mod page's own words into ordering rules for orderprobe`
+Source: [integration/housecarl/adviceprobe/Program.cs](../integration/housecarl/adviceprobe/Program.cs) — `// ADVICEPROBE — turn a mod page's own words into ordering rules for orderprobe`
 
 
 Modifiers (do not select a separate mode):
@@ -2529,6 +2500,7 @@ Modifiers (do not select a separate mode):
 - `--media` — bundle: the supplied pictures and clips (media item schema 2), each checked against the configurations the app scan's accepted receipts measured
 - `--opt-in` — plan: plan an opt-in check of the list (repeatable; the live switch check is the list's one)
 - `--out` — plan: the new overlay run folder; bundle: the overlay bundle folder; verify: the verify.json to write
+- `--probe-cmd` — plan: stand in one of the module's own probes with a command (NAME=COMMAND, repeatable), for a suite; a name no row of the list launches is refused
 - `--rebuild-ledger` — evaluate: rebuild the ledger from the journal and the receipts first (runcontrol's rule)
 - `--registry` — bundle: the list file the overlay plan froze, when it has moved
 - `--run` — evaluate, import, finalize, bundle: the overlay run folder
@@ -3319,6 +3291,21 @@ Outputs: Assertion results or generated fixture data for: How can a test stand i
 Source: [integration/housecarl/tests/fixtures/evalsettings/stub_opener.py](../integration/housecarl/tests/fixtures/evalsettings/stub_opener.py) — `The browser stand-in for test_evalsettings.py: 'evalsettings.py ensure|window --opener THIS' runs 'python THIS URL'.`
 
 
+<a id="tool-integration-housecarl-tests-fixtures-fakeprobes-adviceprobe.py"></a>
+
+### integration/housecarl/tests/fixtures/fakeprobes/adviceprobe.py
+
+**How can I substitute adviceprobe in the AI-side overlay's fixture tests?**
+
+Route the controller's ordering-advice invocation to controlled data during offline evaluation tests.
+
+Inputs: Controlled fixtures for adviceprobe.
+
+Outputs: Assertion results or generated fixture data for: How can I substitute adviceprobe in the AI-side overlay's fixture tests?
+
+Source: [integration/housecarl/tests/fixtures/fakeprobes/adviceprobe.py](../integration/housecarl/tests/fixtures/fakeprobes/adviceprobe.py) — `Fixture stand-in for adviceprobe, the module's probe (moved with patch.author-advice from SkyWright's evalrun fixtures,`
+
+
 <a id="tool-integration-housecarl-tests-fixtures-record_capture-fake_capture_mcp.py"></a>
 
 ### integration/housecarl/tests/fixtures/record_capture/fake_capture_mcp.py
@@ -3347,6 +3334,36 @@ Inputs: A lock path and a job command after --; the slot command's other options
 Outputs: The lock file while the job runs and idle_lock.log take and release lines beside it.
 
 Source: [integration/housecarl/tests/fixtures/standin_hold.py](../integration/housecarl/tests/fixtures/standin_hold.py) — `A stand-in for the machine's slot command in tests`
+
+
+<a id="tool-integration-housecarl-tests-module_fakes.py"></a>
+
+### integration/housecarl/tests/module_fakes.py
+
+**Which commands stand in the module's own probes when its suites plan the AI-side overlay?**
+
+A module suite plans the overlay over the shipped list: pass module_fakes.probe_cmds() so no suite launches the module build's real adviceprobe.
+
+Inputs: The module's fakes under integration/housecarl/tests/fixtures/fakeprobes.
+
+Outputs: Assertion results or generated fixture data for: Which commands stand in the module's own probes when its suites plan the AI-side overlay?
+
+Source: [integration/housecarl/tests/module_fakes.py](../integration/housecarl/tests/module_fakes.py) — `The module's own fixture stand-ins, for its suites: the 'evalcontrol plan' arguments that stand in each probe the`
+
+
+<a id="tool-integration-housecarl-tests-test_adviceprobe.py"></a>
+
+### integration/housecarl/tests/test_adviceprobe.py
+
+**Does adviceprobe find a clash stated on a neighbour's page, and does the evaluation pass the neighbours and record the clash rows?**
+
+Qualify a change to adviceprobe's --with pages, to S4 in integration/housecarl/adviceprobe/OrderAdvice.cs (the overlay's advice wiring is evalcontrol's own `advice:` cases).
+
+Inputs: adviceprobe built from the module's folder; a scratch MO2 instance of two mods and two hand-written archived pages.
+
+Outputs: Assertion results for: Does adviceprobe find a clash stated on a neighbour's page, and does the evaluation pass the neighbours and record the clash rows?
+
+Source: [integration/housecarl/tests/test_adviceprobe.py](../integration/housecarl/tests/test_adviceprobe.py) — `Known answers for adviceprobe's neighbour pages ('--with') and the evaluation's wiring of them.`
 
 
 <a id="tool-integration-housecarl-tests-test_alpha_card_capture.py"></a>

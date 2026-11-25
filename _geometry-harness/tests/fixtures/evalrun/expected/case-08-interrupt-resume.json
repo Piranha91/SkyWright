@@ -43,10 +43,6 @@
     "applicability": "yes",
     "status": "manual"
    },
-   "patch.author-advice": {
-    "applicability": "yes",
-    "status": "planned"
-   },
    "patch.order-evaluation": {
     "applicability": "yes",
     "status": "planned"
@@ -74,9 +70,7 @@
    "geometry.placement-contact",
    "loadability.masters-and-order"
   ],
-  "stillReusedAfterPluginChange": [
-   "patch.author-advice"
-  ],
+  "stillReusedAfterPluginChange": [],
   "runIdsAtLeast": 2,
   "noCompletedWithoutReceiptFile": true
  },

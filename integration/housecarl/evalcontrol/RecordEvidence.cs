@@ -51,6 +51,19 @@ public static class RecordEvidence
         if (path.StartsWith("receipts/", StringComparison.Ordinal))
         {
             var rec = Ev.OrEmpty(PyJson.LoadEvalFile(PyPath.Join(d, path)));
+            if (Ev.OrEmpty(rec.Get("adapter")).Get("kind") is string mk && ModuleRows.LaunchKinds.Contains(mk))
+            {
+                // a module probe's receipt (runcontrol checked its acceptance, outputs and chain, and the controller's
+                // identity): the row it answers was planned for that probe on that arm, and the probe it rests on is the
+                // one the plan froze
+                var planned = Ev.Items(plan.Get("checks")).Select(PyValue.Dict).FirstOrDefault(c => Ev.Eq(c.Get("checkId"), rec.Get("checkId")));
+                if (planned == null || !Ev.Eq(Ev.OrEmpty(planned.Get("adapter")).Get("kind"), mk)
+                    || !Ev.Items(planned.Get("arms")).Select(PyValue.Dict).Any(a => Ev.Eq(a.Get("armId"), rec.Get("armId")) && Ev.Eq(a.Get("status"), "planned")))
+                    defect("receipt-not-planned", path, $"the receipt of {mk} answers {Ev.Str(rec.Get("checkId"))} on {Ev.Str(rec.Get("armId"))}, which the overlay plan did not plan for that probe");
+                foreach (var x in IdentityChecks.Defects(plan, rec, ModuleRows.LaunchKinds).Where(x => x.Role != "controller"))
+                    defect(x.Kind, path, $"the {x.Role} {x.Program} is bound as {Ev.Str(x.Found)}; the overlay plan froze {Ev.Str(x.Recorded)}");
+                return;
+            }
             if (!Ev.Eq(Ev.OrEmpty(rec.Get("adapter")).Get("kind"), ImportKind))
             {
                 defect("evidence-kind-unknown", path, $"a receipt of adapter kind {Ev.Str(Ev.OrEmpty(rec.Get("adapter")).Get("kind"))}, which neither SkyWright nor this module writes");

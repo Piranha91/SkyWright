@@ -17,6 +17,11 @@
       "id": "runtime",
       "title": "Runtime and presentation evidence",
       "packetRow": "Runtime/presentation evidence"
+    },
+    {
+      "id": "patch",
+      "title": "Patch and order evaluation",
+      "packetRow": "Patch/order evaluation"
     }
   ],
   "checks": [
@@ -264,6 +269,55 @@
         "strength": "engine-observation",
         "claim": null,
         "limits": "A run of the game under the evaluated order, in the conditions the flip plan lists (the cell loaded or not, immediate or settled). It needs a scratch game instance and is never inferable from records. A completion is 'no failure under those conditions' and never 'safe'. A finding needs at least two measured failures on the arm; one failure beside one completion is unsettled. Contention on the machine confounds timing-sensitive failures, so every launch records its idle measurement. The verdict is about the order; which record causes a failure is a separate isolation question. No claim-ledger row exists yet."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "patch.author-advice",
+      "family": "patch",
+      "title": "The patch author's stated requirements and load order, read off the page",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "nexusId": true
+        },
+        "note": "Advice is read from a mod page, which needs a Nexus id; scopeprobe reads it from the provider mod folder's meta.ini. No id means no page to read, and that is a measured no, not a skipped check."
+      },
+      "prerequisites": [],
+      "appPrerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "baseline",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "adviceprobe",
+        "exe": "adviceprobe",
+        "args": [
+          "--mod",
+          "{nexusId}",
+          "--out",
+          "{out}",
+          "--offline"
+        ],
+        "reverse": false,
+        "output": "json",
+        "result": {
+          "kind": "discovery",
+          "findings": [
+            "rules",
+            "clashes"
+          ],
+          "judged": "pagesRead",
+          "unjudgeable": "warnings"
+        },
+        "commonFlags": true
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": "PATCH FILE DISCOVERY (its advice half)",
+        "limits": "Run OFFLINE by default here: the stored catalogue copy is read and no network request is made, so the advice is as fresh as its recorded read date and the receipt carries that date. Cached source age is not the date the report was assembled. Per-file requirements are not exposed by the source; the stated order is advice, not a measurement."
       },
       "manualDecisionAllowed": false
     }

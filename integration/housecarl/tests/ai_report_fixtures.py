@@ -27,6 +27,7 @@ import sys
 sys.path.insert(0, str(HERE.parent))
 import skywright_paths as SW  # noqa: E402
 import evalrun_record_cases as RC  # noqa: E402  the record cases' helpers over test_evalrun's engine
+import module_fakes  # noqa: E402  the module's own probe stand-ins
 
 IMPORT_CASE = "R7-import-origin"
 IMPORT_STEMS = {
@@ -67,7 +68,7 @@ def make_import_origin_case(root: Path) -> dict:
     exits["finalize"] = _must(T.evalrun(["finalize", "--run", run], scen), "the controller's finalize").returncode
     exits["bundle"] = _must(T.evalrun(["bundle", "--run", run, "--no-names"], scen), "the controller's bundle").returncode
     app_bundle, ai, ai_bundle = run / "bundle", run / "ai", run / "ai-bundle"
-    _must(evalcontrol("plan", "--app", run, "--app-bundle", app_bundle, "--out", ai), "evalcontrol plan")
+    _must(evalcontrol("plan", "--app", run, "--app-bundle", app_bundle, "--out", ai, *module_fakes.probe_cmds()), "evalcontrol plan")
     _must(evalcontrol("evaluate", "--run", ai), "evalcontrol evaluate")
     plan = T.load(ai / "plan.json")
     arms = {stem: RC.arm_by_stem(plan, stem) for stem in IMPORT_STEMS}
@@ -106,7 +107,7 @@ def add_overlays(root: Path, index: dict, only: str | None = None) -> None:
             continue
         run = Path(entry["run"])
         ai, ai_bundle = run / "ai", run / "ai-bundle"
-        steps = [("plan", ["plan", "--app", run, "--app-bundle", entry["bundle"], "--out", ai]),
+        steps = [("plan", ["plan", "--app", run, "--app-bundle", entry["bundle"], "--out", ai, *module_fakes.probe_cmds()]),
                  ("evaluate", ["evaluate", "--run", ai]),
                  ("finalize", ["finalize", "--run", ai]),
                  ("bundle", ["bundle", "--run", ai, "--out", ai_bundle, *(["--media", entry["media"]] if entry.get("media") else [])]),

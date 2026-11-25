@@ -383,10 +383,6 @@ def default_json(probe: str, entry: dict, scen: dict, order_name: str) -> dict:
     if probe == "bosprobe":
         return {"profile": order_name, "plugins": n, "inis": list(entry.get("inis", [])),
                 "rows": list(entry.get("rows", []))}
-    if probe == "adviceprobe":
-        # The controller hands adviceprobe a --json sink beside the registry's --out, and reads the
-        # result paths (rules / pagesRead / warnings) off it, so the same document goes to both.
-        return advice_report(entry, str(entry.get("modId", "45686")))
     if probe == "scopeprobe":
         scope_path = scen.get("scopeFrom")
         if scope_path and Path(scope_path).exists():
@@ -402,24 +398,6 @@ def default_json(probe: str, entry: dict, scen: dict, order_name: str) -> dict:
                                                      "hits": len(hits)},
                 "hits": hits, "unjudgeableItems": [], "detail": {}}
     return {"probe": probe, "plugins": n, "rows": list(entry.get("rows", []))}
-
-
-def advice_report(entry: dict, mod_id: str) -> dict:
-    """adviceprobe's report-<id>.json: the registry reads findings=rules+clashes, judged=pagesRead,
-    unjudgeable=warnings, so every key is present and countable."""
-    return {"modId": mod_id,
-            "rules": list(entry.get("rules", [{"before": "FixtureTarget.esp", "after": "FixtureBase.esp",
-                                               "hardness": "advice", "source": "stored page",
-                                               "resolutionChain": ["the page states a load order"]}])),
-            "resolutions": [], "notes": ["a fixture report; no page was fetched"],
-            "staleness": ["the stored copy's age is not the date this report was assembled"],
-            "noOrderStated": False,
-            "pagesRead": list(entry.get("pagesRead", [{"url": "stored://fixture/page", "from": "snapshot"}])),
-            "catalogue": {"dir": "fixture", "refresh": "offline", "maxRequests": 0, "requestsAttempted": 0,
-                          "requestsSucceeded": 0, "waitedMs": 0, "pagesServedFromSnapshot": 1,
-                          "pagesFetched": 0, "pagesReplayedFromArchive": 0, "imports": []},
-            "clashes": list(entry.get("clashes", [])),
-            "warnings": list(entry.get("warnings", [])), "choices": []}
 
 
 def parse(argv):
@@ -487,7 +465,8 @@ def main(probe: str, argv=None) -> int:
             waited += 0.05
         print(f"fakeprobe {probe}: sentinel gone after {waited:.2f}s", flush=True)
 
-    # ---- the non-emitting adapters (--json / --out): scopeprobe, switchprobe, adviceprobe, patchprobe, driftprobe
+    # ---- the non-emitting adapters (--json): scopeprobe, switchprobe, patchprobe, driftprobe (the --out report of the
+    # patch author's page, the module's probe, is the module's own fake: integration/housecarl/tests/fixtures/fakeprobes)
     if a.get("json") and not emit:
         if behaviour == "no-emit":
             return 0
@@ -500,20 +479,8 @@ def main(probe: str, argv=None) -> int:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(doc, indent=1), encoding="utf-8")
         return int(entry.get("code", 0)) if behaviour == "exit" else 0
-    if a.get("out") and not emit:
-        d = Path(a["out"])
-        d.mkdir(parents=True, exist_ok=True)
-        # The real probe names the file after the mod id it was ASKED for (--mod), so the fake must too:
-        # a report-<other id>.json is a file the reader cannot find, and it is rejected for that.
-        arg = a.get("mod")
-        mod = str(arg) if arg and not str(arg).startswith("{") else str(entry.get("modId", "45686"))
-        (d / f"report-{mod}.json").write_text(
-            json.dumps(entry.get("report") or advice_report(entry, mod), indent=1), encoding="utf-8")
-        (d / f"rules-{mod}.json").write_text(json.dumps(entry.get("rules") or {"SchemaVersion": 1, "Rules": []}, indent=1), encoding="utf-8")
-        return 0
-
     if emit is None:
-        print("fakeprobe: no --emit and no --json/--out", file=sys.stderr)
+        print("fakeprobe: no --emit and no --json", file=sys.stderr)
         return 2
 
     # ---- refusals, before anything is written

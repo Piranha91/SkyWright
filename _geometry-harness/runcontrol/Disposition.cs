@@ -330,7 +330,7 @@ public static class Disposition
         foreach (var r in all)
         {
             var ad = Ev.OrEmpty(r.Get("adapter"));
-            if (ad.Get("kind") is "adviceprobe" or "patchprobe" && PyValue.Truthy(PyValue.Dict(r["validation"])["accepted"]) && ad.Get("exe") != null)
+            if (ad.Get("kind") is "patchprobe" && PyValue.Truthy(PyValue.Dict(r["validation"])["accepted"]) && ad.Get("exe") != null)
                 searched.Add((string)ad["exe"]!);
         }
         // the qualification receipt: the first one whose derived block carries candidates
@@ -340,14 +340,9 @@ public static class Disposition
             "the Nexus network API (this runner never fetches; advice is read offline from the catalogue snapshot)",
         };
         if (qualified != null) notSearched.AddRange(Ev.Items(Ev.OrEmpty(qualified.Get("derived")).Get("notSearched")));
+        // the author's stated advice (adviceprobe's rows) is the houseCARL integration module's: its finalize writes it
+        // into the overlay's discovery block
         var advice = new List<object?>();
-        foreach (var r in all.Where(r => Ev.Eq(Ev.OrEmpty(r.Get("adapter")).Get("kind"), "adviceprobe")))
-            advice.Add(new PyDict
-            {
-                ["checkId"] = r["checkId"], ["armId"] = r["armId"],
-                ["provenance"] = Ev.G(Ev.G(Ev.OrEmpty(r.Get("consumed")), "configuration", new PyDict()), "source"),
-                ["staleness"] = "read offline from the stored catalogue snapshot; the cached source's age is not the date this report was assembled",
-            }.Update(Discovery.AdviceStatements(run, r)));
         var discovery = new PyDict
         {
             ["sourcesSearched"] = PyOrder.SortedByCodePoint(searched).Cast<object?>().ToList(),

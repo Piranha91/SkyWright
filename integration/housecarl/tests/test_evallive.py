@@ -33,11 +33,12 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))  # the module's folder
 import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is
+import module_fakes  # noqa: E402  the module's own probe stand-ins
 HARNESS = SW.HARNESS
 FIXT = HARNESS / "tests" / "fixtures" / "evalrun"
 EVALCONTROL = SW.tool("evalcontrol")
 PROBES = ["navownprobe", "overlapprobe", "contactprobe", "bosprobe", "switchprobe", "stateprobe",
-          "scopeprobe", "adviceprobe", "patchprobe", "driftprobe", "seamprobe", "waterprobe",
+          "scopeprobe", "patchprobe", "driftprobe", "seamprobe", "waterprobe",
           "blockprobe", "depprobe", "fomodprobe", "poolprobe"]
 CID = "runtime.state-switch-flip"
 CASE = "case-01-geometry-and-quest"
@@ -103,6 +104,7 @@ def overlay(run, opt_in=(), name="ai", list_file=None):
     (the plan's exit, the overlay's run folder)."""
     ai = run / name
     args = ["plan", "--app", run, "--app-bundle", run / "app-bundle", "--out", ai]
+    args += module_fakes.probe_cmds(list_file)
     for o in opt_in:
         args += ["--opt-in", o]
     if list_file:

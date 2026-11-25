@@ -41,6 +41,9 @@
     <Compile Include="..\..\lookprobe\InactivePatchLook.cs" Link="InactivePatchLook.cs" />
     <Compile Include="..\..\lookprobe\DummyTargetLook.cs" Link="DummyTargetLook.cs" />
     <Compile Include="..\..\lookprobe\ScriptDependencyLook.cs" Link="ScriptDependencyLook.cs" />
+    <!-- adviceprobe's author-stated-order extractor and the shared rules file reader it writes for (AdviceProofTests) -->
+    <Compile Include="..\..\adviceprobe\OrderAdvice.cs" Link="OrderAdvice.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\OrderRules.cs" Link="OrderRules.cs" />
     <!-- houseCARL's .pex fixture writer, compiled from the pin (OrderLooksTests writes scripts with it). -->
     <Compile Include="$(HousecarlSrc)housecarl-mcp-tests\PexWriter.cs" Link="PexWriter.cs" />
   </ItemGroup>

@@ -1138,6 +1138,8 @@ class Bundle:
                                                    set(ou.get("familiesUnsupportedOrManual") or []))
         if isinstance(od.get("importedEvidence"), list):     # the imports an overlay credited are its own
             disp["importedEvidence"] = list(disp.get("importedEvidence") or []) + od["importedEvidence"]
+        if isinstance(od.get("discovery"), dict):     # the overlay's block is the app's with the AI side's discovery added
+            disp["discovery"] = od["discovery"]
         self.disposition = disp
         self.plan = dict(self.plan, checks=list(self.plan.get("checks") or []) + list(op.get("checks") or []))
         self.ledger = dict(self.ledger, entries={**(self.ledger.get("entries") or {}), **(ol.get("entries") or {})})

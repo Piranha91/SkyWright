@@ -22,6 +22,7 @@ sys.path.insert(0, str(HERE.parent))  # the module's folder
 import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is
 sys.path.append(str(SW.HARNESS / "tests"))  # SkyWright's own suites and fixtures the module's suites reuse
 import test_evalrun as ER  # noqa: E402
+import module_fakes  # noqa: E402  the module's own probe stand-ins
 
 ORACLES = HERE / "fixtures" / "evalcontrol-run"
 EVALCONTROL = SW.tool("evalcontrol")
@@ -40,7 +41,7 @@ def evalcontrol(args, cwd: Path | None = None):
 def overlay(run: Path) -> Path:
     """The overlay over a finished, bundled app run: planned, evaluated and finalized under run/ai."""
     ai = run / "ai"
-    for what, args in (("plan", ["plan", "--app", run, "--app-bundle", run / "bundle", "--out", ai]),
+    for what, args in (("plan", ["plan", "--app", run, "--app-bundle", run / "bundle", "--out", ai, *module_fakes.probe_cmds()]),
                        ("evaluate", ["evaluate", "--run", ai]), ("finalize", ["finalize", "--run", ai])):
         r = evalcontrol(args, cwd=run)
         if r.returncode != 0:
@@ -154,7 +155,7 @@ def c1933(tmp):
     for f in (pinned / "plan.json", pinned / "bundle" / "plan.json"):
         f.write_bytes(body)
     (pinned / "plan.sha256").write_text(hashlib.sha256(body).hexdigest(), encoding="utf-8")
-    r = evalcontrol(["plan", "--app", pinned, "--app-bundle", pinned / "bundle", "--out", pinned / "ai"], cwd=pinned)
+    r = evalcontrol(["plan", "--app", pinned, "--app-bundle", pinned / "bundle", "--out", pinned / "ai", *module_fakes.probe_cmds()], cwd=pinned)
     said = (r.stderr + r.stdout).strip()
     expect(r.returncode, 2, "C1933: an app plan pinning an input the overlay does not know is refused (exit)")
     check("population" in said and said.count("\n") == 0,
@@ -208,7 +209,58 @@ def record_oracles(tmp):
         ER.assert_disposition(load(ai / "disposition.json") or {}, {"disposition": {"missingIncludes": list(RECORD_IDS)}}, case)
 
 
-CASES = {"case-10": case_10, "C1933": c1933, "plan-oracles": plan_oracles, "record-oracles": record_oracles}
+ADVICE = "patch.author-advice"
+
+
+def advice_oracles(tmp):
+    """The oracles the app suite held for its trim's patch.author-advice (fixtures/evalrun/expected, before 9D-1), under
+    the same labels, on the overlay over each case's app run: plan (cases 01, 02, 04: applicability yes - the fixture
+    scope records a Nexus id -, status planned) and ledger (case 01's baseline: completed, a catalogue). Case 02's
+    "patch.author-advice is listed under missing (D7)" does not carry over: it was missing because the app's --select
+    skipped it, and the overlay takes no --select (raised for the reviewer, not homed here, as plan_oracles says for the
+    media row)."""
+    for case in ("case-01-geometry-and-quest", "case-02-select-three-probes", "case-04-blocked-and-budget"):
+        run = tmp / f"advice-{case}"
+        ER.full_run(run, case, plan_extra=RECORD_EXTRAS.get(case))
+        ai = overlay(run)
+        ER.assert_plan(load(ai / "plan.json") or {}, {"plan": {"checks": {ADVICE: {"applicability": "yes", "status": "planned"}}}}, case)
+        if case == "case-01-geometry-and-quest":
+            ER.assert_ledger(load(ai / "ledger.json") or {},
+                             {"ledger": {f"{ADVICE}__baseline": {"execution": "completed", "detector": "catalogue", "rejection": None}}}, case)
+
+
+def case_803(tmp):
+    """The report's author advice (evalreport reads the disposition's discovery block: each advice row's rules and
+    stated clashes) on a joined bundle. Since patch.author-advice left the app's registry its receipts and the advice
+    rows are the overlay's: the overlay's finalize writes the discovery block, and evalreport's Bundle._join must carry
+    it. The wrong answer it rejects: the joined bundle keeps the app's block, whose advice is empty, and the report
+    silently states no advice."""
+    import importlib.util
+    case = "case-803-report-reads-overlay-advice"
+    run = tmp / case
+    ER.full_run(run, "case-01-geometry-and-quest")
+    ai = overlay(run)
+    aib = ai / "bundle"
+    r = evalcontrol(["bundle", "--run", ai, "--out", aib], cwd=run)
+    expect(r.returncode, 0, f"{case}: premise - the overlay bundles")
+    rows = [(a.get("checkId"), a.get("armId")) for a in ((load(ai / "disposition.json") or {}).get("discovery") or {}).get("advice") or []]
+    expect(rows, [("patch.author-advice", "baseline")], f"{case}: premise - the overlay's disposition carries the advice of its adviceprobe receipt")
+    spec = importlib.util.spec_from_file_location("evalreport_case_803", SW.MODULE / "evalreport.py")
+    er = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(er)
+    app = run / "bundle"
+    er.AI_BUNDLES[str(app.resolve())] = aib.resolve()
+    joined = er.Bundle(app)
+    check(joined.overlay is not None, f"{case}: premise - the app bundle is read joined with its overlay")
+    got = [(a.get("checkId"), a.get("armId")) for a in (joined.disposition.get("discovery") or {}).get("advice") or []]
+    expect(got, [("patch.author-advice", "baseline")], f"{case}: the joined bundle's discovery advice is the overlay's", "author advice")
+    er.AI_BUNDLES.clear()
+    alone = (er.Bundle(app).disposition.get("discovery") or {}).get("advice")
+    expect(alone, [], f"{case}: the app bundle read alone holds no advice (the premise of the overlay read)", "author advice")
+
+
+CASES = {"case-10": case_10, "C1933": c1933, "plan-oracles": plan_oracles, "record-oracles": record_oracles,
+         "case-803": case_803, "advice-oracles": advice_oracles}
 
 
 # ------------------------------------------------------------------ the record checks (9B)

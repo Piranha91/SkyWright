@@ -15,11 +15,11 @@
          probe no longer carries a copy of the ModDetail POST, and why a page the MCP server read is a page this
          probe already has: ONE store, ONE freshness rule. -->
     <ProjectReference Include="$(HousecarlSrc)housecarl-nexus\housecarl-nexus.csproj" />
-    <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
-    <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
-    <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
-    <Compile Include="..\_shared\OrderMasters.cs" Link="OrderMasters.cs" />
-    <Compile Include="..\_shared\OrderRules.cs" Link="OrderRules.cs" />
-    <Compile Include="..\_shared\OrderAdvice.cs" Link="OrderAdvice.cs" />
+    <!-- SkyWright's shared readers (the module may use SkyWright); the advice extractor is this probe's own -->
+    <Compile Include="$(SkyWrightHarness)_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\Configuration.cs" Link="Configuration.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\OrderMasters.cs" Link="OrderMasters.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\OrderRules.cs" Link="OrderRules.cs" />
   </ItemGroup>
 </Project>

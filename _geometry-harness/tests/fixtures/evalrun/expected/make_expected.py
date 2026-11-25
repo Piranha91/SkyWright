@@ -12,7 +12,8 @@ ALL_CHECKS = ["loadability.masters-and-order",
               *GEO, "geometry.bos-overlay", "functional.linked-dependencies",
               "state.switch-census", "state.conditional-geometry",
               "functional.collective-route-connectivity", "environment.generated-output-regeneration",
-              "patch.author-advice", "patch.order-evaluation"]
+              "patch.order-evaluation"]
+# (patch.author-advice left with the patch discovery checks for the module: 9D)
 
 # Applicability, derived from the fixture scope.json (complete; NAVM/REFR/CELL/QUST; placements interior and
 # exterior; masters; a nexusId; `overlays` named under `unmeasured`) against each check's own trigger in the
@@ -29,7 +30,6 @@ APPLIC = {
     "state.conditional-geometry": "yes",               # {"placed": true}
     "functional.collective-route-connectivity": "yes", # {"anyOf": [{"navmesh": true}, {"placed": true}]}
     "environment.generated-output-regeneration": "yes",# {"placed": true}
-    "patch.author-advice": "yes",                      # {"nexusId": true}
     "patch.order-evaluation": "yes",                   # {"always": true}
 }
 # The statuses that come from the adapter kind, not from the run (D3's status vocabulary; Q-2).
@@ -68,7 +68,6 @@ for c in GEO:
     led[f"{c}__candidate-01-reorder__diff"] = {"execution": "completed", "detector": None, "rejection": None}
 led["loadability.masters-and-order__baseline"] = {"execution": "completed", "detector": None, "rejection": None}
 led["state.switch-census__baseline"] = {"execution": "completed", "detector": "catalogue", "rejection": None}
-led["patch.author-advice__baseline"] = {"execution": "completed", "detector": "catalogue", "rejection": None}
 # A-8(5): a differential of the baseline against itself is not a comparison, so the derived order
 # check is not-applicable on the baseline arm and must complete on every candidate arm.
 led["patch.order-evaluation__baseline"] = {"execution": "not-applicable", "detector": None, "rejection": None}
@@ -100,8 +99,7 @@ cases.append(case(
 
 # ---------------------------------------------------------------- 02
 p = plan(state_switch_census="skipped-user", state_conditional_geometry="skipped-user",
-         functional_linked_dependencies="skipped-user", patch_order_evaluation="skipped-user",
-         patch_author_advice="skipped-user")
+         functional_linked_dependencies="skipped-user", patch_order_evaluation="skipped-user")
 cases.append(case(
     "case-02-select-three-probes",
     "Case 01's fixtures, planned with --select navownprobe,overlapprobe,contactprobe - the packet's own "
@@ -110,7 +108,7 @@ cases.append(case(
     {f"{c}__baseline__arm": {"execution": "completed", "detector": "finding", "rejection": None} for c in GEO},
     {"complete": False, "claim": "incomplete",
      "missingIncludes": ["state.switch-census", "state.conditional-geometry",
-                         "patch.order-evaluation", "patch.author-advice", *NEVER_COMPLETE],
+                         "patch.order-evaluation", *NEVER_COMPLETE],
      "missingExcludes": [*GEO, "loadability.masters-and-order", "geometry.bos-overlay"],
      "unknownApplicability": ["functional.linked-dependencies"],
      "arms": {"candidate-01-reorder": {"classification": "PASSES-COMPLETED-CHECKS", "regression": False,
@@ -287,7 +285,8 @@ cases.append(case(
      "reusedAfterResumeNonEmpty": True,
      "invalidatedAfterPluginChange": ["geometry.navmesh-ownership", "geometry.object-overlap",
                                       "geometry.placement-contact", "loadability.masters-and-order"],
-     "stillReusedAfterPluginChange": ["patch.author-advice"],
+     # it named patch.author-advice only, which left the app's registry (9D); no test reads this key
+     "stillReusedAfterPluginChange": [],
      "runIdsAtLeast": 2,
      "noCompletedWithoutReceiptFile": True},
     verify=None,
@@ -312,8 +311,8 @@ cases.append(case(
 # ---------------------------------------------------------------- 10
 cases.append(case(
     "case-10-discovery-media",
-    "adviceprobe returns a catalogued file whose hash is in no evaluated arm; media.json lists one item whose "
-    "fingerprint matches an accepted baseline receipt and one whose fingerprint matches nothing.",
+    "media.json lists one item whose fingerprint matches an accepted baseline receipt and one whose fingerprint "
+    "matches nothing (the advice half, adviceprobe's catalogued file, left with the row for the module: 9D).",
     plan(), {},
     {"complete": False, "claim": "incomplete",
      "missingIncludes": NEVER_COMPLETE, "missingExcludes": [],

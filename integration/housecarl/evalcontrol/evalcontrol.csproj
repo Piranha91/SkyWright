@@ -29,6 +29,7 @@
     <EmbeddedResource Include="known-answers\import.json" LogicalName="import.json" />
     <EmbeddedResource Include="known-answers\records-verify.json" LogicalName="records-verify.json" />
     <EmbeddedResource Include="known-answers\live.json" LogicalName="live.json" />
+    <EmbeddedResource Include="known-answers\advice.json" LogicalName="advice.json" />
   </ItemGroup>
 
   <!-- where the app's build is, seen from this program's folder: the module never spells it anywhere else -->
@@ -36,6 +37,11 @@
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>SkyWrightAppBuild</_Parameter1>
       <_Parameter2>$([MSBuild]::MakeRelative('$(SkyWrightIntegrationLayoutRoot)$(SkyWrightTools)\evalcontrol\', '$(SkyWrightLayoutRoot)'))</_Parameter2>
+    </AssemblyAttribute>
+    <!-- and the module's own build, where its probes are (ModuleRows.ProbeBuild) -->
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>HousecarlIntegrationBuild</_Parameter1>
+      <_Parameter2>$([MSBuild]::MakeRelative('$(SkyWrightIntegrationLayoutRoot)$(SkyWrightTools)\evalcontrol\', '$(SkyWrightIntegrationLayoutRoot)'))</_Parameter2>
     </AssemblyAttribute>
   </ItemGroup>
 

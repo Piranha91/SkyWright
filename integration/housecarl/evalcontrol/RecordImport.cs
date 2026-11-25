@@ -102,17 +102,35 @@ public static class RecordImport
     /// or when the plan is not an overlay or the row names none; else the refusal's clause.</summary>
     public static string? AppGate(string run, PyDict plan, PyDict check, object? armId)
     {
+        if (AppBlock(run, plan, check, armId) is not { } block) return null;
+        if (block.pre == null) return block.detail;
+        return $"blocked-prerequisite: {block.detail} in the app scan. An import is credited only "
+               + $"where the check could run; settle {block.pre} on this arm in the app scan (runcontrol measures it), bundle it and plan the "
+               + "overlay again, then import again";
+    }
+
+    /// <summary>The same gate for a row this module launches: the status and the sentence it is accounted with, or
+    /// null when it holds.</summary>
+    public static (string status, string detail)? AppPrerequisite(string run, PyDict plan, PyDict check, object? armId)
+    {
+        if (AppBlock(run, plan, check, armId) is not { } block) return null;
+        if (block.pre == null) return ("blocked(prerequisite:app-bundle-unreadable)", block.detail);
+        return ($"blocked(prerequisite:{block.pre})", $"{block.detail} in the app scan; settle {block.pre} on this arm in the app scan "
+            + "(runcontrol measures it), bundle it and plan the overlay again");
+    }
+
+    // (null, sentence) when the app bundle cannot be read; (prerequisite, runcontrol's block detail) when one is not settled
+    static (string? pre, string detail)? AppBlock(string run, PyDict plan, PyDict check, object? armId)
+    {
         if (plan.Get(OverlayPlan.Key) is not PyDict bound || !PyValue.Truthy(check.Get("appPrerequisites"))) return null;
         string app = PyPath.Resolve(PyPath.Join(run, Ev.Str(bound.Get("appBundle"))));
         if (PyJson.LoadEvalFile(PyPath.Join(app, "plan.json")) is not PyDict appPlan || !Ev.Exists(PyPath.Join(app, "ledger.json")))
-            return $"blocked-prerequisite: the app bundle this overlay is bound to is not readable at {app}, so its "
-                   + $"{string.Join(", ", Ev.Items(check["appPrerequisites"]).Select(Ev.Str))} cannot be read; plan the overlay again over the app scan's bundle";
+            return (null, $"blocked-prerequisite: the app bundle this overlay is bound to is not readable at {app}, so its "
+                   + $"{string.Join(", ", Ev.Items(check["appPrerequisites"]).Select(Ev.Str))} cannot be read; plan the overlay again over the app scan's bundle");
         var appLedger = new Ledger(app, appPlan);
         var gate = new PyDict { ["checkId"] = check.Get("checkId"), ["prerequisites"] = check["appPrerequisites"] };
         if (Prerequisites.Satisfied(appLedger, gate, armId) is not { } pre) return null;
-        return $"blocked-prerequisite: {Prerequisites.BlockDetail(appLedger, pre, armId)} in the app scan. An import is credited only "
-               + $"where the check could run; settle {pre} on this arm in the app scan (runcontrol measures it), bundle it and plan the "
-               + "overlay again, then import again";
+        return (pre, Prerequisites.BlockDetail(appLedger, pre, armId));
     }
 
     /// <summary>The import itself, under the run-log record `runId`; `outputs` and `imported` report to it.</summary>

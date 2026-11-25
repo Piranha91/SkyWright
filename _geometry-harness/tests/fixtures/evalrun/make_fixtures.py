@@ -57,7 +57,9 @@ KEEP = ["loadability.masters-and-order",
         "geometry.bos-overlay", "functional.linked-dependencies",
         "state.switch-census", "state.conditional-geometry",
         "functional.collective-route-connectivity", "environment.generated-output-regeneration",
-        "patch.author-advice", "patch.order-evaluation"]
+        "patch.order-evaluation"]
+# (patch.author-advice, the trim's patch-advice row, left with the patch discovery checks for the houseCARL
+# integration module in step 3 of the boundary: 9D)
 
 # Q43 / case 12 only: driftprobe's check declares its own population ("n/a (placement history; ...)") and
 # state ("n/a"), so it is the second SUPPORTED probe whose accepted receipt on one arm carries a different
@@ -291,7 +293,7 @@ def main() -> int:
         out = {}
         for probe, rows in rows_by_probe.items():
             out[probe] = {s: ok(rows) for s in stems}
-        for probe in ("bosprobe", "switchprobe", "stateprobe", "scopeprobe", "adviceprobe", "patchprobe", "driftprobe"):
+        for probe in ("bosprobe", "switchprobe", "stateprobe", "scopeprobe", "patchprobe", "driftprobe"):
             out.setdefault(probe, {"*": ok()})
         return out
 
@@ -311,7 +313,7 @@ def main() -> int:
     arms["contactprobe"] = {s: {"behaviour": "ok", "rows": [], "judged": 0,
                                 "coverage": [{"Population": "contact pairs", "Judged": 0, "Unjudgeable": {}}]}
                             for s in stems}
-    for probe in ("bosprobe", "switchprobe", "stateprobe", "scopeprobe", "adviceprobe", "patchprobe", "driftprobe"):
+    for probe in ("bosprobe", "switchprobe", "stateprobe", "scopeprobe", "patchprobe", "driftprobe"):
         arms[probe] = {"*": ok()}
     case_dir("case-03-null-and-extraction",
              {"candidate-00-baseline.json": base, "candidate-01-reorder.json": reorder}, {"arms": arms})
@@ -336,7 +338,7 @@ def main() -> int:
     arms["contactprobe"]["candidate-02-broken"] = {"behaviour": "no-configuration", "rows": ROWS["contactprobe"]}
     for p in ROWS:
         arms[p]["*"] = ok(ROWS[p])
-    for probe in ("bosprobe", "switchprobe", "stateprobe", "scopeprobe", "adviceprobe", "patchprobe", "driftprobe"):
+    for probe in ("bosprobe", "switchprobe", "stateprobe", "scopeprobe", "patchprobe", "driftprobe"):
         arms[probe] = {"*": ok()}
     case_dir("case-05-rejections",
              {"candidate-00-baseline.json": base, "candidate-01-stale.json": stale,
@@ -349,7 +351,7 @@ def main() -> int:
                                                   "predicateDefault": "Holds"},
                             "candidate-01-sham.reverse": ok(ROWS["navownprobe"])},
             "overlapprobe": {"*": ok()}, "contactprobe": {"*": ok()}}
-    for probe in ("bosprobe", "switchprobe", "stateprobe", "scopeprobe", "adviceprobe", "patchprobe", "driftprobe"):
+    for probe in ("bosprobe", "switchprobe", "stateprobe", "scopeprobe", "patchprobe", "driftprobe"):
         arms[probe] = {"*": ok()}
     case_dir("case-06-attribution",
              {"candidate-00-baseline.json": base, "candidate-01-sham.json": sham}, {"arms": arms})
@@ -385,18 +387,17 @@ def main() -> int:
         },
         "contactprobe": {"*": ok(ROWS["contactprobe"])},
     }
-    for probe in ("bosprobe", "switchprobe", "stateprobe", "scopeprobe", "adviceprobe", "patchprobe", "driftprobe"):
+    for probe in ("bosprobe", "switchprobe", "stateprobe", "scopeprobe", "patchprobe", "driftprobe"):
         arms[probe] = {"*": ok()}
     case_dir("case-07-combined-regression",
              {"candidate-00-baseline.json": base, "candidate-01-patcha.json": pa,
               "candidate-02-patchb.json": pb, "candidate-03-combined.json": comb}, {"arms": arms})
 
-    # 09 / 10 reuse case 01's shape; 10 adds the discovery hit and the media list.
+    # 09 / 10 reuse case 01's shape; 10 adds the discovery hit and the media list (its advice entry left with
+    # patch.author-advice for the module: 9D).
     case_dir("case-09-finalize-refusals",
              {"candidate-00-baseline.json": base, "candidate-01-reorder.json": reorder}, {"arms": arms_ok(stems)})
     arms = arms_ok(stems)
-    arms["adviceprobe"] = {"*": {"behaviour": "ok", "modId": "999001",
-                                 "warnings": ["the stored page copy is older than the catalogue snapshot"]}}
     # patchprobe's --json hit list (schema 1): a patch in another list that masters the fixture target, bytes f00d...
     arms["patchprobe"] = {"*": {"behaviour": "ok",
                                 "json": {"schemaVersion": 1, "probe": "patchprobe", "mode": "pair", "complete": True,
@@ -459,7 +460,7 @@ def main() -> int:
     # 14 — the evidence chain. Zero rows with judged > 0 on every geometry probe, so the checks are
     # COMPLETED NULL CHECKS: `completedNullChecks` is the list the deleted evidence has to fall out of.
     arms14 = {p: {s: ok([], judged=42) for s in stems} for p in ROWS}
-    for probe in ("bosprobe", "switchprobe", "stateprobe", "scopeprobe", "adviceprobe", "patchprobe",
+    for probe in ("bosprobe", "switchprobe", "stateprobe", "scopeprobe", "patchprobe",
                   "driftprobe"):
         arms14[probe] = {"*": ok()}
     case_dir("case-14-evidence-chain",

@@ -43,10 +43,6 @@
     "applicability": "yes",
     "status": "manual"
    },
-   "patch.author-advice": {
-    "applicability": "yes",
-    "status": "planned"
-   },
    "patch.order-evaluation": {
     "applicability": "yes",
     "status": "planned"

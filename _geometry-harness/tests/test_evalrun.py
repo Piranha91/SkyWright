@@ -51,7 +51,7 @@ DIFF_EXE = buildlayout.program_under(REAL_HARNESS, "conflictdiff")
 DIFF_SOURCE: str | None = None                # set by use_conflictdiff(): where this run's conflictdiff came from
 
 PROBES = ["navownprobe", "overlapprobe", "contactprobe", "bosprobe", "switchprobe", "stateprobe",
-          "scopeprobe", "adviceprobe", "patchprobe", "driftprobe", "seamprobe", "waterprobe",
+          "scopeprobe", "patchprobe", "driftprobe", "seamprobe", "waterprobe",
           "blockprobe", "depprobe", "fomodprobe", "poolprobe"]
 
 FAILURES: list[str] = []

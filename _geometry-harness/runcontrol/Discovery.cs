@@ -173,22 +173,4 @@ public static class Discovery
         }
         return found;
     }
-
-    /// <summary>The rules and the stated clashes one adviceprobe receipt's report carries, for the disposition.</summary>
-    public static PyDict AdviceStatements(string run, PyDict receipt)
-    {
-        var outs = PyValue.Truthy(receipt.Get("outputs")) ? (List<object?>)receipt["outputs"]! : [];
-        object? doc = outs.Count > 0 && PyValue.Truthy(Ev.G(outs[0], "path")) ? PyJson.LoadEvalFile(PyPath.Join(run, Ev.Str(Ev.G(outs[0], "path")))) : null;
-        if (doc is not PyDict d)
-            return new PyDict
-            {
-                ["rules"] = null, ["clashCount"] = null, ["clashes"] = new List<object?>(),
-                ["statementsNote"] = "the receipt's report could not be read, so its rules and clashes are unknown here",
-            };
-        string[] keys = ["namedModId", "namedModName", "pageModId", "page", "readDate", "line", "symptom"];
-        var clashes = new List<object?>();
-        foreach (var c in Ev.Items(d.Get("clashes")))
-            if (c is PyDict cd) clashes.Add(new PyDict(keys.Select(k => new KeyValuePair<string, object?>(k, cd.Get(k)))));
-        return new PyDict { ["rules"] = (long)PyValue.Len(Ev.OrList(d.Get("rules"))), ["clashCount"] = (long)clashes.Count, ["clashes"] = clashes };
-    }
 }

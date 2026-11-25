@@ -3585,7 +3585,8 @@ MaterialScaleProof.Run(Check);
 PopulationProof.Run(Check);
 MovedRefProof.Run(Check);
 OrderProof.Run(Check);
-AdviceProof.Run(Check);
+// AdviceProof (the author-stated order extractor) moved with adviceprobe to the houseCARL integration module: its
+// cases run there by name (HousecarlIntegration.Tests, AdviceProofTests).
 PlaceProof.Run(Check);
 ProofProbe.ConfigurationProof.Run(Check);
 // G1 build list, Stage A (plan g1/PLAN-7.md): red until the stubs are implemented.

@@ -40,7 +40,7 @@
     {
       "id": "adviceprobe",
       "kind": "csharp-exe",
-      "path": "_geometry-harness/adviceprobe/adviceprobe.csproj",
+      "path": "integration/housecarl/adviceprobe/adviceprobe.csproj",
       "adapter": "csharp",
       "stageSource": "counted",
       "note": "Reads a Nexus mod page (from the shared catalogue, or replayed from an archived response) and writes an OrderRules advice fragment. Its stages are the reads and the write: page, resolve, dates (one page per named mod), write. Duration depends on whether the run FETCHED: a --page replay and a run served from the catalogue's snapshots both make no network call, while a cold or forced one makes one request per page. The run's own features say which - requestsAttempted, pagesServedFromSnapshot, pagesFetched, waitedMs - so two runs of the same stages are comparable only when those agree.",
@@ -51,7 +51,7 @@
       "useWhen": "Turn catalogue descriptions into source-backed ordering constraints before trying alternative mod arrangements.",
       "evidence": [
         {
-          "path": "_geometry-harness/adviceprobe/Program.cs",
+          "path": "integration/housecarl/adviceprobe/Program.cs",
           "anchor": "// ADVICEPROBE — turn a mod page's own words into ordering rules for orderprobe"
         }
       ],
@@ -64,7 +64,7 @@
       ],
       "flagCoverage": {
         "parser": "csharp-args",
-        "path": "_geometry-harness/adviceprobe/Program.cs"
+        "path": "integration/housecarl/adviceprobe/Program.cs"
       },
       "modifiers": {
         "--catalog": "Set catalog for this invocation; consult the linked parser for accepted values.",
@@ -254,7 +254,8 @@
         "--search": "bundle: the candidate search the overlay plan froze, when it has moved",
         "--file": "import: the import document (schema 1) to bind to one arm the overlay left open: a record reader's evidence or a live game driver's export (switchflip.py export)",
         "--rebuild-ledger": "evaluate: rebuild the ledger from the journal and the receipts first (runcontrol's rule)",
-        "--list": "plan: a list of the same schema in place of the shipped ai-checks.json, validated the same way (a suite's trim)"
+        "--list": "plan: a list of the same schema in place of the shipped ai-checks.json, validated the same way (a suite's trim)",
+        "--probe-cmd": "plan: stand in one of the module's own probes with a command (NAME=COMMAND, repeatable), for a suite; a name no row of the list launches is refused"
       }
     },
     {
@@ -7516,24 +7517,24 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/fixtures/evalrun/fakeprobes/adviceprobe.py",
-      "path": "_geometry-harness/tests/fixtures/evalrun/fakeprobes/adviceprobe.py",
+      "id": "integration/housecarl/tests/fixtures/fakeprobes/adviceprobe.py",
+      "path": "integration/housecarl/tests/fixtures/fakeprobes/adviceprobe.py",
       "kind": "script",
       "answers": [
-        "How can I substitute adviceprobe in evaluation-controller fixture tests?"
+        "How can I substitute adviceprobe in the AI-side overlay's fixture tests?"
       ],
       "useWhen": "Route the controller's ordering-advice invocation to controlled data during offline evaluation tests.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/fixtures/evalrun/fakeprobes/adviceprobe.py",
-          "anchor": "Fixture stand-in for adviceprobe — see ../fakeprobe.py."
+          "path": "integration/housecarl/tests/fixtures/fakeprobes/adviceprobe.py",
+          "anchor": "Fixture stand-in for adviceprobe, the module's probe (moved with patch.author-advice from SkyWright's evalrun fixtures,"
         }
       ],
       "inputs": [
         "Controlled fixtures for adviceprobe."
       ],
       "outputs": [
-        "Assertion results or generated fixture data for: How can I substitute adviceprobe in evaluation-controller fixture tests?"
+        "Assertion results or generated fixture data for: How can I substitute adviceprobe in the AI-side overlay's fixture tests?"
       ]
     },
     {
@@ -8140,21 +8141,21 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_adviceprobe.py",
-      "path": "_geometry-harness/tests/test_adviceprobe.py",
+      "id": "integration/housecarl/tests/test_adviceprobe.py",
+      "path": "integration/housecarl/tests/test_adviceprobe.py",
       "kind": "script",
       "answers": [
         "Does adviceprobe find a clash stated on a neighbour's page, and does the evaluation pass the neighbours and record the clash rows?"
       ],
-      "useWhen": "Qualify a change to adviceprobe's --with pages, to S4 in _shared/OrderAdvice.cs (the controller's advice wiring is runcontrol's own `advice:` cases).",
+      "useWhen": "Qualify a change to adviceprobe's --with pages, to S4 in integration/housecarl/adviceprobe/OrderAdvice.cs (the overlay's advice wiring is evalcontrol's own `advice:` cases).",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_adviceprobe.py",
+          "path": "integration/housecarl/tests/test_adviceprobe.py",
           "anchor": "Known answers for adviceprobe's neighbour pages (`--with`) and the evaluation's wiring of them."
         }
       ],
       "inputs": [
-        "adviceprobe built from this checkout; a scratch MO2 instance of two mods and two hand-written archived pages."
+        "adviceprobe built from the module's folder; a scratch MO2 instance of two mods and two hand-written archived pages."
       ],
       "outputs": [
         "Assertion results for: Does adviceprobe find a clash stated on a neighbour's page, and does the evaluation pass the neighbours and record the clash rows?"
@@ -10711,13 +10712,33 @@
       "outputs": [
         "Assertion results for: Does the live driver keep a launch's cleanup when the reading rule's owner cannot be asked?"
       ]
+    },
+    {
+      "id": "integration/housecarl/tests/module_fakes.py",
+      "path": "integration/housecarl/tests/module_fakes.py",
+      "kind": "script",
+      "answers": [
+        "Which commands stand in the module's own probes when its suites plan the AI-side overlay?"
+      ],
+      "useWhen": "A module suite plans the overlay over the shipped list: pass module_fakes.probe_cmds() so no suite launches the module build's real adviceprobe.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/tests/module_fakes.py",
+          "anchor": "The module's own fixture stand-ins, for its suites: the `evalcontrol plan` arguments that stand in each probe the"
+        }
+      ],
+      "inputs": [
+        "The module's fakes under integration/housecarl/tests/fixtures/fakeprobes."
+      ],
+      "outputs": [
+        "Assertion results or generated fixture data for: Which commands stand in the module's own probes when its suites plan the AI-side overlay?"
+      ]
     }
   ],
   "duplicateGroups": [
     {
       "id": "identical-answer-24",
       "members": [
-        "_geometry-harness/tests/fixtures/evalrun/fakeprobes/adviceprobe.py",
         "_geometry-harness/tests/fixtures/evalrun/fakeprobes/bosprobe.py",
         "_geometry-harness/tests/fixtures/evalrun/fakeprobes/contactprobe.py",
         "_geometry-harness/tests/fixtures/evalrun/fakeprobes/driftprobe.py",
@@ -10729,7 +10750,6 @@
         "_geometry-harness/tests/fixtures/evalrun/fakeprobes/switchprobe.py"
       ],
       "owners": [
-        "_geometry-harness/tests/fixtures/evalrun/fakeprobes/adviceprobe.py",
         "_geometry-harness/tests/fixtures/evalrun/fakeprobes/bosprobe.py",
         "_geometry-harness/tests/fixtures/evalrun/fakeprobes/contactprobe.py",
         "_geometry-harness/tests/fixtures/evalrun/fakeprobes/driftprobe.py",

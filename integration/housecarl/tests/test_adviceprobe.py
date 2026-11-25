@@ -1,10 +1,11 @@
 """Known answers for adviceprobe's neighbour pages (`--with`) and the evaluation's wiring of them.
 
-    python _geometry-harness/tests/test_adviceprobe.py [--installed [HARNESS_DIR]]
+    python integration/housecarl/tests/test_adviceprobe.py [--installed [CONFIGURATION]]
 
 A mod page can state a clash with ANOTHER mod ("-Other Mod: the trapdoor is blocked"). When the evaluated mod is the
-other mod, that statement sits on the neighbour's page, not on its own. This suite builds adviceprobe from this checkout
-into a temporary folder (never an older binary; --installed runs the deployed copy instead), writes a scratch MO2
+other mod, that statement sits on the neighbour's page, not on its own. This suite builds adviceprobe from this module
+(integration/housecarl/adviceprobe, where it moved from SkyWright's harness with the patch.author-advice row in step 3 of
+the boundary) into a temporary folder (never an older binary; --installed runs the module build's copy instead), writes a scratch MO2
 instance with two hand-written mods (Nexus ids 9001 and 9002) and two hand-written archived pages, and runs the REAL
 probe offline with --max-requests 0 against them. It then checks evalrun's two pieces of wiring: the --with list built
 from a plan, and the clash rows read back out of a receipt's report.
@@ -24,9 +25,8 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-HARNESS = HERE.parent
-sys.path.append(str(HARNESS))
-import buildlayout  # noqa: E402  where the build put each program
+sys.path.insert(0, str(HERE.parent))  # the module's folder
+import skywright_paths as SW  # noqa: E402  where the module's build put each program
 FAILURES: list[str] = []
 URL = "https://www.nexusmods.com/skyrimspecialedition/mods/{}"
 
@@ -48,7 +48,7 @@ def plugin(masters: list[str], tag: str) -> bytes:
 
 
 def build(tmp: Path) -> Path:
-    csproj = HARNESS / "adviceprobe" / "adviceprobe.csproj"
+    csproj = SW.MODULE / "adviceprobe" / "adviceprobe.csproj"
     out = tmp / "bin" / "adviceprobe"
     r = subprocess.run(["dotnet", "build", str(csproj), "-c", "Release", "--nologo", "--disable-build-servers",
                         "--artifacts-path", str(tmp / "artifacts"), "-o", str(out)],
@@ -62,8 +62,8 @@ def build(tmp: Path) -> Path:
     return exe
 
 
-def installed(harness: Path) -> Path:
-    exe = buildlayout.program_under(harness, "adviceprobe")
+def installed(config: str | None) -> Path:
+    exe = SW.program("adviceprobe", config)
     if not exe.exists():
         raise SystemExit(f"  FAIL  no installed adviceprobe at {exe}")
     print(f"  adviceprobe: installed {exe}")
@@ -140,7 +140,7 @@ def main() -> int:
     try:
         if "--installed" in sys.argv:
             i = sys.argv.index("--installed")
-            exe = installed(Path(sys.argv[i + 1]) if len(sys.argv) > i + 1 else buildlayout.root())
+            exe = installed(sys.argv[i + 1] if len(sys.argv) > i + 1 else None)
         else:
             exe = build(tmp)
         m = machine(tmp / "machine")

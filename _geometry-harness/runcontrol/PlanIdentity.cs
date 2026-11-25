@@ -11,7 +11,7 @@ public static class PlanIdentity
 
     /// <summary>Adapter kinds whose check launches its probe as a child.</summary>
     public static readonly HashSet<string> LaunchKinds = new(StringComparer.Ordinal)
-    { "scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target", "adviceprobe", "patchprobe" };
+    { "scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target", "patchprobe" };
 
     public static string ProbeExe(string harness, string probe) => PyPath.Str(HarnessShared.CheckoutLayout.ProgramExe(harness, probe));
 

@@ -9,7 +9,7 @@ public static class Receipts
 
     /// <summary>Adapter kinds whose check launches its probe as a child.</summary>
     public static readonly HashSet<string> LaunchKinds = new(StringComparer.Ordinal)
-        { "scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target", "adviceprobe", "patchprobe" };
+        { "scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target", "patchprobe" };
 
     public const string Controller = "controller";
     public const string Comparator = "helper:conflictdiff";

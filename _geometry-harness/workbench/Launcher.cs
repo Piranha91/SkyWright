@@ -232,7 +232,7 @@ internal sealed class Launcher : IAsyncDisposable
     }
 
     /// <summary>The registry's checks whose adapter runs a probe; every other kind is not a probe.</summary>
-    internal static readonly string[] ProbeKinds = { "scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target", "patchprobe", "adviceprobe" };
+    internal static readonly string[] ProbeKinds = { "scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target", "patchprobe" };
 
     internal sealed record RegistryCheck(string Id, string Kind, string Title, string? Exe);
 
@@ -332,21 +332,7 @@ internal sealed class Launcher : IAsyncDisposable
             return "this computer has no search roots set for finding MO2 instances (HOUSECARL_SEARCH_ROOTS or the harness config's searchRoots), so installed patches cannot be looked for";
         if (c.Id is "patch.discovery-installed" or "patch.discovery-pool" or "patch.discovery-fomod" && HarnessTarget.DownloadPool.Length == 0)
             return "this computer has no downloads folder set (HOUSECARL_DOWNLOAD_POOL or the harness config's downloadPool), so patches cannot be looked for";
-        if (c.Id == "patch.author-advice")
-        {
-            var sel = Mods.Where(m => m.Selected).ToList();
-            if (sel.Count > 0 && !sel.Any(m => NexusId(Path.Combine(mods, m.Name)) is > 0))
-                return "none of the selected mods has a Nexus mod id in MO2 (its meta.ini), so there is no author page to read";
-        }
         return null;
-    }
-
-    static int? NexusId(string folder)
-    {
-        var ini = Path.Combine(folder, "meta.ini");
-        if (!File.Exists(ini)) return null;
-        var line = File.ReadLines(ini).FirstOrDefault(l => l.StartsWith("modid=", StringComparison.OrdinalIgnoreCase));
-        return line is not null && int.TryParse(line[6..].Trim(), out var id) ? id : null;
     }
 
     /// <summary>Start a run of the selection through the chosen run engine (<see cref="RunEngine"/>): an in-place entry

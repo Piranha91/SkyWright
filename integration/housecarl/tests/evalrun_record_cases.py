@@ -20,6 +20,8 @@ import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is
 sys.path.append(str(SW.HARNESS / "tests"))
 import test_evalrun as ER  # noqa: E402
 from test_evalrun import *  # noqa: E402,F401,F403  the suite's engine: fixtures, fake probes, helpers
+sys.path.insert(0, str(HERE))
+import module_fakes  # noqa: E402  the module's own probe stand-ins
 
 EVALCONTROL = SW.tool("evalcontrol")
 _APP = ER.evalrun
@@ -86,7 +88,7 @@ def to_overlay(run: Path, scen: Path | None = None, tag: str = "overlay", name: 
     ai, app = run / name, run / f"{name}-app-bundle"
     ER.expect(_APP(["finalize", "--run", run], scen).returncode, 0, f"{tag}: the app run finalizes", "setup")
     ER.expect(_APP(["bundle", "--run", run, "--out", app, "--no-names"], scen).returncode, 0, f"{tag}: the app run bundles", "setup")
-    for step in (["plan", "--app", run, "--app-bundle", app, "--out", ai], ["evaluate", "--run", ai]):
+    for step in (["plan", "--app", run, "--app-bundle", app, "--out", ai, *module_fakes.probe_cmds()], ["evaluate", "--run", ai]):
         r = _evalcontrol(step)
         ER.expect(r.returncode, 0, f"{tag}: evalcontrol {step[0]} ({r.stderr.strip()[-200:]})", "setup")
     APP_BUNDLES[str((ER.load(run / "plan.json") or {}).get("planId"))] = app

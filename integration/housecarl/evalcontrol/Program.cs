@@ -4,10 +4,11 @@
 // runcontrol's own rules for plans, receipts, ledgers, dispositions and bundles (it is used as a library), plus the
 // rules only these rows need, which live here.
 //
-//   evalcontrol plan     --app EVAL --app-bundle BUNDLE --out AI [--opt-in CHECK]... [--list FILE]
+//   evalcontrol plan     --app EVAL --app-bundle BUNDLE --out AI [--opt-in CHECK]... [--list FILE] [--probe-cmd NAME=CMD]...
 //                        freeze the overlay's plan: ai-checks.json's rows over the app plan's arms, bound to the app plan
 //                        and the app bundle's manifest; --list plans another list of the same schema, validated the
-//                        same way, in place of the shipped one (a trim of it, for a suite)
+//                        same way, in place of the shipped one (a trim of it, for a suite); --probe-cmd stands in one of
+//                        this module's probes with a command (for a suite), as runcontrol's --probe-cmd does for the app's
 //   evalcontrol evaluate --run AI [--rebuild-ledger]
 //                        account every row of the overlay plan (what an earlier call settled is re-checked and reused);
 //                        --rebuild-ledger first rebuilds the ledger from the journal and the receipts
@@ -63,10 +64,10 @@ public static class Program
             var a = Args.Parse(args);
             return args[0] switch
             {
-                "plan" => OverlayPlan.Run(a.Need("--app"), a.Need("--app-bundle"), a.Need("--out"), a.Many("--opt-in"), a.One("--list")),
+                "plan" => OverlayPlan.Run(a.Need("--app"), a.Need("--app-bundle"), a.Need("--out"), a.Many("--opt-in"), a.One("--list"), a.Many("--probe-cmd")),
                 "evaluate" => OverlayEvaluate.Run(a.Need("--run"), a.Has("--rebuild-ledger")),
                 "import" => RecordImport.Run(a.Need("--run"), a.Need("--file")),
-                "finalize" => Finalizer.Run(a.Need("--run"), OverlayFinalize.Amend),
+                "finalize" => Finalizer.Run(a.Need("--run"), OverlayFinalize.Amend, ModuleRows.LaunchKinds),
                 "bundle" => OverlayBundle.Run(a.Need("--run"), a.Need("--out"), a.One("--media"), a.One("--registry"), a.One("--scope"), a.One("--search")),
                 "verify" => OverlayVerify.Run(a.Positional ?? throw new Refusal("verify needs the overlay bundle's folder: evalcontrol verify DIR [--app BUNDLE] [--out FILE]."),
                     a.One("--app"), a.One("--out")),
@@ -91,7 +92,7 @@ public sealed class Args
 
     static readonly Dictionary<string, string[]> Takes = new(StringComparer.Ordinal)
     {
-        ["plan"] = ["--app", "--app-bundle", "--out", "--opt-in", "--list"],
+        ["plan"] = ["--app", "--app-bundle", "--out", "--opt-in", "--list", "--probe-cmd"],
         ["evaluate"] = ["--run", "--rebuild-ledger"],
         ["import"] = ["--run", "--file"],
         ["finalize"] = ["--run"],
@@ -107,7 +108,7 @@ public sealed class Args
         {
             string flag = args[i], f = flag;
             // every option evalcontrol has (the tool index reads them from this line)
-            bool known = flag is "--app" or "--app-bundle" or "--out" or "--opt-in" or "--run" or "--media" or "--registry" or "--scope" or "--search" or "--file" or "--rebuild-ledger" or "--list";
+            bool known = flag is "--app" or "--app-bundle" or "--out" or "--opt-in" or "--run" or "--media" or "--registry" or "--scope" or "--search" or "--file" or "--rebuild-ledger" or "--list" or "--probe-cmd";
             if (f.StartsWith("--", StringComparison.Ordinal) && !known) throw new Refusal($"evalcontrol has no option {f}.");
             if (!f.StartsWith("--", StringComparison.Ordinal))
             {

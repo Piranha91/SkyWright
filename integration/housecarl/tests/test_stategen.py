@@ -31,7 +31,7 @@ from test_evalrun import CONTROLLER  # noqa: E402  (the built-in controller, run
 EVALSETTINGS = HARNESS / "evalsettings.py"
 CASE = "case-01-geometry-and-quest"
 PROBES = ["navownprobe", "overlapprobe", "contactprobe", "bosprobe", "switchprobe", "stateprobe",
-          "scopeprobe", "adviceprobe", "patchprobe", "driftprobe", "seamprobe", "waterprobe",
+          "scopeprobe", "patchprobe", "driftprobe", "seamprobe", "waterprobe",
           "blockprobe", "depprobe", "fomodprobe", "poolprobe"]
 CG, CENSUS, LIVE = "state.conditional-geometry", "state.switch-census", "runtime.state-switch-flip"
 BASE_ARM, CAND_ARM = "baseline", "candidate-01-reorder"

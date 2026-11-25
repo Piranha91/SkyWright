@@ -24,7 +24,8 @@ public static class OverlayEvaluate
         if (!plan.ContainsKey(OverlayPlan.Key)) throw new Refusal($"{run} is not an AI-side overlay (its plan has no {OverlayPlan.Key} block); runcontrol evaluates an app scan.");
         if (EvalStore.RequestRefusal(plan) is { } outdated) throw new Refusal(outdated);
         if (IdentityChecks.ContractRefusal(plan) is { } noContract) throw new Refusal(noContract);
-        var (changed, measured) = ToolPreflight.Check(run, plan);
+        string probeBuild = ModuleRows.ProbeBuild();
+        var (changed, measured) = ToolPreflight.Check(run, plan, null, ModuleRows.LaunchKinds, probeBuild);
         if (changed != null) throw new Refusal(changed);
         if (EvalStore.PremiseRefusal(plan) is { } premise) throw new Refusal(premise);
         var ledger = new Ledger(run, plan);
@@ -34,7 +35,10 @@ public static class OverlayEvaluate
         using (var parent = RunLog.Begin("evalcontrol-checks", new RunOptions { StageSource = StageSource.Counted }))
         {
             ledger.OpenInvocation("run", parent.RunId, null);
-            var ex = new Executor(run, plan, ledger, false) { ParentRunId = parent.RunId, Preflight = measured };
+            var ex = new Executor(run, plan, ledger, false)
+            {
+                ParentRunId = parent.RunId, Preflight = measured, ProbeHarness = probeBuild, MoreLaunchKinds = ModuleRows.LaunchKinds,
+            };
             ledger.HealInterrupted();
             if (ledger.Entries.Any(kv => EvalStore.IsTerminalOk(Ev.G(kv.Value, "status")))) Revalidate.Run(run, plan, ledger);
             var planned = Ev.Items(plan["checks"]).Select(PyValue.Dict).ToList();
@@ -56,6 +60,7 @@ public static class OverlayEvaluate
                         ex.Account(check, arm, "mcp-only", null,
                             PyValue.Truthy(check.Get("unsupportedReason")) ? (string)check["unsupportedReason"]! : "the list records no command-line adapter for this check");
                     else if (Ev.Eq(st, "live-import")) AccountLive(ex, run, plan, ledger, check, arm);
+                    else if (Ev.Eq(st, "planned") && ModuleRows.LaunchKinds.Contains(kind)) LaunchRow(ex, run, plan, check, arm);
                     else throw new Refusal($"{Ev.Str(check["checkId"])}: adapter kind {PyText.Repr(kind)} is not one evalcontrol evaluates.");
                     parent.Advance();
                 }
@@ -63,6 +68,24 @@ public static class OverlayEvaluate
         }
         EvalStatus.Print(plan, ledger);
         return Exit.Ok;
+    }
+
+    /// <summary>A planned row of a module probe: held until its app prerequisites are settled on this arm in the
+    /// bound app bundle (by runcontrol's own rule), and its own prerequisites in this overlay; then launched by
+    /// runcontrol's generic row with this module's rules (ModuleRows).</summary>
+    static void LaunchRow(Executor ex, string run, PyDict plan, PyDict check, PyDict arm)
+    {
+        if (RecordImport.AppPrerequisite(run, plan, check, arm["armId"]) is { } app)
+        {
+            ex.Account(check, arm, app.status, "blocked-prerequisite", app.detail);
+            return;
+        }
+        if (Prerequisites.Satisfied(ex, check, arm["armId"]) is { } pre)
+        {
+            ex.Account(check, arm, $"blocked(prerequisite:{pre})", "blocked-prerequisite", Prerequisites.BlockDetail(ex, pre, arm["armId"]));
+            return;
+        }
+        ModuleRows.Run(ex, check, arm);
     }
 
     /// <summary>An opted-in live row (moved from runcontrol's evaluate with the check): not applicable when the arm's
@@ -97,6 +120,28 @@ public static class OverlayFinalize
         un["familiesUnsupportedOrManual"] = PyOrder.SortedByCodePoint(families).Cast<object?>().ToList();
         un["mediaUnassessed"] = MediaSentence;
         un["runtimeObservations"] = LiveScope.RuntimeObservations(receipts);
+        disposition["discovery"] = DiscoveryBlock(run, plan, receipts);
         disposition[OverlayPlan.Key] = plan[OverlayPlan.Key];
+    }
+
+    /// <summary>The overlay's discovery block: the bound app bundle's (what the app's rows searched and qualified),
+    /// with the author advice of this overlay's adviceprobe receipts, and adviceprobe among the sources searched when one
+    /// of them was accepted. A report reads this block of a joined bundle (evalreport's Bundle._join).</summary>
+    static PyDict DiscoveryBlock(string run, PyDict plan, PyDict receipts)
+    {
+        string app = PyPath.Resolve(PyPath.Join(run, Ev.Str(Ev.OrEmpty(plan.Get(OverlayPlan.Key)).Get("appBundle"))));
+        var appDisp = Ev.OrEmpty(PyJson.LoadEvalFile(PyPath.Join(app, "disposition.json")));
+        var block = appDisp.Get("discovery") is PyDict d ? (PyDict)Py.Copy(d)! : new PyDict();
+        var searched = Ev.Items(block.Get("sourcesSearched")).Select(Ev.Str).ToHashSet(StringComparer.Ordinal);
+        foreach (var r in receipts.Select(kv => PyValue.Dict(kv.Value)))
+        {
+            var ad = Ev.OrEmpty(r.Get("adapter"));
+            if (ad.Get("kind") is string k && ModuleRows.LaunchKinds.Contains(k) && ad.Get("exe") is string exe
+                && PyValue.Truthy(Ev.OrEmpty(r.Get("validation")).Get("accepted")))
+                searched.Add(exe);
+        }
+        block["sourcesSearched"] = PyOrder.SortedByCodePoint(searched).Cast<object?>().ToList();
+        block["advice"] = ModuleRows.Advice(run, receipts);
+        return block;
     }
 }

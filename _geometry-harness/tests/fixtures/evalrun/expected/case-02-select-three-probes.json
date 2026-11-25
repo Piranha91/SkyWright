@@ -43,10 +43,6 @@
     "applicability": "yes",
     "status": "manual"
    },
-   "patch.author-advice": {
-    "applicability": "yes",
-    "status": "skipped-user"
-   },
    "patch.order-evaluation": {
     "applicability": "yes",
     "status": "skipped-user"
@@ -77,7 +73,6 @@
    "state.switch-census",
    "state.conditional-geometry",
    "patch.order-evaluation",
-   "patch.author-advice",
    "functional.collective-route-connectivity",
    "environment.generated-output-regeneration",
    "functional.linked-dependencies"

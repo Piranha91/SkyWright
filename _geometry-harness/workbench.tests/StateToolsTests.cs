@@ -537,7 +537,7 @@ public sealed class StateToolsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task M7e_bos_and_author_advice_are_greyed_with_a_sentence_when_the_profile_cannot_feed_them()
+    public async Task M7e_bos_is_greyed_with_a_sentence_when_the_profile_cannot_feed_it()
     {
         var inst = LauncherInstanceL5();
         await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", inst), ("profile", "P"), ("game", inst)));
@@ -546,7 +546,6 @@ public sealed class StateToolsTests : IAsyncLifetime
         var probes = P(s, "launcher", "probes").EnumerateArray().ToList();
         string? Why(string id) => P(probes.Single(p => P(p, "checkId").GetString() == id), "whyNot").GetString();
         Assert.Contains("_SWAP.ini", Why("geometry.bos-overlay"));
-        Assert.Contains("meta.ini", Why("patch.author-advice"));
     }
 
     [Fact]

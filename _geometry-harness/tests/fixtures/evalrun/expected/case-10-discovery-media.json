@@ -1,6 +1,6 @@
 {
  "case": "case-10-discovery-media",
- "scenario": "adviceprobe returns a catalogued file whose hash is in no evaluated arm; media.json lists one item whose fingerprint matches an accepted baseline receipt and one whose fingerprint matches nothing.",
+ "scenario": "media.json lists one item whose fingerprint matches an accepted baseline receipt and one whose fingerprint matches nothing (the advice half, adviceprobe's catalogued file, left with the row for the module: 9D).",
  "plan": {
   "checks": {
    "loadability.masters-and-order": {
@@ -43,10 +43,6 @@
     "applicability": "yes",
     "status": "manual"
    },
-   "patch.author-advice": {
-    "applicability": "yes",
-    "status": "planned"
-   },
    "patch.order-evaluation": {
     "applicability": "yes",
     "status": "planned"
@@ -72,9 +68,6 @@
  },
  "verifyBundleExit": 0,
  "notes": [
-  "D8: an item whose fingerprint equals an accepted receipt's fingerprint on that arm is evidence with strength supplied-media; anything else is unassessedMedia with the reason and is not evidence.",
-  "D8 (media item schema 2): the accepted item is copied to media/<sha256[:12]>-<basename> and its row carries every item field plus id, sha256, bytes; a rejected item is unassessed by ONE closed reason (here fingerprint-mismatch), never a free sentence alone.",
-  "A-3: an arm's comparison set is its OWN configuration (accepted receipts with part null or arm). A baseline-order picture declared for the candidate arm with the baseline fingerprint is fingerprint-mismatch even though the candidate's reverse receipt consumed that order.",
-  "An item with no provenance object naming tool and capturedUtc is provenance-missing (checked after the fingerprint source, before the arm's receipts), never accepted with provenance null."
+  "D8: an item whose fingerprint equals an accepted receipt's fingerprint on that arm is evidence with strength supplied-media; anything else is unassessedMedia with the reason and is not evidence."
  ]
 }
