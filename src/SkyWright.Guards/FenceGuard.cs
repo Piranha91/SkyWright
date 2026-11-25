@@ -166,9 +166,11 @@ internal static class FenceGuard
         foreach (var f in outsideListed.Concat(insideListed)) Console.WriteLine($"  named     {f.File}:{f.Line} {f.Kind} {f.Name}");
         foreach (var f in outside.Except(outsideListed)) Check(false, SkillSentence(f, inside: false));
         foreach (var f in inside.Except(insideListed)) Check(false, SkillSentence(f, inside: true));
-        int skillNamed = outsideListed.Count + insideListed.Count;
+        var plantLines = outside.Where(f => ListedIn(SkyWright.TestPlants, f)).ToList();
+        int skillNamed = outsideListed.Count - plantLines.Count + insideListed.Count;
         Console.WriteLine(fail == 0
-            ? $"\n  fence: holds ({listed.Count} references on the named crossing list; {skillNamed} reads of houseCARL's skill data on the named skill lists)"
+            ? $"\n  fence: holds ({listed.Count} references on the named crossing list; {skillNamed} reads on the named skill lists; "
+              + $"{(SkyWright.TestPlants ?? []).Length} test plant ({plantLines.Count} lines), not a read)"
             : $"\n  fence: {fail} failed");
         return fail == 0 ? 0 : 1;
     }
@@ -276,7 +278,8 @@ internal static class FenceGuard
             // the pair rules: a literal "agents" or ".claude-plugin" in a file that also holds a literal "plugin"
             // (Path.Combine pieces, or PLUGIN = root / "plugin" then PLUGIN / "agents"); the finding is on the second
             // piece's line. Inside the module, a skill's bare name in a file that also holds a literal ".claude".
-            if (lits.Any(l => l.Text == "plugin"))
+            // "plugin" as its own piece, or as the last piece of a longer literal ("external/houseCARL/plugin")
+            if (lits.Any(l => EndsWithPiece(l.Text, "plugin")))
             {
                 foreach (var (line, _) in lits.Where(l => l.Text == "agents")) yield return new(rel, line, "plugin + agents", Kind);
                 foreach (var (line, _) in lits.Where(l => l.Text == ".claude-plugin")) yield return new(rel, line, "plugin + .claude-plugin", Kind);
@@ -294,6 +297,13 @@ internal static class FenceGuard
             if (script && (t.StartsWith('#') || t.StartsWith("::") || t.StartsWith("REM ", StringComparison.OrdinalIgnoreCase))) continue;
             foreach (var hit in SkillForms(lines[i], literal: false, inside)) yield return new(rel, i + 1, hit, Kind);
         }
+    }
+
+    /// <summary>Whether a literal is the piece, or ends with it after a separator (/ or \, any number).</summary>
+    static bool EndsWithPiece(string text, string piece)
+    {
+        var t = Regex.Replace(text.Trim().Replace('\\', '/'), "/{2,}", "/").TrimEnd('/');
+        return string.Equals(t, piece, StringComparison.OrdinalIgnoreCase) || t.EndsWith("/" + piece, StringComparison.OrdinalIgnoreCase);
     }
 
     internal static string Sentence(Finding f) =>
@@ -734,6 +744,8 @@ internal static class FenceGuard
                 ("mod/m/reader.py", "P = TREE / \".claude\" / \"skills\" / \"world-edit-compatibility\"\n", ".claude + world-edit-compatibility", true, "inside the module: houseCARL's place built from pieces"),
                 ("mod/m/reader.py", "S = TREE / \"external/houseCARL/standards/HOUSECARL_EVALUATION_PRESENTATION.md\"\n", "HOUSECARL_EVALUATION_PRESENTATION", true, "inside the module: houseCARL's presentation standard"),
                 ("mod/m/reader.py", "M = HC / \"plugin\" / \".claude-plugin\" / \"plugin.json\"\n", "plugin + .claude-plugin", true, "inside the module: houseCARL's plugin manifest from pieces"),
+                ("mod/m/reader.py", "M = ROOT / \"external/houseCARL/plugin\" / \".claude-plugin\" / \"plugin.json\"\n", "plugin + .claude-plugin", true, "inside the module: houseCARL's plugin manifest, plugin the tail of a longer piece"),
+                ("mod/m/Reader.cs", "var p = Path.Combine(root, \"external\\\\houseCARL\\\\plugin\\\\\", \"agents\");\n", "plugin + agents", true, "inside the module: houseCARL's agents, plugin the tail of a backslashed piece"),
                 ("app/Bad.cs", "var p = \"docs\\\\HOUSECARL_EVALUATION_BUNDLE.md\";\n", "HOUSECARL_EVALUATION_BUNDLE", false, "C#: the bundle standard's name outside"),
                 ("app/bad.py", "p = ROOT / \"integration/housecarl/claude-plugin/skills/evaluation-reporting/SKILL.md\"\n", "skills/evaluation-reporting", false, "Python: the module's own skill from outside"),
             ];
