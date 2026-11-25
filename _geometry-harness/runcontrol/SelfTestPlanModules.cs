@@ -180,6 +180,10 @@ public static class SelfTestPlanModules
         using var t = new Temp();
         string path = t.Write("check-registry.json", B64(ka["bytes"]));
         var registry = Registry.Load(path);
+        // the registry as recorded before the AI-side rows left it: the base of the variants whose subject is one of
+        // those rows, until that row's rule moves to the houseCARL integration module (step 3 of the boundary)
+        var withAiRows = Registry.Load(t.Write("check-registry-with-ai-rows.json", B64(ka["oldBytes"])));
+        PyDict BaseOf(PyDict row) => row.Get("base") as string == "with-ai-rows" ? withAiRows : registry;
 
         Case("registry: sha256 of the file's bytes", () => Same("sha256", Registry.Sha256(path), S(ka["sha256"])));
         Case("registry: the real registry validates", () => SameList("problems", Registry.Validate(registry), Strings(ka["problems"])));
@@ -196,11 +200,11 @@ public static class SelfTestPlanModules
         var variants = L(ka["variants"]).Select(D).ToList();
         Case($"registry: validate names every problem of {variants.Count(v => v.ContainsKey("problems"))} broken registries", () =>
             Rows(variants.Where(v => v.ContainsKey("problems")), row =>
-                SameList("problems", Registry.Validate(Apply(registry, row["ops"])), Strings(row["problems"]))));
+                SameList("problems", Registry.Validate(Apply(BaseOf(row), row["ops"])), Strings(row["problems"]))));
         Case($"registry: validate stops where Python stops, on {variants.Count(v => v.ContainsKey("raises"))} malformed registries", () =>
             Rows(variants.Where(v => v.ContainsKey("raises")), row =>
             {
-                try { Registry.Validate(Apply(registry, row["ops"])); }
+                try { Registry.Validate(Apply(BaseOf(row), row["ops"])); }
                 catch (PyError e) { return Same("error", e.Message, S(row["raises"])); }
                 return "nothing was raised";
             }));
