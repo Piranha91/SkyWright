@@ -3,3 +3,5 @@
 *.jsonl text eol=lf
 *.bsa binary
 docs/TOOLS.md text eol=lf
+# frozen fixtures whose bytes a manifest hashes: never converted
+_geometry-harness/tests/fixtures/old-bundles/** -text
