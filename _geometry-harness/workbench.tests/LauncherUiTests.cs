@@ -332,7 +332,7 @@ public sealed class LauncherUiTests : IDisposable
             Assert.False(says.Length == 0, $"{c.Id} has no plain description");
             foreach (var b in banned) Assert.DoesNotContain(b, says, StringComparison.OrdinalIgnoreCase);
         }
-        foreach (var k in new[] { "mcp-only", "derived", "manual", "media", "live-import", "unsupported" })
+        foreach (var k in new[] { "derived", "manual", "unsupported" })
             foreach (var b in banned) Assert.DoesNotContain(b, ProbeNames.NotAProbe(k), StringComparison.OrdinalIgnoreCase);
     }
 

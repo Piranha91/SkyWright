@@ -161,45 +161,5 @@ internal static class ProbeHelp
 
             A seam is a mismatch in the data. It may be hidden under a rock or somewhere nobody walks, and none has yet been confirmed as visible in the game.
             """),
-
-        ["patch.discovery-installed"] = new(
-            "Looks for compatibility patches you already have, installed in this setup or in another Mod Organizer setup on this computer, for mods whose order the selected mods change.",
-            """
-            A compatibility patch is built on top of the two mods it reconciles, so it lists both of them as its masters. That turns finding one into a lookup rather than guesswork.
-
-            The probe finds every Mod Organizer setup in the folders this computer is set to search, reads every plugin in them, and files each one under the pairs of mods it is built on. For each pair of mods whose order relative to each other the selected mods change, it lists every plugin built on both, and where it is: enabled here, installed here but switched off, installed in another setup, or only matched by name among your downloads. A patch in another setup, such as a curated mod list, is a hint that someone thought the pair needed one.
-
-            A plugin built on both mods is a candidate, not a proven fix: it may patch something else entirely, such as how characters look. Folders this computer is not set to search are not looked in, and the result says so.
-            """),
-
-        ["patch.discovery-fomod"] = new(
-            "Finds options in your mods' installers (FOMOD installers) that the installer itself recommends for this load order but that were not chosen when the mod was installed.",
-            """
-            Many mods ship their compatibility patches as optional extras in their installer. Mod Organizer installs only the options picked at the time, and the rest stays inside the downloaded archive, where nothing else can see it.
-
-            The probe opens each installed mod's original archive in your downloads folder and reads its installer instructions. Those instructions say what each option is for, such as "recommended when this other plugin is active". The probe checks each condition against the plugins active in this setup, and lists the options whose condition is met but whose files are not in place: a different variant was installed, the option is missing, or its plugin is there but not enabled.
-
-            Anything in an installer it cannot understand is counted as not judged rather than ignored. A suggested option is a lead, not a fault in the load order. It needs the downloads folder and an archive tool to be set up on this computer.
-            """),
-
-        ["patch.discovery-pool"] = new(
-            "Finds downloaded mods, never installed anywhere on this computer, that look like patches for this setup and would install cleanly into it.",
-            """
-            A downloads folder can hold thousands of archives that were never unpacked. Matching them by their names is a guess; reading the plugins inside is not.
-
-            For every archive in the downloads folder that no Mod Organizer setup on this computer has installed, the probe unpacks the plugins inside and reads, for each one, the files it is built on (its masters). If every master is present and active in this setup, the plugin would load today, so it is reported; one that is only a single master short is reported too. Masters that nearly everything uses, such as the base game, Creation Club content and the widely used community bug-fix patch, are not taken as a sign of what a plugin patches.
-
-            A hit is only a candidate. It is not a proven fix until it has been tested in a load order, which the evaluation does as a separate step.
-            """),
-
-        ["patch.author-advice"] = new(
-            "Reads what the selected mod's author wrote on its Nexus Mods page about load order, needed patches and mods it clashes with.",
-            """
-            Mod pages often say "load this after that" or "not compatible with this other mod". The probe reads the page's description from a copy stored earlier; it makes no internet request during a run, so the advice is as recent as that copy, and the copy's date is recorded. It needs the mod's Nexus page number to be recorded in Mod Organizer.
-
-            It looks for a few clear kinds of statement: a load order list under a heading, a sentence naming exactly two mods with "above" or "below" between them, and named mods the author says it clashes with. Each mod named is matched to a plugin installed in this setup, and a list with an item that does not match is set aside whole.
-
-            It would rather say nothing than guess. A sentence with a condition ("if you use..."), three or more mods in one sentence, two statements that disagree, a name it cannot match, or the word "overwrite" (which is about file priority, not load order) becomes a note quoting the sentence, not a rule. The common line "load patches after the mods they patch" is noted but adds nothing, because the game already requires it. What a page says is advice, not a measurement.
-            """),
     };
 }

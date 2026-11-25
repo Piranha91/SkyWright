@@ -16,11 +16,8 @@ internal static class ProbeNames
     /// <summary>Why a check of this registry kind is not a probe the launcher runs, in plain words.</summary>
     internal static string NotAProbe(string kind) => kind switch
     {
-        "mcp-only" => "is checked by Claude reading the records directly",
         "derived" => "is worked out from the other checks' results",
         "manual" => "is a step done by hand",
-        "media" => "is read from screenshots and video you supply",
-        "live-import" => "needs the game running",
         _ => "is not built yet",
     };
 
@@ -42,10 +39,6 @@ internal static class ProbeNames
         "state.conditional-geometry" => "Overlaps and gaps that appear only once an enable marker switches its objects on.",
         "environment.water-boundaries" => "Neighbouring cells whose water heights or types disagree.",
         "environment.land-seams" => "Neighbouring cells whose landscape edges no longer meet.",
-        "patch.discovery-installed" => "Patches already installed in this instance that cover these mods.",
-        "patch.discovery-fomod" => "Installer (FOMOD) options that fit this load order but were not chosen.",
-        "patch.discovery-pool" => "Downloaded mods, not installed, that would patch these mods.",
-        "patch.author-advice" => "What the mod author's Nexus page says about needed patches and load order.",
         _ => "",
     };
 

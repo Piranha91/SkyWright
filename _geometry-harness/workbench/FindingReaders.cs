@@ -34,12 +34,7 @@ internal static class FindingReaders
 
     internal static IReadOnlyList<FindingRow> Read(string checkId, string path) => Read(checkId, path, null);
 
-    internal static IReadOnlyList<FindingRow> Read(string checkId, string path, Func<string, string?>? cellOfRef) => Read(checkId, path, cellOfRef, null);
-
-    /// <summary>With <paramref name="relevance"/>, finalize's record for this check and arm
-    /// (disposition.discovery.relevance): a discovery hit is a finding when relevant, context saying why when not,
-    /// and, when relevance was not computed, a finding carrying that sentence. Relevance is never re-derived here.</summary>
-    internal static IReadOnlyList<FindingRow> Read(string checkId, string path, Func<string, string?>? cellOfRef, JsonElement? relevance)
+    internal static IReadOnlyList<FindingRow> Read(string checkId, string path, Func<string, string?>? cellOfRef)
     {
         using var doc = JsonDocument.Parse(File.ReadAllText(path));
         var r = doc.RootElement;
@@ -116,33 +111,6 @@ internal static class FindingReaders
                 }
                 Unreadable("unreadable", "a record the probe could not read names no place");
                 break;
-            case "patch.discovery-installed" or "patch.discovery-fomod" or "patch.discovery-pool":
-                {
-                    bool? computed = relevance is { ValueKind: JsonValueKind.Object } rv && rv.TryGetProperty("computed", out var cv) ? cv.ValueKind == JsonValueKind.True : null;
-                    var relevantFiles = computed == true && relevance!.Value.TryGetProperty("relevant", out var rl)
-                        ? rl.EnumerateArray().Select(Text).ToHashSet(StringComparer.OrdinalIgnoreCase) : new HashSet<string>();
-                    string? notWhy = computed == true && relevance!.Value.TryGetProperty("notRelevant", out var nr) ? S(nr, "why") : null;
-                    string? notComputed = computed == false ? S(relevance!.Value, "why") : null;
-                    foreach (var e in List(r, "hits"))
-                    {
-                        var file = S(e, "file") ?? "";
-                        var text = $"{file} ({S(e, "kind")}), masters {string.Join(", ", List(e, "masters").Select(Text))}";
-                        string role = "finding";
-                        if (computed == true && !relevantFiles.Contains(file)) { role = "context"; text += $"; not relevant: {notWhy}"; }
-                        else if (computed == false) text += $"; relevance not computed: {notComputed}";
-                        rows.Add(Note(S(e, "kind") ?? "hit", text, role, "a patch hit is a file, not a place in the world; open its folder", "hit:" + file));
-                    }
-                }
-                {
-                    int i = 0;
-                    foreach (var e in List(r, "unjudgeableItems"))
-                        rows.Add(Note("unjudgeable", $"{S(e, "what")}: {S(e, "why")}", "incomplete", "an item the search could not judge names no place", $"unjudgeable:{i++}"));
-                    i = 0;
-                    foreach (var e in List(r, "sourcesNotSearched"))
-                        rows.Add(Note("not searched", $"not searched: {S(e, "name") ?? Text(e)} ({S(e, "why")})", "incomplete", "a source the search did not reach names no place", $"notsearched:{i++}"));
-                }
-                Incomplete();
-                break;
             case "loadability.masters-and-order":
                 Unreadable("walkFailures", "a walk failure names no record");
                 {
@@ -157,17 +125,6 @@ internal static class FindingReaders
                         rows.Add(Note("unmeasured", $"unmeasured {S(e, "extent")}: {S(e, "why")}", "context", "an unmeasured extent is a statement about the scope", $"unmeasured:{i++}"));
                 }
                 Incomplete();
-                break;
-            case "patch.author-advice":
-                foreach (var k in new[] { "clashes", "rules", "statements", "resolutions", "requirements" })
-                {
-                    int i = 0;
-                    foreach (var e in List(r, k)) rows.Add(Note(k, $"{k}: {Text(e)}", "finding", "author advice is a statement about mods, not a place", $"{k}:{i++}"));
-                }
-                {
-                    int i = 0;
-                    foreach (var e in List(r, "warnings")) rows.Add(Note("warning", Text(e), "incomplete", "author advice is a statement about mods, not a place", $"warning:{i++}"));
-                }
                 break;
             case "geometry.fixture-empty-space":
                 foreach (var e in List(r, "Rows"))

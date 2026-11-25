@@ -193,34 +193,6 @@ internal sealed class BundleConflicts
             }
             return list;
         }
-        List<FindingRow> ImportedFindings(string check, ConflictFile file) =>
-            // an entry that names no record (a missing asset names a file path) is one row of its own, with no place
-            file.Conflicts.SelectMany(c => c.Necessary.Count > 0 ? c.Necessary.Select(n => (c, (ConflictRecord?)n)) : new[] { (c, (ConflictRecord?)null) })
-                .Select(x => (Row: x, Id: ConflictIo.RowIdentity(x.c.Kind, x.Item2?.FormKey ?? "", null, x.c.A) + "|" + (x.c.Summary ?? "").ToLowerInvariant()))
-                .GroupBy(x => x.Id).Select(g => g.First())
-                .Select(x =>
-                {
-                    var (c, n) = x.Row;
-                    if (n is null) return new FindingRow(check, c.Kind, c.A ?? "", c.B ?? "", c.Summary ?? c.Kind, null, null, "this row names no record, so it has no place to open", "finding", x.Id);
-                    var rn = names?.Ref(n.FormKey);
-                    string? why = rn is null ? "the names read did not reach this record, so its cell is not known" : rn.Value.Cell is null ? "the bundle records no cell for this record" : null;
-                    return new FindingRow(check, c.Kind, c.A ?? "", c.B ?? "", c.Summary ?? c.Kind, n.FormKey, rn?.Cell, why, "finding", x.Id, n.Physical) { BaseType = rn?.BaseType };
-                }).ToList();
-        // an imported check's rows file: its result.json names it (outputs[].role "rows", by sha256), and that is the one read
-        (string Recorded, string Full)? ImportedRows(List<(string Recorded, string Full)> outs, out string why)
-        {
-            why = "its import names no result.json";
-            var result = outs.FirstOrDefault(o => Path.GetFileName(o.Full).Equals("result.json", StringComparison.OrdinalIgnoreCase));
-            if (result.Full is null) return null;
-            using var rj = JsonDocument.Parse(File.ReadAllText(result.Full));
-            var sha = rj.RootElement.TryGetProperty("outputs", out var ro2) && ro2.ValueKind == JsonValueKind.Array
-                ? ro2.EnumerateArray().Where(o => o.TryGetProperty("role", out var role) && role.GetString() == "rows")
-                      .Select(o => o.TryGetProperty("sha256", out var s) ? s.GetString() : null).FirstOrDefault() : null;
-            if (sha is null) { why = "its result.json names no rows output"; return null; }
-            foreach (var o in outs) if (Sha(o.Full).Equals(sha, StringComparison.OrdinalIgnoreCase)) return o;
-            why = "the rows output its result.json names is not among the receipt's files";
-            return null;
-        }
         string? ReceiptKey(string check, string a) => new[] { $"{check}__{a}__arm", $"{check}__{a}" }.FirstOrDefault(k => File.Exists(Path.Combine(dir, "receipts", k + ".json")));
         string? BaselineEmit(string check) => ReceiptKey(check, baselineArm) is { } k ? Outputs(k).Select(x => x.Full).FirstOrDefault() : null;
         string? ArmEmit(string k) => Outputs(k).Select(x => x.Full).FirstOrDefault();
@@ -278,58 +250,34 @@ internal sealed class BundleConflicts
                 }
             }
         }
-        // finalize's discovery relevance, from the bundle's disposition, by check and arm
-        JsonElement? relevanceDoc = null;
-        var dispPath = Path.Combine(dir, "disposition.json");
-        if (File.Exists(dispPath))
-        {
-            using var dd = JsonDocument.Parse(File.ReadAllText(dispPath));
-            if (dd.RootElement.TryGetProperty("discovery", out var di) && di.TryGetProperty("relevance", out var rv)) relevanceDoc = rv.Clone();
-        }
-        JsonElement? Relevance(string check, string a) =>
-            relevanceDoc is { } rd && rd.TryGetProperty(check, out var byArm) && byArm.TryGetProperty(a, out var one) ? one : null;
+        // a receipt of a check this SkyWright's registry does not list (an AI-side evaluation's row, in a bundle made before
+        // those rows left the registry, or by the integration module) is not read: the bundle opens and one note says so
+        var listed = Launcher.Registry().Select(c => c.Id).ToHashSet(StringComparer.Ordinal);
+        var unlisted = Directory.EnumerateFiles(Path.Combine(dir, "receipts"), "*.json")
+            .Select(f => Path.GetFileNameWithoutExtension(f).Split("__")[0]).Where(id => !listed.Contains(id)).ToList();
+        if (unlisted.Count > 0)
+            notes.Add($"{unlisted.Count} receipt(s) are of checks this SkyWright does not list ({string.Join(", ", unlisted.Distinct().OrderBy(x => x, StringComparer.Ordinal))}): an AI-side evaluation's rows, not shown here.");
         var findings = new List<FindingRow>();
         foreach (var c in plan.GetProperty("checks").EnumerateArray())
         {
             var check = c.GetProperty("checkId").GetString()!;
-            if (PlacedChecks.Contains(check)) continue;
+            if (PlacedChecks.Contains(check) || !listed.Contains(check)) continue;
             var key = ReceiptKey(check, arm);
             if (key is null) continue;
-            bool conflictFile, imported;
+            bool conflictFile;
             using (var rd = JsonDocument.Parse(File.ReadAllText(Path.Combine(dir, "receipts", key + ".json"))))
-            {
-                var hasAdapter = rd.RootElement.TryGetProperty("adapter", out var ad);
-                conflictFile = hasAdapter && ad.TryGetProperty("output", out var ot) && ot.GetString() == "conflict-file";
-                imported = hasAdapter && ad.TryGetProperty("kind", out var ak) && ak.GetString() == "mcp-import";
-            }
+                conflictFile = rd.RootElement.TryGetProperty("adapter", out var ad) && ad.TryGetProperty("output", out var ot) && ot.GetString() == "conflict-file";
             var outs = Outputs(key);
             if (outs.Count == 0) { notes.Add($"{key} is not accepted or has no json output, so it gives no Findings rows"); continue; }
             var baseKey = arm == baselineArm ? null : ReceiptKey(check, baselineArm);
             string? baseFile = baseKey is null ? null : Outputs(baseKey).FirstOrDefault() is { Full: { } b0 } ? b0 : null;
-            if (imported)
-            {
-                // an imported check's rows are the file its own result.json names as its rows output (by hash); the request,
-                // the response and the result itself are not rows
-                var rows1 = ImportedRows(outs, out var why);
-                if (rows1 is null) { notes.Add($"{key}: {why}, so it gives no Findings rows"); continue; }
-                outs = new() { rows1.Value };
-                conflictFile = true;
-                baseFile = baseKey is null ? null : ImportedRows(Outputs(baseKey), out _)?.Full;
-            }
             var ev = strength.GetValueOrDefault(check, "unknown");
             foreach (var (rel, full) in outs)
             {
                 read.Add((key, rel));
                 IEnumerable<FindingRow> got;
                 HashSet<string>? before = null;
-                if (imported)
-                {
-                    // an imported check's row is one entry of its own rows file: a record can dangle to several targets, so the
-                    // entry's summary (source, target and field) is part of its identity, and no entry is folded into another
-                    got = ImportedFindings(check, ConflictIo.Read(full));
-                    if (baseFile is { } bi) before = ImportedFindings(check, ConflictIo.Read(bi)).Select(x => x.Identity).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                }
-                else if (conflictFile)
+                if (conflictFile)
                 {
                     var file = ConflictIo.Read(full);
                     if (baseFile is { } bf) before = DifferentialRows.Of(ConflictIo.Read(bf)).Select(x => x.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -343,7 +291,7 @@ internal sealed class BundleConflicts
                 }
                 else
                 {
-                    got = FindingReaders.Read(check, full, fk => names?.Ref(fk)?.Cell, Relevance(check, arm))
+                    got = FindingReaders.Read(check, full, fk => names?.Ref(fk)?.Cell)
                         .Select(g => names?.Ref(g.RefKey ?? "") is { } rn2 ? g with { BaseType = rn2.BaseType } : g).ToList();
                     if (baseFile is { } bj)
                         before = FindingReaders.Read(check, bj).Select(x => x.Identity).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -360,6 +308,7 @@ internal sealed class BundleConflicts
             using var rd = JsonDocument.Parse(File.ReadAllText(f));
             var r = rd.RootElement;
             var check = name.Split("__")[0];
+            if (!listed.Contains(check)) continue;   // said once in the notes
             var exec = r.TryGetProperty("result", out var res) && res.TryGetProperty("execution", out var ex) && ex.ValueKind == JsonValueKind.String ? ex.GetString()! : "";
             if (exec is "skipped-user" or "not-opted-in" || checks.Any(c => c.CheckId == check)) continue;   // not ticked, or already listed
             bool accepted = r.TryGetProperty("validation", out var val) && val.TryGetProperty("accepted", out var acc) && acc.ValueKind == JsonValueKind.True;

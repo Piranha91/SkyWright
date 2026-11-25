@@ -378,60 +378,6 @@ public sealed class FindingReaderTests : IDisposable
         Role(rows[1], "context");
     }
 
-    [Theory]
-    [InlineData("patch.discovery-installed")]
-    [InlineData("patch.discovery-fomod")]
-    [InlineData("patch.discovery-pool")]
-    public void Discovery_hits_one_row_per_hit_and_per_unjudgeable_item_none_clickable(string check)
-    {
-        var rows = Read(check, """
-            {"schemaVersion":1,"probe":"p","mode":"pair","complete":true,"counts":{},
-             "hits":[{"file":"SynPatch.esp","kind":"plugin","where":{},"masters":["Syn.esp"]},{"file":"SynPatch2.esp","kind":"plugin","where":{},"masters":[]}],
-             "unjudgeableItems":[{"what":"an archive","why":"unreadable"}],"detail":{}}
-            """);
-        Assert.Equal(3, rows.Count);
-        foreach (var r in rows) NotClickable(r);
-        Assert.Equal(new[] { "finding", "finding", "incomplete" }, rows.Select(r => (string?)Contract.Prop(r, "Role")));
-    }
-
-    /// <summary>B8i: a discovery hit's relevance is read from what finalize recorded (disposition.discovery.relevance
-    /// for the check and arm), never re-derived: a relevant hit is a finding, a hit not relevant is context saying why, and
-    /// with relevance not computed every hit is shown with the sentence, neither hidden nor called relevant.</summary>
-    [Fact]
-    public void B8i_discovery_hits_take_their_relevance_from_finalize()
-    {
-        var p = Path.Combine(_dir, "patch.discovery-pool.json");
-        File.WriteAllText(p, """
-            {"schemaVersion":1,"probe":"p","mode":"pool","complete":true,"counts":{},
-             "hits":[{"file":"SynPatch.esp","kind":"pool-archive","where":{},"masters":["Syn.esp"]},{"file":"SynFar.esp","kind":"pool-archive","where":{},"masters":["Far.esp"]}],
-             "unjudgeableItems":[],"detail":{}}
-            """);
-        List<object> Read(string relevance)
-        {
-            using var d = JsonDocument.Parse(relevance);
-            return ((System.Collections.IEnumerable)Contract.Static("FindingReaders", "Read", "the discovery reader with finalize's relevance",
-                "patch.discovery-pool", p, null, d.RootElement.Clone())!).Cast<object>().ToList();
-        }
-        var computed = Read("""{"computed":true,"relevant":["SynPatch.esp"],"notRelevant":{"count":1,"why":"names no plan target"}}""");
-        Assert.Equal(new[] { "finding", "context" }, computed.Select(r => (string?)Contract.Prop(r, "Role")));
-        Assert.Contains("names no plan target", (string?)Contract.Prop(computed[1], "Summary"));
-        var not = Read("""{"computed":false,"why":"the plan names no target and no pair"}""");
-        Assert.Equal(new[] { "finding", "finding" }, not.Select(r => (string?)Contract.Prop(r, "Role")));
-        Assert.All(not, r => Assert.Contains("no target and no pair", (string?)Contract.Prop(r, "Summary")));
-    }
-
-    [Fact]
-    public void An_incomplete_discovery_output_shows_its_unsearched_sources_and_that_it_is_incomplete()
-    {
-        var rows = Read("patch.discovery-pool", """
-            {"schemaVersion":1,"probe":"p","mode":"pair","complete":false,"counts":{},
-             "hits":[{"file":"SynPatch.esp","kind":"pool-archive","where":{},"masters":[]}],
-             "sourcesNotSearched":[{"kind":"pool","name":"SynDownloads","why":"the folder could not be read"}],"unjudgeableItems":[],"detail":{}}
-            """);
-        Assert.Equal(1, rows.Count(r => (string?)Contract.Prop(r, "Role") == "finding"));
-        Assert.Equal(2, rows.Count(r => (string?)Contract.Prop(r, "Role") == "incomplete"));   // the unsearched source, and complete false
-    }
-
     [Fact]
     public void Scope_rows_for_walk_failures_unreadable_records_and_unmeasured_extents()
     {
@@ -443,19 +389,6 @@ public sealed class FindingReaderTests : IDisposable
         foreach (var r in rows) NotClickable(r);     // no cell is known for an unreadable record
         Assert.Equal(3, rows.Count(r => (string?)Contract.Prop(r, "Role") == "incomplete"));
         Assert.Single(rows, r => (string?)Contract.Prop(r, "Role") == "context");     // the unmeasured extent
-    }
-
-    [Fact]
-    public void Author_advice_rows_one_per_clash_rule_statement_and_warning()
-    {
-        var rows = Read("patch.author-advice", """
-            {"modId":1,"clashes":[{"with":"Other"}],"rules":[{"r":1}],"statements":[{"s":1}],"resolutions":[],"requirements":[],
-             "warnings":["mod 2's page could not be read. What it states about mod 1 is UNKNOWN for this run, not absent."]}
-            """);
-        Assert.Equal(4, rows.Count);
-        foreach (var r in rows) NotClickable(r);
-        Assert.Equal(3, rows.Count(r => (string?)Contract.Prop(r, "Role") == "finding"));
-        Assert.Single(rows, r => (string?)Contract.Prop(r, "Role") == "incomplete");
     }
 
     [Fact]
@@ -667,11 +600,8 @@ public sealed class RealOutputReaderTests
     [Theory]
     [InlineData("geometry.declared-dependencies", "candidate-01")]
     [InlineData("state.switch-census", "candidate-01")]
-    [InlineData("patch.discovery-pool", "baseline")]
-    [InlineData("patch.discovery-fomod", "baseline")]
     [InlineData("loadability.masters-and-order", "candidate-01")]
     [InlineData("geometry.route-cut", "candidate-01")]
-    [InlineData("patch.author-advice", "baseline")]
     public void Each_reader_gives_as_many_finding_rows_as_the_receipt_counts_and_marks_an_incomplete_output(string check, string arm)
     {
         var run = Run();
@@ -692,10 +622,9 @@ public sealed class RealOutputReaderTests
         {
             "geometry.declared-dependencies" => new[] { "rows", "withheldRows", "unreadable" },
             "state.switch-census" => new[] { "switches", "jointFlips", "unreadable" },
-            "patch.discovery-pool" or "patch.discovery-fomod" => new[] { "hits", "unjudgeableItems", "sourcesNotSearched" },
             "loadability.masters-and-order" => new[] { "walkFailures", "unreadableRecords", "limits", "unmeasured" },
             "geometry.route-cut" => new[] { "Rows" },
-            _ => new[] { "clashes", "rules", "statements", "resolutions", "requirements", "warnings" },
+            _ => throw new ArgumentException($"no list of entries is written for {check}"),
         };
         int entries = lists.Sum(k => o.RootElement.TryGetProperty(k, out var a) && a.ValueKind == JsonValueKind.Array ? a.GetArrayLength() : 0)
                       + (o.RootElement.TryGetProperty("complete", out var cc) && cc.ValueKind == JsonValueKind.False ? 1 : 0);

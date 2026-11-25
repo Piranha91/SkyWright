@@ -328,10 +328,6 @@ internal sealed class Launcher : IAsyncDisposable
             if (!roots.Any(r => Directory.Exists(r) && Directory.EnumerateFiles(r, "*_SWAP.ini").Any()))
                 return "no enabled mod and not the game's Data folder has a _SWAP.ini file, so Base Object Swapper changes nothing in this profile";
         }
-        if (c.Id is "patch.discovery-installed" && HarnessTarget.SearchRoots.Length == 0)
-            return "this computer has no search roots set for finding MO2 instances (HOUSECARL_SEARCH_ROOTS or the harness config's searchRoots), so installed patches cannot be looked for";
-        if (c.Id is "patch.discovery-installed" or "patch.discovery-pool" or "patch.discovery-fomod" && HarnessTarget.DownloadPool.Length == 0)
-            return "this computer has no downloads folder set (HOUSECARL_DOWNLOAD_POOL or the harness config's downloadPool), so patches cannot be looked for";
         return null;
     }
 

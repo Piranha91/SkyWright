@@ -108,7 +108,7 @@ public sealed class FindingsBundle : IDisposable
         if (variant == "full")
         {
             // a ticked check that was rejected, and one that was not ticked (the plan lists every check)
-            foreach (var (key, exec, acc) in new[] { ("patch.discovery-installed__candidate-01", "rejected(exit-nonzero)", false), ("patch.discovery-pool__candidate-01", "skipped-user", false) })
+            foreach (var (key, exec, acc) in new[] { ("geometry.route-cut__candidate-01", "rejected(exit-nonzero)", false), ("environment.land-seams__candidate-01", "skipped-user", false) })
                 File.WriteAllText(Path.Combine(Dir, "receipts", key + ".json"), JsonSerializer.Serialize(new
                 {
                     checkId = key.Split("__")[0], armId = "candidate-01", outputs = Array.Empty<object>(), result = new { execution = exec },
@@ -388,8 +388,8 @@ public sealed class FindingsTests
         var checks = P(s, "findings", "checks").EnumerateArray().ToList();
         string? State(string id) => checks.Where(c => P(c, "checkId").GetString() == id).Select(c => P(c, "state").GetString()).SingleOrDefault();
         Assert.Equal("ran", State("geometry.navmesh-ownership"));
-        Assert.Equal("rejected", State("patch.discovery-installed"));
-        Assert.Contains("exit-nonzero", P(checks.Single(c => P(c, "checkId").GetString() == "patch.discovery-installed"), "why").GetString());
-        Assert.Null(State("patch.discovery-pool"));
+        Assert.Equal("rejected", State("geometry.route-cut"));
+        Assert.Contains("exit-nonzero", P(checks.Single(c => P(c, "checkId").GetString() == "geometry.route-cut"), "why").GetString());
+        Assert.Null(State("environment.land-seams"));
     }
 }
