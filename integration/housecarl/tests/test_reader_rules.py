@@ -310,6 +310,41 @@ def case_reel_counts_in_the_reports_units():
     return ok, f"card {rows}; unpictured {un[:220]!r}"
 
 
+def case_what_to_do_counts_record_fields_in_their_unit():
+    """Boundary step 2: the lead said "12 records ... (13 record fields)" and What to do "13 changes": the same 13
+    record fields, called by another name. What to do names the unit the lead names."""
+    arms = [P.arm("baseline", [BASE, OTHER, A], kind="baseline"), P.arm("no-a", [BASE, OTHER])]
+    rows = [P.lost_row(OTHER, A, f"000801:{BASE}", "LocationReference", "o", "a", "v"),
+            P.lost_row(OTHER, A, f"000801:{BASE}", "Name", "o", "a", "v"),
+            P.lost_row(OTHER, A, f"000802:{BASE}", "LocationReference", "o", "a", "v")]
+    plan, md, html = P.compile_and_render(arms, {}, [A], count_only={(RECORDS, "baseline"): 3, (RECORDS, "no-a"): 0},
+                                          enrichment={(RECORDS, "baseline"): rows, (RECORDS, "no-a"): []})
+    todo = " ".join(str(x) for x in pred_of(plan).get("whatToDo") or [])
+    ok = "3 changes to record fields" in todo and "3 changes between" not in todo and "(3 record fields)" in md
+    return ok, f"what to do {todo[:300]!r}"
+
+
+def case_reel_record_count_and_its_left_out_lines_add_up():
+    """Boundary step 2: the reel said "11 records" where the report said 12, and "1 clash on editor-only markers"
+    without its kind. For each kind, the card's figure plus the left-out figures its page states equals the records
+    the kind's rows hold (the report's records figure), in the card's unit."""
+    extra = [{"admission": "admitted", "checkId": "records.contested-fields", "formKey": f"000B03:{BASE}", "A": OTHER,
+              "B": A, "field": "EditorID", "summary": f"PlacedObject 000B03: EditorID - {OTHER}'s value lost to {A}'s",
+              "values": {}}]
+    pres = reel_pres(extra_rows=extra)
+    names = {p: {"name": re.sub(r"\.(esp|esm|esl)$", "", p)} for p in MODS}
+    reel = reel_plan.plan_reel(pres, {}, {}, POLICY, WORDS, None, names, captures_final=True, markers={f"000B02:{OTHER}"})
+    types = next(p for p in chapter(reel, "opening")["still"]["pages"] if p["layout"] == "types")
+    label = WORDS["typeLabels"]["record"]
+    card = next((r.get("count") for r in types["rows"] if r.get("label") == label), 0)
+    lo = types.get("leftOut") or {}
+    stated = " ".join(str(lo.get(k) or "") for k in ("line", "markersLine"))
+    more = sum(int(m) for m in re.findall(r"(\d+) more records? under " + re.escape(label), stated))
+    records = len({r["formKey"] for r in pres["reader"]["prediction"]["record"] if r["checkId"] == "records.contested-fields"})
+    ok = card + more == records and card == records - 2
+    return ok, f"card {card} + stated {more} vs {records} records; left out {stated!r}"
+
+
 def case_reel_closing_reconciled_and_readable():
     reel = reel_of(reel_pres(subjects=40), MODS)
     rows = moved_rows(reel)
