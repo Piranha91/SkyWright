@@ -4,14 +4,14 @@
     python _geometry-harness/evalreel.py render --presentation OUT/presentation.json --out OUT/reel
         [--max-seconds 120] [--chapters C-01,C-03] [--bundle DIR] [--ffmpeg EXE] [--dry-run]
 
-Consumes the presentation plan (standards/HOUSECARL_EVALUATION_PRESENTATION.md, schema 1) and cuts a 1280x720,
+Consumes the presentation plan (the module's EVALUATION-PRESENTATION.md, schema 1) and cuts a 1280x720,
 30 fps, H.264/AAC narrated reel. Every scene uses qualified evidence media at full-frame scale, and any crop,
 pan, or highlight comes from explicit `storyboard` metadata. The opening speaks the overall verdict. There are
 no title cards, caption bands, subtitles, or other added text. Missing media, narration, or clean-frame
 declarations refuse the render instead of silently substituting a card.
 
 Layout and reviewed storyboard input are documented in
-`.claude/skills/evaluation-reporting/references/reel-layout.md`. The scene fills the canvas with its aspect
+the module's skill, `claude-plugin/skills/evaluation-reporting/references/reel-layout.md`. The scene fills the canvas with its aspect
 ratio preserved; only declared crops, pans and subject highlights alter its framing.
 
 Outputs under --out: `reel.mp4`, `reel.srt`, `reel-map.json`, `reel-status.json`, `contact-sheet.png`, and a

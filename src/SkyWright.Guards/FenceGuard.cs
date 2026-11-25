@@ -37,20 +37,27 @@ namespace SkyWright.Guards;
 /// observers and the recorded outputs (<see cref="Exempt"/>) are read by name, printed on every run with their reason, and
 /// an exemption that names nothing fails like a stale crossing. The direction module to outside is never a finding.
 ///
-/// A second fence, about houseCARL's AI-facing skill data: its two evaluation skills' folders
-/// (<c>.claude/skills/evaluation-reporting</c>, <c>.claude/skills/world-edit-compatibility</c>) and its agent definitions
-/// (<c>plugin/agents</c>). Their data lives in the module now, so
-///   (1) outside the module, any reference to them is a finding: the app and the scan read none of it;
-///   (2) inside the module, any reference to them is a finding too: the module reads its own copy, never the old place.
+/// A second fence, about the AI-facing evaluation data that houseCARL held and the module now owns: the two evaluation
+/// skills (houseCARL's <c>.claude/skills/evaluation-reporting</c>, <c>.claude/skills/world-edit-compatibility</c>; the
+/// module's <c>claude-plugin/skills/</c>), houseCARL's agent definitions (<c>plugin/agents</c>), its two evaluation
+/// standards (<c>standards/HOUSECARL_EVALUATION_PRESENTATION.md</c>, <c>HOUSECARL_EVALUATION_BUNDLE.md</c>) and its plugin's
+/// manifest (<c>plugin/.claude-plugin/</c>). So
+///   (1) outside the module, any reference to the skills (houseCARL's or the module's), the agents, the standards or the
+///       plugin manifest is a finding: the app and the scan read none of it;
+///   (2) inside the module, a reference to houseCARL's copy is a finding: the module reads its own, never the old place.
+///       Its own skills (<c>claude-plugin/skills/&lt;skill&gt;</c>, a skill's bare name) are not findings there.
 /// What counts: in a .py or .cs string literal (comments and docstrings removed, as above), a literal holding
-/// <c>skills/&lt;either skill&gt;</c> or <c>plugin/agents</c> with any separator, or a literal that is exactly one of the
-/// two skill names (a path piece, <c>Path.Combine(".claude", "skills", "evaluation-reporting")</c>), or a literal
-/// <c>"agents"</c> in a file that also holds a literal <c>"plugin"</c> (this pair rule reads the one file, not the code
-/// that joins them, so a file naming both for other reasons is a finding too); in build
-/// files, .json and scripts, the path forms only (a skill's bare name in data or prose is a name, not a read). What they
-/// cannot see: a path built from variables or across lines, a skill named in a data value a program later joins, prose
-/// files, and what houseCARL's own programs read (the pin is not walked). Each fence has its own named list, printed with
-/// the step that removes each entry; an entry that matches nothing fails.
+/// <c>skills/&lt;either skill&gt;</c> (inside the module: <c>.claude/skills/&lt;either skill&gt;</c>, houseCARL's place),
+/// <c>plugin/agents</c>, <c>plugin/.claude-plugin</c> or a <c>HOUSECARL_EVALUATION_PRESENTATION</c> /
+/// <c>HOUSECARL_EVALUATION_BUNDLE</c> name, with any separator; outside the module, a literal that is exactly one of the
+/// two skill names (a path piece, <c>Path.Combine(".claude", "skills", "evaluation-reporting")</c>); and three pair
+/// rules that read the one file, not the code that joins its pieces (so a file naming both for other reasons is a
+/// finding too): a literal <c>"agents"</c> with a literal <c>"plugin"</c>, a literal <c>".claude-plugin"</c> with a literal
+/// <c>"plugin"</c>, and inside the module a skill's bare name with a literal <c>".claude"</c>. In build files, .json and
+/// scripts, the path forms only (a skill's bare name in data or prose is a name, not a read). What they cannot see: a
+/// path built from variables or across lines, a skill named in a data value a program later joins, prose files, and
+/// what houseCARL's own programs read (the pin is not walked). Each fence has its own named list, printed with the step
+/// that removes each entry; an entry that matches nothing fails.
 /// </summary>
 internal static class FenceGuard
 {
@@ -99,12 +106,9 @@ internal static class FenceGuard
         ],
         SkillReadsInside:
         [
-            new("integration/housecarl/tests/test_reel_vignettes.py", ["skills/evaluation-reporting"],
-                "case_skill_data's docs check reads the skill's prose (SKILL.md, references/reel-layout.md) for rules the vignette format superseded; prose, not data",
-                "step 3, when the skill moves into the module"),
-            new("integration/housecarl/tests/test_narration_fidelity.py", ["evaluation-reporting"],
-                "C2029 reads the skill's SKILL.md for the setting and flag a rewrite needs; prose, not data",
-                "step 3, when the skill moves into the module"),
+            new("integration/housecarl/evalsettings.py", ["plugin + .claude-plugin"],
+                "the agent route's prefix is read from houseCARL's plugin manifest",
+                "step 3, when the module is its own plugin and reads its own manifest"),
         ],
         SkillExempt:
         [
@@ -174,7 +178,7 @@ internal static class FenceGuard
 
     internal static string SkillSentence(Finding f, bool inside) => inside
         ? $"{f.File}:{f.Line} reads houseCARL's {f.Name} from inside the integration module; that data lives in the module now: read the module's own copy, or name the read with its reason and step in FenceGuard."
-        : $"{f.File}:{f.Line} reads houseCARL's {f.Name} from outside the integration module; the app and the scan read no AI-facing skill data: take it from SkyWright's data/ or move the reader into the module, or name it with its reason and step in FenceGuard.";
+        : $"{f.File}:{f.Line} reads the AI-facing evaluation data {f.Name} from outside the integration module; the app and the scan read none of it: take it from SkyWright's data/ or move the reader into the module, or name it with its reason and step in FenceGuard.";
 
     static bool ListedIn(Crossing[]? list, Finding f) =>
         (list ?? []).Any(c => Same(c.File, f.File) && c.Names.Contains(f.Name, StringComparer.Ordinal));
@@ -193,22 +197,22 @@ internal static class FenceGuard
             if (!(e.Path.EndsWith('/') ? Directory.Exists(p) : File.Exists(p)))
                 problems.Add($"the skill exemption {e.Path} names nothing in this tree: a moved file would hide behind it");
         }
-        void ReadFile(string file, List<Finding> into)
+        void ReadFile(string file, List<Finding> into, bool inside)
         {
             var rel = Norm(Path.GetRelativePath(root, file));
             var kind = Path.GetExtension(file).ToLowerInvariant();
             if (!Read.Contains(kind)) return;
-            into.AddRange(SkillsIn(rel, kind, File.ReadAllText(file)));
+            into.AddRange(SkillsIn(rel, kind, File.ReadAllText(file), inside));
         }
         if (Directory.Exists(module))
             foreach (var file in Walk(root, module))
             {
                 var rel = Norm(Path.GetRelativePath(root, file));
                 if ((cfg.SkillExempt ?? []).Any(e => e.Path.EndsWith('/') ? rel.StartsWith(e.Path, StringComparison.OrdinalIgnoreCase) : Same(e.Path, rel))) continue;
-                ReadFile(file, outside);
+                ReadFile(file, outside, inside: false);
             }
         if (Directory.Exists(module) && cfg.SkillReadsInside != null)
-            foreach (var file in WalkModule(module)) ReadFile(file, inside);
+            foreach (var file in WalkModule(module)) ReadFile(file, inside, inside: true);
         outside = outside.Distinct().ToList();
         inside = inside.Distinct().ToList();
         if ((cfg.TestPlants?.Length ?? 0) > TestPlantsExpected)
@@ -238,19 +242,29 @@ internal static class FenceGuard
         }
     }
 
-    /// <summary>The skill forms one piece of text holds: a path form, and (for a code literal) the bare piece.</summary>
-    static IEnumerable<string> SkillForms(string s, bool literal)
+    static readonly string[] StandardNames = ["HOUSECARL_EVALUATION_PRESENTATION", "HOUSECARL_EVALUATION_BUNDLE"];
+
+    /// <summary>The forms one piece of text holds: a path form, and (for a code literal outside the module) a skill's
+    /// bare name. Inside the module only houseCARL's places count: <c>.claude/skills/&lt;skill&gt;</c>, not the module's
+    /// own <c>claude-plugin/skills/&lt;skill&gt;</c>.</summary>
+    static IEnumerable<string> SkillForms(string s, bool literal, bool inside)
     {
         var t = Regex.Replace(s.Replace('\\', '/'), "/{2,}", "/");
         foreach (var n in SkillNames)
-            if (Regex.IsMatch(t, @"(?<![\w.-])skills/" + Regex.Escape(n) + @"(?![\w-])", RegexOptions.IgnoreCase)) yield return "skills/" + n;
+            if (inside
+                    ? Regex.IsMatch(t, @"(?<![\w-])\.claude/skills/" + Regex.Escape(n) + @"(?![\w-])", RegexOptions.IgnoreCase)
+                    : Regex.IsMatch(t, @"(?<![\w.-])skills/" + Regex.Escape(n) + @"(?![\w-])", RegexOptions.IgnoreCase))
+                yield return (inside ? ".claude/skills/" : "skills/") + n;
         if (Regex.IsMatch(t, @"(?<![\w.-])plugin/agents(?![\w-])", RegexOptions.IgnoreCase)) yield return "plugin/agents";
-        if (literal)
+        if (Regex.IsMatch(t, @"(?<![\w.-])plugin/\.claude-plugin(?![\w-])", RegexOptions.IgnoreCase)) yield return "plugin/.claude-plugin";
+        foreach (var n in StandardNames)
+            if (Regex.IsMatch(t, @"(?<![\w-])" + n + @"(?![\w-])", RegexOptions.IgnoreCase)) yield return n;
+        if (literal && !inside)
             foreach (var n in SkillNames)
                 if (string.Equals(s.Trim(), n, StringComparison.OrdinalIgnoreCase)) yield return n;
     }
 
-    internal static IEnumerable<Finding> SkillsIn(string rel, string kind, string text)
+    internal static IEnumerable<Finding> SkillsIn(string rel, string kind, string text, bool inside = false)
     {
         const string Kind = "reads";
         List<(int Line, string Text)>? lits = kind switch
@@ -261,11 +275,18 @@ internal static class FenceGuard
         };
         if (lits != null)
         {
-            foreach (var (line, s) in lits) foreach (var hit in SkillForms(s, literal: true)) yield return new(rel, line, hit, Kind);
-            // the pair rule: a literal "agents" in a file that also holds a literal "plugin" (Path.Combine pieces, or
-            // PLUGIN = root / "plugin" then PLUGIN / "agents"); the finding is on the "agents" line
+            foreach (var (line, s) in lits) foreach (var hit in SkillForms(s, literal: true, inside)) yield return new(rel, line, hit, Kind);
+            // the pair rules: a literal "agents" or ".claude-plugin" in a file that also holds a literal "plugin"
+            // (Path.Combine pieces, or PLUGIN = root / "plugin" then PLUGIN / "agents"); the finding is on the second
+            // piece's line. Inside the module, a skill's bare name in a file that also holds a literal ".claude".
             if (lits.Any(l => l.Text == "plugin"))
+            {
                 foreach (var (line, _) in lits.Where(l => l.Text == "agents")) yield return new(rel, line, "plugin + agents", Kind);
+                foreach (var (line, _) in lits.Where(l => l.Text == ".claude-plugin")) yield return new(rel, line, "plugin + .claude-plugin", Kind);
+            }
+            if (inside && lits.Any(l => l.Text == ".claude"))
+                foreach (var (line, s) in lits.Where(l => SkillNames.Contains(l.Text.Trim(), StringComparer.OrdinalIgnoreCase)))
+                    yield return new(rel, line, ".claude + " + s.Trim(), Kind);
             yield break;
         }
         var lines = text.Split('\n');
@@ -274,7 +295,7 @@ internal static class FenceGuard
         {
             var t = lines[i].TrimStart();
             if (script && (t.StartsWith('#') || t.StartsWith("::") || t.StartsWith("REM ", StringComparison.OrdinalIgnoreCase))) continue;
-            foreach (var hit in SkillForms(lines[i], literal: false)) yield return new(rel, i + 1, hit, Kind);
+            foreach (var hit in SkillForms(lines[i], literal: false, inside)) yield return new(rel, i + 1, hit, Kind);
         }
     }
 
@@ -712,7 +733,12 @@ internal static class FenceGuard
                 ("app/Bad.cs", "var a = Path.Combine(at, \"plugin\", \"agents\");\n", "plugin + agents", false, "C#: \"plugin\" and \"agents\" as pieces on one line"),
                 ("app/app.props", "<P>$(Root).claude\\skills\\evaluation-reporting\\x.json</P>\n", "skills/evaluation-reporting", false, "a build file naming a skill's path"),
                 ("app/data.json", "{ \"from\": \"external/houseCARL/plugin/agents/model-x.md\" }\n", "plugin/agents", false, "a data file naming plugin/agents"),
-                ("mod/m/reader.py", "P = HC / \".claude/skills/evaluation-reporting/references/report-priorities.json\"\n", "skills/evaluation-reporting", true, "inside the module: a moved file at its old place"),
+                ("mod/m/reader.py", "P = HC / \".claude/skills/evaluation-reporting/references/report-priorities.json\"\n", ".claude/skills/evaluation-reporting", true, "inside the module: a moved file at its old place"),
+                ("mod/m/reader.py", "P = TREE / \".claude\" / \"skills\" / \"world-edit-compatibility\"\n", ".claude + world-edit-compatibility", true, "inside the module: houseCARL's place built from pieces"),
+                ("mod/m/reader.py", "S = TREE / \"external/houseCARL/standards/HOUSECARL_EVALUATION_PRESENTATION.md\"\n", "HOUSECARL_EVALUATION_PRESENTATION", true, "inside the module: houseCARL's presentation standard"),
+                ("mod/m/reader.py", "M = HC / \"plugin\" / \".claude-plugin\" / \"plugin.json\"\n", "plugin + .claude-plugin", true, "inside the module: houseCARL's plugin manifest from pieces"),
+                ("app/Bad.cs", "var p = \"docs\\\\HOUSECARL_EVALUATION_BUNDLE.md\";\n", "HOUSECARL_EVALUATION_BUNDLE", false, "C#: the bundle standard's name outside"),
+                ("app/bad.py", "p = ROOT / \"integration/housecarl/claude-plugin/skills/evaluation-reporting/SKILL.md\"\n", "skills/evaluation-reporting", false, "Python: the module's own skill from outside"),
             ];
             foreach (var (rel, text, name, inside, label) in skill)
             {
@@ -728,6 +754,10 @@ internal static class FenceGuard
             var (sp0, _, _) = ScanSkills(root, cfg);
             yield return (sp0.Any(f => f.File == "app/two.py" && f.Name == "plugin + agents" && f.Line == 3), "skills: Python: \"plugin\" and \"agents\" as pieces on two lines of one file fails on the agents line: " + Describe(sp0, []));
             File.Delete(Path.Combine(root, "app/two.py"));
+            Touch("mod/m/own.py", "S = MODULE / \"claude-plugin\" / \"skills\" / \"evaluation-reporting\" / \"SKILL.md\"\nT = MODULE / \"claude-plugin/skills/world-edit-compatibility/SKILL.md\"\n");
+            var (_, si1, _) = ScanSkills(root, cfg);
+            yield return (si1.Count == 0, "skills: inside the module, its own claude-plugin/skills (a path, or pieces with the bare name) holds: " + Describe(si1, []));
+            File.Delete(Path.Combine(root, "mod/m/own.py"));
             var (sh, sih, sph) = ScanSkills(root, cfg);
             yield return (sh.Count == 0 && sih.Count == 0 && sph.Count == 0, "skills: a skill's bare name in data or prose, a lone \"agents\" and a comment hold: " + Describe(sh.Concat(sih).ToList(), sph));
             File.Delete(Path.Combine(root, "app/registry.json"));

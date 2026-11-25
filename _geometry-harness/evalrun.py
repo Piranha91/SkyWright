@@ -10,7 +10,7 @@ order's record view, an order sweep's geometry); it checks the bundle with `runc
 writes (HOUSECARL_RUNCONTROL, else this checkout's build).
 `configuration_fingerprint` gives the Python tools that need the configuration identity its owner's answer: it asks
 `runcontrol fingerprint` (`_shared/Configuration.cs`'s ConfigurationIdentity.Compute); no Python spells the rule.
-`standards/HOUSECARL_EVALUATION_BUNDLE.md` is the contract.
+`docs/evaluation-bundle.md` is the contract.
 
 Exit codes: 0 ok; 2 usage or a refused input; 3 the bundle no longer verifies after enrich wrote.
 """

@@ -39,7 +39,7 @@ HARNESS = HERE.parent
 ROOT = SW.CHECKOUT
 import reporting_data  # noqa: E402
 DATA = reporting_data.DATA
-SKILL = ROOT / "external" / "houseCARL" / ".claude/skills/evaluation-reporting"   # the skill's prose only (case_skill_data's docs check)
+SKILL = SW.MODULE / "claude-plugin" / "skills" / "evaluation-reporting"   # the module's own skill: its prose (case_skill_data's docs check)
 sys.path.insert(0, str(HARNESS))
 os.environ["HOUSECARL_EVAL_SETTINGS"] = str(Path(tempfile.gettempdir()) / "hc-tests-no-eval-settings" / "houseCARL.evaluation.json")
 

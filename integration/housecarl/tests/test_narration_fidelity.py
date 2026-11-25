@@ -4,8 +4,8 @@ rewrite only when a fidelity judgement bound to its exact text says it keeps the
     python tests/test_narration_fidelity.py [--only C2022,C2023]
 
 No game, no model call. Each case runs the real `evalreport.py` (HOUSECARL_EVALREPORT names another tree's; default this
-checkout's) on a hand-built presentation, and reads the SHIPPED skill data
-(`evaluation-reporting/references/narration.json`), so a skill-data change counts. The plugins, arm and counts are made
+checkout's) on a hand-built presentation, and reads the module's SHIPPED reporting data
+(`integration/housecarl/reporting-data/narration.json`), so a data change counts. The plugins, arm and counts are made
 up; nothing here is evidence about a real load order. The judgements are hand-written stand-ins for the judge agent's
 answer: these cases test the gate that reads them, not the judge.
 
@@ -292,8 +292,8 @@ def c2028(tmp):
 
 
 def c2029(tmp):
-    std = (TREE / "external" / "houseCARL" / "standards" / "HOUSECARL_EVALUATION_PRESENTATION.md").read_text(encoding="utf-8")
-    skill = (TREE / "external" / "houseCARL" / ".claude" / "skills" / "evaluation-reporting" / "SKILL.md").read_text(encoding="utf-8")
+    std = (TREE / "integration" / "housecarl" / "EVALUATION-PRESENTATION.md").read_text(encoding="utf-8")
+    skill = (TREE / "integration" / "housecarl" / "claude-plugin" / "skills" / "evaluation-reporting" / "SKILL.md").read_text(encoding="utf-8")
     rules = ("judged-unfaithful", "judgement-stale", "unjudged", "judgements-foreign")
     check("C2029", all(x in std for x in rules) and "models.checkExplanations" in skill and "--judgements" in skill,
           "the contract or the skill does not say a rewrite needs a faithful judgement",
@@ -351,7 +351,7 @@ def c2052(tmp):
 
 
 def c2053(tmp):
-    std = (TREE / "external" / "houseCARL" / "standards" / "HOUSECARL_EVALUATION_PRESENTATION.md").read_text(encoding="utf-8")
+    std = (TREE / "integration" / "housecarl" / "EVALUATION-PRESENTATION.md").read_text(encoding="utf-8")
     para = next((x for x in std.split("\n\n") if "narrate-packet --presentation P --answers" in x), "")
     check("C2053", "bound rows" in para and "`rows`" in para,
           "the contract does not say the judge's packet carries the finding's bound rows",

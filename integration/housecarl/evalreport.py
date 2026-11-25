@@ -9,7 +9,7 @@ carries: the disposition's findings, missing list, order evaluation and unassess
 coverage lines; the emits' conflict rows; the registry copy's titles, claims and limits. Where the bundle
 lacks something the report says "not assessed" or "not supplied" - never a guess.
 
-Subcommands (contract: standards/HOUSECARL_EVALUATION_PRESENTATION.md):
+Subcommands (contract: the module's EVALUATION-PRESENTATION.md):
 
   plan            --bundle DIR --out OUT [--mode concise|exhaustive] [--max-pages N]
   triage          --manifest ANNOTATED.json --out OUT [--policy POLICY.json]

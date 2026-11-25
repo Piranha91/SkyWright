@@ -2,8 +2,8 @@
 (reporting-data/report-priorities.json), the scene policy (reporting-data/scene-policy.json), the narration words
 (reporting-data/narration.json) and the agent definitions a models.* setting routes a step to (model-agents/).
 
-The one owner of those places. They came from houseCARL's evaluation-reporting skill and plugin/agents, which the module
-no longer reads (SkyWright.Guards fence). Paths are relative to this file, so a copy of the module (a suite's scratch
+The one owner of those places. They came from houseCARL's evaluation-reporting skill and plugin/agents; the skill is now
+the module's own (claude-plugin/), and nothing reads houseCARL's copies (SkyWright.Guards fence). Paths are relative to this file, so a copy of the module (a suite's scratch
 tree) reads its own copy.
 """
 from __future__ import annotations
