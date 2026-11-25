@@ -567,6 +567,40 @@ def capture_records(ctx, res: dict, sdir: Path) -> tuple[dict, list]:
     return {"imports": len(results), "refused": len(bad) + len(refusals)}, [sdir / "records.json", cap, sdir / "checkpoints"]
 
 
+#: the live check's registry row, opted in by the settings' liveSwitchCheck always
+LIVE_CHECK = "runtime.state-switch-flip"
+MEASURING_ENTRY = "measuring-entry.json"
+SETTINGS_RECORD = "evaluation-settings.json"
+
+
+def measuring_entry(entry: dict, settings) -> tuple[dict, list[str]]:
+    """The entry runcontrol measures a lab run from: the entry as written, with the two measuring choices of the user's
+    evaluation settings folded in, each only when it differs from runcontrol's default and the entry does not state it
+    itself (evaluation.reverseComparison false; the live check opted in by liveSwitchCheck always). Every other key,
+    model, report, video and narration settings among them, stays out: they change what is presented, not what is
+    measured. Returns (the entry, the sentences to print)."""
+    out = json.loads(json.dumps(entry))
+    said = []
+    ev = out.get("evaluation") or {}
+    if settings.value("evaluation.reverseComparison") is False and "reverseComparison" not in ev:
+        out.setdefault("evaluation", {})["reverseComparison"] = False
+    live = settings.value("evaluation.liveSwitchCheck")
+    opted = list(ev.get("optIn") or [])
+    if live == "always" and LIVE_CHECK not in opted:
+        out.setdefault("evaluation", {})["optIn"] = opted + [LIVE_CHECK]
+    elif live == "ask" and LIVE_CHECK not in opted:
+        said.append(f"The live switch check is set to ask each evaluation and was not opted in (put {LIVE_CHECK} in the "
+                    f"entry's evaluation.optIn, or plan with `--opt-in {LIVE_CHECK}`, to opt in).")
+    return out, said
+
+
+def settings_record(settings) -> dict:
+    """What a lab run records of the user's evaluation settings: the file's path and hash and every option's value and
+    source (what runcontrol's plan used to freeze). The model, report, video and narration choices are recorded here, by
+    the run's AI-driven side, and nowhere in the plan."""
+    return settings.record()
+
+
 def measure(ctx, through: str) -> None:
     """A lab entry's census to bundle: runcontrol through evaluate, the record capture, then runcontrol on through the
     bundle (each part only as far as `through`). runcontrol reuses every stage whose inputs and outputs are unchanged, so
@@ -1492,8 +1526,27 @@ def patch_search_refusal(ctx, res: dict, through: str) -> str | None:
 
 # ---------------------------------------------------------------- driver
 
-#: how a lab entry's census to bundle is measured (a seam for the suites)
-MEASURE = measure
+def measure_lab(ctx, through: str):
+    """A lab entry's measuring: the user's evaluation settings loaded (a bad file refuses the run in its own sentence),
+    recorded in RUN/evaluation-settings.json, their measuring choices folded into RUN/measuring-entry.json, and census
+    to bundle measured from that entry. Returns the context over the measuring entry, which the later stages hash."""
+    import evalsettings
+    try:
+        settings = evalsettings.load()
+    except evalsettings.SettingsError as ex:
+        raise Refusal(str(ex))
+    folded, said = measuring_entry(read_json(ctx.entry_path), settings)
+    for line in said:
+        print(line)
+    write_json(ctx.out / SETTINGS_RECORD, settings_record(settings))
+    write_json(ctx.out / MEASURING_ENTRY, folded)
+    mctx = Context(ctx.out / MEASURING_ENTRY, ctx.machine_path, ctx.out)
+    measure(mctx, through)
+    return mctx
+
+
+#: how a lab entry's census to bundle is measured (a seam for the suites): returns the context the later stages use
+MEASURE = measure_lab
 
 
 def cmd_run(a) -> int:
@@ -1508,9 +1561,10 @@ def cmd_run(a) -> int:
         os.environ["HOUSECARL_RUNLOG_DIR"] = fwd(out / "runlog")     # a manual run's log stays in its work folder, set
     through = a.through or STAGES[-1]
     if not getattr(ctx, "in_place", None):
-        # a lab entry is measured here: runcontrol through evaluate, the record capture, runcontrol through the bundle
+        # a lab entry is measured here, from its measuring entry: runcontrol through evaluate, the record capture,
+        # runcontrol through the bundle
         try:
-            MEASURE(ctx, through)
+            ctx = MEASURE(ctx, through) or ctx
         except Refusal as r:
             write_json(out / "status.json", {"status": "incomplete", "stoppedAt": "census", "sentence": str(r), "at": utcnow()})
             print(f"REFUSED: {r}", file=sys.stderr)

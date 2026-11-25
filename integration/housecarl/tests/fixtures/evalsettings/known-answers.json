@@ -1,0 +1,1160 @@
+{
+ "about": "evalsettings.load's recorded answers, moved from runcontrol's known-answers/plan-modules.json (settings) when the plan stopped reading the evaluation settings: each case's files, environment, explicit path and flags, and the record, path, values and sentences it gave, or its refusal (made by make_known_answers_plan.py, in the history, from this module's evalsettings.py). Paths name the case's folder as the placeholders say. Read by tests/test_evalsettings_known_answers.py.",
+ "python": "3.12.6",
+ "placeholders": {
+  "backslash": "<ROOT\\>",
+  "forward": "<ROOT/>"
+ },
+ "settings": {
+  "modelIds": [
+   "claude-haiku-5-5",
+   "claude-opus-5-5",
+   "claude-sonnet-5-5"
+  ],
+  "agents": {
+   "files": {
+    "b-second.md": "---\nname: model-b\nmodel: claude-b-1\n---\nbody\n",
+    "A-first.MD": "---\r\n name : model-a \r\nmodel:claude-a-1\r\ndescription: has: colons\r\n---\r\nmodel: not-this\r\n",
+    "c-repeat.md": "---\nname: model-a-again\nmodel: claude-a-1\n---\n",
+    "d-no-name.md": "---\nmodel: claude-d-1\n---\n",
+    "e-no-fence.md": "name: model-e\nmodel: claude-e-1\n",
+    "f-open.md": " --- \nmodel: claude-f-1\nname: model-f",
+    "g-empty.md": "",
+    "notes.txt": "---\nname: n\nmodel: claude-n-1\n---\n",
+    "h-é.md": "---\nname: modèle\nmodel: claude-é-1\n---\n"
+   },
+   "ids": [
+    "claude-a-1",
+    "claude-b-1",
+    "claude-f-1",
+    "claude-é-1"
+   ],
+   "missingFolder": []
+  },
+  "cases": [
+   {
+    "name": "no file",
+    "files": {},
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":null,\"schemaVersion\":null,\"source\":\"built-in defaults\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": null,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": [
+     "No saved evaluation settings were found, so this evaluation uses the built-in defaults (Deep depth, live switch check off, no video); run `evalsettings.py window` to choose."
+    ]
+   },
+   {
+    "name": "no file, forward slashes and a dot in the path",
+    "files": {},
+    "env": {},
+    "explicit": "<ROOT/>/s/./x//houseCARL.evaluation.json",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\x\\\\houseCARL.evaluation.json\",\"sha256\":null,\"schemaVersion\":null,\"source\":\"built-in defaults\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\x\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": null,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": [
+     "No saved evaluation settings were found, so this evaluation uses the built-in defaults (Deep depth, live switch check off, no video); run `evalsettings.py window` to choose."
+    ]
+   },
+   {
+    "name": "no file, found through LOCALAPPDATA",
+    "files": {},
+    "env": {
+     "LOCALAPPDATA": "<ROOT\\>\\local"
+    },
+    "explicit": null,
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\local\\\\houseCARL\\\\houseCARL.evaluation.json\",\"sha256\":null,\"schemaVersion\":null,\"source\":\"built-in defaults\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\local\\houseCARL\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": null,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": [
+     "No saved evaluation settings were found, so this evaluation uses the built-in defaults (Deep depth, live switch check off, no video); run `evalsettings.py window` to choose."
+    ]
+   },
+   {
+    "name": "no file, flags only",
+    "files": {},
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": {
+     "evaluation.depth": "standard",
+     "evaluation.reverseComparison": false,
+     "evaluation.budgetMinutes": 90.0
+    },
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":null,\"schemaVersion\":null,\"source\":\"built-in defaults\",\"options\":{\"evaluation.depth\":{\"value\":\"standard\",\"source\":\"flag\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":false,\"source\":\"flag\"},\"evaluation.budgetMinutes\":{\"value\":90.0,\"source\":\"flag\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": false,
+     "evaluation.budgetMinutes": 90.0,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "standard"
+    },
+    "sentences": [
+     "No saved evaluation settings were found, so this evaluation uses the built-in defaults (Deep depth, live switch check off, no video); run `evalsettings.py window` to choose."
+    ]
+   },
+   {
+    "name": "no file, a flag that is null",
+    "files": {},
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": {
+     "evaluation.depth": null,
+     "evaluation.budgetMinutes": 0.5
+    },
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":null,\"schemaVersion\":null,\"source\":\"built-in defaults\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":0.5,\"source\":\"flag\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": 0.5,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": [
+     "No saved evaluation settings were found, so this evaluation uses the built-in defaults (Deep depth, live switch check off, no video); run `evalsettings.py window` to choose."
+    ]
+   },
+   {
+    "name": "no file, flags that cannot combine",
+    "files": {},
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": {
+     "evaluation.depth": "standard",
+     "evaluation.liveSwitchCheck": "ask"
+    },
+    "error": "This evaluation's flags sets the depth to Standard, which judges the load-time state only, so the live switch check cannot be set to ask: choose Deep, or set the live switch check to off."
+   },
+   {
+    "name": "a file that only names its schema",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJzY2hlbWFWZXJzaW9uIjogMX0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":\"59541d8862e0d1e9f4b7d47eb587065a24c10a62fc0114bb4ddd9df57ef0d4f2\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": null,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": []
+   },
+   {
+    "name": "a file holding null",
+    "files": {
+     "s/houseCARL.evaluation.json": "bnVsbA=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":null,\"schemaVersion\":null,\"source\":\"built-in defaults\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": null,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": [
+     "No saved evaluation settings were found, so this evaluation uses the built-in defaults (Deep depth, live switch check off, no video); run `evalsettings.py window` to choose."
+    ]
+   },
+   {
+    "name": "reverse comparison off",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgInJldmVyc2VDb21wYXJpc29uIjogZmFsc2UKIH0KfQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":\"fa33aa05289e6f53b29a101f79167f47bcbe940080a48563f8534bf39d0e54d5\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":false,\"source\":\"file\"},\"evaluation.budgetMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": false,
+     "evaluation.budgetMinutes": null,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": []
+   },
+   {
+    "name": "a time limit as a whole number",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImJ1ZGdldE1pbnV0ZXMiOiA0NQogfQp9"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":\"e4954932f55c5c2de1619bfefc2a901d487c314c5bce312c848ece6b5324a58a\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":45,\"source\":\"file\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": 45,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": []
+   },
+   {
+    "name": "a time limit as a float",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImJ1ZGdldE1pbnV0ZXMiOiAxMi41CiB9Cn0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":\"9bf098c500c69390b2a892e55b679b0c25ca066b89ca856cd74cd19b89d34a9a\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":12.5,\"source\":\"file\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": 12.5,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": []
+   },
+   {
+    "name": "a time limit as 90.0",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJzY2hlbWFWZXJzaW9uIjogMSwgImV2YWx1YXRpb24iOiB7ImJ1ZGdldE1pbnV0ZXMiOiA5MC4wfX0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":\"b57bcef5b6784b096e66233f48782fe618d247d7b73f670a9bbfea45d73ed1d4\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":90.0,\"source\":\"file\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": 90.0,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": []
+   },
+   {
+    "name": "live switch check ask",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImxpdmVTd2l0Y2hDaGVjayI6ICJhc2siCiB9Cn0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":\"98d148ccfa8b620e02b372b3d6970cd0cff18a7aff4d1d1de481c384160aa45c\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"ask\",\"source\":\"file\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": null,
+     "evaluation.liveSwitchCheck": "ask",
+     "evaluation.depth": "deep"
+    },
+    "sentences": []
+   },
+   {
+    "name": "live switch check always, with its machine",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImxpdmVTd2l0Y2hDaGVjayI6ICJhbHdheXMiCiB9LAogImxpdmVTd2l0Y2hDaGVjayI6IHsKICAiaW5zdGFuY2UiOiAiRDovbGFiIiwKICAic2hvcnRjdXQiOiAiRDovbGFiL2dvLmxuayIsCiAgImdhbWVFeGUiOiAiRDovZy9Ta3lyaW0uZXhlIiwKICAiZGV2YmVuY2hQb3J0IjogODkyMSwKICAibWluRnJlZUdiIjogOC41CiB9Cn0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":\"7eeb42ce1e488c8c8e4ecc28fa693f105da72580215cff6889cecc8abe3bedd1\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"always\",\"source\":\"file\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":\"D:/lab\",\"source\":\"file\"},\"liveSwitchCheck.shortcut\":{\"value\":\"D:/lab/go.lnk\",\"source\":\"file\"},\"liveSwitchCheck.gameExe\":{\"value\":\"D:/g/Skyrim.exe\",\"source\":\"file\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":8921,\"source\":\"file\"},\"liveSwitchCheck.minFreeGb\":{\"value\":8.5,\"source\":\"file\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": null,
+     "evaluation.liveSwitchCheck": "always",
+     "evaluation.depth": "deep"
+    },
+    "sentences": []
+   },
+   {
+    "name": "depth standard",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImRlcHRoIjogInN0YW5kYXJkIgogfQp9"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":\"44e6be0dd1a92b9e3fcba27a81a4d1608888587427ce0c6358e260b0e419b7aa\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"standard\",\"source\":\"file\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": null,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "standard"
+    },
+    "sentences": []
+   },
+   {
+    "name": "every kind of value, nulls, and options newer than the file",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogICJzY2hlbWFWZXJzaW9uIjogMSwKICAic2F2ZWQiOiB7CiAgICAidXRjIjogIjIwMjYtMTAtMDFUMDA6MDA6MDBaIiwKICAgICJvcHRpb25zIjogWwogICAgICAiZXZhbHVhdGlvbi5kZXB0aCIsCiAgICAgICJldmFsdWF0aW9uLmxpdmVTd2l0Y2hDaGVjayIsCiAgICAgICJyZXBvcnQubW9kZSIsCiAgICAgICJ2aWRlby5tYWtlIiwKICAgICAgImdvbmUub3B0aW9uIiwKICAgICAgNQogICAgXQogIH0sCiAgImV2YWx1YXRpb24iOiB7CiAgICAiZGVwdGgiOiAiZGVlcCIsCiAgICAibGl2ZVN3aXRjaENoZWNrIjogbnVsbCwKICAgICJyZXZlcnNlQ29tcGFyaXNvbiI6IHRydWUsCiAgICAiYnVkZ2V0TWludXRlcyI6IG51bGwsCiAgICAibmV4dXNMb29rdXBzIjogZmFsc2UKICB9LAogICJyZXBvcnQiOiB7CiAgICAibW9kZSI6ICJleGhhdXN0aXZlIiwKICAgICJwZGYiOiAib2ZmIiwKICAgICJtYXhQYWdlcyI6IDEyCiAgfSwKICAidmlkZW8iOiB7CiAgICAibWFrZSI6ICJhc2siLAogICAgIm1heFNlY29uZHMiOiA3NS41LAogICAgIm5hcnJhdGlvbiI6IHsKICAgICAgImVuZ2luZSI6ICJxd2VuMyIsCiAgICAgICJ2b2ljZSI6ICJjYWbDqSIsCiAgICAgICJkZXZpY2UiOiBudWxsCiAgICB9LAogICAgImZmbXBlZyI6ICJDOi90b29scy9mZm1wZWcuZXhlIgogIH0sCiAgIm1vZGVscyI6IHsKICAgICJyZWNvcmRDaGVja3MiOiAiY2xhdWRlLWhhaWt1LTUtNSIsCiAgICAicmV3cml0ZUV4cGxhbmF0aW9ucyI6ICJvZmYiLAogICAgImNoZWNrRXhwbGFuYXRpb25zIjogInNlc3Npb24iCiAgfQp9"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":\"93955f995e41540596f79a82820d12a42c18277b47ac39e932ea962fd934f5bc\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"file\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"file\"},\"evaluation.budgetMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"evaluation.nexusLookups\":{\"value\":false,\"source\":\"file\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"exhaustive\",\"source\":\"file\"},\"report.pdf\":{\"value\":\"off\",\"source\":\"file\"},\"report.maxPages\":{\"value\":12,\"source\":\"file\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"ask\",\"source\":\"file\"},\"video.maxSeconds\":{\"value\":75.5,\"source\":\"file\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":\"qwen3\",\"source\":\"file\"},\"video.narration.voice\":{\"value\":\"café\",\"source\":\"file\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":\"C:/tools/ffmpeg.exe\",\"source\":\"file\"},\"models.recordChecks\":{\"value\":\"claude-haiku-5-5\",\"source\":\"file\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"file\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"file\"}},\"newOptions\":[\"evaluation.reverseComparison\",\"evaluation.budgetMinutes\",\"evaluation.nexusLookups\",\"liveSwitchCheck.instance\",\"liveSwitchCheck.shortcut\",\"liveSwitchCheck.gameExe\",\"liveSwitchCheck.crashDir\",\"liveSwitchCheck.devbenchPort\",\"liveSwitchCheck.minFreeGb\",\"liveSwitchCheck.launchMinutes\",\"report.pdf\",\"report.maxPages\",\"report.rowsPerGroup\",\"report.figuresPerFinding\",\"video.maxSeconds\",\"video.footage\",\"video.narration.engine\",\"video.narration.voice\",\"video.narration.device\",\"video.narration.modelDir\",\"video.narration.modelRevision\",\"video.ffmpeg\",\"models.recordChecks\",\"models.imageReview\",\"models.flipPlan\",\"models.rewriteExplanations\",\"models.checkExplanations\"]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": null,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": [
+     "This houseCARL adds the option `evaluation.reverseComparison`, which your saved settings do not set, so its default (`true`) applies.",
+     "This houseCARL adds the option `evaluation.budgetMinutes`, which your saved settings do not set, so its default (`none`) applies.",
+     "This houseCARL adds the option `evaluation.nexusLookups`, which your saved settings do not set, so its default (`true`) applies.",
+     "This houseCARL adds the option `liveSwitchCheck.instance`, which your saved settings do not set, so its default (`not set`) applies.",
+     "This houseCARL adds the option `liveSwitchCheck.shortcut`, which your saved settings do not set, so its default (`not set`) applies.",
+     "This houseCARL adds the option `liveSwitchCheck.gameExe`, which your saved settings do not set, so its default (`not set`) applies.",
+     "This houseCARL adds the option `liveSwitchCheck.crashDir`, which your saved settings do not set, so its default (`~/Documents/My Games/Skyrim Special Edition/SKSE`) applies.",
+     "This houseCARL adds the option `liveSwitchCheck.devbenchPort`, which your saved settings do not set, so its default (`8920`) applies.",
+     "This houseCARL adds the option `liveSwitchCheck.minFreeGb`, which your saved settings do not set, so its default (`16`) applies.",
+     "This houseCARL adds the option `liveSwitchCheck.launchMinutes`, which your saved settings do not set, so its default (`25`) applies.",
+     "This houseCARL adds the option `report.pdf`, which your saved settings do not set, so its default (`\"when-browser-found\"`) applies.",
+     "This houseCARL adds the option `report.maxPages`, which your saved settings do not set, so its default (`the skill's value`) applies.",
+     "This houseCARL adds the option `report.rowsPerGroup`, which your saved settings do not set, so its default (`the skill's value`) applies.",
+     "This houseCARL adds the option `report.figuresPerFinding`, which your saved settings do not set, so its default (`the skill's value`) applies.",
+     "This houseCARL adds the option `video.maxSeconds`, which your saved settings do not set, so its default (`the skill's value`) applies.",
+     "This houseCARL adds the option `video.footage`, which your saved settings do not set, so its default (`\"offline-renders\"`) applies.",
+     "This houseCARL adds the option `video.narration.engine`, which your saved settings do not set, so its default (`kokoro`) applies.",
+     "This houseCARL adds the option `video.narration.voice`, which your saved settings do not set, so its default (`bm_george`) applies.",
+     "This houseCARL adds the option `video.narration.device`, which your saved settings do not set, so its default (`cpu`) applies.",
+     "This houseCARL adds the option `video.narration.modelDir`, which your saved settings do not set, so its default (`not set`) applies.",
+     "This houseCARL adds the option `video.narration.modelRevision`, which your saved settings do not set, so its default (`not set`) applies.",
+     "This houseCARL adds the option `video.ffmpeg`, which your saved settings do not set, so its default (`discovered (PATH or a bundled copy)`) applies.",
+     "This houseCARL adds the option `models.recordChecks`, which your saved settings do not set, so its default (`\"session\"`) applies.",
+     "This houseCARL adds the option `models.imageReview`, which your saved settings do not set, so its default (`\"session\"`) applies.",
+     "This houseCARL adds the option `models.flipPlan`, which your saved settings do not set, so its default (`\"session\"`) applies.",
+     "This houseCARL adds the option `models.rewriteExplanations`, which your saved settings do not set, so its default (`\"off\"`) applies.",
+     "This houseCARL adds the option `models.checkExplanations`, which your saved settings do not set, so its default (`\"session\"`) applies."
+    ]
+   },
+   {
+    "name": "saved options empty: every option is new",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJzY2hlbWFWZXJzaW9uIjogMSwgInNhdmVkIjogeyJvcHRpb25zIjogW119fQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":\"1e47ce3987fcf68f07f3bd651321b12ebfbfd2407e801aa6aa72fa8f47b7e5d3\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[\"evaluation.depth\",\"evaluation.liveSwitchCheck\",\"evaluation.reverseComparison\",\"evaluation.budgetMinutes\",\"evaluation.nexusLookups\",\"liveSwitchCheck.instance\",\"liveSwitchCheck.shortcut\",\"liveSwitchCheck.gameExe\",\"liveSwitchCheck.crashDir\",\"liveSwitchCheck.devbenchPort\",\"liveSwitchCheck.minFreeGb\",\"liveSwitchCheck.launchMinutes\",\"report.mode\",\"report.pdf\",\"report.maxPages\",\"report.rowsPerGroup\",\"report.figuresPerFinding\",\"video.make\",\"video.maxSeconds\",\"video.footage\",\"video.narration.engine\",\"video.narration.voice\",\"video.narration.device\",\"video.narration.modelDir\",\"video.narration.modelRevision\",\"video.ffmpeg\",\"models.recordChecks\",\"models.imageReview\",\"models.flipPlan\",\"models.rewriteExplanations\",\"models.checkExplanations\"]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": null,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": [
+     "This houseCARL adds the option `evaluation.depth`, which your saved settings do not set, so its default (`\"deep\"`) applies.",
+     "This houseCARL adds the option `evaluation.liveSwitchCheck`, which your saved settings do not set, so its default (`\"off\"`) applies.",
+     "This houseCARL adds the option `evaluation.reverseComparison`, which your saved settings do not set, so its default (`true`) applies.",
+     "This houseCARL adds the option `evaluation.budgetMinutes`, which your saved settings do not set, so its default (`none`) applies.",
+     "This houseCARL adds the option `evaluation.nexusLookups`, which your saved settings do not set, so its default (`true`) applies.",
+     "This houseCARL adds the option `liveSwitchCheck.instance`, which your saved settings do not set, so its default (`not set`) applies.",
+     "This houseCARL adds the option `liveSwitchCheck.shortcut`, which your saved settings do not set, so its default (`not set`) applies.",
+     "This houseCARL adds the option `liveSwitchCheck.gameExe`, which your saved settings do not set, so its default (`not set`) applies.",
+     "This houseCARL adds the option `liveSwitchCheck.crashDir`, which your saved settings do not set, so its default (`~/Documents/My Games/Skyrim Special Edition/SKSE`) applies.",
+     "This houseCARL adds the option `liveSwitchCheck.devbenchPort`, which your saved settings do not set, so its default (`8920`) applies.",
+     "This houseCARL adds the option `liveSwitchCheck.minFreeGb`, which your saved settings do not set, so its default (`16`) applies.",
+     "This houseCARL adds the option `liveSwitchCheck.launchMinutes`, which your saved settings do not set, so its default (`25`) applies.",
+     "This houseCARL adds the option `report.mode`, which your saved settings do not set, so its default (`\"concise\"`) applies.",
+     "This houseCARL adds the option `report.pdf`, which your saved settings do not set, so its default (`\"when-browser-found\"`) applies.",
+     "This houseCARL adds the option `report.maxPages`, which your saved settings do not set, so its default (`the skill's value`) applies.",
+     "This houseCARL adds the option `report.rowsPerGroup`, which your saved settings do not set, so its default (`the skill's value`) applies.",
+     "This houseCARL adds the option `report.figuresPerFinding`, which your saved settings do not set, so its default (`the skill's value`) applies.",
+     "This houseCARL adds the option `video.make`, which your saved settings do not set, so its default (`\"off\"`) applies.",
+     "This houseCARL adds the option `video.maxSeconds`, which your saved settings do not set, so its default (`the skill's value`) applies.",
+     "This houseCARL adds the option `video.footage`, which your saved settings do not set, so its default (`\"offline-renders\"`) applies.",
+     "This houseCARL adds the option `video.narration.engine`, which your saved settings do not set, so its default (`kokoro`) applies.",
+     "This houseCARL adds the option `video.narration.voice`, which your saved settings do not set, so its default (`bm_george`) applies.",
+     "This houseCARL adds the option `video.narration.device`, which your saved settings do not set, so its default (`cpu`) applies.",
+     "This houseCARL adds the option `video.narration.modelDir`, which your saved settings do not set, so its default (`not set`) applies.",
+     "This houseCARL adds the option `video.narration.modelRevision`, which your saved settings do not set, so its default (`not set`) applies.",
+     "This houseCARL adds the option `video.ffmpeg`, which your saved settings do not set, so its default (`discovered (PATH or a bundled copy)`) applies.",
+     "This houseCARL adds the option `models.recordChecks`, which your saved settings do not set, so its default (`\"session\"`) applies.",
+     "This houseCARL adds the option `models.imageReview`, which your saved settings do not set, so its default (`\"session\"`) applies.",
+     "This houseCARL adds the option `models.flipPlan`, which your saved settings do not set, so its default (`\"session\"`) applies.",
+     "This houseCARL adds the option `models.rewriteExplanations`, which your saved settings do not set, so its default (`\"off\"`) applies.",
+     "This houseCARL adds the option `models.checkExplanations`, which your saved settings do not set, so its default (`\"session\"`) applies."
+    ]
+   },
+   {
+    "name": "saved options not a list",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJzY2hlbWFWZXJzaW9uIjogMSwgInNhdmVkIjogeyJvcHRpb25zIjogImFsbCJ9fQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":\"034463904c9dc6dcaa873a4718fd1b7349ac0f9585e4aacd3e5cc84f1bd14c13\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": null,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": []
+   },
+   {
+    "name": "saved is null",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJzY2hlbWFWZXJzaW9uIjogMSwgInNhdmVkIjogbnVsbH0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":\"ed5dae1b023ac5845f0eef58eaa4af880ca5fd45c29298a7d309507408b532e3\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": null,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": []
+   },
+   {
+    "name": "a byte-order mark and CRLF",
+    "files": {
+     "s/houseCARL.evaluation.json": "77u/ew0KICJzY2hlbWFWZXJzaW9uIjogMSwNCiAic2F2ZWQiOiB7DQogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLA0KICAiYnkiOiAid2luZG93IiwNCiAgImhvdXNlQ0FSTCI6ICIyLjAuMCINCiB9LA0KICJldmFsdWF0aW9uIjogew0KICAiZGVwdGgiOiAic3RhbmRhcmQiDQogfQ0KfQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":\"792119f4723d4f127ba189292dc1b3ce004e1298d902ce711f26d68128c52dc5\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"standard\",\"source\":\"file\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": null,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "standard"
+    },
+    "sentences": []
+   },
+   {
+    "name": "ffmpeg from the environment beats the file",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogInZpZGVvIjogewogICJmZm1wZWciOiAiQzovZmlsZS9mZm1wZWcuZXhlIgogfQp9"
+    },
+    "env": {
+     "HOUSECARL_FFMPEG": "C:/env/ffmpeg.exe"
+    },
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":\"6c73f37041d1deded2bb76d779dbfd8f114192b52bea0058c22035b956cd49bd\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":\"C:/env/ffmpeg.exe\",\"source\":\"environment\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": null,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": []
+   },
+   {
+    "name": "ffmpeg from the environment, no file",
+    "files": {},
+    "env": {
+     "HOUSECARL_FFMPEG": " D:/ff.exe "
+    },
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":null,\"schemaVersion\":null,\"source\":\"built-in defaults\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":\" D:/ff.exe \",\"source\":\"environment\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": null,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": [
+     "No saved evaluation settings were found, so this evaluation uses the built-in defaults (Deep depth, live switch check off, no video); run `evalsettings.py window` to choose."
+    ]
+   },
+   {
+    "name": "a depth flag beats the file",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImRlcHRoIjogImRlZXAiLAogICJyZXZlcnNlQ29tcGFyaXNvbiI6IGZhbHNlLAogICJidWRnZXRNaW51dGVzIjogMzAKIH0KfQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": {
+     "evaluation.depth": "standard"
+    },
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":\"7806e4b9824ae2e8a35b1a02bbea0196dad64dc1e02a4c1191c852c49dbd7e13\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"standard\",\"source\":\"flag\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":false,\"source\":\"file\"},\"evaluation.budgetMinutes\":{\"value\":30,\"source\":\"file\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": false,
+     "evaluation.budgetMinutes": 30,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "standard"
+    },
+    "sentences": []
+   },
+   {
+    "name": "a reverse flag and a budget flag beat the file",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgInJldmVyc2VDb21wYXJpc29uIjogdHJ1ZSwKICAiYnVkZ2V0TWludXRlcyI6IDMwCiB9Cn0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": {
+     "evaluation.reverseComparison": false,
+     "evaluation.budgetMinutes": 5.0
+    },
+    "record": "{\"path\":\"<ROOT\\\\>\\\\s\\\\houseCARL.evaluation.json\",\"sha256\":\"7aeb1bcc188a36a9819bb26b437eecab7e395198a3b97aa2bcfbc07919ee9213\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":false,\"source\":\"flag\"},\"evaluation.budgetMinutes\":{\"value\":5.0,\"source\":\"flag\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": false,
+     "evaluation.budgetMinutes": 5.0,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": []
+   },
+   {
+    "name": "a depth flag that cannot combine with the file",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImxpdmVTd2l0Y2hDaGVjayI6ICJhc2siCiB9Cn0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": {
+     "evaluation.depth": "standard"
+    },
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets the depth to Standard, which judges the load-time state only, so the live switch check cannot be set to ask: choose Deep, or set the live switch check to off."
+   },
+   {
+    "name": "a depth flag that repairs the file's combination",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImRlcHRoIjogInN0YW5kYXJkIiwKICAibGl2ZVN3aXRjaENoZWNrIjogImFzayIKIH0KfQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": {
+     "evaluation.depth": "deep"
+    },
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets the depth to Standard, which judges the load-time state only, so the live switch check cannot be set to ask: choose Deep, or set the live switch check to off."
+   },
+   {
+    "name": "the given path beats every variable",
+    "files": {
+     "given.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImJ1ZGdldE1pbnV0ZXMiOiAxCiB9Cn0=",
+     "named.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImJ1ZGdldE1pbnV0ZXMiOiAyCiB9Cn0=",
+     "data/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImJ1ZGdldE1pbnV0ZXMiOiAzCiB9Cn0=",
+     "local/houseCARL/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImJ1ZGdldE1pbnV0ZXMiOiA0CiB9Cn0="
+    },
+    "env": {
+     "HOUSECARL_EVAL_SETTINGS": "<ROOT\\>\\named.json",
+     "HOUSECARL_DATA_DIR": "<ROOT\\>\\data",
+     "LOCALAPPDATA": "<ROOT\\>\\local"
+    },
+    "explicit": "<ROOT\\>\\given.json",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\given.json\",\"sha256\":\"936da6253e8c084fd6305b29c93a8d28f6415aebcbc281f2ae8d5cd85d6b744d\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":1,\"source\":\"file\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\given.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": 1,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": []
+   },
+   {
+    "name": "HOUSECARL_EVAL_SETTINGS beats the data folder",
+    "files": {
+     "named.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImJ1ZGdldE1pbnV0ZXMiOiAyCiB9Cn0=",
+     "data/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImJ1ZGdldE1pbnV0ZXMiOiAzCiB9Cn0=",
+     "local/houseCARL/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImJ1ZGdldE1pbnV0ZXMiOiA0CiB9Cn0="
+    },
+    "env": {
+     "HOUSECARL_EVAL_SETTINGS": "  <ROOT/>/named.json\t",
+     "HOUSECARL_DATA_DIR": "<ROOT\\>\\data",
+     "LOCALAPPDATA": "<ROOT\\>\\local"
+    },
+    "explicit": null,
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\named.json\",\"sha256\":\"917def897f82f1c0312d6d2c80950d782c9afb35024992cf8bcd9fc717704fc5\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":2,\"source\":\"file\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\named.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": 2,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": []
+   },
+   {
+    "name": "HOUSECARL_DATA_DIR beats LOCALAPPDATA, and a blank variable is skipped",
+    "files": {
+     "data/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImJ1ZGdldE1pbnV0ZXMiOiAzCiB9Cn0=",
+     "local/houseCARL/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImJ1ZGdldE1pbnV0ZXMiOiA0CiB9Cn0="
+    },
+    "env": {
+     "HOUSECARL_EVAL_SETTINGS": "  ",
+     "HOUSECARL_DATA_DIR": " <ROOT\\>\\data\\ ",
+     "LOCALAPPDATA": "<ROOT\\>\\local"
+    },
+    "explicit": null,
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\data\\\\houseCARL.evaluation.json\",\"sha256\":\"fe0574f35ee4e772bd4cee49c7a9607ce876c021e5d32f25d73b63b006c8f3d3\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":3,\"source\":\"file\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\data\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": 3,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": []
+   },
+   {
+    "name": "LOCALAPPDATA last, and an empty given path is no path",
+    "files": {
+     "local/houseCARL/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImJ1ZGdldE1pbnV0ZXMiOiA0CiB9Cn0="
+    },
+    "env": {
+     "HOUSECARL_EVAL_SETTINGS": "",
+     "HOUSECARL_DATA_DIR": " ",
+     "LOCALAPPDATA": "<ROOT\\>\\local"
+    },
+    "explicit": "",
+    "flags": null,
+    "record": "{\"path\":\"<ROOT\\\\>\\\\local\\\\houseCARL\\\\houseCARL.evaluation.json\",\"sha256\":\"7684620a1c41da56baf7a0f86b3e1790c6492ff4727036398197c1e357a71030\",\"schemaVersion\":1,\"source\":\"file\",\"options\":{\"evaluation.depth\":{\"value\":\"deep\",\"source\":\"built-in default\"},\"evaluation.liveSwitchCheck\":{\"value\":\"off\",\"source\":\"built-in default\"},\"evaluation.reverseComparison\":{\"value\":true,\"source\":\"built-in default\"},\"evaluation.budgetMinutes\":{\"value\":4,\"source\":\"file\"},\"evaluation.nexusLookups\":{\"value\":true,\"source\":\"built-in default\"},\"liveSwitchCheck.instance\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.shortcut\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.gameExe\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.crashDir\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.devbenchPort\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.minFreeGb\":{\"value\":null,\"source\":\"built-in default\"},\"liveSwitchCheck.launchMinutes\":{\"value\":null,\"source\":\"built-in default\"},\"report.mode\":{\"value\":\"concise\",\"source\":\"built-in default\"},\"report.pdf\":{\"value\":\"when-browser-found\",\"source\":\"built-in default\"},\"report.maxPages\":{\"value\":null,\"source\":\"built-in default\"},\"report.rowsPerGroup\":{\"value\":null,\"source\":\"built-in default\"},\"report.figuresPerFinding\":{\"value\":null,\"source\":\"built-in default\"},\"video.make\":{\"value\":\"off\",\"source\":\"built-in default\"},\"video.maxSeconds\":{\"value\":null,\"source\":\"built-in default\"},\"video.footage\":{\"value\":\"offline-renders\",\"source\":\"built-in default\"},\"video.narration.engine\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.voice\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.device\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelDir\":{\"value\":null,\"source\":\"built-in default\"},\"video.narration.modelRevision\":{\"value\":null,\"source\":\"built-in default\"},\"video.ffmpeg\":{\"value\":null,\"source\":\"built-in default\"},\"models.recordChecks\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.imageReview\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.flipPlan\":{\"value\":\"session\",\"source\":\"built-in default\"},\"models.rewriteExplanations\":{\"value\":\"off\",\"source\":\"built-in default\"},\"models.checkExplanations\":{\"value\":\"session\",\"source\":\"built-in default\"}},\"newOptions\":[]}",
+    "path": "<ROOT\\>\\local\\houseCARL\\houseCARL.evaluation.json",
+    "values": {
+     "evaluation.reverseComparison": true,
+     "evaluation.budgetMinutes": 4,
+     "evaluation.liveSwitchCheck": "off",
+     "evaluation.depth": "deep"
+    },
+    "sentences": []
+   },
+   {
+    "name": "not JSON, line 1",
+    "files": {
+     "s/houseCARL.evaluation.json": "e3NjaGVtYVZlcnNpb246IDF9"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` is not valid JSON (line 1): fix it, or run `evalsettings.py window` to replace it."
+   },
+   {
+    "name": "not JSON, a trailing comma on line 4",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogImV2YWx1YXRpb24iOiB7ImRlcHRoIjogImRlZXAifSwKfQo="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` is not valid JSON (line 4): fix it, or run `evalsettings.py window` to replace it."
+   },
+   {
+    "name": "not JSON, CRLF lines",
+    "files": {
+     "s/houseCARL.evaluation.json": "ew0KICJzY2hlbWFWZXJzaW9uIjogMSwNCg0KICJldmFsdWF0aW9uIiB7fQ0KfQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` is not valid JSON (line 4): fix it, or run `evalsettings.py window` to replace it."
+   },
+   {
+    "name": "not JSON, cut short",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogImV2YWx1YXRpb24iOiB7CiAgImRlcHRoIjogImRl"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` is not valid JSON (line 4): fix it, or run `evalsettings.py window` to replace it."
+   },
+   {
+    "name": "not JSON, text after the document",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJzY2hlbWFWZXJzaW9uIjogMX0KCn0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` is not valid JSON (line 3): fix it, or run `evalsettings.py window` to replace it."
+   },
+   {
+    "name": "not JSON, a bad escape",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJzY2hlbWFWZXJzaW9uIjogMSwKCiAiYSI6ICJ4XHEifQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` is not valid JSON (line 3): fix it, or run `evalsettings.py window` to replace it."
+   },
+   {
+    "name": "not JSON, a raw line break in a string",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJzY2hlbWFWZXJzaW9uIjogMSwKICJhIjogIngKeSJ9"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` is not valid JSON (line 2): fix it, or run `evalsettings.py window` to replace it."
+   },
+   {
+    "name": "not JSON, empty",
+    "files": {
+     "s/houseCARL.evaluation.json": ""
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` is not valid JSON (line 1): fix it, or run `evalsettings.py window` to replace it."
+   },
+   {
+    "name": "not JSON, only blank lines",
+    "files": {
+     "s/houseCARL.evaluation.json": "CgogIAo="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` is not valid JSON (line 4): fix it, or run `evalsettings.py window` to replace it."
+   },
+   {
+    "name": "not UTF-8",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJzY2hlbWFWZXJzaW9uIjogMSwgIngiOiAi//4ifQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` is not valid JSON: fix it, or run `evalsettings.py window` to replace it."
+   },
+   {
+    "name": "a list",
+    "files": {
+     "s/houseCARL.evaluation.json": "W10="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` is not a JSON object: fix it, or run `evalsettings.py window` to replace it."
+   },
+   {
+    "name": "text",
+    "files": {
+     "s/houseCARL.evaluation.json": "ImRlZXAi"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` is not a JSON object: fix it, or run `evalsettings.py window` to replace it."
+   },
+   {
+    "name": "no schemaVersion",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJldmFsdWF0aW9uIjoge319"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` has no whole-number schemaVersion: fix it, or run `evalsettings.py window` to replace it."
+   },
+   {
+    "name": "schemaVersion true",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJzY2hlbWFWZXJzaW9uIjogdHJ1ZX0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` has no whole-number schemaVersion: fix it, or run `evalsettings.py window` to replace it."
+   },
+   {
+    "name": "schemaVersion 1.0",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJzY2hlbWFWZXJzaW9uIjogMS4wfQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` has no whole-number schemaVersion: fix it, or run `evalsettings.py window` to replace it."
+   },
+   {
+    "name": "schemaVersion text",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJzY2hlbWFWZXJzaW9uIjogIjEifQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` has no whole-number schemaVersion: fix it, or run `evalsettings.py window` to replace it."
+   },
+   {
+    "name": "a newer schema",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJzY2hlbWFWZXJzaW9uIjogMn0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` was written by a newer houseCARL (schema 2): update houseCARL, or pass --settings with a file this version can read."
+   },
+   {
+    "name": "schema 0",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJzY2hlbWFWZXJzaW9uIjogMH0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` carries schema 0, which no houseCARL wrote: fix it, or run `evalsettings.py window` to replace it."
+   },
+   {
+    "name": "a negative schema",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJzY2hlbWFWZXJzaW9uIjogLTN9"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` carries schema -3, which no houseCARL wrote: fix it, or run `evalsettings.py window` to replace it."
+   },
+   {
+    "name": "an unknown option",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImRlcHRoIjogImRlZXAiLAogICJzcGVlZCI6ICJmYXN0IgogfQp9"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `evaluation.speed`, which is not an evaluation setting this houseCARL knows: remove it, or reopen the window (`evalsettings.py window`)."
+   },
+   {
+    "name": "an unknown section holding a value",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImNvbG91ciI6ICJibHVlIgp9"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `colour`, which is not an evaluation setting this houseCARL knows: remove it, or reopen the window (`evalsettings.py window`)."
+   },
+   {
+    "name": "an unknown section holding a section",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImNvbG91ciI6IHsKICAic2hhZGUiOiB7CiAgICJvZiI6ICJibHVlIgogIH0KIH0KfQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `colour.shade.of`, which is not an evaluation setting this houseCARL knows: remove it, or reopen the window (`evalsettings.py window`)."
+   },
+   {
+    "name": "an option given a section",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImRlcHRoIjogewogICAieCI6IDEKICB9CiB9Cn0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `evaluation.depth` to `{'x': 1}`, which is not one of standard, deep: fix that value or reopen the window."
+   },
+   {
+    "name": "an enum value outside its list",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImRlcHRoIjogInNoYWxsb3ciCiB9Cn0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `evaluation.depth` to `shallow`, which is not one of standard, deep: fix that value or reopen the window."
+   },
+   {
+    "name": "an enum given true",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImxpdmVTd2l0Y2hDaGVjayI6IHRydWUKIH0KfQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `evaluation.liveSwitchCheck` to `True`, which is not one of off, ask, always: fix that value or reopen the window."
+   },
+   {
+    "name": "an enum given a list",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogInJlcG9ydCI6IHsKICAibW9kZSI6IFsKICAgImNvbmNpc2UiCiAgXQogfQp9"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `report.mode` to `['concise']`, which is not one of concise, exhaustive: fix that value or reopen the window."
+   },
+   {
+    "name": "a bool given text",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgInJldmVyc2VDb21wYXJpc29uIjogIm5vIgogfQp9"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `evaluation.reverseComparison` to `\"no\"`, which is not true or false: fix that value or reopen the window."
+   },
+   {
+    "name": "a bool given 0",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgIm5leHVzTG9va3VwcyI6IDAKIH0KfQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `evaluation.nexusLookups` to `0`, which is not true or false: fix that value or reopen the window."
+   },
+   {
+    "name": "a whole number given 0",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogInJlcG9ydCI6IHsKICAibWF4UGFnZXMiOiAwCiB9Cn0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `report.maxPages` to `0`, which is not a whole number above zero: fix that value or reopen the window."
+   },
+   {
+    "name": "a whole number given a float",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogInJlcG9ydCI6IHsKICAibWF4UGFnZXMiOiAzLjAKIH0KfQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `report.maxPages` to `3.0`, which is not a whole number above zero: fix that value or reopen the window."
+   },
+   {
+    "name": "a whole number given true",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImxpdmVTd2l0Y2hDaGVjayI6IHsKICAiZGV2YmVuY2hQb3J0IjogdHJ1ZQogfQp9"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `liveSwitchCheck.devbenchPort` to `true`, which is not a whole number above zero: fix that value or reopen the window."
+   },
+   {
+    "name": "a number below zero",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImJ1ZGdldE1pbnV0ZXMiOiAtMQogfQp9"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `evaluation.budgetMinutes` to `-1`, which is not a number above zero: fix that value or reopen the window."
+   },
+   {
+    "name": "a number given text",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImJ1ZGdldE1pbnV0ZXMiOiAiNDUiCiB9Cn0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `evaluation.budgetMinutes` to `\"45\"`, which is not a number above zero: fix that value or reopen the window."
+   },
+   {
+    "name": "a number given false",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImJ1ZGdldE1pbnV0ZXMiOiBmYWxzZQogfQp9"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `evaluation.budgetMinutes` to `false`, which is not a number above zero: fix that value or reopen the window."
+   },
+   {
+    "name": "a number given NaN",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJzY2hlbWFWZXJzaW9uIjogMSwgImV2YWx1YXRpb24iOiB7ImJ1ZGdldE1pbnV0ZXMiOiBOYU59fQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `evaluation.budgetMinutes` to `NaN`, which is not a number above zero: fix that value or reopen the window."
+   },
+   {
+    "name": "a path that is blank",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImxpdmVTd2l0Y2hDaGVjayI6IHsKICAiaW5zdGFuY2UiOiAiIFx0IgogfQp9"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `liveSwitchCheck.instance` to `\" \\t\"`, which is not a path: fix that value or reopen the window."
+   },
+   {
+    "name": "a path given a number",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogInZpZGVvIjogewogICJmZm1wZWciOiA3CiB9Cn0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `video.ffmpeg` to `7`, which is not a path: fix that value or reopen the window."
+   },
+   {
+    "name": "text that is empty",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogInZpZGVvIjogewogICJuYXJyYXRpb24iOiB7CiAgICJ2b2ljZSI6ICIiCiAgfQogfQp9"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `video.narration.voice` to `\"\"`, which is not a non-empty text: fix that value or reopen the window."
+   },
+   {
+    "name": "text with a quote and an accent",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJzY2hlbWFWZXJzaW9uIjogMSwgInZpZGVvIjogeyJuYXJyYXRpb24iOiB7InZvaWNlIjogeyJhXCJiIjogImNhZsOpIn19fX0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `video.narration.voice` to `{\"a\\\"b\": \"caf\\u00e9\"}`, which is not a non-empty text: fix that value or reopen the window."
+   },
+   {
+    "name": "a model turned off where it cannot be",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogIm1vZGVscyI6IHsKICAicmVjb3JkQ2hlY2tzIjogIm9mZiIKIH0KfQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `models.recordChecks` to `off`, but this step cannot be turned off: run `evalsettings.py set models.recordChecks=VALUE` with VALUE one of session, claude-haiku-5-5, claude-opus-5-5 or claude-sonnet-5-5."
+   },
+   {
+    "name": "a model by a short name",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogIm1vZGVscyI6IHsKICAiaW1hZ2VSZXZpZXciOiAiaGFpa3UiCiB9Cn0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `models.imageReview` to `haiku`, a short name the host can resolve to an older model: run `evalsettings.py set models.imageReview=VALUE` with VALUE one of session, claude-haiku-5-5, claude-opus-5-5 or claude-sonnet-5-5."
+   },
+   {
+    "name": "a model with no agent",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogIm1vZGVscyI6IHsKICAicmV3cml0ZUV4cGxhbmF0aW9ucyI6ICJjbGF1ZGUtbm90aGluZy05IgogfQp9"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `models.rewriteExplanations` to `claude-nothing-9`, which has no houseCARL agent to run it: run `evalsettings.py set models.rewriteExplanations=VALUE` with VALUE one of session, off, claude-haiku-5-5, claude-opus-5-5 or claude-sonnet-5-5."
+   },
+   {
+    "name": "a model given a number",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogIm1vZGVscyI6IHsKICAiZmxpcFBsYW4iOiA1CiB9Cn0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `models.flipPlan` to `5`, which is not session, claude-haiku-5-5, claude-opus-5-5 or claude-sonnet-5-5: fix that value or reopen the window."
+   },
+   {
+    "name": "a model given a number, where off is allowed",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogIm1vZGVscyI6IHsKICAicmV3cml0ZUV4cGxhbmF0aW9ucyI6IDUKIH0KfQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `models.rewriteExplanations` to `5`, which is not session, off, claude-haiku-5-5, claude-opus-5-5 or claude-sonnet-5-5: fix that value or reopen the window."
+   },
+   {
+    "name": "standard depth with the live check on ask",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImRlcHRoIjogInN0YW5kYXJkIiwKICAibGl2ZVN3aXRjaENoZWNrIjogImFzayIKIH0KfQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets the depth to Standard, which judges the load-time state only, so the live switch check cannot be set to ask: choose Deep, or set the live switch check to off."
+   },
+   {
+    "name": "standard depth with the live check on always",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImRlcHRoIjogInN0YW5kYXJkIiwKICAibGl2ZVN3aXRjaENoZWNrIjogImFsd2F5cyIKIH0KfQ=="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets the depth to Standard, which judges the load-time state only, so the live switch check cannot be set to always: choose Deep, or set the live switch check to off."
+   },
+   {
+    "name": "the live check always, with nothing set",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImxpdmVTd2l0Y2hDaGVjayI6ICJhbHdheXMiCiB9Cn0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` opts every evaluation into the live switch check, but no scratch instance, shortcut, gameExe is set: set them in the window, or switch the check to off or ask."
+   },
+   {
+    "name": "the live check always, with only a shortcut",
+    "files": {
+     "s/houseCARL.evaluation.json": "ewogInNjaGVtYVZlcnNpb24iOiAxLAogInNhdmVkIjogewogICJ1dGMiOiAiMjAyNi0xMS0wMVQwMDowMDowMFoiLAogICJieSI6ICJ3aW5kb3ciLAogICJob3VzZUNBUkwiOiAiMi4wLjAiCiB9LAogImV2YWx1YXRpb24iOiB7CiAgImxpdmVTd2l0Y2hDaGVjayI6ICJhbHdheXMiCiB9LAogImxpdmVTd2l0Y2hDaGVjayI6IHsKICAic2hvcnRjdXQiOiAieC5sbmsiCiB9Cn0="
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` opts every evaluation into the live switch check, but no scratch instance, gameExe is set: set them in the window, or switch the check to off or ask."
+   },
+   {
+    "name": "the first bad value in file order wins",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJzY2hlbWFWZXJzaW9uIjogMSwgInJlcG9ydCI6IHsibWF4UGFnZXMiOiAtMX0sICJldmFsdWF0aW9uIjogeyJkZXB0aCI6ICJ4In19"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "error": "The evaluation settings file `<ROOT\\>\\s\\houseCARL.evaluation.json` sets `report.maxPages` to `-1`, which is not a whole number above zero: fix that value or reopen the window."
+   },
+   {
+    "name": "raises: saved is text",
+    "files": {
+     "s/houseCARL.evaluation.json": "eyJzY2hlbWFWZXJzaW9uIjogMSwgInNhdmVkIjogInllc3RlcmRheSJ9"
+    },
+    "env": {},
+    "explicit": "<ROOT\\>\\s\\houseCARL.evaluation.json",
+    "flags": null,
+    "raises": "'str' object has no attribute 'get'"
+   }
+  ]
+ }
+}

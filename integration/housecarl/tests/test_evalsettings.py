@@ -4,10 +4,10 @@
 
 Each test uses its own empty HOUSECARL_EVAL_SETTINGS location and the stub opener
 (tests/fixtures/evalsettings/stub_opener.py, passed with --opener) as the browser, so no real browser opens and no
-test reads the user's own settings file. 1 a fresh user gets the window once; 2 a saved choice is honoured by
-`evalrun plan`; 3 flag > environment > file > built-in default; 4 a missing file with --no-window; 5 refusals of a bad
-file; 6 closing without Save; 7 the server is loopback-only and checks the token and the body; 8 a later save does
-not change a frozen plan; 9 a model choice is session, off where allowed, or an ID with a shipped agent (a short
+test reads the user's own settings file. 1 a fresh user gets the window once; 2 a saved measuring choice reaches a lab
+run's measuring entry (evalpipeline.measuring_entry), and runcontrol's plan made from it; 3 flag > environment > file >
+built-in default; 4 a missing file with --no-window; 5 refusals of a bad file; 6 closing without Save; 7 the server is
+loopback-only and checks the token and the body; 8 a later save does not change a frozen plan; 9 a model choice is session, off where allowed, or an ID with a shipped agent (a short
 name such as `haiku` is refused); 10 `route` names that agent, and refuses outside Claude Code; 11 the shipped agent
 files name full IDs and are the accepted list; 12 the window offers only those and refuses a short name. Light: fake
 probes only, the state checks only.
@@ -37,6 +37,20 @@ LIVE = "runtime.state-switch-flip"
 
 sys.path.insert(0, str(HERE))
 import test_stategen as S  # noqa: E402  (the controller fixture driver and census builder)
+import evalpipeline as EP  # noqa: E402  (the measuring entry and the settings record a lab run writes)
+import evalsettings as ESET  # noqa: E402
+
+ENTRY = {"schema": 1, "id": "m", "evaluation": {}}
+
+
+def folded_flags(file: Path) -> tuple[list, dict, dict]:
+    """(the plan flags a lab run's plan stage passes for the measuring entry the module folds from this settings file,
+    the measuring entry, the settings record)."""
+    s = ESET.load(str(file))
+    entry, _ = EP.measuring_entry(json.loads(json.dumps(ENTRY)), s)
+    ev = entry.get("evaluation") or {}
+    flags = (["--no-reverse"] if ev.get("reverseComparison") is False else []) + [x for o in ev.get("optIn") or [] for x in ("--opt-in", o)]
+    return flags, entry, EP.settings_record(s)
 
 FAILURES, PASSED = [], []
 
@@ -114,35 +128,38 @@ def t2(root):
              f"liveSwitchCheck.gameExe={b.dir / 'game.exe'}"]
     r = b.es("set", "evaluation.liveSwitchCheck=always", "evaluation.reverseComparison=false", *paths)
     check(r.returncode == 0 and b.file.exists(), f"2: set writes the choices ({(r.stdout + r.stderr)[-300:]!r})")
+    flags, entry, record = folded_flags(b.file)
     run = b.dir / "plan-with-file"
-    p = ctl.plan(run, scen, registry="fixture-check-registry-live.json",
-                 env_extra={"HOUSECARL_EVAL_SETTINGS": str(b.file)})
+    p = ctl.plan(run, scen, flags, registry="fixture-check-registry-live.json",
+                 env_extra={"HOUSECARL_EVAL_SETTINGS": str(b.dir / "none" / NAME)})
     if p.returncode:
-        check(False, f"2: evalrun plan reads the file ({(p.stdout + p.stderr)[-300:]!r})")
+        check(False, f"2: the plan from the folded measuring entry ({(p.stdout + p.stderr)[-300:]!r})")
     else:
         pl = load(run / "plan.json")
         row = next((c for c in pl["checks"] if c["checkId"] == LIVE), None)
         check(row is not None and row["required"] is True
               and {a["status"] for a in row["arms"]} <= {"live-import", "not-applicable"},
-              "2: liveSwitchCheck always opts the plan into the live check without --opt-in")
+              "2: liveSwitchCheck always opts a lab run into the live check without --opt-in")
         check(pl["options"].get("noReverse") is True, "2: reverseComparison false freezes noReverse")
-        st = (pl.get("explicitDecisions") or {}).get("settings") or {}
-        check(st.get("sha256") == sha(b.file) and st.get("schemaVersion") == 1,
-              "2: explicitDecisions.settings carries the file's hash and schema")
+        check("settings" not in (pl.get("explicitDecisions") or {}), "2: the plan freezes no settings record")
+    check(record.get("sha256") == sha(b.file) and record.get("schemaVersion") == 1,
+          "2: the run's settings record carries the file's hash and schema")
     absent = b.dir / "plan-no-file"
-    p0 = ctl.plan(absent, scen, registry="fixture-check-registry-live.json",
-                  env_extra={"HOUSECARL_EVAL_SETTINGS": str(b.dir / "none" / NAME)})
+    flags0, entry0, _ = folded_flags(b.dir / "none" / NAME)
+    p0 = ctl.plan(absent, scen, flags0, registry="fixture-check-registry-live.json",
+                  env_extra={"HOUSECARL_EVAL_SETTINGS": str(b.file)})
     if p0.returncode == 0:
         row0 = next((c for c in load(absent / "plan.json")["checks"] if c["checkId"] == LIVE), None)
-        check(row0 is not None and {a["status"] for a in row0["arms"]} == {"not-opted-in"},
-              "2 (red arm): with the file absent the same plan shows the live check not opted in")
+        check(row0 is not None and {a["status"] for a in row0["arms"]} == {"not-opted-in"} and entry0 == ENTRY,
+              "2 (red arm): with the file absent nothing is folded, and the plan shows the live check not opted in "
+              "(even with the settings variable naming the file, which the plan does not read)")
     else:
         check(False, f"2 (red arm): plan without the file ({(p0.stdout + p0.stderr)[-300:]!r})")
     b.es("set", "evaluation.liveSwitchCheck=off", "evaluation.depth=standard")
     std = b.dir / "plan-standard"
     ps = ctl.plan(std, scen, env_extra={"HOUSECARL_EVAL_SETTINGS": str(b.file)})
-    check(ps.returncode == 0 and (load(std / "plan.json").get("states") or {}).get("depth") == "standard",
-          "2: a saved depth of standard is honoured")
+    check(ps.returncode == 0 and (load(std / "plan.json").get("states") or {}).get("depth") == "deep",
+          "2: a saved depth does not reach runcontrol's plan, which reads no settings file (the entry or --depth names it)")
 
 
 def t3(root):
@@ -162,11 +179,10 @@ def t3(root):
     ctl = S.Ctl(b.dir / "fx")
     scen = ctl.scenario(S.census_g1(), S.census_g1())
     b.es("set", "evaluation.depth=standard")
-    run = b.dir / "flag"
-    p = ctl.plan(run, scen, ["--depth", "deep"], env_extra={"HOUSECARL_EVAL_SETTINGS": str(b.file)})
-    o = ((((load(run / "plan.json").get("explicitDecisions") or {}).get("settings") or {}).get("options") or {})
-         if p.returncode == 0 else {})
-    check(o.get("evaluation.depth") == {"value": "deep", "source": "flag"}, "3: a flag beats the file in the plan")
+    b.es("set", "evaluation.reverseComparison=false")
+    own = dict(ENTRY, evaluation={"reverseComparison": True})
+    folded, _ = EP.measuring_entry(json.loads(json.dumps(own)), ESET.load(str(b.file)))
+    check(folded["evaluation"].get("reverseComparison") is True, "3: an entry's own choice beats the file in the measuring entry")
     env = dict(b.env)
     env.pop("HOUSECARL_EVAL_SETTINGS")
     env["HOUSECARL_DATA_DIR"] = str(b.dir / "data")
@@ -186,10 +202,8 @@ def t4(root):
     check(u.returncode == 0 and not b.calls(), "4: HOUSECARL_EVAL_UNATTENDED=1 opens nothing either")
     ctl = S.Ctl(b.dir / "fx")
     scen = ctl.scenario(S.census_g1(), S.census_g1())
-    run = b.dir / "plan"
-    p = ctl.plan(run, scen, env_extra={"HOUSECARL_EVAL_SETTINGS": str(b.file)})
-    st = ((load(run / "plan.json").get("explicitDecisions") or {}).get("settings") or {}) if p.returncode == 0 else {}
-    check(st.get("source") == "built-in defaults", "4: the plan records source: built-in defaults")
+    st = EP.settings_record(ESET.load(str(b.file)))
+    check(st.get("source") == "built-in defaults", "4: the run's settings record says source: built-in defaults")
 
 
 def t5(root):
@@ -246,13 +260,13 @@ def t8(root):
     scen = ctl.scenario(S.census_g1(), S.census_g1())
     run = b.dir / "run"
     env = {"HOUSECARL_EVAL_SETTINGS": str(b.file)}
-    p = ctl.plan(run, scen, env_extra=env)
+    p = ctl.plan(run, scen, ["--depth", "standard"], env_extra=env)
     if p.returncode:
         check(False, f"8: plan written ({(p.stdout + p.stderr)[-300:]!r})")
         return
     plan_sha = sha(run / "plan.json")
     frozen = (load(run / "plan.json").get("states") or {}).get("depth")
-    check(frozen == "standard", f"8: the plan froze the file's Standard depth ({frozen!r})")
+    check(frozen == "standard", f"8: the plan froze its Standard depth ({frozen!r})")
     b.es("set", "evaluation.depth=deep")
     r = ctl.ev(["run", "--run", run], scen, env)
     row = S.ledger_status(run, S.CG, S.BASE_ARM) or {}

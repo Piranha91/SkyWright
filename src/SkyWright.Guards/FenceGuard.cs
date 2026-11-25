@@ -57,7 +57,8 @@ internal static class FenceGuard
     internal sealed record Crossing(string File, string[] Names, string Why, string Step);
     internal sealed record Exemption(string Path, string Why);
     internal sealed record Config(string Module, Exemption[] Exempt, Crossing[] Crossings,
-                                  Crossing[]? SkillReadsOutside = null, Crossing[]? SkillReadsInside = null, Exemption[]? SkillExempt = null);
+                                  Crossing[]? SkillReadsOutside = null, Crossing[]? SkillReadsInside = null, Exemption[]? SkillExempt = null,
+                                  Crossing[]? TestPlants = null);
     internal sealed record Finding(string File, int Line, string Name, string Kind);
 
     /// <summary>Folders not walked: not SkyWright's source (the pin, build output, git, editors, nested worktrees,
@@ -92,15 +93,6 @@ internal static class FenceGuard
         ],
         Crossings:
         [
-            new("_geometry-harness/runcontrol/Checkout.cs", ["integration/housecarl"],
-                "Checkout.Integration: the one place runcontrol finds the module's source folder, for the self-test's live cross-check of the Python settings record (it opens nothing itself)",
-                "step 2(b), with that cross-check, when EvalSettings leaves runcontrol"),
-            new("_geometry-harness/runcontrol/SelfTestPlanModules.cs", ["Checkout.Integration", "import evalsettings"],
-                "live case: starts python to import evalsettings and compare its record with EvalSettings.cs",
-                "step 2(b), when EvalSettings leaves runcontrol"),
-            new("_geometry-harness/runcontrol/EvalSettings.cs", ["evalsettings.py"],
-                "prints only: its refusal sentences tell the user to run evalsettings.py window or set; it opens the settings file, never the script",
-                "step 2(b), when EvalSettings leaves runcontrol"),
         ],
         SkillReadsOutside:
         [
@@ -113,9 +105,6 @@ internal static class FenceGuard
             new("_geometry-harness/workbench.tests/ReviewSpeedPart2Tests.cs", ["evaluation-reporting"],
                 "the grouping tests open the skill's copy in the pin",
                 "step 2(a), after step 4 lands"),
-            new("_geometry-harness/runcontrol/EvalSettings.cs", ["plugin + agents"],
-                "the plan's settings reader looks for plugin/agents above its own program to validate model IDs",
-                "step 2(b), when EvalSettings leaves runcontrol"),
         ],
         SkillReadsInside:
         [
@@ -129,7 +118,18 @@ internal static class FenceGuard
         SkillExempt:
         [
             new("src/SkyWright.Guards/", "the guard names the folders it fences"),
+        ],
+        // a test that plants the very folder the rule is about, to show a program ignores it: not a read. The list holds
+        // exactly this one entry (TestPlantsExpected); a second needs a change here, so a plant cannot slip in unreviewed.
+        TestPlants:
+        [
+            new("_geometry-harness/runcontrol/SelfTestIdentity.cs", ["plugin/agents"],
+                "identity I3 plants plugin/agents above a copy of runcontrol to show the plan neither reads it nor changes because of it",
+                "kept: it tests the rule"),
         ]);
+
+    /// <summary>How many test plants the guard accepts; one more is a code change, reviewed.</summary>
+    internal const int TestPlantsExpected = 1;
 
     static readonly string[] SkillNames = ["evaluation-reporting", "world-edit-compatibility"];
 
@@ -166,9 +166,10 @@ internal static class FenceGuard
         foreach (var e in SkyWright.SkillExempt ?? []) Console.WriteLine($"  skill-exempt {e.Path} — {e.Why}");
         foreach (var c in SkyWright.SkillReadsOutside ?? []) Console.WriteLine($"  skill read (outside) {c.File} [{string.Join(", ", c.Names)}] — {c.Why}; removed in {c.Step}");
         foreach (var c in SkyWright.SkillReadsInside ?? []) Console.WriteLine($"  skill read (module)  {c.File} [{string.Join(", ", c.Names)}] — {c.Why}; removed in {c.Step}");
+        foreach (var c in SkyWright.TestPlants ?? []) Console.WriteLine($"  test plant {c.File} [{string.Join(", ", c.Names)}] — a test that plants the folder; not a read: {c.Why}; {c.Step}");
         var (outside, inside, skillProblems) = ScanSkills(repo, SkyWright);
         foreach (var p in skillProblems) Check(false, p);
-        var outsideListed = outside.Where(f => ListedIn(SkyWright.SkillReadsOutside, f)).ToList();
+        var outsideListed = outside.Where(f => ListedIn(SkyWright.SkillReadsOutside, f) || ListedIn(SkyWright.TestPlants, f)).ToList();
         var insideListed = inside.Where(f => ListedIn(SkyWright.SkillReadsInside, f)).ToList();
         foreach (var f in outsideListed.Concat(insideListed)) Console.WriteLine($"  named     {f.File}:{f.Line} {f.Kind} {f.Name}");
         foreach (var f in outside.Except(outsideListed)) Check(false, SkillSentence(f, inside: false));
@@ -219,7 +220,9 @@ internal static class FenceGuard
             foreach (var file in WalkModule(module)) ReadFile(file, inside);
         outside = outside.Distinct().ToList();
         inside = inside.Distinct().ToList();
-        foreach (var (list, found, label) in new[] { (cfg.SkillReadsOutside, outside, "outside"), (cfg.SkillReadsInside, inside, "module") })
+        if ((cfg.TestPlants?.Length ?? 0) > TestPlantsExpected)
+            problems.Add($"the test-plant list holds {cfg.TestPlants!.Length} entries and the guard accepts {TestPlantsExpected}: a new plant is a reviewed change to TestPlantsExpected");
+        foreach (var (list, found, label) in new[] { (cfg.SkillReadsOutside, outside, "outside"), (cfg.SkillReadsInside, inside, "module"), (cfg.TestPlants, outside, "test plant") })
             foreach (var c in list ?? [])
             {
                 if (!File.Exists(Path.Combine(root, c.File))) { problems.Add($"the skill read ({label}) {c.File} names no file: a closed read leaves the list"); continue; }
@@ -742,6 +745,10 @@ internal static class FenceGuard
             yield return (sp1.Any(p => p.Contains("matches nothing")), "skills: a named outside read that matches nothing fails: " + string.Join("; ", sp1));
             var (_, _, sp2) = ScanSkills(root, cfg with { SkillReadsInside = [new("mod/m/tool.py", ["skills/evaluation-reporting"], "fixture", "never")] });
             yield return (sp2.Any(p => p.Contains("matches nothing")), "skills: a named module read that matches nothing fails: " + string.Join("; ", sp2));
+            var (_, _, sp3) = ScanSkills(root, cfg with { TestPlants = [new("app/clean.py", ["plugin/agents"], "fixture", "kept")] });
+            yield return (sp3.Any(p => p.Contains("test plant") && p.Contains("matches nothing")), "skills: a test plant that plants nothing fails: " + string.Join("; ", sp3));
+            var (_, _, sp4) = ScanSkills(root, cfg with { TestPlants = [new("app/a.py", ["plugin/agents"], "fixture", "kept"), new("app/b.py", ["plugin/agents"], "fixture", "kept")] });
+            yield return (sp4.Any(p => p.Contains($"accepts {TestPlantsExpected}")), "skills: a second test plant needs a change to the guard: " + string.Join("; ", sp4));
         }
         finally { try { Directory.Delete(root, true); } catch { /* temp cleanup best-effort */ } }
     }

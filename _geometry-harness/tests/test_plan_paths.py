@@ -2,7 +2,7 @@
 
     python _geometry-harness/tests/test_plan_paths.py
 
-`evalrun plan` used to store --registry, --scope, --candidates, --settings and each arm's candidate path exactly as
+`evalrun plan` used to store --registry, --scope, --candidates and each arm's candidate path exactly as
 given. Planned from one folder with relative paths and run from another (the machine-queue wrapper runs from the
 repository root), the run refused hours later: "scope-missing: the plan's scope scope\\... does not exist". Drives the
 REAL evalrun.py over the evalrun fixtures, with the shipped registry trimmed to loadability.masters-and-order and the
@@ -66,21 +66,18 @@ def setup(tmp: Path) -> dict:
     (plan_dir / "scope").mkdir()
     shutil.copy2(case / "scope.json", plan_dir / "scope" / "scope.json")
     shutil.copytree(case / "candidates", plan_dir / "candidates")
-    (plan_dir / "inputs" / "settings.json").write_text(
-        json.dumps({"schemaVersion": 1, "evaluation": {"depth": "standard"}}), encoding="utf-8")
     return {"dir": plan_dir, "scenario": case / "scenario.json"}
 
 
 def plan_args(run: Path) -> list:
     return ["plan", "--registry", Path("inputs") / "registry.json", "--scope", Path("scope") / "scope.json",
-            "--candidates", "candidates", "--settings", Path("inputs") / "settings.json", "--out", run,
+            "--candidates", "candidates", "--depth", "standard", "--out", run,
             "--harness", buildlayout.root(), "--probe-cmd", f"scopeprobe={sys.executable} {FIXT / 'fakeprobes' / 'scopeprobe'}.py"]
 
 
 def stored_paths(plan: dict) -> dict:
     out = {"registry": (plan.get("registry") or {}).get("path"), "scope": (plan.get("scope") or {}).get("path"),
-           "candidatesDir": plan.get("candidatesDir"),
-           "settings": (((plan.get("explicitDecisions") or {}).get("settings")) or {}).get("path")}
+           "candidatesDir": plan.get("candidatesDir")}
     for a in plan.get("arms") or []:
         out[f"arm {a.get('armId')}"] = a.get("candidatePath")
     return out
@@ -105,7 +102,6 @@ def relativise(run: Path, planning: Path) -> None:
     plan["registry"]["path"] = rel(plan["registry"]["path"])
     plan["scope"]["path"] = rel(plan["scope"]["path"])
     plan["candidatesDir"] = rel(plan["candidatesDir"])
-    plan["explicitDecisions"]["settings"]["path"] = rel(plan["explicitDecisions"]["settings"]["path"])
     for a in plan["arms"]:
         a["candidatePath"] = rel(a["candidatePath"])
     p.write_text(json.dumps(plan, indent=1), encoding="utf-8")
@@ -132,10 +128,10 @@ def main() -> int:
         check(p.returncode == 0, f"1330: plan from the planning folder exits 0 ({p.returncode}: {p.stderr[-300:]})")
         paths = stored_paths(plan)
         bad = {k: v for k, v in paths.items() if not (isinstance(v, str) and os.path.isabs(v) and Path(v).exists())}
-        check(len(paths) == 6 and not bad, f"1330: registry, scope, candidates, settings and both arms' candidate paths "
+        check(len(paths) == 5 and not bad, f"1330: registry, scope, candidates and both arms' candidate paths "
                                            f"are absolute and exist ({len(paths)} paths; not so: {bad})")
         want = {"registry": fx["dir"] / "inputs" / "registry.json", "scope": fx["dir"] / "scope" / "scope.json",
-                "candidatesDir": fx["dir"] / "candidates", "settings": fx["dir"] / "inputs" / "settings.json"}
+                "candidatesDir": fx["dir"] / "candidates"}
         same = all(isinstance(paths.get(k), str) and os.path.isabs(paths[k]) and Path(paths[k]).resolve() == v.resolve()
                    for k, v in want.items())
         check(same, f"1330: each stored path names the file that was given ({paths})")

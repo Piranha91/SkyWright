@@ -122,7 +122,6 @@ public static class SelfTestPlanModules
         ValueCases(D(ka["values"]));
         RegistryCases(D(ka["registry"]));
         PatternCases(L(ka["patterns"]).Select(D).ToList());
-        SettingsCases(D(ka["settings"]));
         StateCases(D(ka["states"]));
         PopulationCases(L(ka["populations"]).Select(D).ToList());
         MetaCases(L(ka["metaIni"]).Select(D).ToList());
@@ -337,73 +336,6 @@ public static class SelfTestPlanModules
         });
     }
 
-    // ---- the saved settings
-
-    static void SettingsCases(PyDict ka)
-    {
-        var modelIds = Strings(ka["modelIds"]);
-        var cases = L(ka["cases"]).Select(D).ToList();
-
-        // Load one case in its own folder; the result or the refusal, with the folder masked.
-        (EvalSettings? settings, string? error, string? raised) Load(PyDict row, Temp t)
-        {
-            foreach (var (rel, data) in D(row["files"])) t.Write(rel, B64(data));
-            var env = D(row["env"]);
-            try
-            {
-                return (EvalSettings.Load(row["explicit"] is string e ? t.Unmask(e) : null, row["flags"] as PyDict,
-                    name => env.Get(name) is string v ? t.Unmask(v) : null, modelIds), null, null);
-            }
-            catch (SettingsError ex) { return (null, t.Mask(ex.Message), null); }
-            catch (PyError ex) { return (null, null, ex.Message); }
-        }
-
-        var loaded = cases.Where(c => c.ContainsKey("record")).ToList();
-        Case($"settings: record, path, values and sentences of {loaded.Count} loads", () => Rows(loaded, row =>
-        {
-            using var t = new Temp();
-            var (s, error, raised) = Load(row, t);
-            if (s == null) return $"refused: {error ?? raised}";
-            var values = new PyDict();
-            foreach (string key in D(row["values"]).Keys) values[key] = s.Value(key);
-            return Same("record", PyJson.Dumps(t.Mask(s.Record()), ensureAscii: false, compact: true), S(row["record"]))
-                   ?? Same("path", t.Mask(s.FilePath), S(row["path"]))
-                   ?? Same("values", PyJson.Dumps(values), PyJson.Dumps(row["values"]))
-                   ?? SameList("sentences", s.Sentences(), Strings(row["sentences"]));
-        }));
-        var refused = cases.Where(c => c.ContainsKey("error")).ToList();
-        Case($"settings: the sentence of each of {refused.Count} refusals", () => Rows(refused, row =>
-        {
-            using var t = new Temp();
-            var (s, error, raised) = Load(row, t);
-            return s != null ? "nothing was refused" : Same("sentence", error ?? "raised: " + raised, S(row["error"]));
-        }));
-        Case("settings: where Python itself raises", () => Rows(cases.Where(c => c.ContainsKey("raises")), row =>
-        {
-            using var t = new Temp();
-            var (s, error, raised) = Load(row, t);
-            return Same("error", raised ?? (s != null ? "loaded" : "refused: " + error), S(row["raises"]));
-        }));
-        Case("settings: the cases cover the four values plan reads, each source and each location", () =>
-        {
-            string all = string.Concat(loaded.Select(r => S(r["record"])));
-            foreach (string source in new[] { "flag", "environment", "file", "built-in default" })
-                if (!all.Contains($"\"source\":\"{source}\"")) return $"no case takes a value from: {source}";
-            foreach (string key in new[] { "HOUSECARL_EVAL_SETTINGS", "HOUSECARL_DATA_DIR", "LOCALAPPDATA" })
-                if (!cases.Any(c => D(c["env"]).ContainsKey(key) && c["explicit"] == null)) return $"no case finds the file through {key}";
-            var seen = loaded.Select(r => PyJson.Dumps(r["values"])).Distinct().Count();
-            return seen >= 12 ? null : $"only {seen} distinct sets of the four values";
-        });
-        Case("settings: the accepted model IDs of an agents folder", () =>
-        {
-            using var t = new Temp();
-            var agents = D(ka["agents"]);
-            foreach (var (name, text) in D(agents["files"])) t.Write("agents/" + name, Encoding.UTF8.GetBytes(S(text)));
-            return SameList("ids", EvalSettings.ModelIds(Path.Combine(t.Root, "agents")), Strings(agents["ids"]))
-                   ?? SameList("a missing folder", EvalSettings.ModelIds(Path.Combine(t.Root, "none")), Strings(agents["missingFolder"]));
-        });
-    }
-
     // ---- the generated states
 
     static void StateCases(PyDict ka)
@@ -497,60 +429,22 @@ public static class SelfTestPlanModules
             }));
     }
 
-    // ---- against this checkout, and a live Python when one is on PATH
-
-    static (int exit, string stdout, string stderr)? Python(string cwd, params string[] args)
-    {
-        var psi = new ProcessStartInfo("python")
-        {
-            RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, WorkingDirectory = cwd,
-            StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8,
-        };
-        psi.Environment["PYTHONIOENCODING"] = "utf-8";
-        foreach (string a in new[] { "-X", "utf8" }.Concat(args)) psi.ArgumentList.Add(a);
-        try
-        {
-            using var p = Process.Start(psi)!;
-            var err = p.StandardError.ReadToEndAsync();
-            string stdout = p.StandardOutput.ReadToEnd();
-            p.WaitForExit();
-            return (p.ExitCode, stdout.TrimEnd(), err.Result.TrimEnd());
-        }
-        catch (System.ComponentModel.Win32Exception) { return null; }
-    }
+    // ---- against this checkout
 
     static void LiveCases(Action<string, string> skip)
     {
         // (the live comparison with Python's evalregistry went with that module in step 3: the registry's rules are this
-        // program's own, and its recorded answers above are the known answers)
-        string[] names = ["checkout: the registry in this checkout validates, and its patterns compile",
-                          "live: Python's record of the settings on this machine"];
+        // program's own, and its recorded answers above are the known answers; the settings record went with the settings
+        // reader in step 2, to the integration module, which owns the evaluation settings)
+        const string name = "checkout: the registry in this checkout validates, and its patterns compile";
         string? root = HarnessShared.CheckoutLayout.Locate(null, out _)?.Checkout;
-        string harness = root == null ? "" : Path.Combine(root, "_geometry-harness");
-        string module = Checkout.Integration ?? "";   // evalsettings is the houseCARL integration module's
         string registryPath = root == null ? "" : HarnessShared.CheckoutLayout.Registry(root);
         if (!File.Exists(registryPath))
         {
-            foreach (string n in names) skip(n, "this build is not inside a houseCARL checkout");
+            skip(name, "this build is not inside a SkyWright checkout");
             return;
         }
         var registry = Registry.Load(registryPath);
-        Case(names[0], () => Registry.Validate(registry) is { Count: > 0 } said ? string.Join("; ", said.Take(3)) : null);
-
-        if (Python(harness, "--version") is not { exit: 0 })
-        {
-            foreach (string n in names.Skip(1)) skip(n, "python is not on PATH");
-            return;
-        }
-        const string head = "import sys, json; sys.path.insert(0, sys.argv[1]); ";
-        Case(names[1], () =>
-        {
-            var r = Python(harness, "-c", head + "import evalsettings as S; r = S.load(None, {'evaluation.budgetMinutes': 7.5}); "
-                + "print(json.dumps([r.record(), r.sentences()], separators=(',', ':'), ensure_ascii=False))", module);
-            if (r is not { exit: 0 }) return r!.Value.stderr.Contains("SettingsError") ? null : $"python failed: {r.Value.stderr}";
-            var s = EvalSettings.Load(null, new PyDict { ["evaluation.budgetMinutes"] = 7.5 });
-            var mine = new List<object?> { s.Record(), s.Sentences().Cast<object?>().ToList() };
-            return Same("record", PyJson.Dumps(mine, ensureAscii: false, compact: true), PyText.SplitLines(r.Value.stdout).LastOrDefault());
-        });
+        Case(name, () => Registry.Validate(registry) is { Count: > 0 } said ? string.Join("; ", said.Take(3)) : null);
     }
 }

@@ -283,6 +283,40 @@ def case_measure_order():
         or (None if stopped and "the census scope is incomplete." in stopped and "evaluate" in stopped else f"a runcontrol stop said: {stopped}")
 
 
+def case_measure_lab_entry():
+    """A lab run is measured from its measuring entry: measure_lab writes RUN/evaluation-settings.json and
+    RUN/measuring-entry.json (the entry with the settings' reverseComparison false folded in) and hands runcontrol that
+    file, and the context it returns reads it."""
+    root = Root()
+    saved_env = os.environ.get("HOUSECARL_EVAL_SETTINGS")
+    try:
+        sfile = root.path / "settings.json"
+        sfile.write_text(json.dumps({"schemaVersion": 1, "evaluation": {"reverseComparison": False}, "models": {"recordChecks": "session"}}), encoding="utf-8")
+        os.environ["HOUSECARL_EVAL_SETTINGS"] = str(sfile)
+        ctx = context(root, LAB, {"readerCmd": "reader"})
+        (root.path / "run").mkdir()
+        handed = []
+        saved = EP.measure
+        EP.measure = lambda c, through: handed.append((str(c.entry_path), through))
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                got = EP.measure_lab(ctx, "deliver")
+        finally:
+            EP.measure = saved
+        m = json.loads((root.path / "run" / "measuring-entry.json").read_text(encoding="utf-8"))
+        rec = json.loads((root.path / "run" / "evaluation-settings.json").read_text(encoding="utf-8"))
+        return same("handed to runcontrol", handed, [(str(root.path / "run" / "measuring-entry.json"), "deliver")]) \
+            or same("the measuring entry", m, dict(LAB, evaluation={"reverseComparison": False})) \
+            or same("the record's model choice", ((rec.get("options") or {}).get("models.recordChecks") or {}).get("value"), "session") \
+            or same("the returned context's entry", str(got.entry_path), str(root.path / "run" / "measuring-entry.json"))
+    finally:
+        if saved_env is None:
+            os.environ.pop("HOUSECARL_EVAL_SETTINGS", None)
+        else:
+            os.environ["HOUSECARL_EVAL_SETTINGS"] = saved_env
+        root.close()
+
+
 def case_in_place_not_measured():
     """An in-place entry (the app's) is not measured by the module: the app carried it through the bundle."""
     import types
@@ -309,6 +343,7 @@ def main() -> int:
     check("case 59 the records stage takes the machine slot for its backstop", case_59)
     check("records stage: the capture's Python is the machine file's, else this driver's own", case_capture_python)
     check("measure: a lab entry runs runcontrol through evaluate, the capture, then runcontrol through the bundle", case_measure_order)
+    check("measure: a lab run is measured from its measuring entry, its settings recorded beside it", case_measure_lab_entry)
     check("measure: an in-place entry is not measured by the module", case_in_place_not_measured)
     print(f"\n{len(PASSED)} passed, {len(FAILURES)} failed")
     return 1 if FAILURES else 0

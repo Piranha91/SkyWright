@@ -307,10 +307,11 @@ def d2(ctl: Ctl):
     scen = ctl.scenario(census_g1(), census_g1())
     absent = ctl.tmp / "d2-absent" / "houseCARL.evaluation.json"
     env = {"HOUSECARL_EVAL_SETTINGS": str(absent)}
-    cases = [("default", [], None, "deep", "built-in default"),
-             ("flag-standard", ["--depth", "standard"], None, "standard", "flag"),
-             ("file-standard", [], {"evaluation": {"depth": "standard"}}, "standard", "file"),
-             ("flag-beats-file", ["--depth", "deep"], {"evaluation": {"depth": "standard"}}, "deep", "flag")]
+    # runcontrol's plan reads no settings file: a file's depth reaches no plan (the entry or --depth names it)
+    cases = [("default", [], None, "deep", None),
+             ("flag-standard", ["--depth", "standard"], None, "standard", None),
+             ("file-standard", [], {"evaluation": {"depth": "standard"}}, "deep", None),
+             ("flag-beats-file", ["--depth", "deep"], {"evaluation": {"depth": "standard"}}, "deep", None)]
     for name, flags, sections, want, source in cases:
         run = ctl.tmp / f"d2-{name}"
         e = dict(env)
@@ -323,8 +324,7 @@ def d2(ctl: Ctl):
             continue
         pl = load(run / "plan.json")
         got = (pl.get("states") or {}).get("depth")
-        src = (((pl.get("explicitDecisions") or {}).get("settings") or {}).get("options") or {}) \
-            .get("evaluation.depth", {}).get("source")
+        src = ((pl.get("explicitDecisions") or {}).get("settings") or {}).get("source")
         check(got == want and src == source, f"D2 {name}: depth {got!r} from {src!r} (want {want!r} from {source!r})")
 
 
@@ -375,8 +375,13 @@ def d5(ctl: Ctl):
     deep = settings_file(ctl.tmp / "d5-deep.json",
                          {"evaluation": {"depth": "deep", "liveSwitchCheck": "always"}, "liveSwitchCheck": paths})
     run = ctl.tmp / "d5-deep"
-    p = ctl.plan(run, scen, registry="fixture-check-registry-live.json",
-                 env_extra={"HOUSECARL_EVAL_SETTINGS": str(deep)})
+    # the module folds the live choice into the lab run's measuring entry; its plan stage opts the plan in
+    sys.path.insert(0, str(HARNESS))
+    import evalpipeline as EP
+    import evalsettings as ESET
+    folded, _ = EP.measuring_entry({"schema": 1, "id": "m", "evaluation": {}}, ESET.load(str(deep)))
+    opt = [x for o in (folded.get("evaluation") or {}).get("optIn") or [] for x in ("--opt-in", o)]
+    p = ctl.plan(run, scen, ["--depth", "deep", *opt], registry="fixture-check-registry-live.json")
     if p.returncode:
         check(False, f"D5: Deep with the live check always plans ({(p.stdout + p.stderr)[-300:]!r})")
     else:
@@ -387,11 +392,13 @@ def d5(ctl: Ctl):
     for live in ("always", "ask"):
         std = settings_file(ctl.tmp / f"d5-standard-{live}.json",
                             {"evaluation": {"depth": "standard", "liveSwitchCheck": live}, "liveSwitchCheck": paths})
-        p = ctl.plan(ctl.tmp / f"d5-standard-{live}", scen, registry="fixture-check-registry-live.json",
-                     env_extra={"HOUSECARL_EVAL_SETTINGS": str(std)})
-        text = p.stdout + p.stderr
-        check(p.returncode == 2 and "Standard" in text and "live switch check" in text and str(std) in text,
-              f"D5: Standard with the live check {live} is refused at plan in one sentence naming the file")
+        try:
+            ESET.load(str(std))
+            text, refused = "", False
+        except ESET.SettingsError as ex:
+            text, refused = str(ex), True
+        check(refused and "Standard" in text and "live switch check" in text and str(std) in text,
+              f"D5: Standard with the live check {live} is refused when the run loads its settings, in one sentence naming the file")
         v = subprocess.run([sys.executable, str(EVALSETTINGS), "validate", str(std)], capture_output=True, text=True)
         check(v.returncode == 2 and "Standard" in (v.stdout + v.stderr),
               f"D5: evalsettings validate refuses Standard with the live check {live}")

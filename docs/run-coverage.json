@@ -6934,8 +6934,8 @@
         "--alt": "plan: evaluate only these candidate files (repeatable)",
         "--supplied": "plan: PLUGIN[,PLUGIN...]=candidate-NN.json, an ESP-only supplied-combination arm (repeatable)",
         "--states": "plan: name the states by hand (baseline[,NAME...]); overrides the depth",
-        "--depth": "plan: standard (the load-time state only) or deep (every switched state each arm's census yields); default the saved settings, else deep",
-        "--settings": "plan: the evaluation settings file (default: HOUSECARL_EVAL_SETTINGS, then the data folder)",
+        "--depth": "plan: standard (the load-time state only) or deep (every switched state each arm's census yields); default deep",
+        "--settings": "plan: refused in one sentence: the plan reads no evaluation settings file; give --depth, --no-reverse, --budget-minutes and --opt-in",
         "--select": "plan: CHECK,... or an adapter exe name; narrows what runs, never what is planned (repeatable)",
         "--review-arm": "plan: the arm under review; checks that run on one arm only run on it (default the baseline)",
         "--exclude": "plan: CHECK=reason (repeatable); the reason is not optional",
@@ -8822,6 +8822,48 @@
       ],
       "outputs": [
         "Assertion results or generated fixture data for: Does a bundle the built-in controller makes with its names step get reported with no hand step (C567)?"
+      ]
+    },
+    {
+      "id": "integration/housecarl/tests/test_evalsettings_known_answers.py",
+      "path": "integration/housecarl/tests/test_evalsettings_known_answers.py",
+      "kind": "script",
+      "answers": [
+        "Does evalsettings.load still give the recorded record, path, values, sentences and refusals, and do a lab run's ask, opt-in and invalid-file cases hold?"
+      ],
+      "useWhen": "Qualify a change to evalsettings.py's loading, validation or sentences, or to the measuring entry's live-check cases.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/tests/test_evalsettings_known_answers.py",
+          "anchor": "evalsettings.load against the answers recorded from it"
+        }
+      ],
+      "inputs": [
+        "The recorded settings cases in fixtures/evalsettings/known-answers.json."
+      ],
+      "outputs": [
+        "Assertion results or generated fixture data for: Does evalsettings.load still give the recorded record, path, values, sentences and refusals, and do a lab run's ask, opt-in and invalid-file cases hold?"
+      ]
+    },
+    {
+      "id": "integration/housecarl/tests/test_measuring_entry.py",
+      "path": "integration/housecarl/tests/test_measuring_entry.py",
+      "kind": "script",
+      "answers": [
+        "Does a lab run's measuring entry fold only the two measuring choices, keep every other key, and does the module record the model choice?"
+      ],
+      "useWhen": "Qualify a change to evalpipeline.measuring_entry or settings_record, or to which settings reach runcontrol.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/tests/test_measuring_entry.py",
+          "anchor": "Known answers for the measuring entry and the settings record"
+        }
+      ],
+      "inputs": [
+        "Controlled fixtures for test_measuring_entry."
+      ],
+      "outputs": [
+        "Assertion results or generated fixture data for: Does a lab run's measuring entry fold only the two measuring choices, keep every other key, and does the module record the model choice?"
       ]
     },
     {

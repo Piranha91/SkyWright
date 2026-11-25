@@ -221,6 +221,8 @@ public static class StageBodies
                 "--candidates", candidates, "--depth", PyText.Str(ev.ContainsKey("depth") ? ev["depth"] : "deep"), "--budget-minutes", budget,
                 "--max-candidates", PyText.Str((long)scopes.Count), "--out", PyOrder.Fwd(run), .. where]);
         foreach (object? o in Py.ListOrEmpty(ev.Get("optIn"))) argv.AddRange(["--opt-in", PyText.Str(o)]);
+        // a measuring choice the entry states: no reverse comparison (the AI-driven evaluation folds its settings in here)
+        if (ev.Get("reverseComparison") is false) argv.Add("--no-reverse");
         var r = ChildLaunch.Run(ctx, PyPath.Join(sdir, "commands"), "plan", argv, env: env);
         string planFile = PyPath.Join(run, "plan.json");
         if (r.ExitCode != 0 || !File.Exists(planFile))

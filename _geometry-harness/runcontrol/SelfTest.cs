@@ -150,6 +150,7 @@ public static partial class SelfTest
         BlackBoxCases();
         SelfTestPlanModules.Run(Case, Skip);
         PlanCases();
+        IdentityCases();
         SelfTestSweep.Run(Case);
         SelfTestFinalize.Run(Case);
         SelfTestFinalize.RunEvaluate(Case);

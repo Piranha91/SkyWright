@@ -21,12 +21,6 @@ public static class Checkout
     /// <summary>One of SkyWright's programs in this layout.</summary>
     public static string Program(string name) => PyPath.Str(HarnessShared.CheckoutLayout.ProgramExe(Harness, name));
 
-    /// <summary>The houseCARL integration module's source folder in the checkout this build was made in, or null when the
-    /// build sits in none. Only the self-test's live cross-checks with the module's Python pipeline and settings use it;
-    /// nothing a run does reads the module (a named crossing in SkyWright.Guards' fence check, until step 2).</summary>
-    public static string? Integration =>
-        HarnessShared.CheckoutLayout.Locate(null, out _)?.Checkout is { } checkout ? Path.Combine(checkout, "integration/housecarl") : null;
-
     static HarnessShared.CheckoutLayout.Layout Find() =>
         HarnessShared.CheckoutLayout.Locate(null, out var why) ?? throw new Refusal(why + ".");
 }

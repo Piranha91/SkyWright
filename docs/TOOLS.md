@@ -49,6 +49,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does a bundle the built-in controller makes with its names step get reported with no hand step (C567)?](#tool-integration-housecarl-tests-test_report_plan_reads_names.py) — `integration/housecarl/tests/test_report_plan_reads_names.py`
 - [Does a buried clash read as buried in the reel and the report, and does a top-down hide what covers the pair from above by the cutaway's rule?](#tool-integration-housecarl-tests-test_capture_fallbacks.py) — `integration/housecarl/tests/test_capture_fallbacks.py`
 - [Does a fresh user get the settings window once, and is a saved choice honoured?](#tool-integration-housecarl-tests-test_evalsettings.py) — `integration/housecarl/tests/test_evalsettings.py`
+- [Does a lab run's measuring entry fold only the two measuring choices, keep every other key, and does the module record the model choice?](#tool-integration-housecarl-tests-test_measuring_entry.py) — `integration/housecarl/tests/test_measuring_entry.py`
 - [Does a lab run's record capture read the open arms, take the machine slot, import only rows that were open, and refuse in one sentence?](#tool-integration-housecarl-tests-test_record_capture.py) — `integration/housecarl/tests/test_record_capture.py`
 - [Does a navmesh comparison request get its measured top-down camera, both states and its refusals offline?](#tool-integration-housecarl-tests-test_capture_navmesh.py) — `integration/housecarl/tests/test_capture_navmesh.py`
 - [Does a navmesh vignette's earlier-version caption, on the reel strip and in the report, name the plugin the historical frame's own --nav-version draws (never the plan's re-cut history, and none when the frame names none), say which mod replaced that version, and keep a name ending in s free of an "s's" possessive, in the narration too?](#tool-integration-housecarl-tests-test_navmesh_caption.py) — `integration/housecarl/tests/test_navmesh_caption.py`
@@ -74,6 +75,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does each frame's embedded replay command reproduce that frame?](#tool-_geometry-harness-tests-test_replay_command.py) — `_geometry-harness/tests/test_replay_command.py`
 - [Does evalreport plan verify --bundle and --sibling-bundle in place without writing a byte or mtime into either, without a copy in proportion to the bundle even when its evidence is hard-linked, leave no tree after a failure mid-verify, refuse a verify that wrote no result, does runcontrol verify-bundle --out write its result only to the named file, and does every caller check a bundle with runcontrol rather than Python?](#tool-integration-housecarl-tests-test_evalreport_verify_in_place.py) — `integration/housecarl/tests/test_evalreport_verify_in_place.py`
 - [Does evalreport's reel refuse a capture-results file it cannot read, and still plan without one?](#tool-integration-housecarl-tests-test_capture_results_unreadable.py) — `integration/housecarl/tests/test_capture_results_unreadable.py`
+- [Does evalsettings.load still give the recorded record, path, values, sentences and refusals, and do a lab run's ask, opt-in and invalid-file cases hold?](#tool-integration-housecarl-tests-test_evalsettings_known_answers.py) — `integration/housecarl/tests/test_evalsettings_known_answers.py`
 - [Does every imported reference receive exactly one accounting disposition?](#tool-_geometry-harness-tests-test_imported_reference_accounting.py) — `_geometry-harness/tests/test_imported_reference_accounting.py`
 - [Does every probe refuse a --enable it cannot place or an --order candidate built on another profile, in one sentence?](#tool-_geometry-harness-tests-test_order_input_refusal.py) — `_geometry-harness/tests/test_order_input_refusal.py`
 - [Does every probe refuse, in one sentence, a load order whose plugin lacks a master?](#tool-_geometry-harness-tests-test_missing_master_refusal.py) — `_geometry-harness/tests/test_missing_master_refusal.py`
@@ -3635,6 +3637,21 @@ Outputs: Assertion results or generated fixture data for: Does a fresh user get 
 Source: [integration/housecarl/tests/test_evalsettings.py](../integration/housecarl/tests/test_evalsettings.py) — `Known answers for the evaluation's first-run settings and window (evalsettings.py), PROPOSAL section 7.`
 
 
+<a id="tool-integration-housecarl-tests-test_evalsettings_known_answers.py"></a>
+
+### integration/housecarl/tests/test_evalsettings_known_answers.py
+
+**Does evalsettings.load still give the recorded record, path, values, sentences and refusals, and do a lab run's ask, opt-in and invalid-file cases hold?**
+
+Qualify a change to evalsettings.py's loading, validation or sentences, or to the measuring entry's live-check cases.
+
+Inputs: The recorded settings cases in fixtures/evalsettings/known-answers.json.
+
+Outputs: Assertion results or generated fixture data for: Does evalsettings.load still give the recorded record, path, values, sentences and refusals, and do a lab run's ask, opt-in and invalid-file cases hold?
+
+Source: [integration/housecarl/tests/test_evalsettings_known_answers.py](../integration/housecarl/tests/test_evalsettings_known_answers.py) — `evalsettings.load against the answers recorded from it`
+
+
 <a id="tool-integration-housecarl-tests-test_evalspeech.py"></a>
 
 ### integration/housecarl/tests/test_evalspeech.py
@@ -3708,6 +3725,21 @@ Inputs: Controlled fixtures for test_machineidle.
 Outputs: Assertion results or generated fixture data for: Does the idle gate refuse probes by command line and blockers by name?
 
 Source: [integration/housecarl/tests/test_machineidle.py](../integration/housecarl/tests/test_machineidle.py) — `Known answers for the idle gate (machineidle.py).`
+
+
+<a id="tool-integration-housecarl-tests-test_measuring_entry.py"></a>
+
+### integration/housecarl/tests/test_measuring_entry.py
+
+**Does a lab run's measuring entry fold only the two measuring choices, keep every other key, and does the module record the model choice?**
+
+Qualify a change to evalpipeline.measuring_entry or settings_record, or to which settings reach runcontrol.
+
+Inputs: Controlled fixtures for test_measuring_entry.
+
+Outputs: Assertion results or generated fixture data for: Does a lab run's measuring entry fold only the two measuring choices, keep every other key, and does the module record the model choice?
+
+Source: [integration/housecarl/tests/test_measuring_entry.py](../integration/housecarl/tests/test_measuring_entry.py) — `Known answers for the measuring entry and the settings record`
 
 
 <a id="tool-integration-housecarl-tests-test_narration_fidelity.py"></a>
@@ -5696,7 +5728,7 @@ Modifiers (do not select a separate mode):
 - `--alt` — plan: evaluate only these candidate files (repeatable)
 - `--budget-minutes` — plan: the wall-time limit each run or resume of this plan gets (0 or absent: none); run --run and resume: this invocation's limit in place of the plan's
 - `--candidates` — plan: the folder of candidate-*.json files, exactly one of them the baseline
-- `--depth` — plan: standard (the load-time state only) or deep (every switched state each arm's census yields); default the saved settings, else deep
+- `--depth` — plan: standard (the load-time state only) or deep (every switched state each arm's census yields); default deep
 - `--diff-tolerance` — plan: the tolerance conflictdiff gets; frozen into the plan
 - `--entry` — the mod's selection entry (JSON), for run and arms
 - `--exclude` — plan: CHECK=reason (repeatable); the reason is not optional
@@ -5720,7 +5752,7 @@ Modifiers (do not select a separate mode):
 - `--scope` — plan: the scope the plan is frozen over; bundle: the scope file the plan froze, when it has moved
 - `--select` — plan: CHECK,... or an adapter exe name; narrows what runs, never what is planned (repeatable)
 - `--self-test` — Run every known answer; exit 0 when all pass. The live cases with the Python tools that remain are skipped, visibly, when python is not on PATH.
-- `--settings` — plan: the evaluation settings file (default: HOUSECARL_EVAL_SETTINGS, then the data folder)
+- `--settings` — plan: refused in one sentence: the plan reads no evaluation settings file; give --depth, --no-reverse, --budget-minutes and --opt-in
 - `--states` — plan: name the states by hand (baseline[,NAME...]); overrides the depth
 - `--supplied` — plan: PLUGIN[,PLUGIN...]=candidate-NN.json, an ESP-only supplied-combination arm (repeatable)
 - `--through` — run: stop after this stage; census to bundle run here, report-plan and later are refused

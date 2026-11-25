@@ -185,7 +185,6 @@ public static partial class SelfTest
         };
         foreach (string k in psi.Environment.Keys.Where(k => k.StartsWith("HOUSECARL_", StringComparison.OrdinalIgnoreCase)).ToList()) psi.Environment.Remove(k);
         psi.Environment["HOUSECARL_RUNLOG_DIR"] = t.At("runlog");
-        psi.Environment["HOUSECARL_EVAL_SETTINGS"] = t.At("settings/standard.json");
         foreach (var (k, v) in D(row["env"])) psi.Environment[k] = Unmask(t, S(v));
         psi.ArgumentList.Add("plan");
         foreach (string a in Strings(row["argv"])) psi.ArgumentList.Add(Unmask(t, a));

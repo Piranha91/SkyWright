@@ -104,7 +104,6 @@ public static class Plan
         string registryPath = GivenPath(a.Registry!);
         string? scopePath = string.IsNullOrEmpty(a.Scope) ? null : GivenPath(a.Scope);
         string cdir = GivenPath(a.Candidates!);
-        string? settingsPath = string.IsNullOrEmpty(a.Settings) ? a.Settings : GivenPath(a.Settings);
         string? instance = string.IsNullOrEmpty(a.Instance) ? a.Instance : GivenPath(a.Instance);
         string? game = string.IsNullOrEmpty(a.Game) ? a.Game : GivenPath(a.Game);
 
@@ -114,15 +113,13 @@ public static class Plan
         try { (regDoc, regSha, regChecks) = ReadRegistry(registryPath); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or PyError) { throw new Refusal(ex.Message); }
 
-        // a flag beats the settings file, the file beats the built-in default; the effective values are frozen into the plan
-        var flags = new PyDict();
-        if (!string.IsNullOrEmpty(a.Depth)) flags["evaluation.depth"] = a.Depth;
-        if (a.NoReverse) flags["evaluation.reverseComparison"] = false;
-        if (a.BudgetMinutes is { } asked) flags["evaluation.budgetMinutes"] = asked;
-        var settings = EvalSettings.Load(settingsPath, flags);
-        bool noReverse = settings.Value("evaluation.reverseComparison") is false;
-        object? budgetMinutes = settings.Value("evaluation.budgetMinutes");
-        object? liveChoice = settings.Value("evaluation.liveSwitchCheck");
+        // the measuring choices come by flag only (or by the entry, through the run's plan stage); the plan reads no
+        // evaluation settings file and looks for no agents, so a choice about models, reports or video never reaches it
+        if (a.Settings != null)
+            throw new Refusal("plan reads no evaluation settings file: give the measuring choices as flags instead of --settings "
+                              + "(--depth, --no-reverse, --budget-minutes, --opt-in).");
+        bool noReverse = a.NoReverse;
+        object? budgetMinutes = a.BudgetMinutes;
 
         object? scopeRead = scopePath != null ? PyJson.LoadEvalFile(scopePath) : null;
         if (scopePath != null && scopeRead == null)
@@ -224,7 +221,7 @@ public static class Plan
         else
         {
             states = ["baseline"];
-            depth = PyText.Str(settings.Value("evaluation.depth"));
+            depth = string.IsNullOrEmpty(a.Depth) ? "deep" : a.Depth;   // the built-in depth
         }
 
         var layers = string.IsNullOrEmpty(instance) ? null : new PlanLayers(instance, a.Profile, game);
@@ -360,12 +357,6 @@ public static class Plan
         }
         var optInSource = new PyDict();
         foreach (string c in opted) optInSource[c] = "flag";
-        if (PyValue.Eq(liveChoice, "always") && !opted.Contains(LiveCheckId)
-            && regChecks.Any(c => Py.S(c["id"]) == LiveCheckId && Py.Truthy(c.Get("optIn"))))
-        {
-            opted.Add(LiveCheckId);
-            optInSource[LiveCheckId] = "settings: evaluation.liveSwitchCheck always";
-        }
         var excluded = new PyDict();
         foreach (string spec in a.Exclude ?? [])
         {
@@ -566,7 +557,6 @@ public static class Plan
             ["exclude"] = excluded,
         };
         if (opted.Count > 0) { decisions["optIn"] = Py.Objs(opted); decisions["optInSource"] = optInSource; }
-        decisions["settings"] = settings.Record().Update(new PyDict { ["path"] = GivenPath(settings.FilePath) });
         decisions["touched"] = touched;
         decisions["note"] = "--select narrows what RUNS, never what is PLANNED: a check that was not selected "
                             + "is skipped-user and stays visible, and a required one keeps the evaluation "
@@ -661,7 +651,6 @@ public static class Plan
         else File.WriteAllBytes(journal, []);
 
         Report.Line($"plan {plan["planId"]}: {checks.Count} checks, {arms.Count} arms, states {string.Join(",", states)}, depth {depth}");
-        foreach (string s in settings.Sentences()) Report.Line(s);
         if (Py.Truthy(tableRecord!.Get("given")))
             Report.Line($"primitive table: {tableRecord["path"]} ({tableRecord["source"]}, sha256 {Py.S(tableRecord["sha256"])[..12]}), "
                         + $"frozen as {PrimitiveTable.FileName}; stateprobe decides collision-marker primitives by it");
@@ -678,8 +667,6 @@ public static class Plan
                 Report.Line($"   {PlanIdentity.ProgramLabel(pid)}: its --probe-cmd names no file whose content can be checked; run and "
                             + "resume will refuse it (tool-unverifiable)");
         }
-        if (PyValue.Eq(liveChoice, "ask") && !opted.Contains(LiveCheckId))
-            Report.Line("The live switch check is set to ask each evaluation and was not opted in (`--opt-in " + LiveCheckId + "` opts in).");
         foreach (var c in checks.Where(c => c["status"] as string != "planned"))
             Report.Line($"   {Py.S(c["checkId"]),-38} {c["status"]}");
         if (unknownApplicability.Count > 0)

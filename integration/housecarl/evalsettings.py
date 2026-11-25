@@ -430,7 +430,7 @@ class Resolved:
         return "file" if self.doc is not None else "built-in defaults"
 
     def record(self) -> dict:
-        """What a plan freezes: the file's identity and every option's value and source."""
+        """What a lab run records (RUN/evaluation-settings.json): the file's identity and every option's value and source."""
         return {"path": str(self.path), "sha256": self.sha256,
                 "schemaVersion": (self.doc or {}).get("schemaVersion") if self.doc is not None else None,
                 "source": self.source, "options": self.options, "newOptions": self.new_options}
