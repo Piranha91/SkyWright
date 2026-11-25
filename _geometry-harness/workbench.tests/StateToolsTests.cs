@@ -216,10 +216,17 @@ public sealed class StateToolsTests : IAsyncLifetime
         Assert.Contains(StateTools.VerbList, P(act, "properties", "verb", "description").GetString());
         var verbs = StateTools.VerbList.Replace(" or ", ", ").Split(", ");
         Assert.True(verbs.Length >= 31, $"the verb list holds {verbs.Length} verbs");
+        // the verbs reach the window's own controls (the Start tab, the open bar, the tabs), which belong to the thread that
+        // first made them: in the app that is its one UI thread, so here they run on the one thread the window tests share
+        // (ShellCollection), not on this class's own fake UI thread, or every later window test that adds those controls
+        // to its window is refused by WPF ("a different thread owns it")
+        var hub = new StateHub(ShellCollection.Ui.Value, _surface) { Wait = TimeSpan.FromSeconds(2) };
+        await using var server = await StateServer.StartAsync(FreePort(), hub);
+        await using var client = await McpClient.CreateAsync(new HttpClientTransport(new HttpClientTransportOptions { Endpoint = new Uri(server.Url + "/"), TransportMode = HttpTransportMode.StreamableHttp }));
         foreach (var v in verbs)
         {
-            var (_, text) = await Call("workbench_act", A(("verb", v)));
-            Assert.DoesNotContain("is not a verb", text);
+            var r = await client.CallToolAsync("workbench_act", A(("verb", v)));
+            Assert.DoesNotContain("is not a verb", string.Join("\n", r.Content.OfType<TextContentBlock>().Select(c => c.Text)));
         }
         Assert.Contains("is not a verb", await Refused("workbench_act", A(("verb", "fly"))));
     }
