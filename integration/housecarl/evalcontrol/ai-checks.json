@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "registryVersion": 1,
+  "skill": "world-edit-compatibility",
   "about": "The checks only an AI-side evaluation fills: rows SkyWright's own scan never measures (record reads through houseCARL's tools, supplied media, a live game's switch flips, and the discovery of existing patches). evalcontrol plans them as an overlay on a finished app scan, over the app plan's arms, and checks them with runcontrol's own rules for receipts, ledgers, plans and bundles; this list moved out of SkyWright's data/check-registry.json (registryVersion 5) in step 3 of the SkyWright / houseCARL boundary. Same schema as that registry, validated against this module's adapter vocabulary. appPrerequisites names checks of the app plan that must be settled on an arm (read from the bound app bundle's ledger) before a row here is measured or imported on it.",
   "families": [
     {

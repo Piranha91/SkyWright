@@ -1,7 +1,6 @@
 {
   "schemaVersion": 1,
   "registryVersion": 5,
-  "skill": "world-edit-compatibility",
   "generatedUtc": "2026-09-12T19:05:00Z",
   "about": "The checklist a world-edit compatibility evaluation must account for (Q42, roadmap 4.23). Domain knowledge only: which families exist, what each check is about, what it may claim and where it stops. The controller (_geometry-harness/evalrun.py) reads it through _geometry-harness/evalregistry.py and never decides applicability itself. Triggers name record-type families as DOMAIN knowledge; what a target actually contains comes from scopeprobe, by construction, out of Mutagen's own record enumeration. Check ids are stable: retired, never renamed.",
   "notes": {
