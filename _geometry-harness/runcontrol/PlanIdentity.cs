@@ -62,7 +62,13 @@ public static class PlanIdentity
 
     /// <summary>Every program that can launch under a plan: the controller; the probe of every child-launching check
     /// with a planned arm; conflictdiff when a swept check plans an arm other than the baseline.</summary>
-    public static HashSet<string> Launchable(IEnumerable<PyDict> checks, IReadOnlyDictionary<string, string> armKinds)
+    public static HashSet<string> Launchable(IEnumerable<PyDict> checks, IReadOnlyDictionary<string, string> armKinds) =>
+        Launchable(checks, armKinds, LaunchKinds);
+
+    /// <summary>As above, with the caller's set of child-launching adapter kinds (runcontrol's own plans use
+    /// <see cref="LaunchKinds"/>).</summary>
+    public static HashSet<string> Launchable(IEnumerable<PyDict> checks, IReadOnlyDictionary<string, string> armKinds,
+        IReadOnlySet<string> launchKinds)
     {
         var programs = new HashSet<string>(StringComparer.Ordinal) { Controller };
         foreach (var c in checks)
@@ -71,7 +77,7 @@ public static class PlanIdentity
             var planned = Py.ListOrEmpty(c.Get("arms")).Select(Py.D).Where(r => r.Get("status") as string == "planned").ToList();
             if (planned.Count == 0) continue;
             string? kind = ad.Get("kind") as string;
-            if (kind != null && LaunchKinds.Contains(kind) && Py.Truthy(ad.Get("exe"))) programs.Add(ProgramId(Py.S(ad["exe"])));
+            if (kind != null && launchKinds.Contains(kind) && Py.Truthy(ad.Get("exe"))) programs.Add(ProgramId(Py.S(ad["exe"])));
             if (kind == "ordersweep-probe" && planned.Any(r => armKinds.GetValueOrDefault(Py.S(r["armId"])) != "baseline")) programs.Add(Comparator);
         }
         return programs;
