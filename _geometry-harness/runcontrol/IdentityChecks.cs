@@ -18,13 +18,13 @@ public static class IdentityChecks
 
     /// <summary>Every role of a receipt whose bound identity is not the plan's. A role with no digest is
     /// tool-identity-missing; two absent digests are never equal. A plan without the contract has nothing to compare.</summary>
-    public static List<IdentityDefect> Defects(PyDict plan, PyDict receipt)
+    public static List<IdentityDefect> Defects(PyDict plan, PyDict receipt, IReadOnlySet<string>? moreLaunchKinds = null)
     {
         var found = new List<IdentityDefect>();
         if (ContractRefusal(plan) != null) return found;
         var progs = PyValue.Dict(PyValue.Dict(plan["toolIdentity"])["programs"]);
         object? bound = Ev.OrEmpty(receipt.Get("consumed")).Get("programs");
-        foreach (var (role, pidRaw) in Receipts.ReceiptRoles(receipt))
+        foreach (var (role, pidRaw) in Receipts.ReceiptRoles(receipt, moreLaunchKinds))
         {
             string pid = (string)pidRaw!;
             var want = progs.Get(pid) as PyDict ?? new PyDict();

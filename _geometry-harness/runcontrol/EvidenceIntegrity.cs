@@ -5,7 +5,8 @@ namespace RunControl;
 public static class EvidenceIntegrity
 {
     /// <summary>({ok, defects}, ledger key -> the status word for evaluation.missing).</summary>
-    public static (PyDict integrity, PyDict bad) Check(string run, PyDict plan, Ledger ledger, PyDict receipts)
+    public static (PyDict integrity, PyDict bad) Check(string run, PyDict plan, Ledger ledger, PyDict receipts,
+        IReadOnlySet<string>? moreLaunchKinds = null)
     {
         var defects = new List<object?>();
         var bad = new PyDict();
@@ -50,7 +51,7 @@ public static class EvidenceIntegrity
                 continue;
             }
             // the programs it was accepted under, per role, against the identities the plan froze
-            var idd = IdentityChecks.Defects(plan, r);
+            var idd = IdentityChecks.Defects(plan, r, moreLaunchKinds);
             if (idd.Count > 0)
             {
                 var d = idd[0];

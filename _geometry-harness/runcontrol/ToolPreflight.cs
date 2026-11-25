@@ -40,6 +40,12 @@ public static class ToolPreflight
     /// <summary>(refusal, measured identities): every program that can launch under the plan, plus every program a
     /// retained receipt of this plan names. Reads files; writes nothing.</summary>
     public static (string? refusal, PyDict measured) Check(string run, PyDict plan, IEnumerable<string>? only = null)
+        => Check(run, plan, only, null, null);
+
+    /// <summary>As above, for a program using this library for a list of its own: its child-launching adapter kinds
+    /// (added to runcontrol's) and the build folder its probes are found under (the plan's harness when null).</summary>
+    public static (string? refusal, PyDict measured) Check(string run, PyDict plan, IEnumerable<string>? only,
+        IReadOnlySet<string>? moreLaunchKinds, string? probeHarness)
     {
         var progs = PyValue.Dict(PyValue.Dict(plan["toolIdentity"])["programs"]);
         HashSet<string> need;
@@ -48,7 +54,10 @@ public static class ToolPreflight
         {
             var armKinds = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var a in PyValue.Iter(plan["arms"]).Select(PyValue.Dict)) armKinds[Ev.Str(a["armId"])] = Ev.Str(a["kind"]);
-            need = PlanIdentity.Launchable(PyValue.Iter(plan["checks"]).Select(PyValue.Dict), armKinds);
+            need = moreLaunchKinds == null
+                ? PlanIdentity.Launchable(PyValue.Iter(plan["checks"]).Select(PyValue.Dict), armKinds)
+                : PlanIdentity.Launchable(PyValue.Iter(plan["checks"]).Select(PyValue.Dict), armKinds,
+                    new HashSet<string>(PlanIdentity.LaunchKinds.Concat(moreLaunchKinds), StringComparer.Ordinal));
             foreach (var (_, r) in Receipts.ReadReceipts(run))
             {
                 if (!Ev.Eq(Ev.G(r, "planId"), plan["planId"])) continue;
@@ -57,7 +66,7 @@ public static class ToolPreflight
             }
         }
         var opts = PyValue.Dict(plan["options"]);
-        string harness = PyPath.Str(Ev.Str(opts["harness"]));
+        string harness = probeHarness != null ? PyPath.Str(probeHarness) : PyPath.Str(Ev.Str(opts["harness"]));
         var measured = new PyDict();
         var problems = new List<string>();
         var unread = new List<string>();

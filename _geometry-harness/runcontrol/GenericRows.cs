@@ -177,7 +177,7 @@ public static class GenericRows
         if (prog == null)
         {
             ex.Account(check, arm, "blocked(tool-missing)", null,
-                $"no Release binary for '{Ev.Str(adapter.Get("exe"))}' under {ex.Harness} - build it, or stand one in with --probe-cmd");
+                $"no Release binary for '{Ev.Str(adapter.Get("exe"))}' under {ex.ProbeHarness} - build it, or stand one in with --probe-cmd");
             return;
         }
 

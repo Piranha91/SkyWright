@@ -14,6 +14,11 @@ public static class Receipts
     public const string Controller = "controller";
     public const string Comparator = "helper:conflictdiff";
 
+    /// <summary>Whether a check of this adapter kind launches its probe as a child: runcontrol's own kinds, plus a
+    /// caller's.</summary>
+    public static bool Launches(string kind, IReadOnlySet<string>? moreLaunchKinds) =>
+        LaunchKinds.Contains(kind) || (moreLaunchKinds?.Contains(kind) ?? false);
+
     /// <summary>The program id of a probe exe: conflictdiff is the helper, every other is a probe.</summary>
     public static string ProgramId(object? exe) => Ev.Eq(exe, "conflictdiff") ? Comparator : $"probe:{Ev.Str(exe)}";
 
@@ -27,13 +32,14 @@ public static class Receipts
     }
 
     /// <summary>role -> program a receipt's result rests on: a probe child's emitter, a swept diff's comparator, and
-    /// always the controller.</summary>
-    public static PyDict ReceiptRoles(PyDict receipt)
+    /// always the controller. moreLaunchKinds: a caller's own child-launching adapter kinds, added to runcontrol's
+    /// (a program using this library for a list of its own); runcontrol passes none.</summary>
+    public static PyDict ReceiptRoles(PyDict receipt, IReadOnlySet<string>? moreLaunchKinds = null)
     {
         var ad = Ev.OrEmpty(receipt.Get("adapter"));
         if (Ev.Eq(ad.Get("kind"), "ordersweep-probe") && Ev.Eq(receipt.Get("part"), "diff"))
             return new PyDict { ["comparator"] = Comparator, ["controller"] = Controller };
-        if (ad.Get("kind") is string kind && LaunchKinds.Contains(kind) && PyValue.Truthy(ad.Get("exe")))
+        if (ad.Get("kind") is string kind && Launches(kind, moreLaunchKinds) && PyValue.Truthy(ad.Get("exe")))
             return new PyDict { ["emitter"] = ProgramId(ad["exe"]), ["controller"] = Controller };
         return new PyDict { ["controller"] = Controller };
     }

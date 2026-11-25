@@ -18,7 +18,11 @@ public static class Finalizer
 
     /// <summary>As above, with a caller's step that adds its own blocks to the disposition (given the run, the plan and
     /// the receipts) before it and STATUS.md are written. runcontrol's own finalize passes none.</summary>
-    public static int Run(string runFolder, Action<PyDict, string, PyDict, PyDict>? amend)
+    public static int Run(string runFolder, Action<PyDict, string, PyDict, PyDict>? amend) => Run(runFolder, amend, null);
+
+    /// <summary>As above, with the caller's own child-launching adapter kinds (Receipts.ReceiptRoles), so the evidence
+    /// integrity checks the emitter of its receipts too.</summary>
+    public static int Run(string runFolder, Action<PyDict, string, PyDict, PyDict>? amend, IReadOnlySet<string>? moreLaunchKinds)
     {
         string run = PyPath.Str(runFolder);
         EvalStore.SetRunStore(run);
@@ -52,7 +56,7 @@ public static class Finalizer
             record.Stage("finalize", total: 1, unit: "dispositions");
             try
             {
-                (integrity, var badKeys) = EvidenceIntegrity.Check(run, plan, ledger, receipts);
+                (integrity, var badKeys) = EvidenceIntegrity.Check(run, plan, ledger, receipts, moreLaunchKinds);
                 disp = Disposition.Build(run, plan, ledger, receipts, integrity, badKeys);
                 amend?.Invoke(disp, run, plan, receipts);
                 PyJson.WriteEvalFile(PyPath.Join(run, "disposition.json"), disp);

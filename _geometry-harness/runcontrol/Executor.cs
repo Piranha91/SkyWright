@@ -40,7 +40,15 @@ public sealed class Executor
     /// <summary>Test seam: a program's identity now, in place of measuring its files.</summary>
     public Func<string, PyDict>? MeasureProgram { get; set; }
 
-    PyDict MeasureNow(string pid) => MeasureProgram != null ? MeasureProgram(pid) : PlanIdentity.Measure(Opts, Harness, pid);
+    /// <summary>The build folder this invocation's probes are found under: the plan's harness, unless a program using
+    /// this library for a list of its own builds its probes elsewhere.</summary>
+    public string ProbeHarness { get => _probeHarness ?? Harness; init => _probeHarness = PyPath.Str(value); }
+    string? _probeHarness;
+
+    /// <summary>A caller's own child-launching adapter kinds, added to runcontrol's (Receipts.ReceiptRoles).</summary>
+    public IReadOnlySet<string>? MoreLaunchKinds { get; init; }
+
+    PyDict MeasureNow(string pid) => MeasureProgram != null ? MeasureProgram(pid) : PlanIdentity.Measure(Opts, ProbeHarness, pid);
 
     /// <summary>One child through the runner, under this invocation's deadline, its log in logs/ID.txt.</summary>
     public ChildResult Launch(ChildJob job) => RunJob != null ? RunJob(job) : new ChildRunner("evalrun-check", Logs, Deadline).Run(job, echo: true);
@@ -294,7 +302,7 @@ public sealed class Executor
         string jobId = key + jobSuffix;
         if (jobId.Length > 100) jobId = jobId[..100];
         string what = $"check {Ev.Str(check["checkId"])} [{Ev.Str(arm["armId"])}]";
-        var pids = Receipts.ReceiptRoles(new PyDict { ["adapter"] = adapter, ["part"] = part }).Select(kv => Ev.Str(kv.Value)).ToList();
+        var pids = Receipts.ReceiptRoles(new PyDict { ["adapter"] = adapter, ["part"] = part }, MoreLaunchKinds).Select(kv => Ev.Str(kv.Value)).ToList();
         CheckLaunch(pids, what);   // before anything of this job is written
         foreach (string p in outputs) Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(p))!);
         var pre = new Dictionary<string, string?>(StringComparer.Ordinal);
@@ -341,7 +349,7 @@ public sealed class Executor
         string? startedIso, string? endedIso, IEnumerable<string> outputs, string? log, PyDict v, string? baseEmit = null,
         PyDict? extra = null, object? verdict = null, string? execution = null, object? inputs = null)
     {
-        var roles = Receipts.ReceiptRoles(new PyDict { ["adapter"] = adapter, ["part"] = part });
+        var roles = Receipts.ReceiptRoles(new PyDict { ["adapter"] = adapter, ["part"] = part }, MoreLaunchKinds);
         var drift = roles.Select(kv => Ev.Str(kv.Value)).Where(Changed.ContainsKey).Select(pid => Changed[pid]).ToList();
         if (drift.Count > 0 && PyValue.Truthy(v["accepted"]))
         {
@@ -363,11 +371,11 @@ public sealed class Executor
         if (PyValue.Truthy(v["accepted"]) && v["detector"] == null)
             result["detectorUndetermined"] = "this adapter's output contract does not say where a finding count lives "
                 + "(no adapter.findings path), so the detector result is undetermined rather than null-as-clean";
-        bool launches = PyValue.Truthy(adapter.Get("exe")) && adapter.Get("kind") is string kind && Receipts.LaunchKinds.Contains(kind);
+        bool launches = PyValue.Truthy(adapter.Get("exe")) && adapter.Get("kind") is string kind && Receipts.Launches(kind, MoreLaunchKinds);
         var receipt = Receipts.WriteReceipt(Run, Plan, check, arm, part, adapter, argv, res?.RunId, ParentRunId, startedIso, endedIso,
             res?.ExitCodeUnsigned, outputs, log,
             ConsumedFor(arm, adapter, baseEmit: baseEmit, identity: v.Get("identity") as PyDict, inputs: inputs, programs: Bind(roles),
-                tool: launches ? PlanIdentity.ToolRecord(Harness, Ev.Str(adapter["exe"])) : null),
+                tool: launches ? PlanIdentity.ToolRecord(ProbeHarness, Ev.Str(adapter["exe"])) : null),
             v, result, extra);
         var first = rej.Count > 0 ? PyValue.Dict(rej[0]) : null;
         Ledger.Transition(Ev.Str(check["checkId"]), Ev.Str(arm["armId"]), part, status,
@@ -386,7 +394,7 @@ public sealed class Executor
     public List<string> CommonFlags() => ScenePreflight.CommonFlags(Opts);
 
     /// <summary>The child's program: a --probe-cmd prefix, else the probe's build; null when there is neither.</summary>
-    public List<string>? ExeArgv(PyDict adapter) => PlanIdentity.ProbeArgv(Opts, Harness, adapter.Get("exe") as string);
+    public List<string>? ExeArgv(PyDict adapter) => PlanIdentity.ProbeArgv(Opts, ProbeHarness, adapter.Get("exe") as string);
 
     /// <summary>Each {name} of the substitutions replaced in each argument.</summary>
     public static List<string> Expand(IEnumerable<string> args, IEnumerable<KeyValuePair<string, string>> subs) =>
