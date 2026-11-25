@@ -106,9 +106,6 @@ internal static class FenceGuard
         ],
         SkillReadsInside:
         [
-            new("integration/housecarl/evalsettings.py", ["plugin + .claude-plugin"],
-                "the agent route's prefix is read from houseCARL's plugin manifest",
-                "step 3, when the module is its own plugin and reads its own manifest"),
         ],
         SkillExempt:
         [

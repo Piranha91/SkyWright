@@ -56,7 +56,6 @@ FILE_NAME = "houseCARL.evaluation.json"
 TEMPLATE = HERE / "evalsettings_window.html"
 DEFAULT_TIMEOUT_S = 3600.0
 EXIT_OK, EXIT_REFUSED = 0, 2
-PLUGIN_DIR = SW.CHECKOUT / "external" / "houseCARL" / "plugin"
 
 
 def _model_agents(folder: Path) -> dict[str, str]:
@@ -79,8 +78,8 @@ def _model_agents(folder: Path) -> dict[str, str]:
 
 
 def _plugin_name() -> str:
-    """The plugin's name, which the host puts before an agent's name (`housecarl:model-...`)."""
-    return str(json.loads((PLUGIN_DIR / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["name"])
+    """The module plugin's name, which the host puts before an agent's name (`skywright:model-...`)."""
+    return str(json.loads((reporting_data.PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["name"])
 
 
 import reporting_data  # noqa: E402  the module's own agent definitions
@@ -488,10 +487,12 @@ def stamp(doc: dict, by: str) -> dict:
 
 
 def houseCARL_version() -> str:
+    """The pinned houseCARL's version, as git describes the pin (no houseCARL file is read)."""
     try:
-        manifest = json.loads((SW.CHECKOUT / "external" / "houseCARL" / "plugin" / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-        return str(manifest.get("version") or "unknown")
-    except (OSError, ValueError):
+        out = subprocess.run(["git", "-C", str(SW.HOUSECARL), "describe", "--tags", "--always"], capture_output=True,
+                             text=True, timeout=30)
+        return out.stdout.strip() or "unknown"
+    except (OSError, subprocess.SubprocessError):
         return "unknown"
 
 

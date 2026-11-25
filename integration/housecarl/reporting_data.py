@@ -1,6 +1,7 @@
 """Where the houseCARL integration module keeps its own data: the report and reel words and rules
 (reporting-data/report-priorities.json), the scene policy (reporting-data/scene-policy.json), the narration words
-(reporting-data/narration.json) and the agent definitions a models.* setting routes a step to (model-agents/).
+(reporting-data/narration.json) and the agent definitions a models.* setting routes a step to (the module plugin's
+claude-plugin/agents/).
 
 The one owner of those places. They came from houseCARL's evaluation-reporting skill and plugin/agents; the skill is now
 the module's own (claude-plugin/), and nothing reads houseCARL's copies (SkyWright.Guards fence). Paths are relative to this file, so a copy of the module (a suite's scratch
@@ -18,7 +19,8 @@ SCENE_POLICY = DATA / "scene-policy.json"
 GROUPS = MODULE.parent.parent / "data" / "scene-policy.json"
 GROUP_KEYS = ("groupKey", "groupKeyWhy", "types", "otherType")
 NARRATION = DATA / "narration.json"
-AGENTS = MODULE / "model-agents"
+PLUGIN = MODULE / "claude-plugin"   # the module as a Claude Code plugin (its manifest, skills and agents)
+AGENTS = PLUGIN / "agents"
 
 
 def scene_policy(presentation: Path | None = None, groups: Path | None = None) -> dict:

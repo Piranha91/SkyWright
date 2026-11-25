@@ -1,0 +1,8 @@
+{
+  "name": "skywright",
+  "displayName": "SkyWright",
+  "version": "0.1.0",
+  "description": "SkyWright's houseCARL integration module as a Claude Code plugin: the skills that run a world-edit compatibility evaluation of Skyrim mods with SkyWright and turn its bundle into a report and a narrated reel, the skill that drives SkyWright's app through its workbench tools, and the model agents an evaluation's models.* settings route a step to. Load it in place from a SkyWright checkout (claude --plugin-dir <checkout>/integration/housecarl/claude-plugin), beside houseCARL.",
+  "author": { "name": "SkyWright" },
+  "keywords": ["skyrim", "modding", "conflicts", "evaluation"]
+}

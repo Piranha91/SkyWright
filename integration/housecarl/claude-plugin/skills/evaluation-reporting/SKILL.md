@@ -32,7 +32,8 @@ build, each where that build's `skywright-layout.json` puts it. The Python tools
 (`buildlayout.py` looks in their own checkout), so run them from the same checkout as the programs, never from
 another one. Do not rebuild `SW` while an evaluation runs from it: a build replaces the programs in use.
 The report's data (`report-priorities.json`, `scene-policy.json`, `narration.json`) lives in SkyWright's integration
-module, `SW/integration/housecarl/reporting-data/`, and the model agents a `models.*` setting routes a step to in `SW/integration/housecarl/model-agents/`;
+module, `SW/integration/housecarl/reporting-data/`, and the model agents a `models.*` setting routes a step to are this
+plugin's own agents (`SW/integration/housecarl/claude-plugin/agents/`, named `skywright:model-claude-…`);
 an edit to them is a SkyWright change.
 
 The contract is [EVALUATION-PRESENTATION.md](../../../EVALUATION-PRESENTATION.md), the module's own document.

@@ -280,6 +280,8 @@ def t8(root):
 
 import reporting_data  # noqa: E402
 AGENTS = reporting_data.AGENTS
+# the module plugin's name, read here from its manifest; the host puts it before each agent's name
+PLUGIN_NAME = json.loads((reporting_data.PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["name"]
 SHORT_NAMES = ("haiku", "sonnet", "opus", "fable")
 MODEL_KEYS = ("models.recordChecks", "models.imageReview", "models.flipPlan", "models.rewriteExplanations",
               "models.checkExplanations")
@@ -354,8 +356,8 @@ def t10(root):
         except ValueError:
             j = {}
         check(r.returncode == 0 and j.get("use") == "agent" and j.get("value") == mid
-              and j.get("agent") == f"housecarl:{agents[mid]['name']}",
-              f"10: {key}={mid} routes to housecarl:{agents[mid]['name']} ({r.stdout.strip()!r})")
+              and j.get("agent") == f"{PLUGIN_NAME}:{agents[mid]['name']}" and PLUGIN_NAME == "skywright",
+              f"10: {key}={mid} routes to {PLUGIN_NAME}:{agents[mid]['name']} ({r.stdout.strip()!r})")
         env = {k: v for k, v in b.env.items() if k != "CLAUDECODE"}
         rn = subprocess.run([sys.executable, str(EVALSETTINGS), "route", key], capture_output=True, text=True, env=env)
         check(rn.returncode == 2 and "only Claude Code can start an agent on a named model" in rn.stderr
@@ -375,7 +377,7 @@ def t10(root):
 
 def t11(root):
     agents = shipped_agents()
-    check(bool(agents), "11: the module's model-agents folder holds agent definitions")
+    check(bool(agents), "11: the module plugin's agents folder holds agent definitions")
     for mid, a in agents.items():
         check(mid.startswith("claude-") and mid not in SHORT_NAMES, f"11: {a['stem']} names a full model ID ({mid})")
         check(a["name"] == a["stem"] == f"model-{mid}", f"11: {a['stem']}: file, name and model agree")
