@@ -4,7 +4,7 @@ plan, a concise illustrated Markdown report, an HTML rendition, a paginated PDF 
 limit, a complete evidence index and a presentation manifest.
 
 No model call, no paid service, no network. Every sentence the report prints is a template sentence from
-the evaluation-reporting skill's `report-priorities.json`, bound to numbers and names the bundle itself
+the integration module's `reporting-data/report-priorities.json`, bound to numbers and names the bundle itself
 carries: the disposition's findings, missing list, order evaluation and unassessed block; the receipts'
 coverage lines; the emits' conflict rows; the registry copy's titles, claims and limits. Where the bundle
 lacks something the report says "not assessed" or "not supplied" - never a guess.
@@ -13128,7 +13128,7 @@ def validate_answer(plan: dict, f: dict, text: str, pr: dict) -> list[dict]:
 
 
 def load_narration() -> dict:
-    """The narrator's words, the glossary and the fidelity judge's instructions (the reporting skill's narration.json)."""
+    """The narrator's words, the glossary and the fidelity judge's instructions (the module's reporting-data/narration.json)."""
     d = load_json(NARRATION)
     n = (d or {}).get("narrator") if isinstance(d, dict) else None
     if (not isinstance(n, dict) or not all(isinstance(n.get(k), str) for k in ("lead", "plainWords", "glossaryPointer", "binding"))
