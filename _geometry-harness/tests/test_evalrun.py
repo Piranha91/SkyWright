@@ -1691,17 +1691,36 @@ def case_19(tmp):
     mao = "loadability.masters-and-order"
     _, _, _, scen = case_paths(case)
 
-    def run_case(tag, extra):
+    # case 16's fixture supplies a patch file on one arm: the qualification has a payload there (A4)
+    c16 = "case-16-supplied-identity"
+    o16 = load(EXPECTED / f"{c16}.json")
+    supplied = ["--supplied", f"{o16['fixture']['suppliedPlugin']}={GEN / 'cases' / c16 / 'supplied' / 'candidate-02-supplied.json'}",
+                "--instance", GEN / "instance", "--profile", "fixture", "--game", GEN / "game"]
+
+    def run_case(tag, extra, fixture=case):
         run = tmp / f"{case}-{tag}"
-        expect(do_plan(run, case, ["--select", qual] + extra, registry=reg).returncode, 0,
+        _, _, _, fscen = case_paths(fixture)
+        expect(do_plan(run, fixture, ["--select", qual] + extra, registry=reg).returncode, 0,
                f"{case}/{tag}: plan exit", "§4.6")
-        expect(evalrun(["run", "--run", run], scen).returncode, 0, f"{case}/{tag}: run exit", "§4.6")
-        expect(evalrun(["finalize", "--run", run], scen).returncode, 0, f"{case}/{tag}: finalize exit", "D7")
+        expect(evalrun(["run", "--run", run], fscen).returncode, 0, f"{case}/{tag}: run exit", "§4.6")
+        expect(evalrun(["finalize", "--run", run], fscen).returncode, 0, f"{case}/{tag}: finalize exit", "D7")
         plan = load(run / "plan.json") or {}
         base = next((a["armId"] for a in plan.get("arms") or [] if a.get("kind") == "baseline"), "baseline")
         cand = next((a["armId"] for a in plan.get("arms") or [] if a.get("kind") == "candidate"), None)
+        run_case.arms = [a["armId"] for a in plan.get("arms") or []]
+        run_case.run = run
         return (ledger_entries(load(run / "ledger.json") or {}), load(run / "disposition.json") or {},
                 base, cand)
+
+    def no_payload(led, disp, aid, tag):
+        """A4: no arm of the plan supplies a patch file: the row is not-applicable with its sentence, whatever its
+        prerequisite, and is neither a completed null check nor missing."""
+        expect(execution_of(led.get(f"{qual}__{aid}")), "not-applicable", f"{case}/{tag}: {qual} [{aid}] status", "A4")
+        note = ((load(run_case.run / "receipts" / f"{qual}__{aid}.json") or {}).get("result") or {}).get("note")
+        expect(note, "no arm of this plan supplies a patch file, so there is no payload to qualify",
+               f"{case}/{tag}: {qual} [{aid}] says there is no payload to qualify", "A4")
+        check((qual, aid) not in nulls(disp), f"{case}/{tag}: {qual} [{aid}] is NOT a completed null check (A4)")
+        check((qual, aid) not in missing(disp), f"{case}/{tag}: {qual} [{aid}] is not listed missing (A4)")
 
     def nulls(disp):
         return {(r.get("checkId"), r.get("armId")) for r in (field(disp, "completedNullChecks") or [])}
@@ -1720,37 +1739,43 @@ def case_19(tmp):
                f"{case}/{tag}: {cid} [{aid}] is listed missing", "D7")
         expect(field(disp, "complete"), False, f"{case}/{tag}: evaluation.complete", "D7")
 
-    # the qualification's prerequisite unsettled (excluded): candidate-qualification blocks on every arm
+    # the qualification's prerequisite unsettled (excluded), no arm supplying a patch file: an answer the plan gives (A4)
     led, disp, base, cand = run_case("order-excluded",
                                      ["--exclude", f"{order}=fixture: the prerequisite is deliberately unsettled"])
     for aid in (base, cand):
-        blocked_on(led, disp, qual, aid, order, "order-excluded")
+        no_payload(led, disp, aid, "order-excluded")
+    # ... and with a supplied patch file the same exclusion blocks the qualification on every arm, by name
+    led, disp, base, cand = run_case("supplied-order-excluded",
+                                     ["--exclude", f"{order}=fixture: the prerequisite is deliberately unsettled"] + supplied, c16)
+    for aid in run_case.arms:
+        blocked_on(led, disp, qual, aid, order, "supplied-order-excluded")
 
     # every prerequisite settled: order-evaluation derives on the candidate and is not-applicable on the baseline
-    # (an answer, not an absence: Prerequisites.Satisfied), and candidate-qualification derives and is a completed
-    # null, as before
+    # (an answer, not an absence: Prerequisites.Satisfied); with no payload the qualification is not-applicable (A4)
     led, disp, base, cand = run_case("settled", [])
     expect(execution_of(led.get(f"{order}__{cand}")), "completed",
            f"{case}/settled: {order} [{cand}] completed (the prerequisite really is settled)", "§4.6")
     expect(execution_of(led.get(f"{order}__{base}")), "not-applicable",
            f"{case}/settled: {order} [{base}] not-applicable (the prerequisite is settled by its answer)", "§4.6")
     for aid in (base, cand):
-        expect(execution_of(led.get(f"{qual}__{aid}")), "completed", f"{case}/settled: {qual} [{aid}] status",
+        no_payload(led, disp, aid, "settled")
+    # ... and with a supplied patch file it derives on every arm and is a completed null, as before
+    led, disp, base, cand = run_case("supplied-settled", supplied, c16)
+    for aid in run_case.arms:
+        expect(execution_of(led.get(f"{qual}__{aid}")), "completed", f"{case}/supplied-settled: {qual} [{aid}] status",
                "§4.6")
-        check((qual, aid) in nulls(disp), f"{case}/settled: {qual} [{aid}] is a completed null check (D7)")
+        check((qual, aid) in nulls(disp), f"{case}/supplied-settled: {qual} [{aid}] is a completed null check (D7)")
 
     # the order check's own prerequisite unsettled: order-evaluation blocks on the candidate arm; the baseline
-    # keeps its answer (the reference is not measured against itself), and qualification blocks on order-evaluation
-    # on the candidate arm (the chain), while the baseline's qualification, over a settled answer, derives
+    # keeps its answer (the reference is not measured against itself); the qualification, with no payload, answers
+    # not-applicable on both arms (A4)
     led, disp, base, cand = run_case("masters-excluded",
                                      ["--exclude", f"{mao}=fixture: the prerequisite is deliberately unsettled"])
     blocked_on(led, disp, order, cand, mao, "masters-excluded")
     expect(execution_of(led.get(f"{order}__{base}")), "not-applicable",
            f"{case}/masters-excluded: {order} [{base}] stays not-applicable", "§4.6")
-    blocked_on(led, disp, qual, cand, order, "masters-excluded")
-    expect(execution_of(led.get(f"{qual}__{base}")), "completed",
-           f"{case}/masters-excluded: {qual} [{base}] derives over the baseline's settled answer", "§4.6")
-
+    for aid in (base, cand):
+        no_payload(led, disp, aid, "masters-excluded")
 
 # ------------------------------------------- defect iv: the budget is a deadline on the running tree (20)
 

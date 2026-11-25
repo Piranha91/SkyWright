@@ -49,6 +49,9 @@ public static class DerivedRows
         return new Consumed(consumedBy, byName);
     }
 
+    /// <summary>candidate-qualification's answer on a plan none of whose arms supplies a patch file.</summary>
+    public const string NoPayload = "no arm of this plan supplies a patch file, so there is no payload to qualify";
+
     /// <summary>The byte rule of a patch's qualification: a file is qualified only when its sha256 (taken from
     /// <paramref name="from"/>) equals a plugin an accepted receipt consumed. <paramref name="noHash"/> is the clause
     /// saying why there is no sha256; <paramref name="name"/> labels the file and finds same-named plugins.</summary>
@@ -147,6 +150,14 @@ public static class DerivedRows
         }
         else if (Ev.Eq(adapter.Get("derives"), "candidate-qualification") || cid.EndsWith("candidate-qualification", StringComparison.Ordinal))
         {
+            // with no arm of the plan supplying a patch file there is no payload to qualify: an answer the frozen plan
+            // gives, so it waits on no prerequisite, is never missing and is never a "no finding" for files nobody read
+            if (!PyValue.Iter(ex.Plan["arms"]).Select(PyValue.Dict)
+                    .Any(a => Ev.Items(PyValue.Dict(Ev.G(a, "supplied", new PyDict())).Get("declaredFiles")).Any()))
+            {
+                ex.Account(check, arm, "not-applicable", null, NoPayload);
+                return;
+            }
             if (Blocked()) return;
             var consumed = ConsumedBy(receipts);
             derivedFrom = Vals(receipts).Where(Accepted).Select(r => r["receiptId"]).ToList();
