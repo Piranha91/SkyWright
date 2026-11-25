@@ -1,5 +1,6 @@
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 // `navownprobe --navrepair-selftest`: NavRepair's plan on small in-memory navmeshes, for the shapes the plugin fixture does

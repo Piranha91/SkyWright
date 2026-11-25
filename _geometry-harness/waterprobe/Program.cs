@@ -186,13 +186,13 @@ if (cellQuery is not null)
         foreach (var l in r.Cell.Land)
         {
             var hh = l.Heights; float mn = float.MaxValue, mx = float.MinValue, sum = 0f;
-            for (int y = 0; y < HousecarlCore.LandHeight.Side; y++) for (int x = 0; x < HousecarlCore.LandHeight.Side; x++) { var v = hh[x, y]; mn = MathF.Min(mn, v); mx = MathF.Max(mx, v); sum += v; }
+            for (int y = 0; y < SkyWright.Engine.LandHeight.Side; y++) for (int x = 0; x < SkyWright.Engine.LandHeight.Side; x++) { var v = hh[x, y]; mn = MathF.Min(mn, v); mx = MathF.Max(mx, v); sum += v; }
             Console.WriteLine($"   LAND by {PluginName(l.Plugin),-40} z min {mn:0} / mean {sum / (33f * 33f):0} / max {mx:0}; centre {hh[16, 16]:0}"
                             + (r.RWin.Z is { } zw ? $"; below the winner's surface ({zw:0}) at {CellBoundaryIndex.VisibleShare(hh, zw):P0} of vertices" : ""));
             // WP_CELL_GRID=1 — the 33×33 heights, north row first, west to east: the spot-picker for a Part C station.
             if (Environment.GetEnvironmentVariable("WP_CELL_GRID") == "1")
-                for (int y = HousecarlCore.LandHeight.Side - 1; y >= 0; y--)
-                    Console.WriteLine($"      y{y,2} " + string.Join(" ", Enumerable.Range(0, HousecarlCore.LandHeight.Side).Select(x => $"{hh[x, y],6:0}")));
+                for (int y = SkyWright.Engine.LandHeight.Side - 1; y >= 0; y--)
+                    Console.WriteLine($"      y{y,2} " + string.Join(" ", Enumerable.Range(0, SkyWright.Engine.LandHeight.Side).Select(x => $"{hh[x, y],6:0}")));
         }
     }
     return 0;

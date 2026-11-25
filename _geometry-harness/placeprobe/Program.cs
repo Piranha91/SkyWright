@@ -3,6 +3,7 @@ using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
 using HousecarlCore.Progress;
+using SkyWright.Engine;
 
 // Milestone-1 proof harness: run PlacementExtract over a REAL plugin and report what came out.
 // usage: placeprobe <plugin.esp|esm> [--refs <FormID:Plugin>] [--cell <EditorID>]

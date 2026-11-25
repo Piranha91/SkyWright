@@ -74,7 +74,7 @@ The "kind" column is the Python case's: U a pure function, M a replaced internal
 | 59 | the records stage takes the machine slot for its backstop | M | ported | `case 59 the records stage takes the machine slot for its backstop`; also the 28 `records stage: ...` cases (evalpipeline.py's stage_records with its children stood in for) |
 | 60 | a heavy child holds the slot for its own hold minutes | M | ported | `case 60 a heavy child holds the slot for its own hold minutes` (the child launch is built now) |
 | 61 | evaluate stops itself at its budget with the slot held that long | M | ported | `case 61 evaluate stops itself at its budget with the slot held that long` |
-| 62 | a heavy child stopped from outside leaves no lock | S | ported | `case 62 a heavy child stopped from outside leaves no lock when its tree is confirmed gone, and its lock when it is not`, with the runner stood in; a real process tree stopped at its deadline is the child runner's own case in run-log-guard |
+| 62 | a heavy child stopped from outside leaves no lock | S | ported | `case 62 a heavy child stopped from outside leaves no lock when its tree is confirmed gone, and its lock when it is not`, with the runner stood in; a real process tree stopped at its deadline is the child runner's own case in `SkyWright.Guards child-runner` |
 | 63 | the outer deadline sits past the slot command's own bounds | M | ported | `case 63 the outer deadline sits past the slot command's own bounds` |
 | 64 | the review packet names no media bundle the report did not use | M | dropped | as 33 |
 | 65 | a run with no frame stops for a person with the true reason | M | dropped | as 33 |

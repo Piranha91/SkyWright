@@ -19,4 +19,9 @@
     <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The child-runner guard plants a containment failure through ChildRunner.FailContainmentForGuard. -->
+    <InternalsVisibleTo Include="SkyWright.Guards" />
+  </ItemGroup>
+
 </Project>

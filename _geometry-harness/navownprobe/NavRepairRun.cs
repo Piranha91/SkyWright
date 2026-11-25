@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 // navownprobe's repair lanes (task 2026-11-16-navmesh-repair): --repair-plan writes NavRepair's plan for this run's findings

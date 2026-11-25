@@ -5,12 +5,14 @@ using SkyWright.Guards;
 //   run-coverage                             every entry point has a row in docs/run-coverage.json (RegistryGuards)
 //   tool-index [--write]                     docs/TOOLS.md is what that manifest renders to (RegistryGuards)
 //   fence [--self-check]                     nothing outside integration/housecarl/ refers into it (FenceGuard)
+//   child-runner                             the engine's child runner on real children and the real clock (ChildRunnerGuard)
 var guards = new Dictionary<string, Func<string[], int>>(StringComparer.Ordinal)
 {
     ["harness-suites"] = HarnessSuitesGuard.RunGuard,
     ["run-coverage"] = RegistryGuards.RunCoverage,
     ["tool-index"] = RegistryGuards.ToolIndex,
     ["fence"] = FenceGuard.RunGuard,
+    ["child-runner"] = ChildRunnerGuard.RunGuard,
 };
 if (args.Length == 0 || !guards.TryGetValue(args[0], out var run))
 {

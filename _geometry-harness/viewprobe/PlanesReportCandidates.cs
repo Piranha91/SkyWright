@@ -186,12 +186,12 @@ static class PlanesReportCandidates
 static class PlanesReportCandidatesSelfTest
 {
     static PlaneRender Plane(string key) => new(Mutagen.Bethesda.Plugins.FormKey.Factory(key), PlaneKind.PortalBox,
-        new System.Numerics.Vector3(512, 0, 256), new System.Numerics.Vector3(1, 2, 3), new HousecarlCore.Vec3(0, 0, 0.5f),
+        new System.Numerics.Vector3(512, 0, 256), new System.Numerics.Vector3(1, 2, 3), new SkyWright.Engine.Vec3(0, 0, 0.5f),
         1f, PlaneProvenance.Vanilla, "Skyrim.esm", null, new[] { "Skyrim.esm" }, "FF000001");
 
     static RefOcclusion Ref(string refKey, string mesh, bool constructed = false, string? issue = null) => new()
     {
-        Ref = new SceneRef(mesh, new HousecarlCore.Vec3(10, -20, 30.5f), new HousecarlCore.Vec3(0, 0.25f, 1), 1.5f, false,
+        Ref = new SceneRef(mesh, new SkyWright.Engine.Vec3(10, -20, 30.5f), new SkyWright.Engine.Vec3(0, 0.25f, 1), 1.5f, false,
             RefKey: Mutagen.Bethesda.Plugins.FormKey.Factory(refKey), BaseKey: Mutagen.Bethesda.Plugins.FormKey.Factory("000100:Skyrim.esm"),
             Constructed: constructed),
         AssetHash = "AA" + refKey[..6], Issue = issue,
@@ -200,7 +200,7 @@ static class PlanesReportCandidatesSelfTest
     static ShapeOcclusion Shape(string name, int block, string? issue = null) => new()
     {
         Name = name, Block = block, AssetHash = "SH" + block, Issue = issue,
-        Stored = new SkyWright.Engine.NifShapeBound(new HousecarlCore.Vec3(1, 2, 3), 40, new HousecarlCore.Vec3(1, 2, 3), 40, new[] { 0, 3 }, -1),
+        Stored = new SkyWright.Engine.NifShapeBound(new SkyWright.Engine.Vec3(1, 2, 3), 40, new SkyWright.Engine.Vec3(1, 2, 3), 40, new[] { 0, 3 }, -1),
         World = new SkyWright.Engine.SphereBound(new System.Numerics.Vector3(5, 6, 7), 44),
     };
 

@@ -16,4 +16,9 @@
     <Compile Include="..\..\_geometry-harness\_shared\CheckoutLayout.cs" Link="CheckoutLayout.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The child-runner guard runs the engine's ChildRunner on real children. -->
+    <ProjectReference Include="..\SkyWright.Engine\SkyWright.Engine.csproj" />
+  </ItemGroup>
+
 </Project>

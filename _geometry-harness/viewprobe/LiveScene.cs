@@ -119,7 +119,7 @@ internal sealed class LiveSlicer
     /// placing nothing.</summary>
     internal static Dictionary<Mutagen.Bethesda.Plugins.FormKey, (int X, int Y)> CellGridsOf(
         IReadOnlyDictionary<Mutagen.Bethesda.Plugins.FormKey, Mutagen.Bethesda.Plugins.FormKey> refCells,
-        IReadOnlyDictionary<Mutagen.Bethesda.Plugins.FormKey, HousecarlCore.PlacedRef> placed) =>
+        IReadOnlyDictionary<Mutagen.Bethesda.Plugins.FormKey, SkyWright.Engine.PlacedRef> placed) =>
         refCells.Where(kv => placed.ContainsKey(kv.Key))
             .GroupBy(kv => kv.Value, kv => CellOf(placed[kv.Key].Position.X, placed[kv.Key].Position.Y))
             .Select(g => (Cell: g.Key, Total: g.Count(), Top: g.GroupBy(c => c).OrderByDescending(c => c.Count()).First()))

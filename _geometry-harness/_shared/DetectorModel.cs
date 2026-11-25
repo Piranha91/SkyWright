@@ -1567,7 +1567,7 @@ public static class DetectorModel
     // -----------------------------------------------------------------------------------
     // LANDSCAPE SEAMS (roadmap 4.9, Part B — 2026-09-04). The engine draws each cell's LAND on its own;
     // two adjacent cells whose shared-edge vertices disagree show a step or a gap. Heights come from
-    // HousecarlCore.LandHeight; this is the rule over the three deltas the index measures.
+    // SkyWright.Engine.LandHeight; this is the rule over the three deltas the index measures.
     // -----------------------------------------------------------------------------------
 
     /// <summary>Max |Δ| and the count over <paramref name="eps"/> between two 33-vertex edges.</summary>

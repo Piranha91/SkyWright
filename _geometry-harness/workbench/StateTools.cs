@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Numerics;
 using System.Text.Json;
 using HousecarlCore;
+using SkyWright.Engine;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using Mutagen.Bethesda.Plugins;

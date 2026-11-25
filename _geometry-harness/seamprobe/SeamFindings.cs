@@ -1,5 +1,6 @@
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 // seamprobe's decisions, out of the top-level statements so --self-test calls the code the run calls: which edge-adjacent

@@ -23,5 +23,5 @@ static class ContactNotes
         return node;
     }
 
-    public static double[]? Frame(HousecarlCore.Vec3 origin) => SkyWright.Engine.PairFrame.IsWorld(origin) ? null : new double[] { origin.X, origin.Y, origin.Z };
+    public static double[]? Frame(SkyWright.Engine.Vec3 origin) => SkyWright.Engine.PairFrame.IsWorld(origin) ? null : new double[] { origin.X, origin.Y, origin.Z };
 }

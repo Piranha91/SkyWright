@@ -5,6 +5,7 @@ using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
 using HousecarlCore.Progress;
+using SkyWright.Engine;
 
 // LANDSCAPE SEAMS — mismatched heights and textures where two cells meet (roadmap 4.9, Part B; 2026-09-04).
 //
@@ -20,7 +21,7 @@ using HousecarlCore.Progress;
 // Inherited pre-dates the later plugin's edit. Textures (the base layer of the quadrants along the edge)
 // are a seam of their own, reported apart, never folded into the height verdict.
 //
-// Heights come from HousecarlCore.LandHeight — one decode for the renderer and the detector. The
+// Heights come from SkyWright.Engine.LandHeight — one decode for the renderer and the detector. The
 // facts come from CellBoundaryIndex, shared with waterprobe; the decisions are DetectorModel's.
 //
 // Standing rules: the vanilla floor (both winners Bethesda) measured and printed before any class count

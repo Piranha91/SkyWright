@@ -1,11 +1,12 @@
 using System.Collections;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Skyrim;
 
 namespace ViewProbe;
 
 // THE TERRAIN WALK'S RULE FOR ONE CELL COPY'S LAND, in load order (Program.cs's terrain walk; tested by
-// --moved-ref-selftest, T1). The classification is the core's one rule (HousecarlCore.LandHeight.Classify), shared with
+// --moved-ref-selftest, T1). The classification is the core's one rule (SkyWright.Engine.LandHeight.Classify), shared with
 // PlacementExtract and so with every floor filing:
 //   - a cell copy with no LAND leaves the square's earlier terrain as it is;
 //   - a LAND that DECLARES no heights removes the square's earlier terrain from every map the walk keeps, so nothing is

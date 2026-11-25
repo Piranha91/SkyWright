@@ -1,5 +1,6 @@
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 // CLOBBERED, the decisions between the walk and the emit: which navmesh records are clobbered (DetectorModel.FindClobber

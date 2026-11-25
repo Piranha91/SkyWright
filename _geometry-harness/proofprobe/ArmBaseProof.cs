@@ -1,5 +1,6 @@
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 // PROOF BY CONSTRUCTION — a trap arm's own base link reaches the index only as RefArmBase (C1758). RefBase and BaseChanges,

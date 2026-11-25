@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using HarnessShared;
 using HousecarlCore.Progress;
+using SkyWright.Engine;
 
 namespace RunControl;
 

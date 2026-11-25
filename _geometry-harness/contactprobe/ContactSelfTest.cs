@@ -57,7 +57,7 @@ static class ContactSelfTest
             RefGeometry? Decode(string path, byte[] bytes, bool first)
             {
                 allCalls++; if (first) firstCalls++;
-                var box = new SkyWright.Engine.Aabb(new HousecarlCore.Vec3(0, 0, 0), new HousecarlCore.Vec3(bytes[0], bytes[1], bytes[2]), false);
+                var box = new SkyWright.Engine.Aabb(new SkyWright.Engine.Vec3(0, 0, 0), new SkyWright.Engine.Vec3(bytes[0], bytes[1], bytes[2]), false);
                 return new RefGeometry(box, ContactIndex.BoxSoup(box), ContactIndex.BoxSoup(box), 'c', 'c', HostUsable: true, Array.Empty<(string, string)>(), false);
             }
             var reader = new MeshGeometryReader(path => File.Exists(path) ? File.ReadAllBytes(path) : null, Decode);

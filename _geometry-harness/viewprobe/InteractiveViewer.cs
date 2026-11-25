@@ -215,7 +215,7 @@ sealed class InteractiveOptions
     public Func<float, float, float?>? TerrainHeightAt;    // ground height at Skyrim X,Y on the drawn terrain; null off the land
     public IReadOnlyCollection<(int X, int Y)> LandCells = Array.Empty<(int, int)>();   // grid cells whose land the scene read
     public IReadOnlyDictionary<FormKey, string>? BaseTypes; // a modeled base's record type (Static, Tree, Light, ...)
-    public IReadOnlyDictionary<FormKey, (HousecarlCore.Vec3 Position, HousecarlCore.Vec3 Rotation)>? UndrawnAt;   // refs left out as markers or for having no model
+    public IReadOnlyDictionary<FormKey, (SkyWright.Engine.Vec3 Position, SkyWright.Engine.Vec3 Rotation)>? UndrawnAt;   // refs left out as markers or for having no model
 
     public void AddLayerMesh(string layer, GlMesh mesh)
     {

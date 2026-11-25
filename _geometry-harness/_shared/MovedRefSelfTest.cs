@@ -1,5 +1,6 @@
 using System.Reflection;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
 
@@ -136,7 +137,7 @@ public sealed partial class MovedRefSelfTest
         try
         {
             using var m = SkyrimMod.CreateFromBinaryOverlay(bad, MovedRefFixture.Rel);
-            try { foreach (var cp in HousecarlCore.PlacementExtract.FromMod(m)) _ = cp.Refs.Count; pre = "opens; enumerating does NOT throw"; }
+            try { foreach (var cp in SkyWright.Engine.PlacementExtract.FromMod(m)) _ = cp.Refs.Count; pre = "opens; enumerating does NOT throw"; }
             catch (Exception ex) { pre = "opens; enumerating throws " + ex.GetType().Name; }
         }
         catch (Exception ex) { pre = "does not open: " + ex.GetType().Name; }
