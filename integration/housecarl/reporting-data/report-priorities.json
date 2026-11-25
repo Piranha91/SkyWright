@@ -979,7 +979,8 @@
       "notAcceptedQualifier": "This comparison is not counted as an accepted result: {count} {rowNoun} could not be measured in both setups, so these counts are measurements, not a verdict.",
       "verdictNotAccepted": " (from a comparison not counted as an accepted result, because some rows could not be measured in both setups)",
       "missingRefused": "refused a verdict: {why}",
-      "missingUnmeasured": "was measured, but {count} {rowNoun} could not be measured in both setups, so it is not counted as an accepted result (its counts are given with it)",
+      "missingUnmeasured": "the comparison ran, but is not counted as an accepted result, because some rows could not be measured in both setups",
+      "missingUnmeasuredRows": " ({count} {rowNoun})", "missingUnmeasuredRowsLine": "Rows not measured in both setups: {list}.",
       "missingUnmeasuredRemoved": "; that setup does not load {mod}, so {mod}'s own objects cannot be measured in it, and a clash on them still needs {mod}",
       "stillHoldingPatchPlaced": "{count} of the problems in the setup it was compared with {verb} still physically there in this setup, but no longer reported as a clash between two mods: a patch now places one of the two objects (said with the prediction above).", "stillHolding": "{count} of the problems in the setup it was compared with {verb} still physically there in this setup, but no longer reported as a clash between two mods (for example because one plugin now places both objects)."
     },

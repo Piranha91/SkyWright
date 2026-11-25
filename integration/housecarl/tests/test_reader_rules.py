@@ -261,8 +261,8 @@ def reel_pres(subjects=1, extra_rows=(), summary_reason=None):
          "field": "Placement", "summary": f"PlacedObject 000B02: Placement - {OTHER}'s value lost to {A}'s",
          "values": {"lost": "Position=1,2,3; Rotation=0,0,0", "winner": "Position=1,2,-30000; Rotation=0,0,0"}},
         *extra_rows]
-    reason = summary_reason or ("was measured, but 3 rows could not be measured in both setups, so it is not counted as "
-                                "an accepted result (its counts are given with it)")
+    reason = summary_reason or ("the comparison ran, but is not counted as an accepted result, because some rows could "
+                                "not be measured in both setups")
     return {"reader": {"prediction": {"subject": A, "predictionArm": "baseline", "withoutArm": "no-a", "record": rows,
                                       "items": [{"title": "Objects occupying the same space", "count": 5, "shownAs": "pair"}],
                                       "whatToDo": ["Look at the 5 overlap candidates in game."],
@@ -318,7 +318,7 @@ def case_reel_closing_reconciled_and_readable():
     ok = (any("are from the measured load order" in str(r.get("reason")) for r in rows)
           and closing_is_the_sentence(reel)
           and float(page.get("seconds") or 0) >= reel_plan.page_words(page) / rate - 0.01
-          and "could not be measured in both setups, so it is not counted" not in json.dumps(rows))
+          and "because some rows could not be measured in both setups" not in json.dumps(rows))
     return ok, f"closing {page}; first moved rows {rows[:1]}"
 
 
@@ -495,6 +495,41 @@ def case_unmeasured_rows_in_a_setup_without_the_mod_are_explained():
     plan, md, html = removal_comparison_bundle()
     ok = f"that setup does not load {A}, so {A}'s own objects cannot be measured in it" in md
     return ok, f"md mentions {md.count('does not load')}"
+
+
+def unmeasured_comparisons_bundle():
+    # boundary step 2 (report-reel-wording task): a setup without ModA whose comparisons of two checks are not accepted
+    # (rows measured on one side only) and counted nothing; and a second setup with one such check
+    arms = [P.arm("baseline", [BASE, OTHER, A], kind="baseline"), P.arm("no-a", [BASE, OTHER]),
+            P.arm("no-o", [BASE, A])]
+    rows_c = [P.row("CONTACT", OTHER, A, f"00081{i}:{A}") for i in (1, 2)]
+    rows_o = [P.row("OVERLAP", OTHER, A, f"00091{i}:{A}", other=[f"00092{i}:{OTHER}"]) for i in (1, 2)]
+    zero = dict(verdict="DIFFERENTIAL-UNMEASURED", repaired=0, reclassified=0, created=0, newDefect=0, attributed=0)
+    return P.compile_and_render(
+        arms, {(CONTACT, "baseline"): rows_c, (CONTACT, "no-a"): [], (CONTACT, "no-o"): [],
+               (OVERLAP, "baseline"): rows_o, (OVERLAP, "no-a"): [], (OVERLAP, "no-o"): rows_o}, [A],
+        missing=[(CONTACT, "no-a", "completed", "diff"), (OVERLAP, "no-a", "completed", "diff"),
+                 (CONTACT, "no-o", "completed", "diff")],
+        order={"no-a": {"contactprobe": dict(zero, unmeasured=2), "overlapprobe": dict(zero, unmeasured=5)},
+               "no-o": {"contactprobe": dict(zero, unmeasured=3)}},
+        diff_logs={(CONTACT, "no-a"): "   unmeasured   : 2 record(s)\n", (OVERLAP, "no-a"): "   unmeasured   : 5 record(s)\n",
+                   (CONTACT, "no-o"): "   unmeasured   : 3 record(s)\n"})
+
+
+def case_unmeasured_comparisons_of_one_setup_are_one_line():
+    """The four "No result: was measured, but N rows ..." bullets: one statement per setup, with its subject, each check
+    with its own row count (a comparison that counted nothing included), and no "(its counts are given with it)"."""
+    plan, md, html = unmeasured_comparisons_bundle()
+    said = "could not be measured in both setups"
+    bullets = [x for x in md.splitlines() if x.startswith("- **") and said in x]
+    cov = [x for x in bullets if x.startswith("- **No result:")]
+    rows = [m for m in (plan.get("reader") or {}).get("missingSummary") or [] if said in str(m.get("reason"))]
+    ok = (len(cov) == 1 and "2 checks —" in cov[0] and "(2 rows)" in cov[0] and "(5 rows)" in cov[0]
+          and "No result: was measured" not in md and "its counts are given with it" not in md
+          and "its counts are given with it" not in unesc(html) and not re.search(r"\b1 checks\b", md)
+          and all(re.search(r"\d+ rows? could not", str(m.get("reason"))) is None for m in rows)
+          and any("3" in str(m.get("explanation")) for m in rows))
+    return ok, f"coverage bullets {cov}; still-needs rows {[(m.get('reason'), m.get('explanation')) for m in rows]}"
 
 
 def case_unmeasured_rows_in_a_patch_comparison_keep_the_plain_reason():
