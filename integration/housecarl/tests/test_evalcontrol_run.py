@@ -162,7 +162,22 @@ def c1933(tmp):
         print("    said: " + said[:300])
 
 
-CASES = {"case-10": case_10, "C1933": c1933}
+def plan_oracles(tmp):
+    """The plan oracles the app suite held for the media row (cases 01 and 04, D1 / A-1 and D3 / A-2): planned over the
+    app plan of each case, the overlay's runtime.supplied-observations applies (`always`) and is planned. Case 02's
+    `skipped-user` for this row does not carry over: the overlay takes no --select, so an AI-side row is never skipped
+    by the app's selection (raised for the reviewer, not homed here)."""
+    oracle = {"applicability": "yes", "status": "planned"}
+    for case, extra in (("case-01-geometry-and-quest", None),
+                        ("case-04-blocked-and-budget", ["--max-candidates", "1", "--exclude",
+                                                        "geometry.placement-contact=not-relevant-to-this-review"])):
+        run = tmp / f"oracle-{case}"
+        ER.full_run(run, case, plan_extra=extra)
+        plan = load(overlay(run) / "plan.json") or {}
+        ER.assert_plan(plan, {"plan": {"checks": {"runtime.supplied-observations": oracle}}}, case)
+
+
+CASES = {"case-10": case_10, "C1933": c1933, "plan-oracles": plan_oracles}
 
 
 if __name__ == "__main__":

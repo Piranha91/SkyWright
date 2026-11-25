@@ -174,7 +174,7 @@ def with_paths(arm_, paths):
 
 
 def run_plan_cmd(bdir: Path, out: Path, extra=()):
-    R.run_verify_bundle = lambda bundle, out_: ({"bundle": {"complete": True, "schemaSupported": True}}, 0, "")
+    R.run_verify_bundle = lambda bundle, out_, ai=None: ({"bundle": {"complete": True, "schemaSupported": True}}, 0, "")
     err, sink = io.StringIO(), io.StringIO()
     with contextlib.redirect_stderr(err), contextlib.redirect_stdout(sink):
         code = R.cmd_plan(R.build_parser().parse_args(["plan", "--bundle", str(bdir), "--out", str(out), *extra]))
@@ -395,11 +395,11 @@ def c1813_registry_v3_bundle_unchanged():
     """Item 4, the D4 condition: a bundle frozen at registry v3 (findings "rules") whose disposition predates the
     clash count compiles, and its author-advice line is the catalogue line it always was (that the v3 registry still
     validates is runcontrol's registry case)."""
-    v4 = json.loads(REGISTRY.read_text(encoding="utf-8"))
+    current = json.loads(REGISTRY.read_text(encoding="utf-8"))  # v5 since the AI-side rows left the app's registry
     f_, _ = advice_bundle(advice=[{"checkId": ADVICE, "armId": "baseline", "provenance": None, "staleness": "x"}])
     want = ("0 rows catalogued on arm baseline. A catalogue is evidence, not a defect; it completes its check and is "
             "never a finding.")
-    ok = f_.get("plain") == want and v4.get("registryVersion") == 4
+    ok = f_.get("plain") == want and current.get("registryVersion") == 5
     return ok, f"the v3 bundle's line {f_.get('plain')!r}"
 
 

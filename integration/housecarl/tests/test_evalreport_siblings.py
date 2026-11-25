@@ -37,7 +37,7 @@ sys.path.insert(0, str(HERE))
 import test_evalreport_prediction as T                  # noqa: E402  (sets the no-settings environment first)
 
 R = T.R
-R.run_verify_bundle = lambda bundle, out: ({"bundle": {"complete": True, "schemaSupported": True}}, 0, "")
+R.run_verify_bundle = lambda bundle, out, ai=None: ({"bundle": {"complete": True, "schemaSupported": True}}, 0, "")
 os.environ["HOUSECARL_RUNLOG_DIR"] = str(Path(tempfile.gettempdir()) / "hc-tests-evalreport-siblings-runlog")
 
 C, BASE, A, B = T.CONTACT, T.BASE, T.MOD_A, T.MOD_B

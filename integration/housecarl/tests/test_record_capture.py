@@ -244,7 +244,7 @@ def case_capture_python():
 
 def case_measure_order():
     """A lab entry's census to bundle, as the module measures it: runcontrol through evaluate, the capture, runcontrol
-    on through the bundle; a run that stops before the records measures with one runcontrol run; a runcontrol stop is
+    on through the bundle, then the AI-side overlay planned, evaluated, finalized, bundled and verified by evalcontrol; a run that stops before the records measures with one runcontrol run; a runcontrol stop is
     refused with its own sentence. Wrong answers: the capture before evaluate, or after the bundle (the bundle would not
     hold the imports), or a second runcontrol run that is not asked to go on."""
     root = Root()
@@ -278,7 +278,9 @@ def case_measure_order():
             EP.child, EP.capture_records = saved_child, saved_capture
     finally:
         root.close()
-    return same("through the reel", whole, ["runcontrol-through-evaluate", "capture", "runcontrol-through-bundle"]) \
+    return same("through the reel", whole, ["runcontrol-through-evaluate", "capture", "runcontrol-through-bundle",
+                                                 "overlay-plan", "overlay-evaluate", "overlay-finalize", "overlay-bundle",
+                                                 "overlay-verify"]) \
         or same("through the plan", short, ["runcontrol-through-plan"]) \
         or (None if stopped and "the census scope is incomplete." in stopped and "evaluate" in stopped else f"a runcontrol stop said: {stopped}")
 
