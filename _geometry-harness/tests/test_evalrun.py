@@ -604,73 +604,13 @@ def case_09(tmp):
 
 def case_10(tmp):
     case = "case-10-discovery-media"
-    o = load(EXPECTED / f"{case}.json")
     run = tmp / case
     do_plan(run, case)
     _, _, _, scen = case_paths(case)
     evalrun(["run", "--run", run], scen)
     evalrun(["finalize", "--run", run], scen)
-    # one media item whose fingerprint matches an accepted receipt, one that matches nothing
-    fp = None
-    cand_arm = None
-    for r in sorted((run / "receipts").glob("*.json")):
-        d = load(r)
-        if not ((d.get("validation") or {}).get("accepted")):
-            continue
-        got = (((d.get("consumed") or {}).get("configuration") or {}).get("fingerprint"))
-        if d.get("armId") == "baseline" and d.get("part") in (None, "arm"):
-            fp = fp or got
-        elif d.get("armId") != "baseline":
-            cand_arm = cand_arm or d.get("armId")
-    media_dir = run / "supplied"
-    media_dir.mkdir(parents=True, exist_ok=True)
-    for n in ("matched-shot.png", "old-shot.png", "wrong-arm-shot.png", "unsourced-shot.png"):
-        (media_dir / n).write_bytes(b"\x89PNG\r\n\x1a\n" + n.encode())
-    mediajson = run / "media.json"
-    # media item schema 2 (bundle standard §8): kind, a described subject, state, the fingerprint and where
-    # it came from, provenance. The first item's fingerprint is an accepted baseline receipt's; the second's
-    # matches nothing.
-    subject = {"checkId": "geometry.navmesh-ownership", "armId": "baseline",
-               "description": "the contested navmesh cell from the fixture's suggested camera"}
-    mediajson.write_text(json.dumps([
-        {"path": str(media_dir / "matched-shot.png"), "mediaKind": "native-screenshot", "subject": subject,
-         "state": "baseline", "configurationFingerprint": fp, "fingerprintSource": "asserted",
-         "provenance": {"tool": "devbench", "capturedUtc": "2026-09-11T00:00:00Z"}},
-        {"path": str(media_dir / "old-shot.png"), "mediaKind": "native-screenshot", "subject": subject,
-         "state": "baseline", "configurationFingerprint": "deadbeef" * 8, "fingerprintSource": "asserted",
-         "provenance": {"tool": "devbench", "capturedUtc": "2026-05-01T00:00:00Z"}},
-        # A-3's trap: a baseline-order picture declared for the CANDIDATE arm with the baseline fingerprint.
-        # The candidate's reverse part consumed the baseline order, so its receipt carries this fingerprint;
-        # the comparison set is the arm's OWN configuration, so this is a mismatch, not evidence.
-        {"path": str(media_dir / "wrong-arm-shot.png"), "mediaKind": "native-screenshot",
-         "subject": {**subject, "armId": cand_arm or "candidate-01"},
-         "state": "baseline", "configurationFingerprint": fp, "fingerprintSource": "asserted",
-         "provenance": {"tool": "devbench", "capturedUtc": "2026-09-11T00:00:00Z"}},
-        # a matching item that names no provenance: refused by that field, never accepted with provenance null
-        {"path": str(media_dir / "unsourced-shot.png"), "mediaKind": "native-screenshot", "subject": subject,
-         "state": "baseline", "configurationFingerprint": fp, "fingerprintSource": "asserted"},
-    ], indent=1), encoding="utf-8")
-    evalrun(["bundle", "--run", run, "--media", mediajson], scen)
-    man = load(run / "bundle" / "manifest.json") or {}
-    unassessed = json.dumps(man.get("unassessedMedia", []))
-    for n in o["disposition"]["unassessedMediaIncludes"]:
-        check(n in unassessed, f"{case}: {n} is unassessedMedia, not evidence (D8)")
-    for n in o["disposition"]["unassessedMediaExcludes"]:
-        check(n not in unassessed, f"{case}: {n} is NOT unassessed (its fingerprint matched) (D8)")
-    for n, reason in (o["disposition"].get("unassessedMediaReasons") or {}).items():
-        rows = [u for u in man.get("unassessedMedia", []) if n in str(u.get("path"))]
-        expect(rows[0].get("reason") if rows else None, reason,
-               f"{case}: {n} is unassessed by ONE closed reason (D8, media item schema 2)")
-    ev = json.dumps(man.get("evidence", []))
-    check("supplied-media" in ev, f"{case}: the matching media is evidence with strength supplied-media (D8)")
-    rows = [e for e in man.get("evidence", []) if e.get("kind") == "media"]
-    row = rows[0] if rows else {}
-    digest = hashlib.sha256((media_dir / "matched-shot.png").read_bytes()).hexdigest()
-    expect(row.get("path"), f"media/{digest[:12]}-matched-shot.png",
-           f"{case}: the accepted media is copied to media/<sha256[:12]>-<basename> (D8)")
-    for k in o["disposition"].get("mediaRowCarries") or []:
-        check(k in row, f"{case}: the media row carries {k} (D8, media item schema 2)")
-    check((run / "bundle" / row.get("path", "missing")).exists(), f"{case}: the media copy is on disk (D8)")
+    # Its media half (D8: supplied pictures checked against the accepted receipts' configurations) is the houseCARL
+    # integration module's own suite, over its evalcontrol (the app's runcontrol has no media rule).
     # This case's registry trim omits patch.candidate-qualification, so it qualifies nothing: case 47 covers
     # qualification. What the case does show, exactly: no qualification check planned and no candidate rows.
     disp = load(run / "disposition.json") or {}
@@ -5481,8 +5421,12 @@ CASES["case-2329"] = case_2329
 
 
 
-def main() -> int:
-    want = sys.argv[1] if len(sys.argv) > 1 else ""
+def main(cases: dict | None = None, argv: list[str] | None = None) -> int:
+    """Run the suite's cases (or a caller's: the houseCARL integration module runs its AI-side cases over this
+    suite's fixtures and helpers), filtered by the first argument."""
+    argv = sys.argv[1:] if argv is None else argv
+    cases = CASES if cases is None else cases
+    want = argv[0] if argv else ""
     tmp = Path(tempfile.mkdtemp(prefix="hc-evalrun-test-"))
     pin_standard_settings(tmp)
     # Every path-bearing fixture is generated into this run's own directory: the plugin files a receipt
@@ -5515,7 +5459,7 @@ def main() -> int:
     print(diff_exe_identity())
     ran = 0
     try:
-        for name, fn in CASES.items():
+        for name, fn in cases.items():
             if want and not name.startswith(want) and not want.startswith(name):
                 continue
             ran += 1
@@ -5531,7 +5475,7 @@ def main() -> int:
     print()
     if not ran:
         # A filter that selects nothing tested nothing; reporting it as passed would be a vacuous green.
-        print(f"  FAIL  no case matches {want!r}; case names are " + ", ".join(CASES))
+        print(f"  FAIL  no case matches {want!r}; case names are " + ", ".join(cases))
         return 2
     if DISAGREEMENTS:
         print("ORACLE vs CODE disagreements (the oracle is NOT re-based on the code; these go to Fable):")

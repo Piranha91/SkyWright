@@ -60,7 +60,7 @@ public static partial class SelfTestFinalize
             };
             string want = Hashing.Sha256Text("schema:1\npopulation:load-time\nstate:baseline\nplugin:skyrim.esm:ab\nplugin:beta.esp:\n"
                                               + "provider:mod:beta shrine\noverlay:bos:cd\n");
-            var got = BundleMedia.Fingerprints(new List<object?> { cfg });
+            var got = Fingerprints.Of(new List<object?> { cfg });
             if (got.Count != 1 || got[0] as string != want) return $"fingerprint gave {PyText.Repr(got)}; the owner's text hashes to {want}";
             foreach (var (bad, why) in new (PyDict, string)[]
             {
@@ -68,7 +68,7 @@ public static partial class SelfTestFinalize
                 (new PyDict { ["population"] = "load-time" }, "no population or state"),
             })
             {
-                try { BundleMedia.Fingerprints(new List<object?> { bad }); return $"a configuration with {why} was fingerprinted, not refused"; }
+                try { Fingerprints.Of(new List<object?> { bad }); return $"a configuration with {why} was fingerprinted, not refused"; }
                 catch (Refusal r) when (r.Message.Contains(why)) { }
             }
             return null;

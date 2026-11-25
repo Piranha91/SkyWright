@@ -327,8 +327,14 @@ def required_missing(disp: dict) -> list[dict]:
 
 # ---------------------------------------------------------------------------- the compile steps
 
+#: an app bundle's AI-side overlay bundle, by the app bundle (ai_report_fixtures records it as aiBundle)
+AI_OF: dict = {}
+
+
 def do_plan(bundle: Path, out: Path, exhaustive=False, declare_patches=()):
     args = ["plan", "--bundle", bundle, "--out", out] + (["--exhaustive"] if exhaustive else [])
+    if str(bundle) in AI_OF:
+        args += ["--ai-bundle", AI_OF[str(bundle)]]
     for name in declare_patches:
         args += ["--declare-patch", name]
     return evalreport(args)
@@ -449,8 +455,14 @@ def assert_common(case: str, bundle: Path, out: Path, pres: dict, common: dict, 
         if f.get("kind") == "finding" and supplied_count > 0 and f.get("rowsTotal") == 0:
             check(str(supplied_count) in str(f.get("readerPlain") or ""),
                   f"{case}: rowless imported finding reports its supplied count instead of zero records")
-    # evidence
+    # evidence (an AI-side overlay's rows are read joined with the app bundle's)
+    ai_man = load(Path(AI_OF[str(bundle)]) / "manifest.json") or {} if str(bundle) in AI_OF else {}
+    # an overlay row's path is written relative to the app bundle (the report reads both from there)
+    ai_rel = os.path.relpath(AI_OF[str(bundle)], bundle).replace("\\", "/") if str(bundle) in AI_OF else ""
     man_ev = {e.get("id"): e for e in man.get("evidence") or []}
+    # the overlay's own control, registry, scope and search files are not joined (the app bundle's are the report's)
+    man_ev.update({e.get("id"): {**e, "path": f"{ai_rel}/{e.get('path')}"} for e in ai_man.get("evidence") or []
+                   if e.get("kind") not in ("control", "registry", "scope", "search")})
     for eid, e in evid.items():
         external_scope = e.get("kind") == "scope" and e.get("recordedBy") == "scopeprobe" and eid[2:] == str(e.get("sha256") or "")[:16]
         ok = re.fullmatch(c["evidence"]["idPattern"], str(eid)) is not None and (eid[2:] in man_ev or external_scope)
@@ -2198,7 +2210,8 @@ def case_r5(tmp, index, common):
     check(len({m.get("sha256") for m in assessed}) == len(assessed), f"{case}: assessed media sha256 distinct")
     check(len({m.get("path") for m in assessed}) == len(assessed), f"{case}: assessed media paths distinct")
     for m in assessed:
-        check(str(m.get("path", "")).startswith(ar["pathStartsWith"]), f"{case}: {m.get('id')} path under media/")
+        # a media path is written relative to the app bundle the overlay is read with: under the overlay's media/
+        check(("/" + ar["pathStartsWith"]) in ("/" + str(m.get("path", "")).replace("\\", "/")), f"{case}: {m.get('id')} path under media/")
         check(str(m.get("path", "")).endswith(ar["pathBasenameEndsWith"]), f"{case}: {m.get('id')} keeps the basename cell-view.png")
         check((bundle / str(m.get("path"))).exists(), f"{case}: {m.get('id')} exists under the bundle")
         check(any(m.get("id") in (x.get("mediaIds") or []) for x in pres.get("chapters") or []), f"{case}: {m.get('id')} is in a chapter")
@@ -2457,6 +2470,7 @@ def main() -> int:
     common = load(EXPECTED / "common.json")
     try:
         import make_report_fixtures as MF
+        import ai_report_fixtures as AIF
         check_direction_inference()
         check_stylesheet_escaping()
         print("=== fixtures ===")
@@ -2475,7 +2489,11 @@ def main() -> int:
                 only = "R4"
             elif want:
                 only = want
-            index = MF.generate(tmp / "fixtures", only)
+            index = MF.generate(tmp / "fixtures", only, ai_hook=AIF.add_overlays)
+            for entry in [e for e in index.values() if isinstance(e, dict)] + [
+                    x for e in index.values() if isinstance(e, dict) for x in e.values() if isinstance(x, dict)]:
+                if entry.get("aiBundle"):
+                    AI_OF[str(Path(entry["bundle"]))] = entry["aiBundle"]
             check(True, f"fixtures generated under {tmp / 'fixtures'} ({time.time() - t0:.1f}s)")
         except SystemExit as ex:
             check(False, f"fixture generation failed: {ex}")

@@ -1,0 +1,5 @@
+{"batchMarker": "rec-s00", "sourceFile": "raw/rec-s00.request.jsonl", "sourceSha256": "0000000000000000000000000000000000000000000000000000000000000000"}
+{"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "evalrun:63e36b97b433:baseline", "version": "fixture-capture 1"}}}
+{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "housecarl_read_plugin_file", "arguments": {"plugin": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Skyrim.esm", "formid": "000801:Skyrim.esm", "format": "text", "depth": 3}}}
+{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "housecarl_read_plugin_file", "arguments": {"plugin": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Update.esm", "formid": "000801:Skyrim.esm", "format": "text", "depth": 3}}}
+{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "housecarl_read_plugin_file", "arguments": {"plugin": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureBase.esp", "formid": "000801:Skyrim.esm", "format": "text", "depth": 3}}}

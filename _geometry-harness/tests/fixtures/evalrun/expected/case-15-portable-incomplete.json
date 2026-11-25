@@ -45,6 +45,6 @@
 
  "unassessedMedia": {
   "assertedHere": false,
-  "why": "the unassessed-media accounting is unchanged by D7/D8 (`Media rules unchanged; unassessed media stays unassessed`) and is already measured by case-10, which drives a matched and an unmatched media item through bundle --media. Re-fixturing it here would duplicate case-10's arm without adding a boundary."
+  "why": "the unassessed-media accounting is unchanged by D7/D8 (`Media rules unchanged; unassessed media stays unassessed`) and is measured by the houseCARL integration module's case-10, which drives a matched and an unmatched media item through evalcontrol bundle --media. Re-fixturing it here would duplicate case-10's arm without adding a boundary."
  }
 }

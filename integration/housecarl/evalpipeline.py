@@ -631,6 +631,54 @@ def measure(ctx, through: str) -> None:
     sdir.mkdir(parents=True, exist_ok=True)
     capture_records(ctx, {}, sdir)
     controller(last)
+    if last == "bundle":
+        measure_overlay(ctx)
+
+
+def evalcontrol_exe(machine: dict | None) -> Path:
+    """The AI-side checks' controller, this module's evalcontrol: the machine file's `evalcontrol`, else the module's build."""
+    named = (machine or {}).get("evalcontrol")
+    exe = Path(named) if named else SW.tool("evalcontrol")
+    if not exe.is_file():
+        raise Refusal(f"the houseCARL integration module's evalcontrol is not at {fwd(exe)}; build the module "
+                      f"(scripts/build.ps1) or name evalcontrol.exe under the key evalcontrol in the machine file.")
+    return exe
+
+
+def evalcontrol_argv(machine: dict | None, verb: str, *args) -> list[str]:
+    return [fwd(evalcontrol_exe(machine)), verb, *[fwd(a) if isinstance(a, Path) else str(a) for a in args]]
+
+
+def ai_dir(ctx) -> Path:
+    """The AI-side overlay's run folder: ai-checks.json's rows planned over the app plan's arms."""
+    return ctx.out / "ai"
+
+
+def ai_bundle_dir(ctx) -> Path:
+    return ai_dir(ctx) / "bundle"
+
+
+def measure_overlay(ctx) -> None:
+    """The AI-side rows of a lab run, after the app's bundle: evalcontrol plans them over the app plan (once per app
+    bundle: an overlay bound to an earlier app bundle is planned again), evaluates, finalizes, bundles beside the app
+    bundle and verifies the pair. Raises Refusal with evalcontrol's sentence when a step stops."""
+    run, app = ai_dir(ctx), bundle_dir(ctx)
+    plan = read_json(run / "plan.json") if (run / "plan.json").is_file() else None
+    if plan is not None and (plan.get("overlay") or {}).get("appManifestSha256") != sha256_file(app / "manifest.json"):
+        shutil.rmtree(run)
+        plan = None
+    steps = [] if plan is not None else [("overlay-plan", evalcontrol_argv(ctx.machine, "plan", "--app", ctx.out / "evaluation",
+                                                                           "--app-bundle", app, "--out", run))]
+    if ai_bundle_dir(ctx).exists():
+        shutil.rmtree(ai_bundle_dir(ctx))
+    steps += [("overlay-evaluate", evalcontrol_argv(ctx.machine, "evaluate", "--run", run)),
+              ("overlay-finalize", evalcontrol_argv(ctx.machine, "finalize", "--run", run)),
+              ("overlay-bundle", evalcontrol_argv(ctx.machine, "bundle", "--run", run, "--out", ai_bundle_dir(ctx))),
+              ("overlay-verify", evalcontrol_argv(ctx.machine, "verify", ai_bundle_dir(ctx)))]
+    for name, argv in steps:
+        r = child(ctx, ctx.out / "measure", name, argv)
+        if r.get("exitCode") != 0:
+            raise Refusal(f"evalcontrol stopped at {name} (exit {r.get('exitCode')}); read {fwd(ctx.out / 'measure' / (name + '.txt'))}.")
 
 
 def reader_cmd(ctx) -> str:
@@ -670,12 +718,14 @@ def stage_precedent(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     return {"bundle": sha256_file(bundle_dir(ctx) / "manifest.json")}, [out]
 
 
-def report_plan_argv(ctx, res, out: Path, captures=(), bundle: Path | None = None, final: bool = False) -> list:
-    """evalreport plan's argv; `final` once the capture stage is closed (the report stage), so the reel plans only from
+def report_plan_argv(ctx, res, out: Path, captures=(), ai: Path | None = None, final: bool = False) -> list:
+    """evalreport plan's argv: the app bundle, with the AI-side overlay bundle bound to it (`ai`, else the measured
+    overlay's when there is one); `final` once the capture stage is closed (the report stage), so the reel plans only from
     captured clashes instead of asking for captures no later round will take."""
     run = ctx.out / "evaluation"
-    argv = [sys.executable, fwd(HERE / "evalreport.py"), "plan", "--bundle", fwd(bundle or bundle_dir(ctx)), "--out", fwd(out),
-            "--mode", ctx.entry.get("report", {}).get("mode", "concise")]
+    ai = ai or (ai_bundle_dir(ctx) if (ai_bundle_dir(ctx) / "manifest.json").is_file() else None)
+    argv = [sys.executable, fwd(HERE / "evalreport.py"), "plan", "--bundle", fwd(bundle_dir(ctx)), "--out", fwd(out),
+            "--mode", ctx.entry.get("report", {}).get("mode", "concise")] + (["--ai-bundle", fwd(ai)] if ai else [])
     if ctx.entry.get("report", {}).get("maxPages"):
         argv += ["--max-pages", str(ctx.entry["report"]["maxPages"])]
     arms = read_json(ctx.out / "prepare" / "preparation.json")["arms"]
@@ -1108,59 +1158,30 @@ def media_bundle_dir(ctx) -> Path:
     return ctx.out / "report" / "media-bundle" / "evidence"
 
 
-def frozen_input_args(ctx) -> list[str]:
-    """The media bundle's frozen inputs, by construction (C1930, C1933): every input the evaluation's plan pins by path
-    and hash at its top level (evalrun's PREMISE_COPIES: the check registry, the scope and the candidate search) whose
-    original no longer hashes to the plan (gone, or changed since) is handed to runcontrol bundle as the evidence bundle's own copy, which
-    runcontrol checks against the plan's hash and refuses if it differs. A pinned input this function does not know is
-    refused in one sentence rather than left for the bundle to trip on (Hroggar: registry-changed; Ice Blade:
-    scope-missing, its plan naming a scope on a deleted folder)."""
-    import evalrun as ER
-    plan = read_json(ctx.out / "evaluation" / "plan.json")
-    out = []
-    for label, frozen in plan.items():
-        if not (isinstance(frozen, dict) and frozen.get("path") and frozen.get("sha256")):
-            continue
-        dest = ER.PREMISE_COPIES.get(label)
-        if dest is None:
-            raise Refusal(f"the plan pins {label} ({frozen['path']}), which the report stage does not know how to hand "
-                          f"the media bundle; add it to frozen_input_args before reporting.")
-        if ER.premise_file_refusal(plan, label, "") is None:
-            continue
-        copy = bundle_dir(ctx) / dest
-        if copy.is_file():
-            out += [f"--{label}", fwd(copy)]
-    return out
-
-
 def stage_report(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
-    """The captured frames go into a second evidence bundle (runcontrol bundle --media, every item checked against the
-    arm's own configuration fingerprint), and the report is planned and compiled from it with the capture results."""
+    """The captured frames go into a second AI-side overlay bundle (evalcontrol bundle --media, every item checked against
+    the arm's own configuration fingerprint the app scan's accepted receipts measured), verified with the app bundle it is
+    bound to, and the report is planned and compiled from the app bundle joined with it, with the capture results."""
     rows = read_json(ctx.out / "capture" / "captures.json")
     caps = [Path(r["result"]) for r in rows if r.get("result") and r.get("status") != "superseded"]
     # every generation in its own numbered folder: a reviewed report is never written over (review pinning)
     out = next_numbered(sdir, "report")
     items = capture_media_items(rows)
-    bundle = bundle_dir(ctx)
+    ai = None
     if items:
         mdir = sdir / "media-bundle"
         if mdir.exists():
             shutil.rmtree(mdir)
         mdir.mkdir(parents=True)
         write_json(mdir / "media.json", {"schemaVersion": 2, "items": items})
-        bundle = media_bundle_dir(ctx)
-        run = ctx.out / "evaluation"
-        for name, argv in (("media-bundle", [fwd(runcontrol_exe(ctx.machine)), "bundle", "--run", fwd(run), "--out", fwd(bundle), "--media",
-                                                    fwd(mdir / "media.json"), *frozen_input_args(ctx),
-                                                    "--reader-cmd", reader_cmd(ctx),
-                                                    *[x for k, v in names_env(ctx).items() for x in ("--reader-env", f"{k}={v}")],
-                                                    *[x for p, n in (ctx.entry.get("modNames") or {}).items()
-                                                      for x in ("--mod-name", f"{p}={n}")]]),
-                           ("media-verify", verify_bundle_argv(ctx.machine, bundle))):
+        ai = media_bundle_dir(ctx)
+        for name, argv in (("media-bundle", evalcontrol_argv(ctx.machine, "bundle", "--run", ai_dir(ctx), "--out", ai,
+                                                             "--media", mdir / "media.json")),
+                           ("media-verify", evalcontrol_argv(ctx.machine, "verify", ai))):
             r = child(ctx, sdir / "commands", name, argv)
             if r.get("exitCode") != 0:
                 raise Refusal(f"{name} refused (exit {r.get('exitCode')}); read {fwd(sdir / 'commands' / (name + '.txt'))}.")
-    steps = [("plan", report_plan_argv(ctx, res, out, caps, bundle, final=True)),
+    steps = [("plan", report_plan_argv(ctx, res, out, caps, ai, final=True)),
              ("report", [sys.executable, fwd(HERE / "evalreport.py"), "report", "--presentation",
                          fwd(out / "presentation.json"), "--out", fwd(out)]),
              ("verify", [sys.executable, fwd(HERE / "evalreport.py"), "verify", "--out", fwd(out)])]
@@ -1174,7 +1195,7 @@ def stage_report(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
 
 def stage_reel(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     m = ctx.machine
-    reel_bundle = media_bundle_dir(ctx) if media_bundle_dir(ctx).is_dir() else bundle_dir(ctx)
+    reel_bundle = bundle_dir(ctx)
     rep = latest_numbered(ctx.out / "report", "report")
     if rep is None:
         raise Refusal("no report generation exists to cut a reel from.")

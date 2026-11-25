@@ -1,0 +1,17 @@
+{
+ "SchemaVersion": 1,
+ "Name": "candidate-01-reorder",
+ "BaseProfile": "fixture",
+ "Plugins": [
+  "Skyrim.esm",
+  "Update.esm",
+  "FixtureTarget.esp",
+  "FixtureBase.esp"
+ ],
+ "Changes": [
+  "moved FixtureTarget.esp above FixtureBase.esp"
+ ],
+ "Provenance": {
+  "fixture": "evalrun test fixture"
+ }
+}

@@ -58,10 +58,6 @@
    "patch.order-evaluation": {
     "applicability": "yes",
     "status": "planned"
-   },
-   "runtime.supplied-observations": {
-    "applicability": "yes",
-    "status": "planned"
    }
   }
  },

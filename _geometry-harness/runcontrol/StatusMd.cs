@@ -153,7 +153,8 @@ public static class StatusMd
             // a completed check can still leave part of its population unjudged; it is stated here, not only counted
             L.Add($"- `{P(p["checkId"])}` [{P(p["armId"])}] {P(p["population"])}: {P(p["judged"])} judged, not judged "
                 + PyJson.Canonical(p["unjudgeable"]));
-        L.Add($"- media: {P(un["mediaUnassessed"])}");
+        // supplied media is the houseCARL integration module's: a disposition that carries its sentence shows it
+        if (un.ContainsKey("mediaUnassessed")) L.Add($"- media: {P(un["mediaUnassessed"])}");
         L.Add($"- runtime: {P(un["runtimeObservations"])}");
         L.AddRange(["", "## Regeneration needs", ""]);
         var regen = PyValue.Iter(plan["checks"]).Select(D).Where(c => PyValue.Truthy(Ev.OrEmpty(c.Get("evidence")).Get("regeneration"))).ToList();

@@ -88,7 +88,7 @@ public static class EvalCommands
             {
                 case "--run": a.Run = Value(); run = true; break;
                 case "--out": a.Out = Value(); break;
-                case "--media": a.Media = Value(); break;
+                case "--media": throw new Refusal("bundle no longer takes --media: supplied media is checked and bundled by the houseCARL integration module (its own bundle of the AI-side checks), not by SkyWright's bundle.");
                 case "--registry": a.Registry = Value(); break;
                 case "--scope": a.Scope = Value(); break;
                 case "--search": a.Search = Value(); break;

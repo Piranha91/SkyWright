@@ -31,7 +31,7 @@ using RunControl;
 //                                        For the live switch check's driver.
 //        runcontrol finalize --run RUN   derive disposition.json and STATUS.md from the ledger and receipts (evalrun finalize)
 //        runcontrol bundle --run RUN [--out DIR] [--reader-cmd CMD] [--reader-env K=V]... [--mod-name PLUGIN=NAME]... [--no-names]
-//                          [--media FILE] [--registry FILE] [--scope FILE] [--search FILE]   assemble one evidence bundle (evalrun bundle)
+//                          [--registry FILE] [--scope FILE] [--search FILE]   assemble one evidence bundle (evalrun bundle)
 //        runcontrol verify-bundle DIR [--out FILE]   check a bundle from its own files only (evalrun verify-bundle)
 //        runcontrol run    --run RUN [--budget-minutes N]   run the plan's checks (evalrun run); `run --entry` is the pipeline's
 //        runcontrol resume --run RUN [--budget-minutes N] [--rebuild-ledger]   re-check what is kept, redo the rest (evalrun resume)

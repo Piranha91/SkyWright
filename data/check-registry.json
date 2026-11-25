@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "registryVersion": 4,
+  "registryVersion": 5,
   "skill": "world-edit-compatibility",
   "generatedUtc": "2026-09-12T19:05:00Z",
   "about": "The checklist a world-edit compatibility evaluation must account for (Q42, roadmap 4.23). Domain knowledge only: which families exist, what each check is about, what it may claim and where it stops. The controller (_geometry-harness/evalrun.py) reads it through _geometry-harness/evalregistry.py and never decides applicability itself. Triggers name record-type families as DOMAIN knowledge; what a target actually contains comes from scopeprobe, by construction, out of Mutagen's own record enumeration. Check ids are stable: retired, never renamed.",
@@ -1237,36 +1237,6 @@
         "strength": "record-fact",
         "claim": "PATCH FILE DISCOVERY",
         "limits": "A candidate is `qualified` only when the hash of an actual plugin file appears in an evaluated arm. A Nexus hit, a pool file or a FOMOD option is `unqualified` however well it matches by name. An ESP-only arm qualifies the plugin and not the mod: its meshes, scripts and installer choices were not staged."
-      },
-      "manualDecisionAllowed": false
-    },
-    {
-      "id": "runtime.supplied-observations",
-      "family": "runtime",
-      "title": "Screenshots, video and schematics supplied with an identity that matches an evaluated arm",
-      "required": false,
-      "applicability": {
-        "trigger": {
-          "always": true
-        },
-        "note": "Media may be supplied for any evaluation; whether any was is not a property of the target."
-      },
-      "prerequisites": [],
-      "inputs": {
-        "arms": "all",
-        "states": "selected"
-      },
-      "adapter": {
-        "kind": "media",
-        "exe": null,
-        "args": [],
-        "reverse": false,
-        "output": null
-      },
-      "evidence": {
-        "strength": "supplied-media",
-        "claim": null,
-        "limits": "Admitted as evidence only when the item's configuration fingerprint equals an accepted receipt's fingerprint on that arm and it names its subject, state and provenance. Anything else is listed under unassessedMedia with the reason and is not evidence. Media illustrates a result; it never establishes one."
       },
       "manualDecisionAllowed": false
     },

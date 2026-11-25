@@ -1,0 +1,1600 @@
+{
+ "schemaVersion": 2,
+ "planId": "63e36b97b433",
+ "requestProviders": "arm-view",
+ "createdUtc": "2026-11-25T09:28:14Z",
+ "registry": {
+  "path": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\fixtures\\registry\\fixture-check-registry.json",
+  "registryVersion": 4,
+  "sha256": "92c0b41d82b826873a742550c241057e7304ab6fca41fd1c59baf9cc074a3f77"
+ },
+ "tools": {
+  "scopeprobe": {
+   "exe": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\conflictdiff-build\\harness\\Probes\\scopeprobe\\scopeprobe.exe",
+   "exeSha256": null,
+   "dllSha256": null,
+   "coreDllSha256": null,
+   "present": false
+  },
+  "navownprobe": {
+   "exe": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\conflictdiff-build\\harness\\Probes\\navownprobe\\navownprobe.exe",
+   "exeSha256": null,
+   "dllSha256": null,
+   "coreDllSha256": null,
+   "present": false
+  },
+  "overlapprobe": {
+   "exe": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\conflictdiff-build\\harness\\Probes\\overlapprobe\\overlapprobe.exe",
+   "exeSha256": null,
+   "dllSha256": null,
+   "coreDllSha256": null,
+   "present": false
+  },
+  "contactprobe": {
+   "exe": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\conflictdiff-build\\harness\\Probes\\contactprobe\\contactprobe.exe",
+   "exeSha256": null,
+   "dllSha256": null,
+   "coreDllSha256": null,
+   "present": false
+  },
+  "bosprobe": {
+   "exe": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\conflictdiff-build\\harness\\Probes\\bosprobe\\bosprobe.exe",
+   "exeSha256": null,
+   "dllSha256": null,
+   "coreDllSha256": null,
+   "present": false
+  },
+  "switchprobe": {
+   "exe": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\conflictdiff-build\\harness\\Probes\\switchprobe\\switchprobe.exe",
+   "exeSha256": null,
+   "dllSha256": null,
+   "coreDllSha256": null,
+   "present": false
+  },
+  "stateprobe": {
+   "exe": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\conflictdiff-build\\harness\\Probes\\stateprobe\\stateprobe.exe",
+   "exeSha256": null,
+   "dllSha256": null,
+   "coreDllSha256": null,
+   "present": false
+  },
+  "adviceprobe": {
+   "exe": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\conflictdiff-build\\harness\\Probes\\adviceprobe\\adviceprobe.exe",
+   "exeSha256": null,
+   "dllSha256": null,
+   "coreDllSha256": null,
+   "present": false
+  }
+ },
+ "toolIdentity": {
+  "contract": 1,
+  "rule": "package: every top-level non-PDB file and runtimes/**, by lower-cased relative path and sha256; probe-cmd: the command text and the files it names; scripts: the controller's scripts",
+  "programs": {
+   "controller": {
+    "kind": "package",
+    "locator": "S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\bin\\Release\\net9.0-windows10.0.19041.0\\Tools\\runcontrol",
+    "state": "present",
+    "digest": "folder:2ac7b9cf9f17b9a3678b5e38df44c44c7bb0f8e12a76108619ac78378c2fe382",
+    "files": [
+     {
+      "path": "dynamicdata.dll",
+      "sha256": "254cffeda53b8cb7fc847dbd30ebdf15188dfc1b92510551efb309aa0a01d8c3"
+     },
+     {
+      "path": "fluentresults.dll",
+      "sha256": "bef62110c889afbb46a2cb3cbf2a9a1b5879047b5abab701436f65056d6c735d"
+     },
+     {
+      "path": "gamefinder.common.dll",
+      "sha256": "ae8c546aa21d044daa185a5048d740d03953a47510f77b9b45dc7e468ee3f631"
+     },
+     {
+      "path": "gamefinder.registryutils.dll",
+      "sha256": "26e608ea58f86b7fb61c27ae23c9d3971fa28c662298dd3ff44bf2e4a90f4f5f"
+     },
+     {
+      "path": "gamefinder.storehandlers.gog.dll",
+      "sha256": "22787484caf62afccc512b0278074fd0185b35d94b5acd768145c1d1bf6061b9"
+     },
+     {
+      "path": "gamefinder.storehandlers.steam.dll",
+      "sha256": "ccb630c631d4a183203b5633ef90f22862a1bd2bd72e0fb2dfee283150f7ed7c"
+     },
+     {
+      "path": "gamefinder.storehandlers.xbox.dll",
+      "sha256": "b948655818208a346945e263a7fa7e7efd61ad23de560f93d1284b0cf300c5de"
+     },
+     {
+      "path": "gamefinder.wine.dll",
+      "sha256": "826d8607be5317d4d321bc7ba1345004982d1976cdf641369af6a42c89ff7923"
+     },
+     {
+      "path": "housecarl-core.dll",
+      "sha256": "8151287cc7a0fe9079c3543e3b2171169a56a74e6d5c686ae924b7c5d4d3b478"
+     },
+     {
+      "path": "housecarl-mcp.dll",
+      "sha256": "62c1689357d46cc1ad04ee8e88410de6e1dab9ef035f946b10088814b9cb292b"
+     },
+     {
+      "path": "housecarl-nexus.dll",
+      "sha256": "a92ef8a65c46ef420dee8ba7534c81437f8f4e320ef37ce593e1e77d7e9a1cee"
+     },
+     {
+      "path": "icsharpcode.sharpziplib.dll",
+      "sha256": "32ea2d0ce3512e74f1c7ad82591fe67e6b8939d76a8a4ff9c93ead030131e71c"
+     },
+     {
+      "path": "inifileparser.dll",
+      "sha256": "8cf56be6ee819711b776493fb0b5bc44d37c1656954e0e979a51554e52b62392"
+     },
+     {
+      "path": "k4os.compression.lz4.dll",
+      "sha256": "e282aadc2353b864fe95cd5fb525a1a093d99a30a5bf2530b7ab831d56179816"
+     },
+     {
+      "path": "k4os.compression.lz4.streams.dll",
+      "sha256": "b146cf3c769000cd5e4458cfed5da3c0e838b7b2da6dbe6dad458cd5a0e3ce41"
+     },
+     {
+      "path": "k4os.hash.xxhash.dll",
+      "sha256": "19d73fa58c1f6c12c61f30eaad91881bd06f50caf4b462b061bc1b45d0a577cd"
+     },
+     {
+      "path": "loqui.dll",
+      "sha256": "ea5d7219028bce5f4954b729843786be117ab69208d32156cab1c6f627ad129d"
+     },
+     {
+      "path": "microsoft.extensions.ai.abstractions.dll",
+      "sha256": "c725997b529ff9f9090398123aeead13a1d53b811ad7fb36fdd3d30ff76e0112"
+     },
+     {
+      "path": "microsoft.extensions.caching.abstractions.dll",
+      "sha256": "2aae87459d529ec8ac2a571fb8b835f0c5abdc90a6464e38075b1bf43dcc8f0c"
+     },
+     {
+      "path": "microsoft.extensions.configuration.abstractions.dll",
+      "sha256": "7545ca18ceec2fb8e02d3e7911035cb4f5d6386f7ac8a974321192735841b673"
+     },
+     {
+      "path": "microsoft.extensions.dependencyinjection.abstractions.dll",
+      "sha256": "db07665fa94ac0ebde4cfafce9ae6768d14c262b278a0b47d3139568caa7e03e"
+     },
+     {
+      "path": "microsoft.extensions.diagnostics.abstractions.dll",
+      "sha256": "84ab87ea27a486b89cba006e8f379835934d153313b05ec1cbc10b1473be02f6"
+     },
+     {
+      "path": "microsoft.extensions.fileproviders.abstractions.dll",
+      "sha256": "2aa37378a38c00dc9ecd83a77f2c72e2fecb303ac8aa3de182ff84e7e5f8f73c"
+     },
+     {
+      "path": "microsoft.extensions.hosting.abstractions.dll",
+      "sha256": "4df2b1e844ad770bca86229f48f27fece2aa806aefe3fbe86d11096ab15dd826"
+     },
+     {
+      "path": "microsoft.extensions.logging.abstractions.dll",
+      "sha256": "3d4d1ba079e7a301a06047b97ee1ab4f44cbf0da2aa56697753fc3da49c9c66f"
+     },
+     {
+      "path": "microsoft.extensions.options.dll",
+      "sha256": "660511f10ccdd892eff62143b96831c68d55c5a92fb4f643b208745c5da0d236"
+     },
+     {
+      "path": "microsoft.extensions.primitives.dll",
+      "sha256": "fb564ae906421a27a99264763695d68814626cb41f1c925cd756632990897ac4"
+     },
+     {
+      "path": "miniball.dll",
+      "sha256": "5191bf800002b92f19ca2aa88683b58848515a8be90e474065134b57f03d35be"
+     },
+     {
+      "path": "modelcontextprotocol.aspnetcore.dll",
+      "sha256": "77ec804457c378ab20fca07bfa12d8819fcd238199adaa273fe765f34775eac1"
+     },
+     {
+      "path": "modelcontextprotocol.core.dll",
+      "sha256": "475efd517f1cbfe3bcf8c0332ba19a56186cea66b19012640daffd83da1baad0"
+     },
+     {
+      "path": "modelcontextprotocol.dll",
+      "sha256": "0a058b5fb06c2e2cc07a9eb9f4b17195628f9e31f6ddd990f04e9bd80eefe7b1"
+     },
+     {
+      "path": "mutagen.bethesda.core.dll",
+      "sha256": "eef54d5b1c156be2e726c44c225007ec399a1093473cdb4909ecb139d903987c"
+     },
+     {
+      "path": "mutagen.bethesda.kernel.dll",
+      "sha256": "f16e15959c755d241dc2bbd8350d42d906f246468790facede93c86f62718e52"
+     },
+     {
+      "path": "mutagen.bethesda.skyrim.dll",
+      "sha256": "291dd30e533276e22dd6c0098032a335c9f80bb1e672e97a2335e5cf1cbcb168"
+     },
+     {
+      "path": "nexusmods.paths.dll",
+      "sha256": "f81a10cddec57ba162f5057e46a806c5197a52e6e52ef45fad6a84dc11f5da6c"
+     },
+     {
+      "path": "niflysharp.dll",
+      "sha256": "db2d798023f2352e7b571d8048a3784e45ad6bcb8e33105ecd5c16cf116f906d"
+     },
+     {
+      "path": "noggog.csharpext.dll",
+      "sha256": "a2da06d2bbd211f69f76a0d32f0f848bdc88b31857591a8a56480bd74e73f39e"
+     },
+     {
+      "path": "oneof.dll",
+      "sha256": "2f0c32cb83ae0a12e9bcde8e86eced54bb56a78eaac6dbafd3add6b8292de577"
+     },
+     {
+      "path": "reloaded.memory.dll",
+      "sha256": "c924730da00c2130791bf9a27db3af1d37e06b183be22dac01c6cb1d882d0bad"
+     },
+     {
+      "path": "runcontrol.deps.json",
+      "sha256": "833426865d507d79ee03c70462444bf5405969bdd39bb7e4535e8bf16b30b263"
+     },
+     {
+      "path": "runcontrol.dll",
+      "sha256": "618ec6b1c1716094111159b725e7e8c2b1cb309fa677e0f1f12aeb1f1c7e27db"
+     },
+     {
+      "path": "runcontrol.exe",
+      "sha256": "a9d8cbf72b3ea6ff21efc0c39d3dc78b24c0f1a7ebcacc37a89faf30aa22b83f"
+     },
+     {
+      "path": "runcontrol.runtimeconfig.json",
+      "sha256": "3c0bf772b95c93363a0a14e5df78e4ec408c90f04cb7103205af97b2d276fab0"
+     },
+     {
+      "path": "runtimes/browser/lib/net8.0/system.text.encodings.web.dll",
+      "sha256": "da808440792e010b374d20dd4695574ea60f893382bd5afc8c444853033a38aa"
+     },
+     {
+      "path": "runtimes/win/lib/net9.0/system.text.encoding.codepages.dll",
+      "sha256": "b5b2143f770eb2c08b7fe0a48d4a074eea75d4cbacd8718977bea729ed44935e"
+     },
+     {
+      "path": "runtimes/win/lib/net9.0/system.text.encodings.web.dll",
+      "sha256": "8362122a3bdf6f67b881a5924ed39c03d7a455ab1ef6ac6431edf880c1ba3fd0"
+     },
+     {
+      "path": "skywright.engine.dll",
+      "sha256": "afc65aaf4f809ad3efde63e8fd7a7b01fac60ad44b565869a8f23fb1bba22e2a"
+     },
+     {
+      "path": "stronginject.dll",
+      "sha256": "60082998d23d8421a42111c2c69628b70fff8f31c9adc7477344634251f6afa0"
+     },
+     {
+      "path": "system.collections.immutable.dll",
+      "sha256": "41d3ca3adbb57b10c0894d3cd829a80775f83752aadf3548f0cf2be51512c924"
+     },
+     {
+      "path": "system.diagnostics.diagnosticsource.dll",
+      "sha256": "dc24fd9f9dec597592d246d64aceeb70ef87f1a85272dfad8b46d281002d9471"
+     },
+     {
+      "path": "system.interactive.async.dll",
+      "sha256": "1d838f468208a932239f6c21edae4f2bb7c1ff410dae7a7f874318ef5a9364e4"
+     },
+     {
+      "path": "system.io.abstractions.dll",
+      "sha256": "6c3a4e68a71eb78948a2b878237fc6cd7970cf2d9e80ae87db70a9f3f5c689e4"
+     },
+     {
+      "path": "system.io.pipelines.dll",
+      "sha256": "17b4ec00a384f01be1ed016fc387f50aa2339461001558e5d90954b20324c6b4"
+     },
+     {
+      "path": "system.linq.async.dll",
+      "sha256": "442c9263ab53aa0baf0c685890a517176f81a7244986b5cfa966ba0543a72964"
+     },
+     {
+      "path": "system.linq.asyncenumerable.dll",
+      "sha256": "358f6d220b67e5f244cf9a77db5a5994f414c94b87f4e8d261453aea1ac105a5"
+     },
+     {
+      "path": "system.net.serversentevents.dll",
+      "sha256": "b9454cd51debf0b5e0800fa0416d00257a38f004dcc5d7f2b82e240b5763a70e"
+     },
+     {
+      "path": "system.reactive.dll",
+      "sha256": "c1cae1a8b97d5e0ed64f7a9947f6ae44498398b6e9ee71473c2bef24646e91f8"
+     },
+     {
+      "path": "system.text.encoding.codepages.dll",
+      "sha256": "686c3a7b5d77b64961b31bc4532b96730e9eaebef92998c133e308c48e0160e4"
+     },
+     {
+      "path": "system.text.encodings.web.dll",
+      "sha256": "427bcc11ddd7acd774f5f60ab321fb7114b4c81c4e8dd0756ef1a10336a6360f"
+     },
+     {
+      "path": "system.text.json.dll",
+      "sha256": "d0e961334ac6008c07bf00370d719301cc355860f8f8d5818dbf0a55f6966265"
+     },
+     {
+      "path": "testableio.system.io.abstractions.dll",
+      "sha256": "616138fdb0c032dc36f360fff03464a5629671c27e419b79f23869fd47aa8f1e"
+     },
+     {
+      "path": "testableio.system.io.abstractions.wrappers.dll",
+      "sha256": "44df840fa1300f9bc237260bbd329e29a0f922c791fb509fce3e7c2dc8db4999"
+     },
+     {
+      "path": "testably.abstractions.filesystem.interface.dll",
+      "sha256": "53097bbd1329ca408de871353fd9e8fbccef8d6b9c7cc179c44f6b52062be4b2"
+     },
+     {
+      "path": "transparentvalueobjects.abstractions.dll",
+      "sha256": "9862ad65db5257cdeaa366311fa7d67d416bc8249dfef97f8b0ca0122c61485d"
+     },
+     {
+      "path": "valvekeyvalue.dll",
+      "sha256": "c2d159c15baac110ba6ef2be49836d9cce8aa39a416b6dd238787312e063427f"
+     }
+    ]
+   },
+   "helper:conflictdiff": {
+    "kind": "package",
+    "locator": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\conflictdiff-build\\harness\\Probes\\conflictdiff",
+    "state": "present",
+    "digest": "folder:d28952da17f107c73b731161cfbb2fe972c48d1176cfc0352827afb9a64b2f74",
+    "files": [
+     {
+      "path": "conflictdiff.deps.json",
+      "sha256": "ef955ba9e5ebe5c876a07547cecba42ad34300bd8f6642aeede8bb85079bc3e8"
+     },
+     {
+      "path": "conflictdiff.dll",
+      "sha256": "b0cef0cbb9caa73bf7f7f6133c9753842785178351a8a2e717a433834c4bb84b"
+     },
+     {
+      "path": "conflictdiff.exe",
+      "sha256": "08529a3c0ec0b9dae59a54d719446e050156ae8c66497663c56874fe5307b568"
+     },
+     {
+      "path": "conflictdiff.runtimeconfig.json",
+      "sha256": "3c0bf772b95c93363a0a14e5df78e4ec408c90f04cb7103205af97b2d276fab0"
+     }
+    ]
+   },
+   "probe:adviceprobe": {
+    "kind": "probe-cmd",
+    "command": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\adviceprobe.py",
+    "interpreter": "C:\\Python315\\python.exe",
+    "inputs": [
+     {
+      "token": 1,
+      "path": "S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\adviceprobe.py",
+      "sha256": "1c25bbd882c5fb03f8fcbe4266d8fe1c3eb4b774342fa4891a8999aae5f52920"
+     }
+    ],
+    "state": "present",
+    "digest": "probe-cmd:0baf8ee2115e8db5751002272d8a4d7063b0f01746f428d19d9c190c4174579b"
+   },
+   "probe:contactprobe": {
+    "kind": "probe-cmd",
+    "command": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\contactprobe.py",
+    "interpreter": "C:\\Python315\\python.exe",
+    "inputs": [
+     {
+      "token": 1,
+      "path": "S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\contactprobe.py",
+      "sha256": "261fcfc8f239c66bbefe107fe6e3dca2c00888f43754a4d6d0da6ce8b9a1a67a"
+     }
+    ],
+    "state": "present",
+    "digest": "probe-cmd:84c7d54342a499d8205f57caf766f389af860de324c37c8e8c458db728f4474a"
+   },
+   "probe:navownprobe": {
+    "kind": "probe-cmd",
+    "command": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\navownprobe.py",
+    "interpreter": "C:\\Python315\\python.exe",
+    "inputs": [
+     {
+      "token": 1,
+      "path": "S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\navownprobe.py",
+      "sha256": "aa7efa349a3971edba8c0125063050e94a89d4c5aaed21d3342a6315b0c2ffa1"
+     }
+    ],
+    "state": "present",
+    "digest": "probe-cmd:2cf48be48f7b1e9eca2d05cbebb0732c84cb1d5c210280e100fa3b60440a6794"
+   },
+   "probe:overlapprobe": {
+    "kind": "probe-cmd",
+    "command": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\overlapprobe.py",
+    "interpreter": "C:\\Python315\\python.exe",
+    "inputs": [
+     {
+      "token": 1,
+      "path": "S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\overlapprobe.py",
+      "sha256": "e586e9e5fc86b9176386bb4df728be8adf88aaa737bac903abcecf405adcda9d"
+     }
+    ],
+    "state": "present",
+    "digest": "probe-cmd:cc24a73c8b91244de571ba374e721b0c1982e59a36ca66c6cef3275937266f06"
+   },
+   "probe:scopeprobe": {
+    "kind": "probe-cmd",
+    "command": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\scopeprobe.py",
+    "interpreter": "C:\\Python315\\python.exe",
+    "inputs": [
+     {
+      "token": 1,
+      "path": "S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\scopeprobe.py",
+      "sha256": "eaac7e5b5cb1e0f4936d1d9edd299b15012ce58959e61b38891ed37e9c8c37c7"
+     }
+    ],
+    "state": "present",
+    "digest": "probe-cmd:e54b388bc69293ddbb86bb9ec1cd028890a4a005b8bbc47b2c6d785c1c13f9a0"
+   },
+   "probe:stateprobe": {
+    "kind": "probe-cmd",
+    "command": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\stateprobe.py",
+    "interpreter": "C:\\Python315\\python.exe",
+    "inputs": [
+     {
+      "token": 1,
+      "path": "S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\stateprobe.py",
+      "sha256": "180796b30816e39dc76c820c16a1eb65d5dd3cfed3144f248fa7f520137b04e1"
+     }
+    ],
+    "state": "present",
+    "digest": "probe-cmd:e695b98aa8b423d4b2f19ad44e37ec65b10c0b549d0d931d0ecbbac857c3ba80"
+   },
+   "probe:switchprobe": {
+    "kind": "probe-cmd",
+    "command": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\switchprobe.py",
+    "interpreter": "C:\\Python315\\python.exe",
+    "inputs": [
+     {
+      "token": 1,
+      "path": "S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\switchprobe.py",
+      "sha256": "c7d5184ab9d8604537307c8c97a90c4ad4a13b5e5c432c77170c5e3f2dd37856"
+     }
+    ],
+    "state": "present",
+    "digest": "probe-cmd:6d012cc13f4ec37c24977054fd6c5c7cd17e2cfcdcf511e125aa9952a8938acf"
+   }
+  }
+ },
+ "runner": {
+  "runcontrol": "folder:2ac7b9cf9f17b9a3678b5e38df44c44c7bb0f8e12a76108619ac78378c2fe382"
+ },
+ "targets": [
+  {
+   "name": "FixtureTarget.esp",
+   "provider": "fixture-mods",
+   "sha256": null,
+   "footprint": {
+    "recordTypes": {
+     "NAVM": {
+      "new": 3,
+      "override": 2,
+      "className": "Navmesh"
+     },
+     "REFR": {
+      "new": 40,
+      "override": 12,
+      "className": "PlacedObject"
+     },
+     "CELL": {
+      "new": 0,
+      "override": 4,
+      "className": "Cell"
+     },
+     "QUST": {
+      "new": 1,
+      "override": 0,
+      "className": "Quest"
+     }
+    },
+    "placed": {
+     "total": 52,
+     "interior": 30,
+     "exterior": 22,
+     "persistent": 2,
+     "navm": 5,
+     "navmesh": 5,
+     "land": 0,
+     "exteriorCells": [
+      [
+       "Tamriel",
+       5,
+       12
+      ]
+     ],
+     "worldspaces": [
+      "Tamriel"
+     ]
+    },
+    "expansion": {
+     "neighbourCells": [
+      [
+       "Tamriel",
+       4,
+       12
+      ],
+      [
+       "Tamriel",
+       6,
+       12
+      ]
+     ],
+     "doorDestinations": [
+      {
+       "door": "0A0007:FixtureTarget.esp",
+       "destinationCell": "FixtureInterior01"
+      }
+     ],
+     "unresolved": 0,
+     "formLinksByMaster": {
+      "Skyrim.esm": 61,
+      "FixtureBase.esp": 8
+     }
+    },
+    "masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "FixtureBase.esp"
+    ],
+    "scripts": {
+     "recordsWithVmad": 2
+    },
+    "assets": {
+     "count": 3,
+     "paths": [
+      "fixture/mesh01.nif",
+      "fixture/mesh02.nif",
+      "fixture/mesh03.nif"
+     ]
+    },
+    "nexusId": 999001
+   }
+  }
+ ],
+ "scope": {
+  "path": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\fixtures\\cases\\case-01-geometry-and-quest\\scope.json",
+  "sha256": "c5b41b948959a661716122107691bf66c36f7ccb9fe3ea349a1947ebaf56a9db",
+  "complete": true,
+  "unmeasured": [
+   {
+    "extent": "script-placement",
+    "why": "a reference a Papyrus script moves or creates at runtime is in no static walk"
+   },
+   {
+    "extent": "alias-fill",
+    "why": "a quest alias fill is decided at runtime, so the object it points at is not known statically"
+   },
+   {
+    "extent": "bos-swaps",
+    "why": "the Base Object Swapper ini layer is not scanned; the ini list is not the set of swaps"
+   },
+   {
+    "extent": "asset-replacers",
+    "why": "a mesh or texture swapped by file precedence carries nothing to walk"
+   },
+   {
+    "extent": "generated-output",
+    "why": "whether DynDOLOD or an occlusion pass must be regenerated is not derivable here"
+   }
+  ],
+  "recordTypes": [],
+  "walkFailures": []
+ },
+ "configuration": {
+  "fingerprint": "981273e5b0ffaf5780f00e3dc17d4f5c6500157fee165edcc6d210eef89c3011",
+  "source": "candidate:candidate-00-baseline.json",
+  "population": "load-time",
+  "plugins": [
+   {
+    "name": "Skyrim.esm",
+    "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Skyrim.esm",
+    "sha256": "e27885aee97ce4f40b677e2c362c5286d9c7c005b4f26c422719c65780159512"
+   },
+   {
+    "name": "Update.esm",
+    "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Update.esm",
+    "sha256": "65dfd4bd8fcb74944dec5d479448578b44b5256a6777953704cc3402cc1ada2c"
+   },
+   {
+    "name": "FixtureBase.esp",
+    "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureBase.esp",
+    "sha256": "598d358b0f01cb51697f624d767dd12b2fd3f36ecbc2c87bb5e9564168560b6a"
+   },
+   {
+    "name": "FixtureTarget.esp",
+    "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureTarget.esp",
+    "sha256": "1439e0fe3e9204937f854b786c53d7d6e7cfa17c20a31cf21e92af6ba6e2b87d"
+   }
+  ],
+  "providers": [
+   {
+    "name": "overwrite",
+    "kind": "overwrite"
+   },
+   {
+    "name": "fixture-mods",
+    "kind": "mod"
+   },
+   {
+    "name": "Data",
+    "kind": "data"
+   }
+  ],
+  "overlays": []
+ },
+ "candidatesDir": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\fixtures\\cases\\case-01-geometry-and-quest\\candidates",
+ "search": {
+  "path": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\fixtures\\cases\\case-01-geometry-and-quest\\candidates\\candidates.json",
+  "sha256": "b50de4bdda40935385efc947c03687512a6842ea5364e5d6238534e1625487a7"
+ },
+ "arms": [
+  {
+   "armId": "baseline",
+   "kind": "baseline",
+   "candidateFile": "candidate-00-baseline.json",
+   "candidatePath": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\fixtures\\cases\\case-01-geometry-and-quest\\candidates\\candidate-00-baseline.json",
+   "candidateSha256": "5c520fd00a4056ff36bb0fdb03c5cd7d69e91e9765520839861e222d029d75af",
+   "plugins": [
+    "Skyrim.esm",
+    "Update.esm",
+    "FixtureBase.esp",
+    "FixtureTarget.esp"
+   ],
+   "mods": null,
+   "changes": [
+    "the profile's own order"
+   ],
+   "provenance": {
+    "fixture": "evalrun test fixture"
+   },
+   "loadedInGame": null,
+   "loadedInGameNote": "offline hypothetical configuration; not verified loaded in game",
+   "expected": {
+    "population": "load-time",
+    "states": [
+     "baseline"
+    ]
+   },
+   "heldBack": false,
+   "requested": {
+    "plugins": [
+     {
+      "name": "Skyrim.esm",
+      "sha256": "e27885aee97ce4f40b677e2c362c5286d9c7c005b4f26c422719c65780159512",
+      "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Skyrim.esm",
+      "hashSource": "scope"
+     },
+     {
+      "name": "Update.esm",
+      "sha256": "65dfd4bd8fcb74944dec5d479448578b44b5256a6777953704cc3402cc1ada2c",
+      "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Update.esm",
+      "hashSource": "scope"
+     },
+     {
+      "name": "FixtureBase.esp",
+      "sha256": "598d358b0f01cb51697f624d767dd12b2fd3f36ecbc2c87bb5e9564168560b6a",
+      "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureBase.esp",
+      "hashSource": "scope"
+     },
+     {
+      "name": "FixtureTarget.esp",
+      "sha256": "1439e0fe3e9204937f854b786c53d7d6e7cfa17c20a31cf21e92af6ba6e2b87d",
+      "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureTarget.esp",
+      "hashSource": "scope"
+     }
+    ],
+    "overlays": [],
+    "providers": [
+     {
+      "name": "overwrite",
+      "kind": "overwrite"
+     },
+     {
+      "name": "fixture-mods",
+      "kind": "mod"
+     },
+     {
+      "name": "Data",
+      "kind": "data"
+     }
+    ],
+    "population": "load-time",
+    "states": [
+     "baseline"
+    ]
+   },
+   "payload": {
+    "espOnly": false,
+    "staged": [],
+    "note": "the candidate reorders plugins already present in the configuration"
+   },
+   "scenePreflight": {
+    "status": "not-run",
+    "reason": "no --instance was given, so the plan could not check the arms' asset views against the base profile the way overlapprobe's scene captures will"
+   }
+  },
+  {
+   "armId": "candidate-01-reorder",
+   "kind": "candidate",
+   "candidateFile": "candidate-01-reorder.json",
+   "candidatePath": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\fixtures\\cases\\case-01-geometry-and-quest\\candidates\\candidate-01-reorder.json",
+   "candidateSha256": "dbccd50b02d911a5a253b828d4c92d598b1a809880dcd4c75a8d26801a492266",
+   "plugins": [
+    "Skyrim.esm",
+    "Update.esm",
+    "FixtureTarget.esp",
+    "FixtureBase.esp"
+   ],
+   "mods": null,
+   "changes": [
+    "moved FixtureTarget.esp above FixtureBase.esp"
+   ],
+   "provenance": {
+    "fixture": "evalrun test fixture"
+   },
+   "loadedInGame": null,
+   "loadedInGameNote": "offline hypothetical configuration; not verified loaded in game",
+   "expected": {
+    "population": "load-time",
+    "states": [
+     "baseline"
+    ]
+   },
+   "heldBack": false,
+   "requested": {
+    "plugins": [
+     {
+      "name": "Skyrim.esm",
+      "sha256": "e27885aee97ce4f40b677e2c362c5286d9c7c005b4f26c422719c65780159512",
+      "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Skyrim.esm",
+      "hashSource": "scope"
+     },
+     {
+      "name": "Update.esm",
+      "sha256": "65dfd4bd8fcb74944dec5d479448578b44b5256a6777953704cc3402cc1ada2c",
+      "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Update.esm",
+      "hashSource": "scope"
+     },
+     {
+      "name": "FixtureTarget.esp",
+      "sha256": "1439e0fe3e9204937f854b786c53d7d6e7cfa17c20a31cf21e92af6ba6e2b87d",
+      "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureTarget.esp",
+      "hashSource": "scope"
+     },
+     {
+      "name": "FixtureBase.esp",
+      "sha256": "598d358b0f01cb51697f624d767dd12b2fd3f36ecbc2c87bb5e9564168560b6a",
+      "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureBase.esp",
+      "hashSource": "scope"
+     }
+    ],
+    "overlays": [],
+    "providers": [
+     {
+      "name": "overwrite",
+      "kind": "overwrite"
+     },
+     {
+      "name": "fixture-mods",
+      "kind": "mod"
+     },
+     {
+      "name": "Data",
+      "kind": "data"
+     }
+    ],
+    "population": "load-time",
+    "states": [
+     "baseline"
+    ]
+   },
+   "payload": {
+    "espOnly": false,
+    "staged": [],
+    "note": "the candidate reorders plugins already present in the configuration"
+   },
+   "scenePreflight": {
+    "status": "not-run",
+    "reason": "no --instance was given, so the plan could not check the arms' asset views against the base profile the way overlapprobe's scene captures will"
+   }
+  }
+ ],
+ "states": {
+  "selected": [
+   "baseline"
+  ],
+  "depth": "deep",
+  "notExplored": [],
+  "fromCensus": {
+   "generator": "runcontrol",
+   "sha256": "folder:2ac7b9cf9f17b9a3678b5e38df44c44c7bb0f8e12a76108619ac78378c2fe382",
+   "checks": [
+    "runtime.supplied-observations",
+    "state.conditional-geometry"
+   ],
+   "note": "each arm's states are generated at run time from that arm's own accepted state.switch-census output; the list, its hash and what it could not express are recorded beside the check's output"
+  }
+ },
+ "checks": [
+  {
+   "checkId": "loadability.masters-and-order",
+   "family": "loadability",
+   "title": "The target's masters resolve and the evaluated order is one the engine would load",
+   "required": true,
+   "applicability": "yes",
+   "applicabilityEvidence": "this check applies to every evaluation.",
+   "prerequisites": [],
+   "inputs": {
+    "arms": "all",
+    "states": "baseline"
+   },
+   "evidence": {
+    "strength": "record-fact",
+    "claim": null,
+    "limits": "The claim ledger has no row for loadability: it is a record fact read off the plugin headers and the resolver's own refusal rules, not a detector class with a floor and a control. It says the order loads and what it contains; it says nothing about whether the content is compatible."
+   },
+   "adapter": {
+    "kind": "scopeprobe",
+    "exe": "scopeprobe",
+    "args": [
+     "--order",
+     "{order}",
+     "--json",
+     "{json}"
+    ],
+    "reverse": false,
+    "output": "json",
+    "commonFlags": true
+   },
+   "manualDecisionAllowed": false,
+   "unsupportedReason": null,
+   "arms": [
+    {
+     "armId": "baseline",
+     "status": "planned"
+    },
+    {
+     "armId": "candidate-01-reorder",
+     "status": "planned"
+    }
+   ],
+   "status": "planned"
+  },
+  {
+   "checkId": "loadability.dangling-references",
+   "family": "loadability",
+   "title": "References, links and record integrity errors across the winning order",
+   "required": true,
+   "applicability": "yes",
+   "applicabilityEvidence": "the target(s) declare 3 master(s).",
+   "prerequisites": [
+    "loadability.masters-and-order"
+   ],
+   "inputs": {
+    "arms": "all",
+    "states": "baseline"
+   },
+   "evidence": {
+    "strength": "record-fact",
+    "claim": null,
+    "limits": "No CLI adapter. The capability is the MCP tool housecarl_check (errors family), which the controller cannot call: it is served by the in-process MCP server, not by a harness binary. The check therefore stays unsupported for the runner and keeps the evaluation incomplete until a human runs the tool and files a decision, which this check does not admit."
+   },
+   "adapter": {
+    "kind": "mcp-only",
+    "exe": null,
+    "args": [],
+    "reverse": false,
+    "output": null
+   },
+   "manualDecisionAllowed": false,
+   "unsupportedReason": "housecarl_check is an MCP tool with no command-line entry point; evalrun composes processes, not MCP verbs.",
+   "arms": [
+    {
+     "armId": "baseline",
+     "status": "mcp-only"
+    },
+    {
+     "armId": "candidate-01-reorder",
+     "status": "mcp-only"
+    }
+   ],
+   "status": "mcp-only"
+  },
+  {
+   "checkId": "records.cell-attributes",
+   "family": "records",
+   "title": "CELL attributes a later plugin restates: lighting, water height, music, flags, encounter zone",
+   "required": true,
+   "applicability": "yes",
+   "applicabilityEvidence": "the target carries CELL x4.",
+   "prerequisites": [
+    "loadability.masters-and-order"
+   ],
+   "inputs": {
+    "arms": "all",
+    "states": "baseline"
+   },
+   "evidence": {
+    "strength": "record-fact",
+    "claim": null,
+    "limits": "No CLI adapter; the same MCP record tools as records.contested-fields. waterprobe covers the CELL water tuple at a worldspace boundary only (environment.water-boundaries) — it is not a general CELL attribute reader."
+   },
+   "adapter": {
+    "kind": "mcp-only",
+    "exe": null,
+    "args": [],
+    "reverse": false,
+    "output": null
+   },
+   "manualDecisionAllowed": false,
+   "unsupportedReason": "the CELL attribute comparison is served by the MCP record tools, which have no command-line entry point.",
+   "arms": [
+    {
+     "armId": "baseline",
+     "status": "mcp-only"
+    },
+    {
+     "armId": "candidate-01-reorder",
+     "status": "mcp-only"
+    }
+   ],
+   "status": "mcp-only"
+  },
+  {
+   "checkId": "geometry.navmesh-ownership",
+   "family": "geometry",
+   "title": "Navmesh edits discarded by a later plugin, and the integrity of the winning mesh's links",
+   "required": true,
+   "applicability": "yes",
+   "applicabilityEvidence": "5 NAVM record(s).",
+   "prerequisites": [
+    "loadability.masters-and-order"
+   ],
+   "inputs": {
+    "arms": "all",
+    "states": "baseline"
+   },
+   "evidence": {
+    "strength": "calibrated-inference",
+    "claim": "CLOBBERED (with DANGLE / EDGE-IDX and UNCUT); DOOR-IDX is retired and off unless --door-idx is passed",
+    "limits": "CLOBBERED reports a LOST EDIT, never broken pathing; a row Holds on the 120 u victim-only-ground predicate and becomes a finding only with a witness. Connectivity is the selector's stated blind spot both ways. UNCUT is a census, not a verdict. Class A (Bethesda-on-Bethesda) is withheld."
+   },
+   "adapter": {
+    "kind": "ordersweep-probe",
+    "exe": "navownprobe",
+    "args": [
+     "--order",
+     "{order}",
+     "--emit",
+     "{emit}",
+     "--base",
+     "{base}"
+    ],
+    "reverse": true,
+    "output": "conflict-file",
+    "commonFlags": true
+   },
+   "manualDecisionAllowed": false,
+   "unsupportedReason": null,
+   "arms": [
+    {
+     "armId": "baseline",
+     "status": "planned"
+    },
+    {
+     "armId": "candidate-01-reorder",
+     "status": "planned"
+    }
+   ],
+   "status": "planned"
+  },
+  {
+   "checkId": "geometry.object-overlap",
+   "family": "geometry",
+   "title": "References placed or moved into another plugin's reference",
+   "required": true,
+   "applicability": "yes",
+   "applicabilityEvidence": "52 placed record(s) filed under cells.",
+   "prerequisites": [
+    "loadability.masters-and-order"
+   ],
+   "inputs": {
+    "arms": "all",
+    "states": "baseline"
+   },
+   "evidence": {
+    "strength": "calibrated-inference",
+    "claim": "OVERLAP — Introduced + Blind",
+    "limits": "Actual placed strict NIF render surfaces decide crossing, coplanar overlap, touching and separation; validated closed-solid containment is separate evidence. Bounds only accelerate safe rejection, with no box depth, fraction or size decision gate. The population is the LOAD-TIME enable state, not the reference flag alone. Introduced-vs-Inherited requires a measured counterfactual; missing geometry or unfinished work remains unknown. Geometric intersection does not establish harmful or unintended overlap. Historical bounds policies are not comparable for repair credit."
+   },
+   "adapter": {
+    "kind": "ordersweep-probe",
+    "exe": "overlapprobe",
+    "populationFlag": "--population",
+    "args": [
+     "--order",
+     "{order}",
+     "--emit",
+     "{emit}",
+     "--base",
+     "{base}"
+    ],
+    "reverse": true,
+    "output": "conflict-file",
+    "commonFlags": true,
+    "population": "load-time+population:7f65e2f5011a"
+   },
+   "manualDecisionAllowed": false,
+   "unsupportedReason": null,
+   "arms": [
+    {
+     "armId": "baseline",
+     "status": "planned"
+    },
+    {
+     "armId": "candidate-01-reorder",
+     "status": "planned"
+    }
+   ],
+   "status": "planned"
+  },
+  {
+   "checkId": "geometry.placement-contact",
+   "family": "geometry",
+   "title": "Dependents left touching nothing after a later plugin moved their host",
+   "required": true,
+   "applicability": "yes",
+   "applicabilityEvidence": "52 placed record(s) filed under cells.",
+   "prerequisites": [
+    "loadability.masters-and-order"
+   ],
+   "inputs": {
+    "arms": "all",
+    "states": "baseline"
+   },
+   "evidence": {
+    "strength": "calibrated-inference",
+    "claim": "STRANDED / ORPHANED (Fixed)",
+    "limits": "Fixed dependents only, judged within epsilon against the arm's own load-time enable state per arm. A dependent that was never touching as authored is out of the population."
+   },
+   "adapter": {
+    "kind": "ordersweep-probe",
+    "exe": "contactprobe",
+    "populationFlag": "--population",
+    "args": [
+     "--order",
+     "{order}",
+     "--emit",
+     "{emit}",
+     "--base",
+     "{base}"
+    ],
+    "reverse": true,
+    "output": "conflict-file",
+    "commonFlags": true,
+    "population": "load-time+population:7f65e2f5011a"
+   },
+   "manualDecisionAllowed": false,
+   "unsupportedReason": null,
+   "arms": [
+    {
+     "armId": "baseline",
+     "status": "planned"
+    },
+    {
+     "armId": "candidate-01-reorder",
+     "status": "planned"
+    }
+   ],
+   "status": "planned"
+  },
+  {
+   "checkId": "geometry.bos-overlay",
+   "family": "geometry",
+   "title": "Base Object Swapper layer: which bases the game actually loads for the target's references",
+   "required": true,
+   "applicability": "no",
+   "applicabilityEvidence": "the configuration lists no overlay (BOS ini) files.",
+   "prerequisites": [
+    "loadability.masters-and-order"
+   ],
+   "inputs": {
+    "arms": "all",
+    "states": "baseline"
+   },
+   "evidence": {
+    "strength": "record-fact",
+    "claim": null,
+    "limits": "No ledger row of its own: bosprobe is the reader the geometry probes apply, not a detector class. What it reports is which base each reference resolves to and which ini lines it could not read as written; those anomalies are the finding. Runtime BOS behaviour beyond the ini semantics is unmeasured."
+   },
+   "adapter": {
+    "kind": "probe-json",
+    "exe": "bosprobe",
+    "args": [
+     "--order",
+     "{order}",
+     "--json",
+     "{json}"
+    ],
+    "reverse": false,
+    "output": "json",
+    "result": {
+     "kind": "catalogue",
+     "findings": "rows",
+     "judged": "plugins",
+     "unjudgeable": null,
+     "note": "bosprobe's --json carries profile, plugins, inis and rows and no unjudgeable count; the lines the reader could not read as written are printed by --anomalies and are not in the file, so the spec is null rather than a number read off something else."
+    },
+    "commonFlags": true
+   },
+   "manualDecisionAllowed": false,
+   "unsupportedReason": null,
+   "arms": [
+    {
+     "armId": "baseline",
+     "status": "not-applicable"
+    },
+    {
+     "armId": "candidate-01-reorder",
+     "status": "not-applicable"
+    }
+   ],
+   "status": "not-applicable"
+  },
+  {
+   "checkId": "functional.linked-dependencies",
+   "family": "functional",
+   "title": "What the target reaches outside its own cells: door destinations, neighbouring cells, outbound links",
+   "required": true,
+   "applicability": "unknown",
+   "applicabilityEvidence": "the scope lists script-placement under unmeasured: \"a reference a Papyrus script moves or creates at runtime is in no static walk\".",
+   "prerequisites": [
+    "loadability.masters-and-order"
+   ],
+   "inputs": {
+    "arms": "all",
+    "states": "baseline"
+   },
+   "evidence": {
+    "strength": "record-fact",
+    "claim": null,
+    "limits": "Derived from scope.expansion: the four-neighbour exterior cells, the resolved door destinations with their unresolved count, and the outbound form links by master. It is an EXTENT, not a verdict — it says where the evaluation would have to look, and the unresolved destinations plus the stated unmeasured extents are exactly what it cannot close."
+   },
+   "adapter": {
+    "kind": "derived",
+    "exe": null,
+    "args": [],
+    "reverse": false,
+    "output": null
+   },
+   "manualDecisionAllowed": false,
+   "unsupportedReason": null,
+   "arms": [
+    {
+     "armId": "baseline",
+     "status": "planned"
+    },
+    {
+     "armId": "candidate-01-reorder",
+     "status": "planned"
+    }
+   ],
+   "status": "planned"
+  },
+  {
+   "checkId": "functional.collective-route-connectivity",
+   "family": "functional",
+   "title": "Whether the surviving navigable surface still connects the places actors must reach",
+   "required": true,
+   "applicability": "yes",
+   "applicabilityEvidence": "5 NAVM record(s).",
+   "prerequisites": [
+    "loadability.masters-and-order"
+   ],
+   "inputs": {
+    "arms": "all",
+    "states": "baseline"
+   },
+   "evidence": {
+    "strength": "calibrated-inference",
+    "claim": "CLOBBERED (its stated blind spot) and ROUTE CUT (Q30's fold)",
+    "limits": "Open research limit, not an adapter gap. Both existing route classes judge one object or one lost edit at a time: CLOBBERED names connectivity as its selector's blind spot in both directions, and ROUTE CUT was folded to a single object's clearance. Nothing measures whether several individually-passable changes jointly cut a route. Required, and therefore keeps every evaluation of a geometry target incomplete — which is the honest state."
+   },
+   "adapter": {
+    "kind": "unsupported",
+    "exe": null,
+    "args": [],
+    "reverse": false,
+    "output": null
+   },
+   "manualDecisionAllowed": false,
+   "unsupportedReason": "no detector measures collective route connectivity; it is an open limit in the claim ledger and this packet does not reopen detector research.",
+   "arms": [
+    {
+     "armId": "baseline",
+     "status": "unsupported"
+    },
+    {
+     "armId": "candidate-01-reorder",
+     "status": "unsupported"
+    }
+   ],
+   "status": "unsupported"
+  },
+  {
+   "checkId": "state.switch-census",
+   "family": "state",
+   "title": "The enable markers, their member sets and their triggers in the target's cells",
+   "required": true,
+   "applicability": "yes",
+   "applicabilityEvidence": "52 placed record(s) filed under cells.",
+   "prerequisites": [
+    "loadability.masters-and-order"
+   ],
+   "inputs": {
+    "arms": "all",
+    "states": "baseline"
+   },
+   "evidence": {
+    "strength": "record-fact",
+    "claim": "STATE CONDITIONAL (its census half)",
+    "limits": "A census of switches and the triggers bound to them, not a verdict. Its --json output is the --switch-map the state arms consume, and it runs on EVERY arm (about 14 s each on the lab) because a candidate that reorders the plugins can change which switch wins: reusing the baseline's map would judge one arm's states with another arm's census, and running it only on the baseline leaves every candidate's state check blocked for want of a map. A switch whose binding the reader could not read as written is counted as an anomaly, never as absent."
+   },
+   "adapter": {
+    "kind": "probe-json",
+    "exe": "switchprobe",
+    "args": [
+     "--order",
+     "{order}",
+     "--json",
+     "{json}"
+    ],
+    "reverse": false,
+    "output": "json",
+    "result": {
+     "kind": "catalogue",
+     "findings": "summary.switches",
+     "judged": "plugins",
+     "unjudgeable": "unreadable"
+    },
+    "commonFlags": true
+   },
+   "manualDecisionAllowed": false,
+   "unsupportedReason": null,
+   "arms": [
+    {
+     "armId": "baseline",
+     "status": "planned"
+    },
+    {
+     "armId": "candidate-01-reorder",
+     "status": "planned"
+    }
+   ],
+   "status": "planned"
+  },
+  {
+   "checkId": "state.conditional-geometry",
+   "family": "state",
+   "title": "Geometry rows that appear only once an enable marker is flipped",
+   "required": true,
+   "applicability": "yes",
+   "applicabilityEvidence": "52 placed record(s) filed under cells.",
+   "prerequisites": [
+    "state.switch-census"
+   ],
+   "inputs": {
+    "arms": "all",
+    "states": "selected"
+   },
+   "evidence": {
+    "strength": "calibrated-inference",
+    "claim": "STATE CONDITIONAL",
+    "limits": "A Standard plan evaluates only the states it selected (none beyond the load-time state by default); a Deep plan evaluates every state stategen.py generates from each arm's own census (every switch alone and every quest stage's joint flip, handed over as --states-file), and lists what the generator could not express (a looping or unresolved chain, an ambiguous stage member, disabled singletons, player-parented references, unreadable plugins, and combinations beyond one stage) under `unassessed`. STATE-OVERLAP is explicitly unmeasured and withheld until strict placed render triangles are available in this evaluator; diagnostic boxes cannot establish overlap findings. State contact and route roles remain available under their separate geometry contracts. The changed measurement identity refuses comparison against legacy box-based state emits. Each state also reads LEFT IN EMPTY SPACE for the fixtures it brings in (--empty-space; STATE-EMPTY rows; interiors only), so a fixture that exists only after its quest flips a switch is judged where it appears. stateprobe has no --base, so there is no reverse arm and no physical differential credit for a state row. The Bethesda floor is withheld. Collision-marker primitives are decided only when the plan found station Q's measured table (evalrun plan --primitive-solidity, HOUSECARL_PRIMITIVE_SOLIDITY or primitiveSolidity in the harness config): one measured solid is a route obstacle by its invisible box (NPC pathing through it is inferred from the player measurement); without the table they stay unjudged and the plan and emit say so. Placed actors a state changes are never rows: one that leaves is set aside, one arriving over the navmesh, on the floor and clear of solids is judged from placement (not checked in game), and the rest are unjudged by cause."
+   },
+   "adapter": {
+    "kind": "probe-emit",
+    "exe": "stateprobe",
+    "populationFlag": "--population",
+    "primitiveSolidityFlag": "--primitive-solidity",
+    "args": [
+     "--order",
+     "{order}",
+     "--switch-map",
+     "{switchMap}",
+     "--emit",
+     "{emit}",
+     "--empty-space",
+     "{out}/{arm}.empty-space.json"
+    ],
+    "statesFlag": "--state",
+    "statesFileFlag": "--states-file",
+    "reverse": false,
+    "output": "conflict-file",
+    "commonFlags": true,
+    "population": "load-time+population:7f65e2f5011a"
+   },
+   "manualDecisionAllowed": false,
+   "unsupportedReason": null,
+   "arms": [
+    {
+     "armId": "baseline",
+     "status": "planned"
+    },
+    {
+     "armId": "candidate-01-reorder",
+     "status": "planned"
+    }
+   ],
+   "status": "planned"
+  },
+  {
+   "checkId": "environment.generated-output-regeneration",
+   "family": "environment",
+   "title": "Generated output that must be rebuilt after this change: Occlusion.esp, DynDOLOD, xLODGen, Synthesis, Reqtificator",
+   "required": true,
+   "applicability": "yes",
+   "applicabilityEvidence": "52 placed record(s) filed under cells.",
+   "prerequisites": [
+    "loadability.masters-and-order"
+   ],
+   "inputs": {
+    "arms": "all",
+    "states": "baseline"
+   },
+   "evidence": {
+    "strength": "record-fact",
+    "claim": null,
+    "limits": "No detector. The regeneration need is a consequence of the change, not a finding about it, and re-running the generators is out of this packet's scope. A decision here records WHICH generated outputs the reviewer judged stale and why; it never asserts that they were regenerated."
+   },
+   "adapter": {
+    "kind": "manual",
+    "exe": null,
+    "args": [],
+    "reverse": false,
+    "output": null
+   },
+   "manualDecisionAllowed": true,
+   "unsupportedReason": "regenerating LOD, occlusion and patcher output is outside the controller's scope; the check exists so the need is recorded rather than forgotten.",
+   "arms": [
+    {
+     "armId": "baseline",
+     "status": "manual"
+    },
+    {
+     "armId": "candidate-01-reorder",
+     "status": "manual"
+    }
+   ],
+   "status": "manual"
+  },
+  {
+   "checkId": "patch.author-advice",
+   "family": "patch",
+   "title": "The patch author's stated requirements and load order, read off the page",
+   "required": true,
+   "applicability": "yes",
+   "applicabilityEvidence": "the provider's meta.ini names Nexus mod id(s) 999001.",
+   "prerequisites": [
+    "loadability.masters-and-order"
+   ],
+   "inputs": {
+    "arms": "baseline",
+    "states": "baseline"
+   },
+   "evidence": {
+    "strength": "record-fact",
+    "claim": "PATCH FILE DISCOVERY (its advice half)",
+    "limits": "Run OFFLINE by default here: the stored catalogue copy is read and no network request is made, so the advice is as fresh as its recorded read date and the receipt carries that date. Cached source age is not the date the report was assembled. Per-file requirements are not exposed by the source; the stated order is advice, not a measurement."
+   },
+   "adapter": {
+    "kind": "adviceprobe",
+    "exe": "adviceprobe",
+    "args": [
+     "--mod",
+     "{nexusId}",
+     "--out",
+     "{out}",
+     "--offline"
+    ],
+    "reverse": false,
+    "output": "json",
+    "result": {
+     "kind": "discovery",
+     "findings": [
+      "rules",
+      "clashes"
+     ],
+     "judged": "pagesRead",
+     "unjudgeable": "warnings"
+    },
+    "commonFlags": true
+   },
+   "manualDecisionAllowed": false,
+   "unsupportedReason": null,
+   "arms": [
+    {
+     "armId": "baseline",
+     "status": "planned"
+    }
+   ],
+   "status": "planned"
+  },
+  {
+   "checkId": "patch.order-evaluation",
+   "family": "patch",
+   "title": "Which of the examined orders passes the checks that were actually run",
+   "required": true,
+   "applicability": "yes",
+   "applicabilityEvidence": "this check applies to every evaluation.",
+   "prerequisites": [
+    "loadability.masters-and-order"
+   ],
+   "inputs": {
+    "arms": "all",
+    "states": "baseline"
+   },
+   "evidence": {
+    "strength": "calibrated-inference",
+    "claim": "ORDER-DEPENDENT EVALUATION and DIFFERENTIAL CREDIT",
+    "limits": "Derived from the ordersweep receipts: the per-candidate classification is retained VERBATIM and scoped to the probes that ran, and is never promoted into a whole-evaluation pass. REPAIRED only when a physical predicate goes Holds -> Gone; a row that changed hands is RECLASSIFIED, with no repair credit. Per-probe repaired / reclassified / created / unmeasured counts are kept apart: no sum across probes, no net, and a regression on any probe stays a regression."
+   },
+   "adapter": {
+    "kind": "derived",
+    "exe": null,
+    "args": [],
+    "reverse": false,
+    "output": null
+   },
+   "manualDecisionAllowed": false,
+   "unsupportedReason": null,
+   "arms": [
+    {
+     "armId": "baseline",
+     "status": "planned"
+    },
+    {
+     "armId": "candidate-01-reorder",
+     "status": "planned"
+    }
+   ],
+   "status": "planned"
+  },
+  {
+   "checkId": "runtime.supplied-observations",
+   "family": "runtime",
+   "title": "Screenshots, video and schematics supplied with an identity that matches an evaluated arm",
+   "required": false,
+   "applicability": "yes",
+   "applicabilityEvidence": "this check applies to every evaluation.",
+   "prerequisites": [],
+   "inputs": {
+    "arms": "all",
+    "states": "selected"
+   },
+   "evidence": {
+    "strength": "supplied-media",
+    "claim": null,
+    "limits": "Admitted as evidence only when the item's configuration fingerprint equals an accepted receipt's fingerprint on that arm and it names its subject, state and provenance. Anything else is listed under unassessedMedia with the reason and is not evidence. Media illustrates a result; it never establishes one."
+   },
+   "adapter": {
+    "kind": "media",
+    "exe": null,
+    "args": [],
+    "reverse": false,
+    "output": null
+   },
+   "manualDecisionAllowed": false,
+   "unsupportedReason": null,
+   "arms": [
+    {
+     "armId": "baseline",
+     "status": "planned"
+    },
+    {
+     "armId": "candidate-01-reorder",
+     "status": "planned"
+    }
+   ],
+   "status": "planned"
+  }
+ ],
+ "options": {
+  "instance": null,
+  "profile": null,
+  "game": null,
+  "harness": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\conflictdiff-build\\harness",
+  "probeArgs": "",
+  "probeCmd": {
+   "navownprobe": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\navownprobe.py",
+   "overlapprobe": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\overlapprobe.py",
+   "contactprobe": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\contactprobe.py",
+   "bosprobe": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\bosprobe.py",
+   "switchprobe": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\switchprobe.py",
+   "stateprobe": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\stateprobe.py",
+   "scopeprobe": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\scopeprobe.py",
+   "adviceprobe": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\adviceprobe.py",
+   "patchprobe": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\patchprobe.py",
+   "driftprobe": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\driftprobe.py",
+   "seamprobe": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\seamprobe.py",
+   "waterprobe": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\waterprobe.py",
+   "blockprobe": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\blockprobe.py",
+   "depprobe": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\depprobe.py",
+   "fomodprobe": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\fomodprobe.py",
+   "poolprobe": "python S:\\Dev\\SkyWright\\.claude\\worktrees\\boundary-3-opt-in-d24ba9\\_geometry-harness\\tests\\fixtures\\evalrun\\fakeprobes\\poolprobe.py"
+  },
+  "diffTolerance": null,
+  "noReverse": false,
+  "population": "load-time"
+ },
+ "ordersweepProbes": [
+  "contactprobe",
+  "navownprobe",
+  "overlapprobe"
+ ],
+ "population": {
+  "scoped": true,
+  "file": "population.json",
+  "sha256": "7f65e2f5011ad7bc0b584a4aba56585d3a72a454600ce9c66de8bb1cee906df8",
+  "identity": "load-time+population:7f65e2f5011a",
+  "plugins": [
+   "FixtureBase.esp",
+   "FixtureTarget.esp"
+  ],
+  "mods": [],
+  "targets": [
+   "FixtureTarget.esp"
+  ],
+  "scopedProbes": [
+   "contactprobe",
+   "overlapprobe"
+  ],
+  "scopedChecks": [
+   "geometry.object-overlap",
+   "geometry.placement-contact",
+   "state.conditional-geometry"
+  ],
+  "wholeOrderChecks": {
+   "geometry.navmesh-ownership": "this probe takes no population (it runs on the whole order)"
+  },
+  "note": "the scoped probes measure only rows a reference the population reaches can take part in; their whole-order index is kept, so every such row is computed as in a whole-order run"
+ },
+ "inputs": {
+  "primitiveSolidity": {
+   "given": true,
+   "file": "inputs/primitive-solidity.json",
+   "sha256": "8b442b75db360e6c215aac68386d862f59a25a196d0654534412d3ae03603e00",
+   "source": "primitiveSolidity in S:\\Dev\\houseCARL\\_claude\\harness\\harness.local.json",
+   "path": "S:\\Dev\\houseCARL\\_claude\\runs\\2026-10-03-reach-refusals-to-zero\\data\\primitive-solidity.json",
+   "entries": 9
+  }
+ },
+ "budgets": {
+  "minutes": null,
+  "maxCandidates": null,
+  "candidatesHeldBack": {
+   "byMaxCandidates": [],
+   "count": 0,
+   "fromManifestBudget": {
+    "evaluated": 1,
+    "legalNotEvaluated": 0,
+    "note": "fixture manifest: the search was not run"
+   }
+  },
+  "statesNotExplored": []
+ },
+ "explicitDecisions": {
+  "select": null,
+  "selectRaw": null,
+  "selectImplied": {},
+  "exclude": {},
+  "touched": {},
+  "note": "--select narrows what RUNS, never what is PLANNED: a check that was not selected is skipped-user and stays visible, and a required one keeps the evaluation incomplete. An exe name in --select expands to every check that runs it."
+ }
+}

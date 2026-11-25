@@ -1,0 +1,174 @@
+{
+ "baseline": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\old-lab-bundle-run\\candidates\\candidate-00-baseline.json",
+ "probes": [
+  "contactprobe",
+  "navownprobe",
+  "overlapprobe"
+ ],
+ "candidates": {
+  "candidate-01-reorder": {
+   "classification": "PASSES-COMPLETED-CHECKS",
+   "changes": "moved FixtureTarget.esp above FixtureBase.esp",
+   "rows": [
+    {
+     "probe": "contactprobe",
+     "candidate": "candidate-01-reorder",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {
+       "repaired": 0,
+       "reclassified": 0,
+       "created": 0,
+       "unmeasured": 0,
+       "unchanged": 1
+      },
+      "refusals": [],
+      "delta": [
+       "- plugin order changed: 1 pair(s) flipped, first FixtureBase.esp / FixtureTarget.esp"
+      ]
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0,
+      "newExamples": []
+     },
+     "emit": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\old-lab-bundle-run\\sweep\\inv-0001\\contactprobe\\candidate-01-reorder.json",
+     "memoryRoute": {
+      "route": "not reported"
+     },
+     "reverseExit": 0,
+     "reverseEmit": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\old-lab-bundle-run\\sweep\\inv-0001\\contactprobe\\candidate-01-reorder.reverse.json",
+     "reverseMemoryRoute": {
+      "route": "not reported"
+     },
+     "diffExit": 0
+    },
+    {
+     "probe": "navownprobe",
+     "candidate": "candidate-01-reorder",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {
+       "repaired": 0,
+       "reclassified": 0,
+       "created": 0,
+       "unmeasured": 0,
+       "unchanged": 1
+      },
+      "refusals": [],
+      "delta": [
+       "- plugin order changed: 1 pair(s) flipped, first FixtureBase.esp / FixtureTarget.esp"
+      ]
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0,
+      "newExamples": []
+     },
+     "emit": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\old-lab-bundle-run\\sweep\\inv-0001\\navownprobe\\candidate-01-reorder.json",
+     "memoryRoute": {
+      "route": "not reported"
+     },
+     "reverseExit": 0,
+     "reverseEmit": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\old-lab-bundle-run\\sweep\\inv-0001\\navownprobe\\candidate-01-reorder.reverse.json",
+     "reverseMemoryRoute": {
+      "route": "not reported"
+     },
+     "diffExit": 0
+    },
+    {
+     "probe": "overlapprobe",
+     "candidate": "candidate-01-reorder",
+     "probeExit": 0,
+     "probeRefused": false,
+     "illegal": false,
+     "diff": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "counts": {
+       "repaired": 0,
+       "reclassified": 0,
+       "created": 0,
+       "unmeasured": 0,
+       "unchanged": 1
+      },
+      "refusals": [],
+      "delta": [
+       "- plugin order changed: 1 pair(s) flipped, first FixtureBase.esp / FixtureTarget.esp"
+      ]
+     },
+     "created": {
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0,
+      "newExamples": []
+     },
+     "emit": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\old-lab-bundle-run\\sweep\\inv-0001\\overlapprobe\\candidate-01-reorder.json",
+     "memoryRoute": {
+      "route": "not reported"
+     },
+     "reverseExit": 0,
+     "reverseEmit": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\old-lab-bundle-run\\sweep\\inv-0001\\overlapprobe\\candidate-01-reorder.reverse.json",
+     "reverseMemoryRoute": {
+      "route": "not reported"
+     },
+     "diffExit": 0
+    }
+   ],
+   "rules": {
+    "violates": [],
+    "satisfies": []
+   }
+  }
+ },
+ "manifest": {
+  "SchemaVersion": 1,
+  "Candidates": [
+   {
+    "File": "candidate-00-baseline.json",
+    "ViolatesAdvice": [],
+    "SatisfiesAdvice": []
+   },
+   {
+    "File": "candidate-01-reorder.json",
+    "ViolatesAdvice": [],
+    "SatisfiesAdvice": []
+   }
+  ],
+  "Budget": {
+   "evaluated": 1,
+   "legalNotEvaluated": 0,
+   "note": "fixture manifest: the search was not run"
+  },
+  "Contradictions": []
+ },
+ "baselineMemoryRoute": {
+  "contactprobe": {
+   "route": "not reported"
+  },
+  "navownprobe": {
+   "route": "not reported"
+  },
+  "overlapprobe": {
+   "route": "not reported"
+  }
+ },
+ "population": {
+  "file": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\old-lab-bundle-run\\population.json",
+  "sha256": "7f65e2f5011ad7bc0b584a4aba56585d3a72a454600ce9c66de8bb1cee906df8",
+  "probes": [
+   "contactprobe",
+   "overlapprobe"
+  ]
+ }
+}

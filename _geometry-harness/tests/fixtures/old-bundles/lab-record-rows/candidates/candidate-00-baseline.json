@@ -1,0 +1,17 @@
+{
+ "SchemaVersion": 1,
+ "Name": "candidate-00-baseline",
+ "BaseProfile": "fixture",
+ "Plugins": [
+  "Skyrim.esm",
+  "Update.esm",
+  "FixtureBase.esp",
+  "FixtureTarget.esp"
+ ],
+ "Changes": [
+  "the profile's own order"
+ ],
+ "Provenance": {
+  "fixture": "evalrun test fixture"
+ }
+}

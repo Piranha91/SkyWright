@@ -160,7 +160,7 @@ public static class EvaluateRun
                 object? st = armRow["status"];
                 if (AlreadyDone(cid, aid))
                 {
-                    string? pre = Ev.Eq(st, "planned") && !Ev.Eq(kind, "media") ? Prerequisites.ReuseBlockedBy(ex, check, aid) : null;
+                    string? pre = Ev.Eq(st, "planned") ? Prerequisites.ReuseBlockedBy(ex, check, aid) : null;
                     // only an import credits an import row, and it stays credited only while its gate still holds on this arm
                     if (Import(st)) pre = Prerequisites.Satisfied(ex, check, aid);
                     if (Ev.Eq(kind, "derived")) { }   // reused or blocked after the loop, where derived checks are decided
@@ -210,11 +210,6 @@ public static class EvaluateRun
                     ex.Account(check, arm, "manual", null,
                         PyValue.Truthy(check.Get("unsupportedReason")) ? (string)check["unsupportedReason"]!
                             : "this check is completed by an attributed manual decision, read at finalize");
-                else if (Ev.Eq(kind, "media"))
-                    ex.Account(check, arm, "blocked(no-identified-media)", null,
-                        "no supplied media identified this check's configuration on this arm: media is "
-                        + "assessed by `bundle --media`, and an item whose fingerprint does not match an "
-                        + "accepted receipt is unassessed, not an illustration of a verified result");
                 else if (Ev.Eq(kind, "derived")) { }   // after the loop: derived checks consume other receipts
                 else
                 {

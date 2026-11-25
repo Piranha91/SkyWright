@@ -1,7 +1,7 @@
 namespace RunControl;
 
 /// <summary>The rule answers the Python that stays asks for, so it holds no copy of a rule this program owns: `runcontrol
-/// fingerprint` (ConfigurationIdentity.Compute, through BundleMedia.Fingerprints) and `runcontrol switchflip-outcome`
+/// fingerprint` (ConfigurationIdentity.Compute, through Fingerprints.Of) and `runcontrol switchflip-outcome`
 /// (SwitchFlipOutcome). Each reads one JSON document on standard input and writes one JSON answer on standard output,
 /// exit 0, or one REFUSED sentence on standard error, exit 2. They are pure, read and write no file, and open no run-log
 /// record: the live driver asks once a second, and opening a record costs seconds.</summary>
@@ -23,7 +23,7 @@ public static class RuleQueries
                 throw new Refusal($"{args[0]}: standard input is not one JSON document ({ex.Message}); send the request as JSON.");
             }
             object answer;
-            try { answer = args[0] == "fingerprint" ? BundleMedia.Fingerprints(request) : SwitchFlipOutcome.Answer(request); }
+            try { answer = args[0] == "fingerprint" ? Fingerprints.Of(request) : SwitchFlipOutcome.Answer(request); }
             catch (Exception ex) when (EvalCommands.IsShapeError(ex) && ex is not IOException and not UnauthorizedAccessException)
             {
                 throw new Refusal($"{args[0]}: the request holds a value of a shape the rule cannot read ({ex.GetType().Name}: {ex.Message}); "

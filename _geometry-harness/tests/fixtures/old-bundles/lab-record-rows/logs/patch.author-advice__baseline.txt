@@ -1,0 +1,4 @@
+$ python S:\Dev\SkyWright\.claude\worktrees\boundary-3-opt-in-d24ba9\_geometry-harness\tests\fixtures\evalrun\fakeprobes\adviceprobe.py --mod 999001 --out C:\Users\Piranha\AppData\Local\Temp\tmp7vy3bsk5\old-lab-bundle-run\outputs\patch.author-advice --offline
+(exit 0, 0.0s)
+
+fakeprobe adviceprobe: arm '-' behaviour 'ok'

@@ -19,14 +19,14 @@ public static class Registry
     /// <summary>The app registry's vocabulary.</summary>
     public static readonly Vocabulary App = new(
         AdapterKinds: new HashSet<string>(["scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target",
-            "adviceprobe", "patchprobe", "derived", "media", "manual", "mcp-only", "live-import", "unsupported"]),
+            "adviceprobe", "patchprobe", "derived", "manual", "mcp-only", "live-import", "unsupported"]),
         KindsNeedingReason: new HashSet<string>(["manual", "mcp-only", "unsupported"]),
         ResultKinds: new HashSet<string>(["detector", "catalogue", "discovery"]),
-        KindsWithoutOutput: new HashSet<string>(["derived", "media", "mcp-only", "manual", "unsupported", "live-import"]),
+        KindsWithoutOutput: new HashSet<string>(["derived", "mcp-only", "manual", "unsupported", "live-import"]),
         KindsRequiringOptIn: new HashSet<string>(["live-import"]),
         KindsWithChild: new HashSet<string>(["scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target",
             "adviceprobe", "patchprobe"]),
-        EvidenceStrengths: new HashSet<string>(["record-fact", "calibrated-inference", "engine-observation", "supplied-media"]));
+        EvidenceStrengths: new HashSet<string>(["record-fact", "calibrated-inference", "engine-observation"]));
 
     static readonly HashSet<string> TriggerKeys = ["always", "anyType", "placed", "exterior", "land", "navmesh", "overlays", "nexusId",
         "masters", "placedMeshes", "anyOf", "allOf"];

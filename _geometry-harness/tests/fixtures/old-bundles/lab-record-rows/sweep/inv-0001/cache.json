@@ -1,0 +1,290 @@
+{
+ "7e04f9c5cfc5c541298bd1ddbb4e7b196ea40f444cf2bd0e5be9daf3f0ea0386": {
+  "cacheVersion": 2,
+  "emit": "contactprobe/baseline.json",
+  "emitSha256": "71455c583a937e74086a1c6f3fd307853f1b68af9da33b1c189633e47a7ff9e4",
+  "label": "contactprobe-baseline",
+  "recordedUtc": "2026-11-25T09:28:15Z",
+  "identity": {
+   "fingerprint": "fac236de4cf62921768849901b248a3739d450341112c8e561c906a1a61902ea",
+   "plugins": [
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Skyrim.esm",
+     "sha256": "e27885aee97ce4f40b677e2c362c5286d9c7c005b4f26c422719c65780159512"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Update.esm",
+     "sha256": "65dfd4bd8fcb74944dec5d479448578b44b5256a6777953704cc3402cc1ada2c"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureBase.esp",
+     "sha256": "598d358b0f01cb51697f624d767dd12b2fd3f36ecbc2c87bb5e9564168560b6a"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureTarget.esp",
+     "sha256": "1439e0fe3e9204937f854b786c53d7d6e7cfa17c20a31cf21e92af6ba6e2b87d"
+    }
+   ],
+   "overlays": [],
+   "population": "load-time+population:7f65e2f5011a",
+   "state": "baseline",
+   "limits": []
+  }
+ },
+ "325cee4c8875b0cef486bd5613883ee584107bfca71892221c40396ba0b9dd3d": {
+  "cacheVersion": 2,
+  "emit": "navownprobe/baseline.json",
+  "emitSha256": "8bbbd0f788f244ca8f3225e7a354c90ed3c56787d7798203daa2d2fb9008319f",
+  "label": "navownprobe-baseline",
+  "recordedUtc": "2026-11-25T09:28:15Z",
+  "identity": {
+   "fingerprint": "981273e5b0ffaf5780f00e3dc17d4f5c6500157fee165edcc6d210eef89c3011",
+   "plugins": [
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Skyrim.esm",
+     "sha256": "e27885aee97ce4f40b677e2c362c5286d9c7c005b4f26c422719c65780159512"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Update.esm",
+     "sha256": "65dfd4bd8fcb74944dec5d479448578b44b5256a6777953704cc3402cc1ada2c"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureBase.esp",
+     "sha256": "598d358b0f01cb51697f624d767dd12b2fd3f36ecbc2c87bb5e9564168560b6a"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureTarget.esp",
+     "sha256": "1439e0fe3e9204937f854b786c53d7d6e7cfa17c20a31cf21e92af6ba6e2b87d"
+    }
+   ],
+   "overlays": [],
+   "population": "load-time",
+   "state": "baseline",
+   "limits": []
+  }
+ },
+ "83af87760c2835c581e6388b10782a6578833bcd6c1acab68fb96a60c20041f5": {
+  "cacheVersion": 2,
+  "emit": "overlapprobe/baseline.json",
+  "emitSha256": "e6cc1f40281ebfee486bfad9e55cb485cf7d7bbeb21ee419392a1921c2f8fd8e",
+  "label": "overlapprobe-baseline",
+  "recordedUtc": "2026-11-25T09:28:15Z",
+  "identity": {
+   "fingerprint": "fac236de4cf62921768849901b248a3739d450341112c8e561c906a1a61902ea",
+   "plugins": [
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Skyrim.esm",
+     "sha256": "e27885aee97ce4f40b677e2c362c5286d9c7c005b4f26c422719c65780159512"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Update.esm",
+     "sha256": "65dfd4bd8fcb74944dec5d479448578b44b5256a6777953704cc3402cc1ada2c"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureBase.esp",
+     "sha256": "598d358b0f01cb51697f624d767dd12b2fd3f36ecbc2c87bb5e9564168560b6a"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureTarget.esp",
+     "sha256": "1439e0fe3e9204937f854b786c53d7d6e7cfa17c20a31cf21e92af6ba6e2b87d"
+    }
+   ],
+   "overlays": [],
+   "population": "load-time+population:7f65e2f5011a",
+   "state": "baseline",
+   "limits": []
+  }
+ },
+ "a9216a16416dc2e91a999979d3a9a5aead6efbcf5d2fe82afa02e9651122ed94": {
+  "cacheVersion": 2,
+  "emit": "contactprobe/candidate-01-reorder.json",
+  "emitSha256": "9209fd4e4d941caa14482e11078813cb335ef5f8cb92e025705f2db68a1db0cb",
+  "label": "contactprobe-candidate-01-reorder",
+  "recordedUtc": "2026-11-25T09:28:16Z",
+  "identity": {
+   "fingerprint": "eedd6ace143c8e75535f3bb02962e1b550579a10817b01cc3bf3684ea13593cb",
+   "plugins": [
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Skyrim.esm",
+     "sha256": "e27885aee97ce4f40b677e2c362c5286d9c7c005b4f26c422719c65780159512"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Update.esm",
+     "sha256": "65dfd4bd8fcb74944dec5d479448578b44b5256a6777953704cc3402cc1ada2c"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureTarget.esp",
+     "sha256": "1439e0fe3e9204937f854b786c53d7d6e7cfa17c20a31cf21e92af6ba6e2b87d"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureBase.esp",
+     "sha256": "598d358b0f01cb51697f624d767dd12b2fd3f36ecbc2c87bb5e9564168560b6a"
+    }
+   ],
+   "overlays": [],
+   "population": "load-time+population:7f65e2f5011a",
+   "state": "baseline",
+   "limits": []
+  }
+ },
+ "9f16fec519cf495be0da22c222b4e5a90cda60c4baf294a47c15039e6885ce85": {
+  "cacheVersion": 2,
+  "emit": "contactprobe/candidate-01-reorder.reverse.json",
+  "emitSha256": "c99e6f7b8dcfe2c5e4a1c02c145082eebdb3bbe052cd040c626008e16b874ddd",
+  "label": "contactprobe-candidate-01-reorder-reverse",
+  "recordedUtc": "2026-11-25T09:28:16Z",
+  "identity": {
+   "fingerprint": "fac236de4cf62921768849901b248a3739d450341112c8e561c906a1a61902ea",
+   "plugins": [
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Skyrim.esm",
+     "sha256": "e27885aee97ce4f40b677e2c362c5286d9c7c005b4f26c422719c65780159512"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Update.esm",
+     "sha256": "65dfd4bd8fcb74944dec5d479448578b44b5256a6777953704cc3402cc1ada2c"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureBase.esp",
+     "sha256": "598d358b0f01cb51697f624d767dd12b2fd3f36ecbc2c87bb5e9564168560b6a"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureTarget.esp",
+     "sha256": "1439e0fe3e9204937f854b786c53d7d6e7cfa17c20a31cf21e92af6ba6e2b87d"
+    }
+   ],
+   "overlays": [],
+   "population": "load-time+population:7f65e2f5011a",
+   "state": "baseline",
+   "limits": []
+  }
+ },
+ "94e54a3b7dc0df13040c9196e07b2484fcf8333223ec6a42fcbf69ee3f685239": {
+  "cacheVersion": 2,
+  "emit": "navownprobe/candidate-01-reorder.json",
+  "emitSha256": "9148e91f696bf84675a8a39dcc9c41ddf3781fb32dba654c5e88c120f53ae4a1",
+  "label": "navownprobe-candidate-01-reorder",
+  "recordedUtc": "2026-11-25T09:28:16Z",
+  "identity": {
+   "fingerprint": "ce574c2af697102e267eaed845d66d893554ee05197b0ba9c855d31f7cea3cca",
+   "plugins": [
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Skyrim.esm",
+     "sha256": "e27885aee97ce4f40b677e2c362c5286d9c7c005b4f26c422719c65780159512"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Update.esm",
+     "sha256": "65dfd4bd8fcb74944dec5d479448578b44b5256a6777953704cc3402cc1ada2c"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureTarget.esp",
+     "sha256": "1439e0fe3e9204937f854b786c53d7d6e7cfa17c20a31cf21e92af6ba6e2b87d"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureBase.esp",
+     "sha256": "598d358b0f01cb51697f624d767dd12b2fd3f36ecbc2c87bb5e9564168560b6a"
+    }
+   ],
+   "overlays": [],
+   "population": "load-time",
+   "state": "baseline",
+   "limits": []
+  }
+ },
+ "e9d8670c638961e6ed03e254a0374929b8ae704173981b3695b6dbb1ddc2bd58": {
+  "cacheVersion": 2,
+  "emit": "navownprobe/candidate-01-reorder.reverse.json",
+  "emitSha256": "6712ada4d2ed12b9fedaa860254e74b97a58ddc48b2ac897e926c420ca783376",
+  "label": "navownprobe-candidate-01-reorder-reverse",
+  "recordedUtc": "2026-11-25T09:28:16Z",
+  "identity": {
+   "fingerprint": "981273e5b0ffaf5780f00e3dc17d4f5c6500157fee165edcc6d210eef89c3011",
+   "plugins": [
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Skyrim.esm",
+     "sha256": "e27885aee97ce4f40b677e2c362c5286d9c7c005b4f26c422719c65780159512"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Update.esm",
+     "sha256": "65dfd4bd8fcb74944dec5d479448578b44b5256a6777953704cc3402cc1ada2c"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureBase.esp",
+     "sha256": "598d358b0f01cb51697f624d767dd12b2fd3f36ecbc2c87bb5e9564168560b6a"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureTarget.esp",
+     "sha256": "1439e0fe3e9204937f854b786c53d7d6e7cfa17c20a31cf21e92af6ba6e2b87d"
+    }
+   ],
+   "overlays": [],
+   "population": "load-time",
+   "state": "baseline",
+   "limits": []
+  }
+ },
+ "60a2798f2c06a8a879e4edcc33b73174a5aea97fe844de1027fcb7160d667d84": {
+  "cacheVersion": 2,
+  "emit": "overlapprobe/candidate-01-reorder.json",
+  "emitSha256": "bcea30ff4a12ff28553872fea954f13a76bfb78125f3dbdcd4d34c036649f095",
+  "label": "overlapprobe-candidate-01-reorder",
+  "recordedUtc": "2026-11-25T09:28:16Z",
+  "identity": {
+   "fingerprint": "eedd6ace143c8e75535f3bb02962e1b550579a10817b01cc3bf3684ea13593cb",
+   "plugins": [
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Skyrim.esm",
+     "sha256": "e27885aee97ce4f40b677e2c362c5286d9c7c005b4f26c422719c65780159512"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Update.esm",
+     "sha256": "65dfd4bd8fcb74944dec5d479448578b44b5256a6777953704cc3402cc1ada2c"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureTarget.esp",
+     "sha256": "1439e0fe3e9204937f854b786c53d7d6e7cfa17c20a31cf21e92af6ba6e2b87d"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureBase.esp",
+     "sha256": "598d358b0f01cb51697f624d767dd12b2fd3f36ecbc2c87bb5e9564168560b6a"
+    }
+   ],
+   "overlays": [],
+   "population": "load-time+population:7f65e2f5011a",
+   "state": "baseline",
+   "limits": []
+  }
+ },
+ "4650af36ecaac65464a09d22d8418d9710b9863016925f1ca1417589d69e5df0": {
+  "cacheVersion": 2,
+  "emit": "overlapprobe/candidate-01-reorder.reverse.json",
+  "emitSha256": "b4a19df2516ccddf2c6899cbcdda9860a43a5807b3d7f26d651ffa6317eb3b98",
+  "label": "overlapprobe-candidate-01-reorder-reverse",
+  "recordedUtc": "2026-11-25T09:28:16Z",
+  "identity": {
+   "fingerprint": "fac236de4cf62921768849901b248a3739d450341112c8e561c906a1a61902ea",
+   "plugins": [
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Skyrim.esm",
+     "sha256": "e27885aee97ce4f40b677e2c362c5286d9c7c005b4f26c422719c65780159512"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Update.esm",
+     "sha256": "65dfd4bd8fcb74944dec5d479448578b44b5256a6777953704cc3402cc1ada2c"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureBase.esp",
+     "sha256": "598d358b0f01cb51697f624d767dd12b2fd3f36ecbc2c87bb5e9564168560b6a"
+    },
+    {
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureTarget.esp",
+     "sha256": "1439e0fe3e9204937f854b786c53d7d6e7cfa17c20a31cf21e92af6ba6e2b87d"
+    }
+   ],
+   "overlays": [],
+   "population": "load-time+population:7f65e2f5011a",
+   "state": "baseline",
+   "limits": []
+  }
+ }
+}

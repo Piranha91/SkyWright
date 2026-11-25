@@ -398,20 +398,13 @@ def c1899_marked_view_captions(tmp: Path):
           "the station view line is not said once per figure (on its first frame only)", f"{first!r} / {later!r}")
 
 
-def c1930_media_bundle_frozen_registry(tmp: Path):
-    """Hroggar's report stage: the check registry changed after the evaluation was planned, so `evalrun bundle --media`
-    refused (registry-changed) and the pipeline delivered no report. Wrong answer: the media-bundle command does not
-    name the evidence bundle's own registry copy, the one the plan froze."""
-    EP = load("ac_evalpipeline3", HARNESS / "evalpipeline.py")
-    out = tmp / "c1930"
-    reg = out / "bundle" / "evidence" / "registry" / "check-registry.json"
-    reg.parent.mkdir(parents=True, exist_ok=True)
-    reg.write_text("{}", encoding="utf-8")
-    live = out / "live-registry.json"
-    live.write_text('{"changed": true}', encoding="utf-8")
+def _media_bundle_argv(tmp: Path, name: str, plan: dict) -> list:
+    """The report stage's media-bundle command for a run whose app plan is `plan`, with one captured frame; every
+    child is recorded and stopped before it runs."""
+    EP = load(f"ac_evalpipeline_{name}", HARNESS / "evalpipeline.py")
+    out = tmp / name
     (out / "evaluation").mkdir(parents=True, exist_ok=True)
-    (out / "evaluation" / "plan.json").write_text(json.dumps({"registry": {"path": str(live), "sha256": hashlib.sha256(
-        b"{}").hexdigest()}}), encoding="utf-8")
+    (out / "evaluation" / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     seq = out / "capture" / "capture-x" / "sequence"
     seq.mkdir(parents=True, exist_ok=True)
     (seq / "capture-result.json").write_text("{}", encoding="utf-8")
@@ -428,18 +421,27 @@ def c1930_media_bundle_frozen_registry(tmp: Path):
         seen.append((name, [str(x) for x in argv]))
         raise Stop()
     EP.child = fake_child
-    EP.reader_cmd = lambda ctx: "reader"
-    EP.names_env = lambda ctx: {}
+    EP.evalcontrol_exe = lambda machine: Path("evalcontrol.exe")
     ctx = types.SimpleNamespace(out=out, entry={}, machine={})
     try:
         EP.stage_report(ctx, None, out / "report")
     except Stop:
         pass
-    argv = next((a for n, a in seen if n == "media-bundle"), [])
-    i = argv.index("--registry") if "--registry" in argv else -1
-    check("C1930", i >= 0 and Path(argv[i + 1]) == reg,
-          "the media bundle is built without the evidence bundle's own frozen registry, so a changed registry refuses "
-          "the report stage", f"media-bundle argv {argv[:20]}")
+    return next((a for n, a in seen if n == "media-bundle"), []), EP.fwd(EP.ai_dir(ctx))
+
+
+def c1930_media_bundle_frozen_registry(tmp: Path):
+    """Hroggar's report stage: the check registry changed after the evaluation was planned, so `evalrun bundle --media`
+    refused (registry-changed) and the pipeline delivered no report. Since the AI-side rows left the app's registry the
+    media bundle is the overlay's (`evalcontrol bundle --media` over the overlay run), whose plan names its own list copy
+    and the app bundle's copies (OverlayPlan), so no original is read. Wrong answer: the media-bundle command bundles
+    anything but the overlay run, or hands it a registry, scope or search file to read instead of the frozen copies."""
+    h = hashlib.sha256(b"{}").hexdigest()
+    argv, ai = _media_bundle_argv(tmp, "c1930", {"registry": {"path": str(tmp / "live-registry.json"), "sha256": h}})
+    i = argv.index("--run") if "--run" in argv else -1
+    check("C1930", i >= 0 and argv[i + 1] == ai and not {"--registry", "--scope", "--search"} & set(argv),
+          "the media bundle is built from something other than the overlay run's frozen plan, or is handed a live "
+          "registry, scope or search to read", f"media-bundle argv {argv[:20]}")
 
 
 def c1931_reel_speaks_no_ids(tmp: Path):
@@ -508,64 +510,17 @@ def c1932_cell_by_form_key_and_true_reasons(tmp: Path):
 
 def c1933_media_bundle_frozen_scope(tmp: Path):
     """Ice Blade's report stage: the plan's scope path was on a folder since deleted, so `evalrun bundle --media` refused
-    (scope-missing). Wrong answers: the media-bundle command does not name the evidence bundle's own scope copy; an
-    input the plan still holds unchanged is replaced by the copy; a plan pinning an input the report stage does not
-    know is passed on silently instead of refused."""
-    EP = load("ac_evalpipeline4", HARNESS / "evalpipeline.py")
-    out = tmp / "c1933"
-    ev = out / "bundle" / "evidence"
-    (ev / "registry").mkdir(parents=True, exist_ok=True)
-    (ev / "registry" / "check-registry.json").write_text("{}", encoding="utf-8")
-    (ev / "scope").mkdir(parents=True, exist_ok=True)
-    (ev / "scope" / "scope.json").write_text("{}", encoding="utf-8")
-    live = out / "registry-live.json"
-    live.write_text("{}", encoding="utf-8")                  # the registry's original still hashes to the plan
+    (scope-missing). The overlay's plan takes the scope from the app bundle's copy (OverlayPlan; the module's
+    test_evalcontrol_run.py shows it, and that an app plan pinning an input the overlay does not know is refused in one
+    sentence, case C1933 there). Wrong answer: the media-bundle command names the plan's scope path (on the deleted
+    folder) or any scope file at all."""
     h = hashlib.sha256(b"{}").hexdigest()
-    plan = {"registry": {"path": str(live), "sha256": h}, "scope": {"path": str(out / "gone" / "scope.json"), "sha256": h},
-            "explicitDecisions": {"settings": {"path": "x", "sha256": h}}}
-    (out / "evaluation").mkdir(parents=True, exist_ok=True)
-    (out / "evaluation" / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
-    seq = out / "capture" / "capture-x" / "sequence"
-    seq.mkdir(parents=True, exist_ok=True)
-    (seq / "capture-result.json").write_text("{}", encoding="utf-8")
-    (seq / "media-with.json").write_text(json.dumps({"items": [{"path": "x.png"}]}), encoding="utf-8")
-    (out / "capture" / "captures.json").write_text(json.dumps([{"id": "capture-x", "status": "captured",
-                                                                 "result": str(seq / "capture-result.json")}]),
-                                                    encoding="utf-8")
-    seen = []
-
-    class Stop(Exception):
-        pass
-
-    def fake_child(ctx, cdir, name, argv, **kw):
-        seen.append((name, [str(x) for x in argv]))
-        raise Stop()
-    EP.child = fake_child
-    EP.reader_cmd = lambda ctx: "reader"
-    EP.names_env = lambda ctx: {}
-    ctx = types.SimpleNamespace(out=out, entry={}, machine={})
-    try:
-        EP.stage_report(ctx, None, out / "report")
-    except Stop:
-        pass
-    argv = next((a for n, a in seen if n == "media-bundle"), [])
-    i = argv.index("--scope") if "--scope" in argv else -1
-    check("C1933", i >= 0 and Path(argv[i + 1]) == ev / "scope" / "scope.json" and "--registry" not in argv,
-          "the media bundle is built without the evidence bundle's own scope copy (or replaces an input the plan still "
-          "holds unchanged)", f"media-bundle argv {argv[:24]}")
-    # a plan pinning an input the report stage does not know fails in one sentence, not silently
-    plan["population"] = {"path": str(out / "gone" / "population.json"), "sha256": h}
-    (out / "evaluation" / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
-    seen.clear()
-    said = None
-    try:
-        EP.stage_report(ctx, None, out / "report")
-    except Stop:
-        said = "went on to bundle"
-    except EP.Refusal as e:
-        said = str(e)
-    check("C1933", bool(said) and "population" in said and "went on" not in said,
-          "a plan pinning an input the report stage does not know is passed over silently", str(said))
+    gone = tmp / "c1933" / "gone" / "scope.json"
+    argv, ai = _media_bundle_argv(tmp, "c1933", {"registry": {"path": str(tmp / "r.json"), "sha256": h},
+                                                 "scope": {"path": str(gone), "sha256": h}})
+    check("C1933", bool(argv) and "--scope" not in argv and not any("gone" in a for a in argv),
+          "the media bundle is handed the plan's scope (on a deleted folder) instead of bundling the overlay run",
+          f"media-bundle argv {argv[:24]}")
 
 
 def c1935_vignette_requests_its_own_pair(tmp: Path):

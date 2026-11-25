@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "planId": "63e36b97b433",
+  "checkId": "records.cell-attributes",
+  "armId": "baseline",
+  "state": "baseline",
+  "origin": "fresh",
+  "capturedUtc": "2026-11-25T09:28:17.948779Z",
+  "tool": {
+    "name": "fixture record capture",
+    "version": "1"
+  },
+  "configuration": {
+    "schemaVersion": 1,
+    "source": "candidate:candidate-00-baseline.json",
+    "plugins": [
+      {
+        "name": "Skyrim.esm",
+        "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Skyrim.esm",
+        "sha256": "e27885aee97ce4f40b677e2c362c5286d9c7c005b4f26c422719c65780159512"
+      },
+      {
+        "name": "Update.esm",
+        "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Update.esm",
+        "sha256": "65dfd4bd8fcb74944dec5d479448578b44b5256a6777953704cc3402cc1ada2c"
+      },
+      {
+        "name": "FixtureBase.esp",
+        "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureBase.esp",
+        "sha256": "598d358b0f01cb51697f624d767dd12b2fd3f36ecbc2c87bb5e9564168560b6a"
+      },
+      {
+        "name": "FixtureTarget.esp",
+        "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureTarget.esp",
+        "sha256": "1439e0fe3e9204937f854b786c53d7d6e7cfa17c20a31cf21e92af6ba6e2b87d"
+      }
+    ],
+    "providers": [
+      {
+        "name": "overwrite",
+        "kind": "overwrite"
+      },
+      {
+        "name": "fixture-mods",
+        "kind": "mod"
+      },
+      {
+        "name": "Data",
+        "kind": "data"
+      }
+    ],
+    "overlays": [],
+    "population": "load-time",
+    "state": "baseline",
+    "fingerprint": "981273e5b0ffaf5780f00e3dc17d4f5c6500157fee165edcc6d210eef89c3011"
+  },
+  "result": {
+    "detector": "finding",
+    "findings": 1,
+    "coverage": [
+      {
+        "Population": "contested PlacedObject records",
+        "Judged": 1,
+        "Unjudgeable": {}
+      }
+    ]
+  },
+  "outputs": [
+    {
+      "role": "request",
+      "path": "request.jsonl",
+      "sha256": "09a72ad4f8fbd9848b27c8715849e57f12f6643ed695d904fbef6bc362c01a8e"
+    },
+    {
+      "role": "response",
+      "path": "response.jsonl",
+      "sha256": "b480130d32b2bd462837764e46154b686b7e80a82b9d28203c20f15634a738c5"
+    }
+  ]
+}

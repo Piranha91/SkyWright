@@ -1,0 +1,39 @@
+{
+ "generated": "2026-11-25 09:28:17Z",
+ "instance": "fixture://evalrun",
+ "profile": "candidate-01-reorder",
+ "plugins": 4,
+ "unreadable": [],
+ "summary": {
+  "switches": 3,
+  "children": 6,
+  "descendants": 6,
+  "onSet": 3,
+  "offSet": 0,
+  "chained": 0,
+  "cycles": 0,
+  "playerParentRefs": 0
+ },
+ "perPlugin": [],
+ "switches": [
+  {
+   "switch": "0A0010:FixtureTarget.esp",
+   "kind": "quest-stage",
+   "children": 2,
+   "set": "on"
+  },
+  {
+   "switch": "0A0010:FixtureTarget.esp",
+   "kind": "quest-stage",
+   "children": 2,
+   "set": "on"
+  },
+  {
+   "switch": "0A0010:FixtureTarget.esp",
+   "kind": "quest-stage",
+   "children": 2,
+   "set": "on"
+  }
+ ],
+ "jointFlips": []
+}

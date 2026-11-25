@@ -1,0 +1,4 @@
+$ python S:\Dev\SkyWright\.claude\worktrees\boundary-3-opt-in-d24ba9\_geometry-harness\tests\fixtures\evalrun\fakeprobes\switchprobe.py --order C:\Users\Piranha\AppData\Local\Temp\tmp7vy3bsk5\fixtures\cases\case-01-geometry-and-quest\candidates\candidate-00-baseline.json --json C:\Users\Piranha\AppData\Local\Temp\tmp7vy3bsk5\old-lab-bundle-run\outputs\state.switch-census\baseline.json
+(exit 0, 0.0s)
+
+fakeprobe switchprobe: arm 'baseline' behaviour 'ok'

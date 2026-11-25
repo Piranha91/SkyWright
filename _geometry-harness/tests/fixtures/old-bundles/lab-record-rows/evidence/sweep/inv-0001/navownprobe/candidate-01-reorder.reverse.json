@@ -1,0 +1,115 @@
+{
+ "Probe": "navownprobe",
+ "Instance": "fixture://evalrun",
+ "GeneratedUtc": "2026-11-25 09:28:16Z",
+ "Conflicts": [
+  {
+   "Kind": "CLOBBERED",
+   "A": "FixtureTarget.esp",
+   "B": "FixtureBase.esp",
+   "Summary": "3 navmesh record(s) re-cut without a declared dependency",
+   "Necessary": [
+    {
+     "FormKey": "0A0001:FixtureBase.esp",
+     "Role": "navmesh",
+     "Label": "FixtureInterior01",
+     "Physical": "Holds",
+     "PhysicalDetail": "the loser's mesh reaches 260u past the winner's"
+    }
+   ]
+  }
+ ],
+ "Coverage": [
+  {
+   "Population": "fixture population",
+   "Judged": 42,
+   "Unjudgeable": {}
+  }
+ ],
+ "Population": "load-time",
+ "State": "baseline",
+ "Predicates": [
+  {
+   "Kind": "CLOBBERED",
+   "A": "FixtureTarget.esp",
+   "B": "FixtureBase.esp",
+   "FormKey": "0A0001:FixtureBase.esp",
+   "Other": null,
+   "Physical": "Holds",
+   "Detail": "fixture re-measurement under this arm"
+  }
+ ],
+ "BaseEmit": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/old-lab-bundle-run/sweep/inv-0001/navownprobe/candidate-01-reorder.json",
+ "Configuration": {
+  "SchemaVersion": 1,
+  "Fingerprint": "981273e5b0ffaf5780f00e3dc17d4f5c6500157fee165edcc6d210eef89c3011",
+  "Source": "candidate:candidate-00-baseline.json",
+  "Plugins": [
+   {
+    "Name": "Skyrim.esm",
+    "Path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Skyrim.esm",
+    "Sha256": "e27885aee97ce4f40b677e2c362c5286d9c7c005b4f26c422719c65780159512",
+    "Bytes": 80,
+    "Provider": "fixture-mods",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": []
+   },
+   {
+    "Name": "Update.esm",
+    "Path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Update.esm",
+    "Sha256": "65dfd4bd8fcb74944dec5d479448578b44b5256a6777953704cc3402cc1ada2c",
+    "Bytes": 34,
+    "Provider": "fixture-mods",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": []
+   },
+   {
+    "Name": "FixtureBase.esp",
+    "Path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureBase.esp",
+    "Sha256": "598d358b0f01cb51697f624d767dd12b2fd3f36ecbc2c87bb5e9564168560b6a",
+    "Bytes": 61,
+    "Provider": "fixture-mods",
+    "MasterFlag": false,
+    "LightFlag": false,
+    "Masters": []
+   },
+   {
+    "Name": "FixtureTarget.esp",
+    "Path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureTarget.esp",
+    "Sha256": "1439e0fe3e9204937f854b786c53d7d6e7cfa17c20a31cf21e92af6ba6e2b87d",
+    "Bytes": 76,
+    "Provider": "fixture-mods",
+    "MasterFlag": false,
+    "LightFlag": false,
+    "Masters": []
+   }
+  ],
+  "Providers": [
+   {
+    "Name": "overwrite",
+    "Kind": "overwrite"
+   },
+   {
+    "Name": "fixture-mods",
+    "Kind": "mod"
+   },
+   {
+    "Name": "Data",
+    "Kind": "data"
+   }
+  ],
+  "Overlays": [],
+  "Population": "load-time",
+  "State": "baseline",
+  "Limits": [],
+  "Unknown": {
+   "installerChoices": "not modelled: MO2 keeps no per-mod record of the FOMOD options taken; the installed files are the evidence",
+   "gameBuild": "not read: the executable version and SKSE/plugin set are not part of a records run",
+   "distributors": "not read: SPID / KID / SkyPatcher layers are not scanned; only BOS ini files are listed as overlays",
+   "saveState": "not applicable: a records run judges a fresh load, never a save"
+  }
+ },
+ "PopulationIdentity": "load-time / state baseline"
+}

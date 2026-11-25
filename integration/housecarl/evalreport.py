@@ -1043,16 +1043,18 @@ def relative_pdf_links(pdf: Path, folder: Path) -> str | None:
 
 # ------------------------------------------------------------------------------ bundle verification --
 
-def run_verify_bundle(bundle: Path, out: Path) -> tuple[dict | None, int, str]:
+def run_verify_bundle(bundle: Path, out: Path, ai: Path | None = None) -> tuple[dict | None, int, str]:
     """D1: the built-in controller's `runcontrol verify-bundle DIR` is the authority (HOUSECARL_RUNCONTROL, else this
     checkout's build). It reads the bundle in place and writes its result to OUT/verify.json (`--out`), so the bundle is
     never written and nothing is copied. An earlier OUT/verify.json is removed first, so a verify that dies before
-    writing cannot be read as this run's verdict."""
+    writing cannot be read as this run's verdict. With `ai`, the AI-side overlay bundle bound to it: `evalcontrol verify`
+    verifies both and the binding, and its verify.json states the AI-side evaluation (its one owner)."""
     import evalpipeline
     result = out / "verify.json"
     result.unlink(missing_ok=True)
     try:
-        argv = evalpipeline.verify_bundle_argv(None, bundle) + ["--out", str(result)]
+        argv = (evalpipeline.evalcontrol_argv(None, "verify", ai, "--app", bundle) if ai else
+                evalpipeline.verify_bundle_argv(None, bundle)) + ["--out", str(result)]
     except evalpipeline.Refusal as ex:
         return None, EXIT_REFUSED_INPUT, f"verify-bundle could not run: {ex}"
     try:
@@ -1068,8 +1070,15 @@ def run_verify_bundle(bundle: Path, out: Path) -> tuple[dict | None, int, str]:
 
 # -------------------------------------------------------------------------------------- compile --
 
+#: an app bundle's AI-side overlay bundle (evalcontrol), by the app bundle's resolved folder: `plan --ai-bundle`
+AI_BUNDLES: dict[str, Path] = {}
+
+
 class Bundle:
-    """Read-only view of a schema-2 bundle: manifest, disposition, plan, ledger, registry, receipts."""
+    """Read-only view of a schema-2 bundle: manifest, disposition, plan, ledger, registry, receipts. An app bundle with
+    an AI-side overlay (AI_BUNDLES) is read joined with it: the overlay's rows, receipts and evidence beside the app's
+    (each evidence path written relative to the app bundle, so every reader of a path finds the file), its disposition's
+    lists added to the app's, and the evaluation's completeness taken from evalcontrol verify (adopt_verdict)."""
 
     def __init__(self, d: Path):
         self.dir = d
@@ -1078,6 +1087,9 @@ class Bundle:
         self.plan = load_json(d / self.manifest.get("plan", "plan.json")) or {}
         self.ledger = load_json(d / self.manifest.get("ledger", "ledger.json")) or {}
         self.registry = load_json(d / self.manifest.get("registry", "registry/check-registry.json")) or {}
+        self.overlay = AI_BUNDLES.get(str(Path(d).resolve()))
+        if self.overlay is not None:
+            self._join(self.overlay)
         self.scope = load_json(d / self.manifest["scope"]) if self.manifest.get("scope") else None
         self.checks = {c.get("id"): c for c in (self.registry.get("checks") or []) if isinstance(c, dict)}
         self.families = {f.get("id"): f for f in (self.registry.get("families") or []) if isinstance(f, dict)}
@@ -1098,6 +1110,43 @@ class Bundle:
         for rid, rc in self.receipts.items():
             self.receipt_by_key[(rc.get("checkId"), rc.get("armId"), rc.get("part"))] = rc
         self._emits = {}
+
+    def _join(self, o: Path) -> None:
+        om = load_json(o / "manifest.json") or {}
+        od = load_json(o / om.get("disposition", "disposition.json")) or {}
+        op = load_json(o / om.get("plan", "plan.json")) or {}
+        ol = load_json(o / om.get("ledger", "ledger.json")) or {}
+        oreg = load_json(o / om.get("registry", "registry/check-registry.json")) or {}
+        here = lambda p: os.path.relpath(o / p, self.dir).replace("\\", "/")  # noqa: E731
+        ev = [dict(e, path=here(e["path"])) for e in om.get("evidence") or []
+              if isinstance(e, dict) and e.get("path") and e.get("kind") not in ("control", "registry", "scope", "search")]
+        self.manifest = dict(self.manifest, evidence=list(self.manifest.get("evidence") or []) + ev,
+                             unassessedMedia=om.get("unassessedMedia") or [], overlay=dict(om.get("overlay") or {}, dir=str(o)))
+        disp = json.loads(json.dumps(self.disposition))
+        de, oe = disp.setdefault("evaluation", {}), od.get("evaluation") or {}
+        for k in ("missing", "findings", "completedNullChecks", "completedCatalogues", "unknownApplicability"):
+            de[k] = list(de.get(k) or []) + list(oe.get(k) or [])
+        de["complete"], de["claim"] = None, None     # the AI-side evaluation's: evalcontrol verify decides it
+        du, ou = disp.setdefault("unassessed", {}), od.get("unassessed") or {}
+        for k in ("mediaUnassessed", "runtimeObservations"):
+            if k in ou:
+                du[k] = ou[k]
+        du["familiesUnsupportedOrManual"] = sorted(set(du.get("familiesUnsupportedOrManual") or []) |
+                                                   set(ou.get("familiesUnsupportedOrManual") or []))
+        self.disposition = disp
+        self.plan = dict(self.plan, checks=list(self.plan.get("checks") or []) + list(op.get("checks") or []))
+        self.ledger = dict(self.ledger, entries={**(self.ledger.get("entries") or {}), **(ol.get("entries") or {})})
+        fams = {f.get("id") for f in self.registry.get("families") or [] if isinstance(f, dict)}
+        self.registry = dict(self.registry, checks=list(self.registry.get("checks") or []) + list(oreg.get("checks") or []),
+                             families=list(self.registry.get("families") or []) +
+                             [f for f in oreg.get("families") or [] if isinstance(f, dict) and f.get("id") not in fams])
+
+    def adopt_verdict(self, verify: dict) -> None:
+        """The joined bundle's evaluation completeness and claim, as evalcontrol verify stated them (never recomputed)."""
+        if self.overlay is not None:
+            v = verify.get("evaluation") or {}
+            self.disposition["evaluation"]["complete"] = v.get("complete")
+            self.disposition["evaluation"]["claim"] = v.get("claim")
 
     def emit(self, path: str):
         if path not in self._emits:
@@ -8883,6 +8932,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     order_setups: the record lane's rows measured on the setup without the patch with its plugins in another order
     [{armId, planPath, rowsPath, plugins [{name, sha256}], rows [conflict rows, each with its `_check`]}]."""
     b = Bundle(bundle_dir)
+    b.adopt_verdict(verify)
     # the names enrichment, where the bundle carries one: each placed object's base and the base's model, so every
     # section that counts objects leaves out an object with no body (round 4)
     names_row0 = next((e for e in b.enrichment() if e.get("enrichment") == "names"), None)
@@ -12481,7 +12531,10 @@ def cmd_plan(a) -> int:
             return refuse(r, f"schema-unsupported: bundleSchema {manifest.get('bundleSchema')!r} is not {BUNDLE_SCHEMA}; "
                              "this bundle predates evidence-chain verification - rebuild it from its run")
         out.mkdir(parents=True, exist_ok=True)
-        verify, code, err = run_verify_bundle(bundle, out)
+        ai_bundle = Path(a.ai_bundle) if getattr(a, "ai_bundle", None) else None
+        if ai_bundle is not None:
+            AI_BUNDLES[str(bundle.resolve())] = ai_bundle.resolve()
+        verify, code, err = run_verify_bundle(bundle, out, ai_bundle)
         if verify is None:
             return refuse(r, f"verify-failed: {err}")
         bl = verify.get("bundle") or {}
@@ -13302,6 +13355,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("plan", help="verify the bundle and compile the presentation plan")
     p.add_argument("--bundle", required=True)
+    p.add_argument("--ai-bundle", default=None,
+                   help="the AI-side overlay bundle bound to --bundle (evalcontrol bundle); read joined with it")
     p.add_argument("--out", required=True)
     p.add_argument("--mode", choices=("concise", "exhaustive"), default=None,
                    help="default: the saved evaluation settings' report.mode, else concise")

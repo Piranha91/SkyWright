@@ -57,7 +57,7 @@ KEEP = ["loadability.masters-and-order", "loadability.dangling-references", "rec
         "geometry.bos-overlay", "functional.linked-dependencies",
         "state.switch-census", "state.conditional-geometry",
         "functional.collective-route-connectivity", "environment.generated-output-regeneration",
-        "patch.author-advice", "patch.order-evaluation", "runtime.supplied-observations"]
+        "patch.author-advice", "patch.order-evaluation"]
 
 # Q43 / case 12 only: driftprobe's check declares its own population ("n/a (placement history; ...)") and
 # state ("n/a"), so it is the second SUPPORTED probe whose accepted receipt on one arm carries a different

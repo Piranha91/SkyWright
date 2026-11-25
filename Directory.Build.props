@@ -116,7 +116,7 @@
   <!-- The houseCARL integration module, integration\housecarl\ (its own solution, housecarl-integration.sln, which
        scripts\build.ps1 builds after the app's): AI-facing tools that use SkyWright and that nothing in the app, the
        probes or the scan reads. Its programs build outside the app's build folder, one folder per configuration,
-       integration\housecarl\bin\<Configuration>\: Probes\<name>\ (lookprobe), Tools\winrt-tts\, Tools\housecarl-mcp\
+       integration\housecarl\bin\<Configuration>\: Probes\<name>\ (lookprobe), Tools\winrt-tts\, Tools\evalcontrol\, Tools\housecarl-mcp\
        (houseCARL's server, built from the pin, with its rulebook), Tests\<name>\, and the
        marker housecarl-integration-layout.json. The guards learn that folder from here (assembly metadata), so no one
        else spells it. -->
@@ -131,12 +131,13 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <_SwIntFolder>$(SkyWrightProbes)\$(MSBuildProjectName)\</_SwIntFolder>
     <_SwIntFolder Condition="'$(MSBuildProjectName)' == 'winrt-tts'">$(SkyWrightTools)\winrt-tts\</_SwIntFolder>
+    <_SwIntFolder Condition="'$(MSBuildProjectName)' == 'evalcontrol'">$(SkyWrightTools)\evalcontrol\</_SwIntFolder>
     <_SwIntFolder Condition="$(MSBuildProjectName.EndsWith('.Tests'))">Tests\$(MSBuildProjectName)\</_SwIntFolder>
     <OutputPath>$(SkyWrightIntegrationLayoutRoot)$(_SwIntFolder)</OutputPath>
   </PropertyGroup>
   <Target Name="SkyWrightIntegrationLayout" AfterTargets="Build" Condition="'$(_SwInIntegration)' == 'True'">
     <PropertyGroup>
-      <_SwIntJson>{ "kind": "housecarl-integration-build", "configuration": "$(SkyWrightConfiguration)", "program": "$(SkyWrightProbes)/{name}/{name}.exe", "tool": "$(SkyWrightTools)/{name}/{name}.exe", "tools": ["winrt-tts", "housecarl-mcp"] }</_SwIntJson>
+      <_SwIntJson>{ "kind": "housecarl-integration-build", "configuration": "$(SkyWrightConfiguration)", "program": "$(SkyWrightProbes)/{name}/{name}.exe", "tool": "$(SkyWrightTools)/{name}/{name}.exe", "tools": ["winrt-tts", "housecarl-mcp", "evalcontrol"] }</_SwIntJson>
     </PropertyGroup>
     <WriteLinesToFile File="$(SkyWrightIntegrationLayoutRoot)$(SkyWrightIntegrationMarker)" Lines="$(_SwIntJson)" Overwrite="true" WriteOnlyWhenDifferent="true" ContinueOnError="WarnAndContinue" />
   </Target>

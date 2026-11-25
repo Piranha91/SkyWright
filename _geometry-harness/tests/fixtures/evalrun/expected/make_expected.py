@@ -10,7 +10,7 @@ ALL_CHECKS = ["loadability.masters-and-order", "loadability.dangling-references"
               *GEO, "geometry.bos-overlay", "functional.linked-dependencies",
               "state.switch-census", "state.conditional-geometry",
               "functional.collective-route-connectivity", "environment.generated-output-regeneration",
-              "patch.author-advice", "patch.order-evaluation", "runtime.supplied-observations"]
+              "patch.author-advice", "patch.order-evaluation"]
 
 # Applicability, derived from the fixture scope.json (complete; NAVM/REFR/CELL/QUST; placements interior and
 # exterior; masters; a nexusId; `overlays` named under `unmeasured`) against each check's own trigger in the
@@ -31,7 +31,6 @@ APPLIC = {
     "environment.generated-output-regeneration": "yes",# {"placed": true}
     "patch.author-advice": "yes",                      # {"nexusId": true}
     "patch.order-evaluation": "yes",                   # {"always": true}
-    "runtime.supplied-observations": "yes",            # {"always": true}; required: false
 }
 # The statuses that come from the adapter kind, not from the run (D3's status vocabulary; Q-2).
 KIND_STATUS = {
@@ -44,7 +43,6 @@ KIND_STATUS = {
 NEVER_COMPLETE = ["loadability.dangling-references", "records.cell-attributes",
                   "functional.collective-route-connectivity", "environment.generated-output-regeneration",
                   "functional.linked-dependencies"]   # A-2/Q-7: unknown is listed under missing as well
-OPTIONAL = ["runtime.supplied-observations"]
 
 
 def plan(**status):
@@ -53,8 +51,6 @@ def plan(**status):
     for c in ALL_CHECKS:
         st = status.get(c.replace(".", "_").replace("-", "_"), KIND_STATUS.get(c, "planned"))
         out[c] = {"applicability": APPLIC[c], "status": st}
-    if "runtime_supplied_observations" in status:
-        out["runtime.supplied-observations"]["status"] = status["runtime_supplied_observations"]
     return {"checks": out}
 
 
@@ -109,7 +105,7 @@ cases.append(case(
 # ---------------------------------------------------------------- 02
 p = plan(state_switch_census="skipped-user", state_conditional_geometry="skipped-user",
          functional_linked_dependencies="skipped-user", patch_order_evaluation="skipped-user",
-         patch_author_advice="skipped-user", runtime_supplied_observations="skipped-user")
+         patch_author_advice="skipped-user")
 cases.append(case(
     "case-02-select-three-probes",
     "Case 01's fixtures, planned with --select navownprobe,overlapprobe,contactprobe - the packet's own "
@@ -326,10 +322,8 @@ cases.append(case(
     {"complete": False, "claim": "incomplete",
      "missingIncludes": NEVER_COMPLETE, "missingExcludes": [],
      "unknownApplicability": ["functional.linked-dependencies"],
-     "discovery": {"sourcesNotSearchedPresent": True},
-     "mediaEvidenceStrength": "supplied-media",
-     "unassessedMediaIncludes": ["old-shot.png"],
-     "unassessedMediaExcludes": ["matched-shot.png"]},
+     "discovery": {"sourcesNotSearchedPresent": True}},
+    # the media half (D8) is the houseCARL integration module's: integration/housecarl/tests/fixtures/evalcontrol-run/
     verify=0,
     notes=["D8: an item whose fingerprint equals an accepted receipt's fingerprint on that arm is evidence with "
            "strength supplied-media; anything else is unassessedMedia with the reason and is not evidence."]))

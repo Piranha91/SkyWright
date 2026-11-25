@@ -1,0 +1,20 @@
+{
+ "schemaVersion": 1,
+ "kind": "record-rows",
+ "tool": [
+  {
+   "file": "bundleenrich.py",
+   "sha256": "c877ce55e96aeb03708f862385eb94687251a2c0df5eefeda2deb29a222c6f21"
+  },
+  {
+   "file": "recordrows.py",
+   "sha256": "4f50953edc72defce4e8b8bcae8d31e75baf843c114b5cace2283773eef6a603"
+  }
+ ],
+ "baseManifestSha256": "3c909dc946b4db8623eac323f2f54559d4b0d6bd7226b5edc36b37b15c0d3995",
+ "dispositionSha256": "7c2e7f6c4ba117abd796ebaa5887cd29ca4634054d79c6235a2f7dea53940fb7",
+ "outputs": [
+  "enrichment/record-rows/records.cell-attributes__baseline.json"
+ ],
+ "note": "derived after measurement; changes no result, count or claim"
+}

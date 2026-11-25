@@ -1,0 +1,144 @@
+{
+ "schemaVersion": 2,
+ "receiptId": "524522f1aa189eb8",
+ "planId": "63e36b97b433",
+ "checkId": "loadability.masters-and-order",
+ "armId": "candidate-01-reorder",
+ "part": null,
+ "adapter": {
+  "kind": "scopeprobe",
+  "exe": "scopeprobe",
+  "args": [
+   "--order",
+   "{order}",
+   "--json",
+   "{json}"
+  ],
+  "reverse": false,
+  "output": "json",
+  "commonFlags": true
+ },
+ "argvShape": [
+  "python",
+  "<abs>/scopeprobe.py",
+  "--target",
+  "FixtureTarget.esp",
+  "--order",
+  "<abs>/candidate-01-reorder.json",
+  "--json",
+  "<RUN>/outputs/loadability.masters-and-order/candidate-01-reorder.json"
+ ],
+ "runId": "loadability-masters-and-order__c-20261125T092815340-d0e0b1ed",
+ "parentRunId": "evalrun-checks-20261125T092814977-84e2a5da",
+ "startedUtc": "2026-11-25T09:28:15Z",
+ "endedUtc": "2026-11-25T09:28:15Z",
+ "exitCode": 0,
+ "outputs": [
+  {
+   "path": "outputs/loadability.masters-and-order/candidate-01-reorder.json",
+   "sha256": "8f4282614a227e1d70321cb7c0595e4223dcb992406f5a6323d755f1bdbbc9b3",
+   "bytes": 4634,
+   "mtimeUtc": "2026-11-25T09:28:15Z"
+  }
+ ],
+ "log": "logs/loadability.masters-and-order__candidate-01-reorder.txt",
+ "consumed": {
+  "candidateSha256": "dbccd50b02d911a5a253b828d4c92d598b1a809880dcd4c75a8d26801a492266",
+  "candidatePath": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\fixtures\\cases\\case-01-geometry-and-quest\\candidates\\candidate-01-reorder.json",
+  "configuration": {
+   "fingerprint": null,
+   "fingerprintNote": "the child stated no identity; reuse re-checks the plan's stated plugin hashes on disk",
+   "source": "candidate:candidate-01-reorder.json",
+   "plugins": [
+    {
+     "name": "Skyrim.esm",
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Skyrim.esm",
+     "sha256": "e27885aee97ce4f40b677e2c362c5286d9c7c005b4f26c422719c65780159512",
+     "hashSource": "scope"
+    },
+    {
+     "name": "Update.esm",
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Update.esm",
+     "sha256": "65dfd4bd8fcb74944dec5d479448578b44b5256a6777953704cc3402cc1ada2c",
+     "hashSource": "scope"
+    },
+    {
+     "name": "FixtureTarget.esp",
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureTarget.esp",
+     "sha256": "1439e0fe3e9204937f854b786c53d7d6e7cfa17c20a31cf21e92af6ba6e2b87d",
+     "hashSource": "scope"
+    },
+    {
+     "name": "FixtureBase.esp",
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureBase.esp",
+     "sha256": "598d358b0f01cb51697f624d767dd12b2fd3f36ecbc2c87bb5e9564168560b6a",
+     "hashSource": "scope"
+    }
+   ],
+   "providers": [
+    {
+     "name": "overwrite",
+     "kind": "overwrite"
+    },
+    {
+     "name": "fixture-mods",
+     "kind": "mod"
+    },
+    {
+     "name": "Data",
+     "kind": "data"
+    }
+   ],
+   "overlays": [],
+   "population": "load-time",
+   "state": null,
+   "limits": []
+  },
+  "configurationSource": "plan",
+  "baseEmitSha256": null,
+  "baseEmitPath": null,
+  "registrySha256": "92c0b41d82b826873a742550c241057e7304ab6fca41fd1c59baf9cc074a3f77",
+  "tool": {
+   "exe": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\conflictdiff-build\\harness\\Probes\\scopeprobe\\scopeprobe.exe",
+   "exeSha256": null,
+   "dllSha256": null,
+   "coreDllSha256": null,
+   "present": false
+  },
+  "optionsSha256": "deb979d1551cf0185cabbe641f3b832c4dc1a1ce4e434ebf3c1a0c87763609d8",
+  "scopeSha256": "c5b41b948959a661716122107691bf66c36f7ccb9fe3ea349a1947ebaf56a9db",
+  "programs": {
+   "emitter": {
+    "program": "probe:scopeprobe",
+    "kind": "probe-cmd",
+    "digest": "probe-cmd:e54b388bc69293ddbb86bb9ec1cd028890a4a005b8bbc47b2c6d785c1c13f9a0",
+    "checked": [
+     "launch",
+     "acceptance"
+    ]
+   },
+   "controller": {
+    "program": "controller",
+    "kind": "package",
+    "digest": "folder:2ac7b9cf9f17b9a3678b5e38df44c44c7bb0f8e12a76108619ac78378c2fe382",
+    "checked": [
+     "launch",
+     "acceptance"
+    ]
+   }
+  }
+ },
+ "validation": {
+  "accepted": true,
+  "rejections": [],
+  "identityLimits": []
+ },
+ "result": {
+  "execution": "completed",
+  "detector": "no-finding",
+  "findings": 0,
+  "coverage": [],
+  "strength": "record-fact",
+  "verdict": null
+ }
+}

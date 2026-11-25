@@ -62,7 +62,7 @@ public static partial class SelfTestFinalize
         var commands = D(ka["commands"]);
         foreach (var c in L(commands["cases"]).Select(D)) BundleCommandCase(c, commands);
         OrderChoiceCases(L(ka["order"]));
-        MediaRuleCases(D(ka["media"]));
+        FileVocabularyCases(D(ka["files"]));
         TextRuleCases(D(ka["text"]));
         WalkCases(D(ka["walk"]));
         PremiseSourceCases(D(ka["premises"]));
@@ -168,37 +168,11 @@ public static partial class SelfTestFinalize
                 ?? SameJson("is master file", pair.Select(p => (object?)OrderChoice.IsMasterFile(p, heads.GetValueOrDefault(PyText.Lower(p)))).ToList(), row["isMaster"]);
         }));
 
-    static void MediaRuleCases(PyDict ka)
-    {
-        var vocabulary = D(ka["vocabulary"]);
-        Case("bundle: the media vocabularies, the binary suffixes and the control files", () =>
-            SameJson("kinds", BundleMedia.Kinds.Cast<object?>().ToList(), vocabulary["kinds"])
-            ?? SameJson("sources", BundleMedia.FingerprintSources.Cast<object?>().ToList(), vocabulary["sources"])
-            ?? SameJson("reasons", BundleMedia.Reasons.Cast<object?>().ToList(), vocabulary["reasons"])
-            ?? SameJson("binary suffixes", Bundle.BinarySuffixes.OrderBy(x => x, StringComparer.Ordinal).Cast<object?>().ToList(), ka["binarySuffixes"])
+    // the bundle's own vocabularies (the media rule's moved to the houseCARL integration module with the media row)
+    static void FileVocabularyCases(PyDict ka) =>
+        Case("bundle: the binary suffixes and the control files", () =>
+            SameJson("binary suffixes", Bundle.BinarySuffixes.OrderBy(x => x, StringComparer.Ordinal).Cast<object?>().ToList(), ka["binarySuffixes"])
             ?? SameJson("control files", Bundle.ControlFiles.Cast<object?>().ToList(), ka["controlFiles"]));
-        static Dictionary<string, HashSet<string>> Keyed(object? d) =>
-            D(d).ToDictionary(kv => PyValue.Hash(kv.Key), kv => L(kv.Value).Select(PyValue.Hash).ToHashSet(StringComparer.Ordinal), StringComparer.Ordinal);
-        Case("bundle: media_item_refusal", () =>
-        {
-            using var t = new Temp();
-            BuildTree(t, ka["tree"]);
-            var states = D(ka["states"]);
-            HashSet<string> State(string arm, object? state) =>
-                Ev.Items(states.Get($"{arm[1..]}|{Ev.Str(state)}")).Select(x => (string)x!).ToHashSet(StringComparer.Ordinal);
-            return In(t.Root, () => Rows(L(ka["cases"]), row =>
-            {
-                var item = D(row["item"]);
-                var (reason, detail) = BundleMedia.Refusal(item, PyPath.Str(PyValue.Truthy(item.Get("path")) ? S(item["path"]) : ""),
-                    Keyed(ka["fingerprints"]), Keyed(ka["others"]), State);
-                if (reason != null && !BundleMedia.Reasons.Contains(reason)) return $"a reason outside the vocabulary: {reason}";
-                return Same("reason", reason, (string?)row["reason"]) ?? Same("detail", detail, (string?)row["detail"]);
-            }));
-        });
-        Case("bundle: state_media_fingerprints", () => Rows(L(ka["stateFingerprints"]), row =>
-            SameJson("fingerprints", BundleMedia.StateFingerprints(L(row["configs"]).Select(D), Strings(row["measured"]).ToHashSet(StringComparer.Ordinal), row["state"])
-                .OrderBy(x => x, StringComparer.Ordinal).Cast<object?>().ToList(), row["want"])));
-    }
 
     static void TextRuleCases(PyDict ka)
     {

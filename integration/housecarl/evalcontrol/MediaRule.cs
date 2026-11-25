@@ -1,12 +1,13 @@
 using System.Text.RegularExpressions;
-using HarnessShared;
+using RunControl;
 
-namespace RunControl;
+namespace EvalControl;
 
-/// <summary>`bundle --media FILE`: which supplied pictures and clips illustrate a measured arm (evalrun.py's media
-/// vocabularies, state_media_fingerprints and media_item_refusal). An item is accepted only when its fingerprint is
-/// one an accepted receipt measured on the arm it names; every other item is listed unassessed with one closed reason.</summary>
-public static class BundleMedia
+/// <summary>`evalcontrol bundle --media FILE`: which supplied pictures and clips illustrate a measured arm (evalrun.py's
+/// media vocabularies, state_media_fingerprints and media_item_refusal; moved out of runcontrol's bundle with the
+/// runtime.supplied-observations row). An item is accepted only when its fingerprint is one an accepted receipt of the
+/// bound app scan measured on the arm it names; every other item is listed unassessed with one closed reason.</summary>
+public static class MediaRule
 {
     public static readonly string[] Kinds = ["offline-render", "native-screenshot", "game-video", "historical-illustration"];
     public static readonly string[] FingerprintSources = ["emitted", "asserted"];
@@ -28,38 +29,6 @@ public static class BundleMedia
     // (v or "") as text.
     static string Text(object? v) => PyValue.Truthy(v) ? Ev.Str(v) : "";
 
-    /// <summary>The configuration fingerprint of a recorded configuration with another population and state, by the
-    /// owner's rule (ConfigurationIdentity.Compute); null for a configuration schema the owner does not compute.</summary>
-    public static string? Fingerprint(PyDict cfg, string population, string state)
-    {
-        if (cfg.Get("schemaVersion") is { } schema && !Ev.Eq(schema, (long)ConfigurationIdentity.CurrentSchema)) return null;
-        var plugins = Ev.Items(cfg.Get("plugins")).Select(p => new ConfigPlugin(Text(Ev.G(p, "name")), "", Text(Ev.G(p, "sha256")), 0, "", false, false, [])).ToList();
-        var providers = Ev.Items(cfg.Get("providers")).Select(v => new ConfigProvider(Text(Ev.G(v, "name")), Text(Ev.G(v, "kind")))).ToList();
-        var overlays = Ev.Items(cfg.Get("overlays")).Select(o => new ConfigOverlay(Text(Ev.G(o, "kind")), "", Text(Ev.G(o, "sha256")))).ToList();
-        return ConfigurationIdentity.Compute("", plugins, providers, overlays, population, state).Fingerprint;
-    }
-
-    /// <summary>`runcontrol fingerprint`: the fingerprint of each configuration in a JSON list, by the owner's rule, for
-    /// the Python that stays and must not hold its own copy of it. A configuration names its population and state as
-    /// text; a schemaVersion other than the owner's, or none of these shapes, is refused in one sentence.</summary>
-    public static List<object?> Fingerprints(object? doc)
-    {
-        if (doc is not List<object?> list)
-            throw new Refusal("fingerprint reads a JSON list of configurations on standard input; give it a list, even of one.");
-        var found = new List<object?>();
-        for (int i = 0; i < list.Count; i++)
-        {
-            if (list[i] is not PyDict cfg)
-                throw new Refusal($"fingerprint: configuration {i} is not a JSON object; give plugins, providers, overlays, population and state.");
-            if (cfg.Get("population") is not string population || cfg.Get("state") is not string state)
-                throw new Refusal($"fingerprint: configuration {i} names no population or state as text; give both, as the run recorded them.");
-            found.Add(Fingerprint(cfg, population, state) ?? throw new Refusal(
-                $"fingerprint: configuration {i} has schemaVersion {PyText.Repr(cfg.Get("schemaVersion"))}, and the owner computes only "
-                + $"schema {ConfigurationIdentity.CurrentSchema}; it was written by another build, so measure it again with this one."));
-        }
-        return found;
-    }
-
     /// <summary>The configurations a picture rendered in a world state may carry: the arm's own accepted
     /// configurations, with the population as recorded and as the renderer reads it (a scoped population's base),
     /// and only the state line set to that state; none for a state this run's state checks did not measure.</summary>
@@ -71,9 +40,78 @@ public static class BundleMedia
         {
             string pop = Text(cfg.Get("population"));
             foreach (string p in new[] { pop, ScopedPopulation.Replace(pop, "") })
-                if (Fingerprint(cfg, p, name) is string fp) found.Add(fp);
+                if (Fingerprints.Fingerprint(cfg, p, name) is string fp) found.Add(fp);
         }
         return found;
+    }
+
+    /// <summary>What the receipts of a finished app scan measured, for the media rule: each arm's own fingerprints
+    /// (accepted receipts whose part is null or "arm"), what its reverse and diff parts consumed (which only ever
+    /// explains a refusal), and the state fingerprints. <paramref name="outputAt"/> maps a receipt's output path to the
+    /// file (in a bundle, under evidence/).</summary>
+    public sealed class Measured
+    {
+        public Dictionary<string, HashSet<string>> Own { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, HashSet<string>> Other { get; } = new(StringComparer.Ordinal);
+        readonly Dictionary<string, List<PyDict>> _configs = new(StringComparer.Ordinal);
+        readonly HashSet<string> _states = new(StringComparer.Ordinal);
+
+        public Measured(PyDict receipts, Func<string, string> outputAt)
+        {
+            foreach (var (_, recRaw) in receipts)
+            {
+                var rec = PyValue.Dict(recRaw);
+                if (!PyValue.Truthy(PyValue.Dict(rec["validation"])["accepted"])) continue;
+                var cfg = Ev.OrEmpty(Ev.OrEmpty(rec.Get("consumed")).Get("configuration"));
+                object? fp = cfg.Get("fingerprint");
+                if (PyValue.Truthy(fp))
+                {
+                    bool own = rec.Get("part") is null or "arm";
+                    string arm = PyValue.Hash(rec["armId"]);
+                    var target = own ? Own : Other;
+                    if (!target.ContainsKey(arm)) target[arm] = new HashSet<string>(StringComparer.Ordinal);
+                    target[arm].Add(PyValue.Hash(fp));
+                    if (own)
+                    {
+                        if (!_configs.ContainsKey(arm)) _configs[arm] = [];
+                        _configs[arm].Add(cfg);
+                    }
+                }
+                if (Ev.Eq(rec.Get("checkId"), "state.conditional-geometry"))
+                    // the world states this run measured: every switch a state row's Kind names
+                    foreach (var o in Ev.Items(rec.Get("outputs")).Select(PyValue.Dict))
+                        if (PyValue.Truthy(o.Get("path")) && PyJson.LoadEvalFile(outputAt((string)o["path"]!)) is PyDict doc)
+                            foreach (var c in Ev.Items(doc.Get("Conflicts")))
+                                if (StateSwitch(Ev.G(c, "Kind")) is string name) _states.Add(name);
+            }
+        }
+
+        public HashSet<string> State(string arm, object? state) => StateFingerprints(_configs.GetValueOrDefault(arm) ?? [], _states, state);
+    }
+
+    /// <summary>Why a media item's identity does not tie it to a measured arm: the reasons no-accepted-receipt-on-arm and
+    /// fingerprint-mismatch, or (null, null). The part of the rule that reads no file, so a bundle's verify can apply
+    /// it again to an item it holds.</summary>
+    public static (string? reason, string? detail) IdentityRefusal(PyDict item, IReadOnlyDictionary<string, HashSet<string>> fingerprints,
+        IReadOnlyDictionary<string, HashSet<string>> otherFingerprints, Func<string, object?, HashSet<string>>? stateFingerprints)
+    {
+        object? fp = item.Get("configurationFingerprint");
+        object? aid = Ev.OrEmpty(item.Get("subject")).Get("armId");
+        string arm = PyValue.Hash(aid), print = PyValue.Hash(fp);
+        if (!fingerprints.ContainsKey(arm))
+            return ("no-accepted-receipt-on-arm", $"no accepted receipt measured arm {PyText.Repr(aid)}'s own configuration"
+                + (otherFingerprints.ContainsKey(arm) ? " (its reverse / diff parts measured the other order)" : ""));
+        bool inState = item.Get("state") is not (null or "baseline") && stateFingerprints != null
+            && fp is string fpText && stateFingerprints(arm, item["state"]).Contains(fpText);
+        if (!fingerprints[arm].Contains(print) && !inState)
+        {
+            if (otherFingerprints.TryGetValue(arm, out var other) && other.Contains(print))
+                return ("fingerprint-mismatch", $"the fingerprint {Ev.Head(fp, 12)} belongs to the other order this arm's reverse part "
+                    + $"measured, not to arm {Ev.Str(aid)}'s own configuration; a picture of the baseline order illustrates the baseline arm");
+            return ("fingerprint-mismatch", $"the fingerprint {Ev.Head(fp, 12)} does not match any accepted receipt's configuration on "
+                + $"arm {Ev.Str(aid)}: this is not an illustration of a verified result");
+        }
+        return (null, null);
     }
 
     /// <summary>Why a media item is unassessed: one closed reason and a plain sentence, or (null, null) when it is
@@ -101,21 +139,7 @@ public static class BundleMedia
                 : $"fingerprintSource {PyText.Repr(fps)} is not one of {string.Join(", ", FingerprintSources)}");
         if (item.Get("provenance") is not PyDict prov || !PyValue.Truthy(prov.Get("tool")) || !PyValue.Truthy(prov.Get("capturedUtc")))
             return ("provenance-missing", "provenance must be an object naming tool and capturedUtc");
-        object? aid = subject["armId"];
-        string arm = PyValue.Hash(aid), print = PyValue.Hash(fp);
-        if (!fingerprints.ContainsKey(arm))
-            return ("no-accepted-receipt-on-arm", $"no accepted receipt measured arm {PyText.Repr(aid)}'s own configuration"
-                + (otherFingerprints.ContainsKey(arm) ? " (its reverse / diff parts measured the other order)" : ""));
-        bool inState = item.Get("state") is not (null or "baseline") && stateFingerprints != null
-            && fp is string fpText && stateFingerprints(arm, item["state"]).Contains(fpText);
-        if (!fingerprints[arm].Contains(print) && !inState)
-        {
-            if (otherFingerprints.TryGetValue(arm, out var other) && other.Contains(print))
-                return ("fingerprint-mismatch", $"the fingerprint {Ev.Head(fp, 12)} belongs to the other order this arm's reverse part "
-                    + $"measured, not to arm {Ev.Str(aid)}'s own configuration; a picture of the baseline order illustrates the baseline arm");
-            return ("fingerprint-mismatch", $"the fingerprint {Ev.Head(fp, 12)} does not match any accepted receipt's configuration on "
-                + $"arm {Ev.Str(aid)}: this is not an illustration of a verified result");
-        }
+        if (IdentityRefusal(item, fingerprints, otherFingerprints, stateFingerprints) is { reason: not null } refused) return refused;
         if (item.Get("sourceInterval") is { } interval)
         {
             if (interval is not PyDict iv || !PyValue.Truthy(iv.Get("sourcePath"))) return ("source-missing", "sourceInterval names no sourcePath");

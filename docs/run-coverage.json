@@ -212,6 +212,47 @@
       }
     },
     {
+      "id": "evalcontrol",
+      "kind": "csharp-exe",
+      "path": "integration/housecarl/evalcontrol/evalcontrol.csproj",
+      "adapter": "csharp",
+      "stageSource": "counted",
+      "note": "The AI-side evaluation's checks, as an overlay on a finished app scan: ai-checks.json's rows planned over the app plan's arms into RUN/ai, evaluated, finalized, bundled beside the app bundle and verified with it, all by runcontrol's own rules (runcontrol.dll from the app build is used as a library; evalcontrol holds no copy of a runcontrol rule), plus the rules only these rows need (the supplied-media rule). verify is the one owner of aiEvaluation.complete (both bundles verify and both evaluations are complete). Its run-log ops are evalcontrol-<command>; children it starts through runcontrol's launcher record under evalcontrol-<op>, never runcontrol-<op>. Its known answers are known-answers/*.json and its own cases (--self-test, run by the module's tests).",
+      "answers": [
+        "How do I plan, measure, bundle and verify the AI-side checks of an evaluation over a finished app scan?",
+        "Is an AI-side evaluation complete, and does its overlay bundle still bind to the app bundle it was made over?"
+      ],
+      "useWhen": "Run or check the rows only an AI-driven evaluation serves (ai-checks.json), after runcontrol has bundled the app scan; evalpipeline.py does this for a lab entry.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/evalcontrol/Program.cs",
+          "anchor": "// evalcontrol: the AI-side evaluation's own checks, as an overlay on a finished app scan."
+        }
+      ],
+      "inputs": [
+        "An app scan's evaluation folder and its bundle (plan --app, --app-bundle); the overlay's run folder (--run) for evaluate, finalize and bundle; a media list (--media) for bundle; an overlay bundle folder for verify. Nothing for --self-test."
+      ],
+      "outputs": [
+        "The overlay's run folder (plan.json, ledger.json, receipts, disposition.json, STATUS.md) and bundle (manifest.json with its overlay binding, media copies); verify.json with bundle, evaluation and aiEvaluation blocks; exit 0, 2 or 3. For --self-test one GREEN, RED or SKIP line per case and a count."
+      ],
+      "flagCoverage": {
+        "parser": "csharp-args",
+        "path": "integration/housecarl/evalcontrol/Program.cs"
+      },
+      "modifiers": {
+        "--self-test": "Run every known answer and case; exit 0 when all pass.",
+        "--app": "plan: the app scan's evaluation folder (its plan.json); verify: the app bundle, when it is not the one the overlay names",
+        "--app-bundle": "plan: the app scan's bundle the overlay binds to",
+        "--out": "plan: the new overlay run folder; bundle: the overlay bundle folder; verify: the verify.json to write",
+        "--opt-in": "plan: plan an opt-in check of the list (repeatable)",
+        "--run": "evaluate, finalize, bundle: the overlay run folder",
+        "--media": "bundle: the supplied pictures and clips (media item schema 2), each checked against the configurations the app scan's accepted receipts measured",
+        "--registry": "bundle: the list file the overlay plan froze, when it has moved",
+        "--scope": "bundle: the scope file the overlay plan froze, when it has moved",
+        "--search": "bundle: the candidate search the overlay plan froze, when it has moved"
+      }
+    },
+    {
       "id": "collprobe",
       "kind": "csharp-exe",
       "path": "_geometry-harness/collprobe/collprobe.csproj",
@@ -4050,7 +4091,8 @@
         "--capture-results": "capture_acquire.py capture results: a refused vignette becomes a still, its reason on the closing",
         "--also-bundle": "name a further evaluation of the same mods (repeatable); the report names it with the setups it measured, and its results are not joined into the counts",
         "--captures-final": "the capture stage is closed: the review reel pictures only clashes with captured frames and says in one sentence when a kind has none",
-        "--precedent": "the precedent stage's cards folder: the patch section counts each patch's own edits from its summary.json census and labels the cards' reasons as model-written"
+        "--precedent": "the precedent stage's cards folder: the patch section counts each patch's own edits from its summary.json census and labels the cards' reasons as model-written",
+        "--ai-bundle": "plan, verify: the AI-side overlay bundle (evalcontrol's, bound to --bundle) whose rows, media and aiEvaluation verdict join the app bundle's in the report"
       }
     },
     {
@@ -6913,7 +6955,7 @@
         }
       ],
       "inputs": [
-        "A selection entry and a machine file for run and arms; a run folder for status; a registry, a candidates folder and a new run folder for plan; an evaluation's RUN folder (--run) for run, resume, status, import-results, finalize and bundle; an import document (--file) for import-results; a bundle folder for verify-bundle; plugin paths for population; ordersweep.py's arguments for ordersweep. Nothing for --self-test (the known answers are built in; Python on PATH adds the live cases with the Python tools that remain). A build folder for identity. A JSON document on standard input for canon. bundle takes, besides --run and --out: --media, --registry, --scope, --search, --reader-cmd, --reader-env NAME=VALUE, --mod-name PLUGIN=NAME and --no-names."
+        "A selection entry and a machine file for run and arms; a run folder for status; a registry, a candidates folder and a new run folder for plan; an evaluation's RUN folder (--run) for run, resume, status, import-results, finalize and bundle; an import document (--file) for import-results; a bundle folder for verify-bundle; plugin paths for population; ordersweep.py's arguments for ordersweep. Nothing for --self-test (the known answers are built in; Python on PATH adds the live cases with the Python tools that remain). A build folder for identity. A JSON document on standard input for canon. bundle takes, besides --run and --out: --registry, --scope, --search, --reader-cmd, --reader-env NAME=VALUE, --mod-name PLUGIN=NAME and --no-names."
       ],
       "outputs": [
         "For run with --entry: the run folder through the stage named (arms.json, stages.json, status.json, preparation-key.json, disk-forecast.json, census/, prepare/, scope/, plan/, evaluate/, records/, evaluation/, bundle/, names-instance/, runlog/), the same stage lines, exit 0, 2 or 3. For arms and status: one line per arm or stage. For plan, run, resume, import-results, finalize, bundle, verify-bundle, population and ordersweep: the files the evaluation bundle standard names for that command, and its lines. For --self-test: one GREEN, RED or SKIP line per case and a count, exit 0 or 1. A package identity as JSON; the sha256 of a document's two canonical forms."
@@ -7350,6 +7392,27 @@
         "--only": "one case by prefix (R6 also builds R1 and R5)",
         "--out": "Set out for this invocation; consult the linked parser for accepted values."
       }
+    },
+    {
+      "id": "integration/housecarl/tests/ai_report_fixtures.py",
+      "path": "integration/housecarl/tests/ai_report_fixtures.py",
+      "kind": "script",
+      "answers": [
+        "How are the report fixtures' AI-side overlays (R5's supplied media) made by the module's evalcontrol?"
+      ],
+      "useWhen": "Refresh the report fixtures' overlay half when evalcontrol's bundle or the media rule changes; make_report_fixtures.py calls it as its ai_hook.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/tests/ai_report_fixtures.py",
+          "anchor": "The AI-side half of the report fixtures: what an AI-side evaluation adds to an app bundle the app-side maker"
+        }
+      ],
+      "inputs": [
+        "An app run and bundle made by make_report_fixtures.py."
+      ],
+      "outputs": [
+        "Assertion results or generated fixture data for: How are the report fixtures' AI-side overlays (R5's supplied media) made by the module's evalcontrol?"
+      ]
     },
     {
       "id": "_geometry-harness/tests/fixtures/evalrun/expected/make_expected.py",
@@ -8718,6 +8781,27 @@
       ],
       "outputs": [
         "Assertion results or generated fixture data for: Does shotplan resolve a usable viewprobe and explain unavailable builds?"
+      ]
+    },
+    {
+      "id": "integration/housecarl/tests/test_evalcontrol_run.py",
+      "path": "integration/housecarl/tests/test_evalcontrol_run.py",
+      "kind": "script",
+      "answers": [
+        "Do the AI-side checks run end to end over the controller suite's fixtures, by evalcontrol over a finished app run?"
+      ],
+      "useWhen": "Qualify a change to evalcontrol or to the controller suite's fixtures it reuses (test_evalrun.py), for the cases whose subject left the app's registry.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/tests/test_evalcontrol_run.py",
+          "anchor": "The AI-side evaluation's checks run end to end over SkyWright's controller suite"
+        }
+      ],
+      "inputs": [
+        "test_evalrun.py's generated fixtures and fake probes; the module's oracles in tests/fixtures/evalcontrol-run/."
+      ],
+      "outputs": [
+        "Assertion results or generated fixture data for: Do the AI-side checks run end to end over the controller suite's fixtures, by evalcontrol over a finished app run?"
       ]
     },
     {

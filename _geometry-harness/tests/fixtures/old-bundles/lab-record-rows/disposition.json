@@ -1,0 +1,565 @@
+{
+ "schemaVersion": 2,
+ "planId": "63e36b97b433",
+ "createdUtc": "2026-11-25T09:28:18Z",
+ "registryVersion": 4,
+ "runIds": [
+  {
+   "runId": "evalrun-checks-20261125T092814977-84e2a5da",
+   "parentRunId": null,
+   "command": "run",
+   "startedUtc": "2026-11-25T09:28:15Z",
+   "sweepFolders": [
+    "sweep/inv-0001"
+   ]
+  }
+ ],
+ "derivedFrom": {
+  "ledgerSha256": "e9251e585d0590f47bc75f37545e18e505a8a69faf18743e89646b5ece7869ab",
+  "receipts": "9ce554183e6117c1349c022a267fba4ffd3f167c8fc3f3977da44f9228970b86",
+  "journalLines": 47
+ },
+ "evaluation": {
+  "complete": false,
+  "claim": "incomplete",
+  "missing": [
+   {
+    "checkId": "loadability.dangling-references",
+    "armId": "baseline",
+    "part": null,
+    "status": "mcp-only",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "loadability"
+   },
+   {
+    "checkId": "loadability.dangling-references",
+    "armId": "candidate-01-reorder",
+    "part": null,
+    "status": "mcp-only",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "loadability"
+   },
+   {
+    "checkId": "records.cell-attributes",
+    "armId": "candidate-01-reorder",
+    "part": null,
+    "status": "mcp-only",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "records"
+   },
+   {
+    "checkId": "functional.linked-dependencies",
+    "armId": "baseline",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "functional",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: the scope lists script-placement under unmeasured: \"a reference a Papyrus script moves or creates at runtime is in no static walk\"."
+   },
+   {
+    "checkId": "functional.linked-dependencies",
+    "armId": "candidate-01-reorder",
+    "part": null,
+    "status": "unknown-applicability",
+    "required": true,
+    "family": "functional",
+    "cause": "applicability is unknown, and unknown never becomes not-applicable: the scope lists script-placement under unmeasured: \"a reference a Papyrus script moves or creates at runtime is in no static walk\"."
+   },
+   {
+    "checkId": "functional.linked-dependencies",
+    "armId": "baseline",
+    "part": null,
+    "status": "unsupported",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "functional"
+   },
+   {
+    "checkId": "functional.linked-dependencies",
+    "armId": "candidate-01-reorder",
+    "part": null,
+    "status": "unsupported",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "functional"
+   },
+   {
+    "checkId": "functional.collective-route-connectivity",
+    "armId": "baseline",
+    "part": null,
+    "status": "unsupported",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "functional"
+   },
+   {
+    "checkId": "functional.collective-route-connectivity",
+    "armId": "candidate-01-reorder",
+    "part": null,
+    "status": "unsupported",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "functional"
+   },
+   {
+    "checkId": "environment.generated-output-regeneration",
+    "armId": "baseline",
+    "part": null,
+    "status": "manual",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "environment"
+   },
+   {
+    "checkId": "environment.generated-output-regeneration",
+    "armId": "candidate-01-reorder",
+    "part": null,
+    "status": "manual",
+    "cause": "the check did not produce an accepted detector result",
+    "required": true,
+    "family": "environment"
+   }
+  ],
+  "unknownApplicability": [
+   {
+    "checkId": "functional.linked-dependencies",
+    "evidence": "the scope lists script-placement under unmeasured: \"a reference a Papyrus script moves or creates at runtime is in no static walk\".",
+    "effect": "keeps evaluation.complete false"
+   }
+  ],
+  "integrity": {
+   "ok": true,
+   "defects": []
+  },
+  "refused": null,
+  "toolIdentity": {
+   "guarantee": "verified",
+   "detail": "every accepted local result is bound, per role, to the program identity this plan froze; evaluation.integrity lists any receipt that is not"
+  },
+  "findings": [
+   {
+    "checkId": "records.cell-attributes",
+    "armId": "baseline",
+    "part": null,
+    "findings": 1,
+    "verdict": null,
+    "strength": "record-fact"
+   },
+   {
+    "checkId": "geometry.navmesh-ownership",
+    "armId": "baseline",
+    "part": "arm",
+    "findings": 1,
+    "verdict": null,
+    "strength": "calibrated-inference"
+   },
+   {
+    "checkId": "geometry.navmesh-ownership",
+    "armId": "candidate-01-reorder",
+    "part": "arm",
+    "findings": 1,
+    "verdict": null,
+    "strength": "calibrated-inference"
+   },
+   {
+    "checkId": "geometry.navmesh-ownership",
+    "armId": "candidate-01-reorder",
+    "part": "reverse",
+    "findings": 1,
+    "verdict": null,
+    "strength": "calibrated-inference"
+   },
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "baseline",
+    "part": "arm",
+    "findings": 1,
+    "verdict": null,
+    "strength": "calibrated-inference"
+   },
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "candidate-01-reorder",
+    "part": "arm",
+    "findings": 1,
+    "verdict": null,
+    "strength": "calibrated-inference"
+   },
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "candidate-01-reorder",
+    "part": "reverse",
+    "findings": 1,
+    "verdict": null,
+    "strength": "calibrated-inference"
+   },
+   {
+    "checkId": "geometry.placement-contact",
+    "armId": "baseline",
+    "part": "arm",
+    "findings": 1,
+    "verdict": null,
+    "strength": "calibrated-inference"
+   },
+   {
+    "checkId": "geometry.placement-contact",
+    "armId": "candidate-01-reorder",
+    "part": "arm",
+    "findings": 1,
+    "verdict": null,
+    "strength": "calibrated-inference"
+   },
+   {
+    "checkId": "geometry.placement-contact",
+    "armId": "candidate-01-reorder",
+    "part": "reverse",
+    "findings": 1,
+    "verdict": null,
+    "strength": "calibrated-inference"
+   }
+  ],
+  "completedNullChecks": [
+   {
+    "checkId": "loadability.masters-and-order",
+    "armId": "baseline",
+    "part": null,
+    "coverage": 0
+   },
+   {
+    "checkId": "loadability.masters-and-order",
+    "armId": "candidate-01-reorder",
+    "part": null,
+    "coverage": 0
+   },
+   {
+    "checkId": "geometry.navmesh-ownership",
+    "armId": "candidate-01-reorder",
+    "part": "diff",
+    "coverage": 0
+   },
+   {
+    "checkId": "geometry.object-overlap",
+    "armId": "candidate-01-reorder",
+    "part": "diff",
+    "coverage": 0
+   },
+   {
+    "checkId": "geometry.placement-contact",
+    "armId": "candidate-01-reorder",
+    "part": "diff",
+    "coverage": 0
+   },
+   {
+    "checkId": "patch.order-evaluation",
+    "armId": "candidate-01-reorder",
+    "part": null,
+    "coverage": 0
+   }
+  ],
+  "completedCatalogues": [
+   {
+    "checkId": "state.switch-census",
+    "armId": "baseline",
+    "count": 3,
+    "unit": "rows",
+    "kind": "catalogue"
+   },
+   {
+    "checkId": "state.switch-census",
+    "armId": "candidate-01-reorder",
+    "count": 3,
+    "unit": "rows",
+    "kind": "catalogue"
+   },
+   {
+    "checkId": "patch.author-advice",
+    "armId": "baseline",
+    "count": 1,
+    "unit": "rows",
+    "kind": "discovery"
+   }
+  ],
+  "claimVocabulary": [
+   "no-findings-in-completed-checks",
+   "findings",
+   "incomplete"
+  ],
+  "note": "the words pass, compatible and clean are not claims this finalizer makes; a completed check that found a defect is a completed check with a finding"
+ },
+ "arms": {
+  "baseline": {
+   "kind": "baseline",
+   "candidateFile": "candidate-00-baseline.json",
+   "loadedInGame": null,
+   "loadedInGameNote": "offline hypothetical configuration; not verified loaded in game",
+   "payload": {
+    "espOnly": false,
+    "staged": [],
+    "note": "the candidate reorders plugins already present in the configuration"
+   },
+   "orderEvaluation": {
+    "classification": null,
+    "probes": [],
+    "regression": false,
+    "perProbe": {},
+    "scope": "ordersweep's own classification, verbatim, about the probes named and the population and state they ran in"
+   }
+  },
+  "candidate-01-reorder": {
+   "kind": "candidate",
+   "candidateFile": "candidate-01-reorder.json",
+   "loadedInGame": null,
+   "loadedInGameNote": "offline hypothetical configuration; not verified loaded in game",
+   "payload": {
+    "espOnly": false,
+    "staged": [],
+    "note": "the candidate reorders plugins already present in the configuration"
+   },
+   "orderEvaluation": {
+    "classification": "PASSES-COMPLETED-CHECKS",
+    "classificationSource": {
+     "launch": "sweep/inv-0001",
+     "note": "the newest launch among the accepted diffs measured every one of them again with the same emits and the same rows"
+    },
+    "probes": [
+     "contactprobe",
+     "navownprobe",
+     "overlapprobe"
+    ],
+    "regression": false,
+    "perProbe": {
+     "navownprobe": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "repaired": 0,
+      "reclassified": 0,
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     },
+     "overlapprobe": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "repaired": 0,
+      "reclassified": 0,
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     },
+     "contactprobe": {
+      "verdict": "DIFFERENTIAL-INERT",
+      "repaired": 0,
+      "reclassified": 0,
+      "created": 0,
+      "newDefect": 0,
+      "attributed": 0,
+      "unmeasured": 0
+     }
+    },
+    "scope": "ordersweep's own classification, verbatim, about the probes named and the population and state they ran in"
+   }
+  }
+ },
+ "manualDecisions": [],
+ "unassessed": {
+  "statesNotExplored": [
+   {
+    "checkId": "state.conditional-geometry",
+    "armId": "baseline",
+    "subject": "(unnamed switch)",
+    "kind": "single",
+    "code": "no-key",
+    "reason": "The census row names no FormKey for this switch, so no state can name it.",
+    "count": 1
+   },
+   {
+    "checkId": "state.conditional-geometry",
+    "armId": "baseline",
+    "subject": "(unnamed switch)",
+    "kind": "single",
+    "code": "no-key",
+    "reason": "The census row names no FormKey for this switch, so no state can name it.",
+    "count": 1
+   },
+   {
+    "checkId": "state.conditional-geometry",
+    "armId": "baseline",
+    "subject": "(unnamed switch)",
+    "kind": "single",
+    "code": "no-key",
+    "reason": "The census row names no FormKey for this switch, so no state can name it.",
+    "count": 1
+   },
+   {
+    "checkId": "state.conditional-geometry",
+    "armId": "baseline",
+    "subject": "combinations",
+    "kind": "class",
+    "code": "combinations",
+    "reason": "Combinations of switches other than one quest stage's joint flip (stages in sequence, a scene or event flipping several, unrelated switches together) are not enumerated; their extent is unknown, not empty.",
+    "count": null
+   },
+   {
+    "checkId": "state.conditional-geometry",
+    "armId": "candidate-01-reorder",
+    "subject": "(unnamed switch)",
+    "kind": "single",
+    "code": "no-key",
+    "reason": "The census row names no FormKey for this switch, so no state can name it.",
+    "count": 1
+   },
+   {
+    "checkId": "state.conditional-geometry",
+    "armId": "candidate-01-reorder",
+    "subject": "(unnamed switch)",
+    "kind": "single",
+    "code": "no-key",
+    "reason": "The census row names no FormKey for this switch, so no state can name it.",
+    "count": 1
+   },
+   {
+    "checkId": "state.conditional-geometry",
+    "armId": "candidate-01-reorder",
+    "subject": "(unnamed switch)",
+    "kind": "single",
+    "code": "no-key",
+    "reason": "The census row names no FormKey for this switch, so no state can name it.",
+    "count": 1
+   },
+   {
+    "checkId": "state.conditional-geometry",
+    "armId": "candidate-01-reorder",
+    "subject": "combinations",
+    "kind": "class",
+    "code": "combinations",
+    "reason": "Combinations of switches other than one quest stage's joint flip (stages in sequence, a scene or event flipping several, unrelated switches together) are not enumerated; their extent is unknown, not empty.",
+    "count": null
+   }
+  ],
+  "candidatesHeldBack": {
+   "byMaxCandidates": [],
+   "count": 0,
+   "fromManifestBudget": {
+    "evaluated": 1,
+    "legalNotEvaluated": 0,
+    "note": "fixture manifest: the search was not run"
+   }
+  },
+  "unjudgeablePopulations": [],
+  "familiesUnsupportedOrManual": [
+   "environment",
+   "functional",
+   "loadability",
+   "records",
+   "runtime"
+  ],
+  "scopeUnmeasured": [
+   {
+    "extent": "script-placement",
+    "why": "a reference a Papyrus script moves or creates at runtime is in no static walk"
+   },
+   {
+    "extent": "alias-fill",
+    "why": "a quest alias fill is decided at runtime, so the object it points at is not known statically"
+   },
+   {
+    "extent": "bos-swaps",
+    "why": "the Base Object Swapper ini layer is not scanned; the ini list is not the set of swaps"
+   },
+   {
+    "extent": "asset-replacers",
+    "why": "a mesh or texture swapped by file precedence carries nothing to walk"
+   },
+   {
+    "extent": "generated-output",
+    "why": "whether DynDOLOD or an occlusion pass must be regenerated is not derivable here"
+   }
+  ],
+  "mediaUnassessed": "media is identified and assessed by `bundle --media`; see the bundle manifest",
+  "runtimeObservations": "no runtime observation was supplied to this run: nothing here says what the engine did at play time",
+  "notOptedIn": []
+ },
+ "explicitDecisions": {
+  "select": null,
+  "selectRaw": null,
+  "selectImplied": {},
+  "exclude": {},
+  "touched": {},
+  "note": "--select narrows what RUNS, never what is PLANNED: a check that was not selected is skipped-user and stays visible, and a required one keeps the evaluation incomplete. An exe name in --select expands to every check that runs it."
+ },
+ "discovery": {
+  "sourcesSearched": [
+   "adviceprobe"
+  ],
+  "sourcesNotSearched": [
+   "the Nexus network API (this runner never fetches; advice is read offline from the catalogue snapshot)"
+  ],
+  "notRelevant": {},
+  "candidates": [],
+  "advice": [
+   {
+    "checkId": "patch.author-advice",
+    "armId": "baseline",
+    "provenance": "candidate:candidate-00-baseline.json",
+    "staleness": "read offline from the stored catalogue snapshot; the cached source's age is not the date this report was assembled",
+    "rules": 1,
+    "clashCount": 0,
+    "clashes": []
+   }
+  ],
+  "listings": [
+   {
+    "checkId": "patch.author-advice",
+    "armId": "baseline",
+    "count": 1,
+    "unit": "rows",
+    "kind": "discovery"
+   }
+  ],
+  "relevance": {},
+  "note": "a Nexus hit is a lead: a downloadable file stays unqualified until its actual payload was in an evaluated arm"
+ },
+ "catalogues": [
+  {
+   "checkId": "state.switch-census",
+   "armId": "baseline",
+   "count": 3,
+   "unit": "rows",
+   "kind": "catalogue"
+  },
+  {
+   "checkId": "state.switch-census",
+   "armId": "candidate-01-reorder",
+   "count": 3,
+   "unit": "rows",
+   "kind": "catalogue"
+  },
+  {
+   "checkId": "patch.author-advice",
+   "armId": "baseline",
+   "count": 1,
+   "unit": "rows",
+   "kind": "discovery"
+  }
+ ],
+ "importedEvidence": [
+  {
+   "checkId": "records.cell-attributes",
+   "armId": "baseline",
+   "receiptId": "2c49429b8fc3accd",
+   "origin": "fresh",
+   "capturedUtc": "2026-11-25T09:28:17.948779Z"
+  }
+ ],
+ "ledgerCounts": {
+  "blocked(...)": 2,
+  "completed": 19,
+  "manual": 2,
+  "mcp-only": 3,
+  "not-applicable": 5,
+  "unsupported": 4
+ }
+}

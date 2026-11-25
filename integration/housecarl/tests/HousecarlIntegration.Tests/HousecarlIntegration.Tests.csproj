@@ -24,6 +24,8 @@
   <ItemGroup>
     <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
     <ProjectReference Include="$(SkyWrightSrc)SkyWright.Engine\SkyWright.Engine.csproj" />
+    <!-- built first, not referenced: EvalcontrolTests start the program from the module's layout -->
+    <ProjectReference Include="..\..\evalcontrol\evalcontrol.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
 
   <!-- runcontrol's stage ledger, from the app's build (scripts\build.ps1 builds the app before this module), for the

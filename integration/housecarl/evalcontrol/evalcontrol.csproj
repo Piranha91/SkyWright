@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- evalcontrol: the AI-side evaluation's checks, as an overlay on a finished app scan (plan, evaluate, finalize,
+       bundle, verify). It uses SkyWright's runcontrol as a library, from the app's build (scripts\build.ps1 builds the
+       app before this module), so every rule it applies to a receipt, a ledger, a plan or a bundle is runcontrol's own;
+       the rules only an AI-side evaluation needs (the media rule, and the checks of ai-checks.json) are here. Nothing in
+       the app refers to this program; it is built only by the module's solution. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>evalcontrol</AssemblyName>
+    <RootNamespace>EvalControl</RootNamespace>
+    <NoWarn>CA1416</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="runcontrol">
+      <HintPath>$(SkyWrightLayoutRoot)$(SkyWrightTools)\runcontrol\runcontrol.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
+    <!-- runcontrol's own package, so the libraries it was built against (System.Text.Json and the rest) come along -->
+    <PackageReference Include="ModelContextProtocol.Core" Version="2.2.0" />
+    <None Include="ai-checks.json" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="known-answers\media.json" LogicalName="media.json" />
+  </ItemGroup>
+
+  <!-- where the app's build is, seen from this program's folder: the module never spells it anywhere else -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>SkyWrightAppBuild</_Parameter1>
+      <_Parameter2>$([MSBuild]::MakeRelative('$(SkyWrightIntegrationLayoutRoot)$(SkyWrightTools)\evalcontrol\', '$(SkyWrightLayoutRoot)'))</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <Target Name="EvalcontrolNeedsTheApp" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(SkyWrightLayoutRoot)$(SkyWrightTools)\runcontrol\runcontrol.dll')"
+           Text="evalcontrol uses the app's runcontrol, and the app's $(SkyWrightConfiguration) build has none at $(SkyWrightLayoutRoot)$(SkyWrightTools)\runcontrol\; build the app first (scripts\build.ps1 builds it before this module)." />
+  </Target>
+
+</Project>

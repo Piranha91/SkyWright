@@ -1,0 +1,76 @@
+{
+ "Population": "contested records",
+ "State": "baseline",
+ "Conflicts": [
+  {
+   "Kind": "LOST-EDIT",
+   "A": "Update.esm",
+   "B": "FixtureBase.esp",
+   "Field": "LocationReference",
+   "Summary": "PlacedObject 000801:Skyrim.esm: LocationReference - Update.esm's value lost to FixtureBase.esp's",
+   "Necessary": [
+    {
+     "FormKey": "000801:Skyrim.esm",
+     "Label": null,
+     "Values": {
+      "lost": "0A0001:Skyrim.esm",
+      "winner": "0B0001:Skyrim.esm",
+      "overridden": "02008A:Skyrim.esm"
+     },
+     "Reads": [
+      {
+       "batch": "rec-s00",
+       "id": 1,
+       "plugin": "Skyrim.esm"
+      },
+      {
+       "batch": "rec-s00",
+       "id": 2,
+       "plugin": "Update.esm"
+      },
+      {
+       "batch": "rec-s00",
+       "id": 3,
+       "plugin": "FixtureBase.esp"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "Coverage": [
+  {
+   "Population": "contested PlacedObject records",
+   "Judged": 1,
+   "Unjudgeable": {},
+   "SetAside": {}
+  }
+ ],
+ "Unjudged": [],
+ "derivedFrom": [
+  {
+   "path": "evidence/imports/records.cell-attributes__baseline/01-request.jsonl",
+   "sha256": "09a72ad4f8fbd9848b27c8715849e57f12f6643ed695d904fbef6bc362c01a8e",
+   "role": "request"
+  },
+  {
+   "path": "evidence/imports/records.cell-attributes__baseline/02-response.jsonl",
+   "sha256": "b480130d32b2bd462837764e46154b686b7e80a82b9d28203c20f15634a738c5",
+   "role": "response"
+  }
+ ],
+ "tool": {
+  "name": "recordrows",
+  "sha256": "4f50953edc72defce4e8b8bcae8d31e75baf843c114b5cace2283773eef6a603",
+  "scopeSha256": "edeec7cd31bcf72f5348f20dba7394918aa87187bd8d63819ee77c435d37bc2f",
+  "schemaSha256": "c5f7b31b41957bc09e03dfd44dbf907768baaf26e20c34b31ea1d9c3f1a028ad"
+ },
+ "ignored": {},
+ "mastersUnread": [],
+ "mastersRecorded": [
+  "fixturebase.esp",
+  "fixturetarget.esp",
+  "skyrim.esm",
+  "update.esm"
+ ]
+}

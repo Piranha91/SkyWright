@@ -1,0 +1,43 @@
+{
+ "modId": "999001",
+ "rules": [
+  {
+   "before": "FixtureTarget.esp",
+   "after": "FixtureBase.esp",
+   "hardness": "advice",
+   "source": "stored page",
+   "resolutionChain": [
+    "the page states a load order"
+   ]
+  }
+ ],
+ "resolutions": [],
+ "notes": [
+  "a fixture report; no page was fetched"
+ ],
+ "staleness": [
+  "the stored copy's age is not the date this report was assembled"
+ ],
+ "noOrderStated": false,
+ "pagesRead": [
+  {
+   "url": "stored://fixture/page",
+   "from": "snapshot"
+  }
+ ],
+ "catalogue": {
+  "dir": "fixture",
+  "refresh": "offline",
+  "maxRequests": 0,
+  "requestsAttempted": 0,
+  "requestsSucceeded": 0,
+  "waitedMs": 0,
+  "pagesServedFromSnapshot": 1,
+  "pagesFetched": 0,
+  "pagesReplayedFromArchive": 0,
+  "imports": []
+ },
+ "clashes": [],
+ "warnings": [],
+ "choices": []
+}

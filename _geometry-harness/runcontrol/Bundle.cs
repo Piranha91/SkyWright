@@ -6,7 +6,7 @@ namespace RunControl;
 public sealed class BundleArgs
 {
     public string Run = "";
-    public string? Out, Media, Registry, Scope, Search, ReaderCmd;
+    public string? Out, Registry, Scope, Search, ReaderCmd;
     public bool NoNames;
     /// <summary>The copies and the manifest only: no names step and no order step (for another program using this
     /// library to bundle a run of its own; runcontrol's own command never sets it).</summary>
@@ -189,14 +189,13 @@ public static class Bundle
         }
 
         var evidence = new List<object?>();
-        var unassessedMedia = new List<object?>();
         PyDict st;
         using (var record = RunLog.Begin("evalrun-bundle", new RunOptions { StageSource = StageSource.Counted }))
         {
             try
             {
                 record.Stage("bundle", total: 1, unit: "bundles");
-                if (Assemble(a, run, outDir, plan, ledger, receipts, decisions, premises, evidence, unassessedMedia) is string refused) return Refuse(refused);
+                Assemble(run, outDir, plan, ledger, receipts, decisions, premises, evidence);
                 record.Advance();
                 if (a.CopyOnly)
                 {
@@ -244,16 +243,15 @@ public static class Bundle
                 throw;
             }
         }
-        Console.Out.WriteLine($"bundle: {evidence.Count} evidence file(s) under {outDir}"
-            + (unassessedMedia.Count > 0 ? $"; {unassessedMedia.Count} media item(s) unassessed" : ""));
+        Console.Out.WriteLine($"bundle: {evidence.Count} evidence file(s) under {outDir}");
         (st["status"] is "refused" or "skipped" or "partial" ? Console.Error : Console.Out)
             .WriteLine($"names: {Ev.Str(st["status"])}: {Ev.Str(st["sentence"])}");
         return Exit.Ok;
     }
 
-    // The copies and the manifest. Returns a refused input's sentence (the media file), or null when the manifest is written.
-    static string? Assemble(BundleArgs a, string run, string outDir, PyDict plan, Ledger ledger, PyDict receipts, List<object?> decisions,
-        Dictionary<string, string> premises, List<object?> evidence, List<object?> unassessedMedia)
+    // The copies and the manifest.
+    static void Assemble(string run, string outDir, PyDict plan, Ledger ledger, PyDict receipts, List<object?> decisions,
+        Dictionary<string, string> premises, List<object?> evidence)
     {
         Directory.CreateDirectory(outDir);
         var copied = new Dictionary<string, PyDict>(StringComparer.Ordinal);
@@ -359,67 +357,6 @@ public static class Bundle
         }
         foreach (var (_, v) in searchNote) Console.Out.WriteLine($"   search: {Ev.Str(v)}");
 
-        object? mediaDoc = string.IsNullOrEmpty(a.Media) ? null : PyJson.LoadEvalFile(PyPath.Str(a.Media));
-        if (!string.IsNullOrEmpty(a.Media) && mediaDoc == null) return $"--media {a.Media}: not readable as JSON";
-        // an arm's comparison set is the fingerprint of its own configuration (accepted receipts whose part is null or
-        // "arm"); a reverse part measured the other order, and its fingerprints only ever explain a refusal
-        var fingerprints = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
-        var otherFingerprints = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
-        var ownConfigs = new Dictionary<string, List<PyDict>>(StringComparer.Ordinal);
-        var measuredStates = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (_, recRaw) in receipts)
-        {
-            var rec = PyValue.Dict(recRaw);
-            if (!PyValue.Truthy(PyValue.Dict(rec["validation"])["accepted"])) continue;
-            object? cfgRaw = Ev.OrEmpty(rec.Get("consumed")).Get("configuration");
-            var cfg = Ev.OrEmpty(cfgRaw);
-            object? fp = cfg.Get("fingerprint");
-            if (PyValue.Truthy(fp))
-            {
-                bool own = rec.Get("part") is null or "arm";
-                string arm = PyValue.Hash(rec["armId"]);
-                var target = own ? fingerprints : otherFingerprints;
-                if (!target.ContainsKey(arm)) target[arm] = new HashSet<string>(StringComparer.Ordinal);
-                target[arm].Add(PyValue.Hash(fp));
-                if (own)
-                {
-                    if (!ownConfigs.ContainsKey(arm)) ownConfigs[arm] = [];
-                    ownConfigs[arm].Add(cfg);
-                }
-            }
-            if (Ev.Eq(rec.Get("checkId"), "state.conditional-geometry"))
-                // the world states this run measured: every switch a state row's Kind names
-                foreach (var o in Ev.Items(rec.Get("outputs")).Select(PyValue.Dict))
-                    if (PyValue.Truthy(o.Get("path")) && PyJson.LoadEvalFile(PyPath.Join(run, (string)o["path"]!)) is PyDict doc)
-                        foreach (var c in Ev.Items(doc.Get("Conflicts")))
-                            if (BundleMedia.StateSwitch(Ev.G(c, "Kind")) is string name) measuredStates.Add(name);
-        }
-        HashSet<string> StateFingerprints(string arm, object? state) =>
-            BundleMedia.StateFingerprints(ownConfigs.GetValueOrDefault(arm) ?? [], measuredStates, state);
-        var mediaItems = mediaDoc is List<object?> list ? list : Ev.Items(Ev.OrEmpty(mediaDoc).Get("items")).ToList();
-        foreach (var itemRaw in mediaItems)
-        {
-            if (itemRaw is not PyDict item) return $"--media {a.Media}: an item is not an object: {PyText.Repr(Ev.Head(itemRaw, 80))}";
-            string src = PyPath.Str(PyValue.Truthy(item.Get("path")) ? (string)item["path"]! : "");
-            if (IsBinary(src))
-                return $"--media {a.Media}: {PyPath.Name(src)} has a suffix that is never copied by policy "
-                    + $"({PyPath.Suffix(src)}); a media item is an image or video file";
-            var (reason, detail) = BundleMedia.Refusal(item, src, fingerprints, otherFingerprints, StateFingerprints);
-            if (reason != null)
-            {
-                unassessedMedia.Add(new PyDict(item) { ["reason"] = reason, ["detail"] = detail });
-                continue;
-            }
-            var subject = PyValue.Dict(item["subject"]);
-            string rel = $"media/{Hashing.Sha256File(src)[..12]}-{PyPath.Name(src)}";
-            CopyIn(src, rel, checkId: subject.Get("checkId"), armId: subject.Get("armId"), strength: "supplied-media", kind: "media",
-                provenance: item.Get("provenance"));
-            if (!copied.TryGetValue(rel, out var row)) return $"--media {a.Media}: {src} could not be copied into the bundle";
-            // the row carries every field of the item on top of its own keys, which are never overwritten
-            foreach (var (k, v) in item)
-                if (k is not ("path" or "sha256" or "bytes" or "id" or "kind" or "checkId" or "armId" or "strength" or "recordedBy")) row[k] = v;
-        }
-
         // what a reader may demand of this bundle: a manifest that only lists what it copied cannot prove completeness
         foreach (string name in ControlFiles) Require(name);
         Require("registry/check-registry.json");
@@ -464,10 +401,8 @@ public static class Bundle
                     + "and content hash and never carries its bytes",
             },
         };
-        manifest["unassessedMedia"] = unassessedMedia;
         manifest["note"] = "bundle assembly and evaluation completeness are two different states: this bundle can "
             + "be complete while the evaluation is not. Read disposition.json for the second.";
         PyJson.WriteEvalFile(PyPath.Join(outDir, "manifest.json"), manifest);
-        return null;
     }
 }

@@ -1,0 +1,31 @@
+$ C:\Users\Piranha\AppData\Local\Temp\tmp7vy3bsk5\conflictdiff-build\harness\Probes\conflictdiff\conflictdiff.exe C:\Users\Piranha\AppData\Local\Temp\tmp7vy3bsk5\old-lab-bundle-run\sweep\inv-0001\contactprobe\baseline.json C:\Users\Piranha\AppData\Local\Temp\tmp7vy3bsk5\old-lab-bundle-run\sweep\inv-0001\contactprobe\candidate-01-reorder.json
+(exit 0, 0.2s)
+
+base    : C:\Users\Piranha\AppData\Local\Temp\tmp7vy3bsk5\old-lab-bundle-run\sweep\inv-0001\contactprobe\baseline.json  (1 conflicts, 1 rows; predicates on 1)
+changed : C:\Users\Piranha\AppData\Local\Temp\tmp7vy3bsk5\old-lab-bundle-run\sweep\inv-0001\contactprobe\candidate-01-reorder.json  (1 conflicts, 1 rows; base-row predicates carried: 1, measured against baseline.json)
+population: base load-time+population:7f65e2f5011a / state baseline | changed load-time+population:7f65e2f5011a / state baseline
+   measurement policy: fixture-contact-v1
+   configuration (base)   : fac236de4cf6 (4 plugins, 3 providers, load-time+population:7f65e2f5011a/baseline, candidate:candidate-00-baseline.json)
+   configuration (changed): eedd6ace143c (4 plugins, 3 providers, load-time+population:7f65e2f5011a/baseline, candidate:candidate-01-reorder.json)
+   configuration delta    : this is what the differential below is a difference OF -
+      - plugin order changed: 1 pair(s) flipped, first FixtureBase.esp / FixtureTarget.esp
+
+
+   IDENTICAL - the change touched nothing the detector sees.
+
+   repaired     : 0 record(s)   (the physical predicate went Holds -> Gone)
+   reclassified : 0 record(s)   (left the class still holding 0; left with no physical defect to begin with 0; entered reading Gone 0)
+   created      : 0 record(s)   (entered the class with the predicate holding)
+   unmeasured   : 0 record(s)   (a predicate the credit rests on could not be measured - counted apart)
+   unchanged    : 1 record(s)   (predicate flips beside: Holds -> Gone 0, Gone -> Holds 0)
+
+   coverage (base):
+      fixture population               judged         42   unjudgeable        0 (0.00%)
+   coverage (changed):
+      fixture population               judged         42   unjudgeable        0 (0.00%)
+
+   verdict : DIFFERENTIAL-INERT  (repaired 0 - created 0 = net 0; reclassified 0, unmeasured 0)
+
+   A verdict here outranks --verify's CONFIRMED: coverage says a patch touches the broken records;
+   only the differential says what happens to the conflict set - and only a row whose physical predicate
+   went away is credited as repaired. A row that changed hands with the defect intact is reclassified.

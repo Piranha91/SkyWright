@@ -1,0 +1,185 @@
+{
+ "schemaVersion": 2,
+ "receiptId": "45aa35a8bf9c0fca",
+ "planId": "63e36b97b433",
+ "checkId": "geometry.placement-contact",
+ "armId": "candidate-01-reorder",
+ "part": "diff",
+ "adapter": {
+  "kind": "ordersweep-probe",
+  "exe": "contactprobe",
+  "populationFlag": "--population",
+  "args": [
+   "--order",
+   "{order}",
+   "--emit",
+   "{emit}",
+   "--base",
+   "{base}"
+  ],
+  "reverse": true,
+  "output": "conflict-file",
+  "commonFlags": true,
+  "population": "load-time+population:7f65e2f5011a"
+ },
+ "argvShape": null,
+ "runId": "ordersweep-20261125T092815564-2dcf4570",
+ "parentRunId": "evalrun-checks-20261125T092814977-84e2a5da",
+ "startedUtc": "2026-11-25T09:28:15Z",
+ "endedUtc": "2026-11-25T09:28:17Z",
+ "exitCode": 0,
+ "outputs": [
+  {
+   "path": "sweep/inv-0001/logs/diff-contactprobe-candidate-01-reorder.txt",
+   "sha256": "43b21b2aad35c4a732c765474b1595d3d696a733e4148fe78d4ec89a4a4b938d",
+   "bytes": 2584,
+   "mtimeUtc": "2026-11-25T09:28:16Z"
+  }
+ ],
+ "log": "sweep/inv-0001/logs/diff-contactprobe-candidate-01-reorder.txt",
+ "consumed": {
+  "candidateSha256": "dbccd50b02d911a5a253b828d4c92d598b1a809880dcd4c75a8d26801a492266",
+  "candidatePath": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\fixtures\\cases\\case-01-geometry-and-quest\\candidates\\candidate-01-reorder.json",
+  "configuration": {
+   "fingerprint": null,
+   "fingerprintNote": "the child stated no identity; reuse re-checks the plan's stated plugin hashes on disk",
+   "source": "candidate:candidate-01-reorder.json",
+   "plugins": [
+    {
+     "name": "Skyrim.esm",
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Skyrim.esm",
+     "sha256": "e27885aee97ce4f40b677e2c362c5286d9c7c005b4f26c422719c65780159512",
+     "hashSource": "scope"
+    },
+    {
+     "name": "Update.esm",
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/Update.esm",
+     "sha256": "65dfd4bd8fcb74944dec5d479448578b44b5256a6777953704cc3402cc1ada2c",
+     "hashSource": "scope"
+    },
+    {
+     "name": "FixtureTarget.esp",
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureTarget.esp",
+     "sha256": "1439e0fe3e9204937f854b786c53d7d6e7cfa17c20a31cf21e92af6ba6e2b87d",
+     "hashSource": "scope"
+    },
+    {
+     "name": "FixtureBase.esp",
+     "path": "C:/Users/Piranha/AppData/Local/Temp/tmp7vy3bsk5/fixtures/plugins/FixtureBase.esp",
+     "sha256": "598d358b0f01cb51697f624d767dd12b2fd3f36ecbc2c87bb5e9564168560b6a",
+     "hashSource": "scope"
+    }
+   ],
+   "providers": [
+    {
+     "name": "overwrite",
+     "kind": "overwrite"
+    },
+    {
+     "name": "fixture-mods",
+     "kind": "mod"
+    },
+    {
+     "name": "Data",
+     "kind": "data"
+    }
+   ],
+   "overlays": [],
+   "population": "load-time",
+   "state": null,
+   "limits": []
+  },
+  "configurationSource": "plan",
+  "baseEmitSha256": null,
+  "baseEmitPath": null,
+  "registrySha256": "92c0b41d82b826873a742550c241057e7304ab6fca41fd1c59baf9cc074a3f77",
+  "tool": {
+   "exe": "C:\\Users\\Piranha\\AppData\\Local\\Temp\\tmp7vy3bsk5\\conflictdiff-build\\harness\\Probes\\contactprobe\\contactprobe.exe",
+   "exeSha256": null,
+   "dllSha256": null,
+   "coreDllSha256": null,
+   "present": false
+  },
+  "optionsSha256": "deb979d1551cf0185cabbe641f3b832c4dc1a1ce4e434ebf3c1a0c87763609d8",
+  "scopeSha256": "c5b41b948959a661716122107691bf66c36f7ccb9fe3ea349a1947ebaf56a9db",
+  "inputs": [
+   {
+    "part": "arm",
+    "path": "sweep/inv-0001/contactprobe/candidate-01-reorder.json",
+    "sha256": "9209fd4e4d941caa14482e11078813cb335ef5f8cb92e025705f2db68a1db0cb"
+   },
+   {
+    "part": "reverse",
+    "path": "sweep/inv-0001/contactprobe/candidate-01-reorder.reverse.json",
+    "sha256": "c99e6f7b8dcfe2c5e4a1c02c145082eebdb3bbe052cd040c626008e16b874ddd"
+   }
+  ],
+  "programs": {
+   "comparator": {
+    "program": "helper:conflictdiff",
+    "kind": "package",
+    "digest": "folder:d28952da17f107c73b731161cfbb2fe972c48d1176cfc0352827afb9a64b2f74",
+    "checked": [
+     "launch",
+     "acceptance"
+    ]
+   },
+   "controller": {
+    "program": "controller",
+    "kind": "package",
+    "digest": "folder:2ac7b9cf9f17b9a3678b5e38df44c44c7bb0f8e12a76108619ac78378c2fe382",
+    "checked": [
+     "launch",
+     "acceptance"
+    ]
+   }
+  }
+ },
+ "validation": {
+  "accepted": true,
+  "rejections": [],
+  "identityLimits": []
+ },
+ "result": {
+  "execution": "completed",
+  "detector": "no-finding",
+  "findings": 0,
+  "coverage": [],
+  "strength": "calibrated-inference",
+  "verdict": "DIFFERENTIAL-INERT"
+ },
+ "sweep": {
+  "folder": "sweep/inv-0001",
+  "job": "diff-contactprobe-candidate-01-reorder",
+  "outcome": "ran",
+  "reusedFrom": null
+ },
+ "orderEvaluation": {
+  "classification": "PASSES-COMPLETED-CHECKS",
+  "probes": [
+   "contactprobe"
+  ],
+  "diff": {
+   "verdict": "DIFFERENTIAL-INERT",
+   "counts": {
+    "repaired": 0,
+    "reclassified": 0,
+    "created": 0,
+    "unmeasured": 0,
+    "unchanged": 1
+   },
+   "refusals": [],
+   "delta": [
+    "- plugin order changed: 1 pair(s) flipped, first FixtureBase.esp / FixtureTarget.esp"
+   ]
+  },
+  "created": {
+   "created": 0,
+   "newDefect": 0,
+   "attributed": 0,
+   "unmeasured": 0,
+   "newExamples": []
+  },
+  "note": "ordersweep's own classification, verbatim and scoped to the probes named; never a whole-evaluation pass"
+ }
+}

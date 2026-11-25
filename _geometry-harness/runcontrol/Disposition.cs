@@ -324,7 +324,7 @@ public static class Disposition
                     });
         var families = new HashSet<string>(StringComparer.Ordinal);
         foreach (var c in PyValue.Iter(plan["checks"]).Select(PyValue.Dict))
-            if (Ev.G(c["adapter"], "kind") is "unsupported" or "mcp-only" or "manual" or "media") families.Add((string)c["family"]!);
+            if (Ev.G(c["adapter"], "kind") is "unsupported" or "mcp-only" or "manual") families.Add((string)c["family"]!);
         var unassessed = new PyDict
         {
             ["statesNotExplored"] = notExplored,
@@ -332,7 +332,6 @@ public static class Disposition
             ["unjudgeablePopulations"] = unjudgeable,
             ["familiesUnsupportedOrManual"] = PyOrder.SortedByCodePoint(families).Cast<object?>().ToList(),
             ["scopeUnmeasured"] = Ev.G(plan["scope"], "unmeasured", new List<object?>()),
-            ["mediaUnassessed"] = "media is identified and assessed by `bundle --media`; see the bundle manifest",
             ["runtimeObservations"] = RuntimeObservationsSentence(receipts),
             ["notOptedIn"] = PyValue.Iter(plan["checks"]).Select(PyValue.Dict).Where(c => Ev.Eq(c.Get("status"), EvalStore.NotOptedIn))
                 .Select(c => c["checkId"]).ToList(),

@@ -1,0 +1,2989 @@
+{
+ "python": "3.12.6",
+ "placeholders": {
+  "backslash": "<ROOT\\>",
+  "forward": "<ROOT/>",
+  "doubled": "<ROOT\\\\>"
+ },
+ "rule": {
+  "tree": [
+   {
+    "path": "a.png",
+    "bytes": "YSBwaWN0dXJl"
+   },
+   {
+    "path": "folder/x.txt",
+    "bytes": "eA=="
+   },
+   {
+    "path": "source.mkv",
+    "bytes": "dGhlIHJlY29yZGluZw=="
+   }
+  ],
+  "vocabulary": {
+   "kinds": [
+    "offline-render",
+    "native-screenshot",
+    "game-video",
+    "historical-illustration"
+   ],
+   "sources": [
+    "emitted",
+    "asserted"
+   ],
+   "reasons": [
+    "file-missing",
+    "kind-missing",
+    "subject-missing",
+    "state-missing",
+    "fingerprint-missing",
+    "fingerprint-source-missing",
+    "provenance-missing",
+    "no-accepted-receipt-on-arm",
+    "fingerprint-mismatch",
+    "source-missing",
+    "original-missing"
+   ]
+  },
+  "fingerprints": {
+   "baseline": [
+    "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+   ],
+   "candidate-01": [
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+   ]
+  },
+  "others": {
+   "candidate-01": [
+    "0000000000000000000000000000000000000000000000000000000000000000"
+   ],
+   "reverse-only": [
+    "0000000000000000000000000000000000000000000000000000000000000000"
+   ]
+  },
+  "states": {
+   "baseline|gate": [
+    "5555555555555555555555555555555555555555555555555555555555555555"
+   ]
+  },
+  "cases": [
+   {
+    "name": "accepted",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": null,
+    "detail": null
+   },
+   {
+    "name": "no path",
+    "item": {
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "file-missing",
+    "detail": "the file None does not exist"
+   },
+   {
+    "name": "an empty path",
+    "item": {
+     "path": "",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "file-missing",
+    "detail": "the file '' does not exist"
+   },
+   {
+    "name": "a file that is not there",
+    "item": {
+     "path": "nowhere.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "file-missing",
+    "detail": "the file 'nowhere.png' does not exist"
+   },
+   {
+    "name": "a folder",
+    "item": {
+     "path": "folder",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "file-missing",
+    "detail": "the file 'folder' does not exist"
+   },
+   {
+    "name": "no kind",
+    "item": {
+     "path": "a.png",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "kind-missing",
+    "detail": "mediaKind is absent (a schema-1 item)"
+   },
+   {
+    "name": "an unknown kind",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "painting",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "kind-missing",
+    "detail": "mediaKind 'painting' is not one of offline-render, native-screenshot, game-video, historical-illustration"
+   },
+   {
+    "name": "a kind that is no text",
+    "item": {
+     "path": "a.png",
+     "mediaKind": 3,
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "kind-missing",
+    "detail": "mediaKind 3 is not one of offline-render, native-screenshot, game-video, historical-illustration"
+   },
+   {
+    "name": "no subject",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "subject-missing",
+    "detail": "subject must carry checkId, armId and description"
+   },
+   {
+    "name": "a subject that is a list",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": [
+      "c"
+     ],
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "subject-missing",
+    "detail": "subject must carry checkId, armId and description"
+   },
+   {
+    "name": "a subject with no description",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": ""
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "subject-missing",
+    "detail": "subject must carry checkId, armId and description"
+   },
+   {
+    "name": "no state",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "state-missing",
+    "detail": "the item names no world state"
+   },
+   {
+    "name": "an empty state",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "state-missing",
+    "detail": "the item names no world state"
+   },
+   {
+    "name": "no fingerprint",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "fingerprint-missing",
+    "detail": "the item names no configuration fingerprint: it cannot be tied to a measured arm"
+   },
+   {
+    "name": "no fingerprint source",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "fingerprint-source-missing",
+    "detail": "fingerprintSource is absent (a schema-1 item)"
+   },
+   {
+    "name": "an unknown fingerprint source",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "guessed",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "fingerprint-source-missing",
+    "detail": "fingerprintSource 'guessed' is not one of emitted, asserted"
+   },
+   {
+    "name": "no provenance",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted"
+    },
+    "reason": "provenance-missing",
+    "detail": "provenance must be an object naming tool and capturedUtc"
+   },
+   {
+    "name": "provenance with no tool",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "provenance-missing",
+    "detail": "provenance must be an object naming tool and capturedUtc"
+   },
+   {
+    "name": "provenance with no time",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": null
+     }
+    },
+    "reason": "provenance-missing",
+    "detail": "provenance must be an object naming tool and capturedUtc"
+   },
+   {
+    "name": "provenance that is text",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": "viewprobe"
+    },
+    "reason": "provenance-missing",
+    "detail": "provenance must be an object naming tool and capturedUtc"
+   },
+   {
+    "name": "an arm with no accepted receipt",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "nowhere",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "no-accepted-receipt-on-arm",
+    "detail": "no accepted receipt measured arm 'nowhere''s own configuration"
+   },
+   {
+    "name": "an arm only its reverse part measured",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "reverse-only",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "no-accepted-receipt-on-arm",
+    "detail": "no accepted receipt measured arm 'reverse-only''s own configuration (its reverse / diff parts measured the other order)"
+   },
+   {
+    "name": "an arm named by a number",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": 7,
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "no-accepted-receipt-on-arm",
+    "detail": "no accepted receipt measured arm 7's own configuration"
+   },
+   {
+    "name": "the other order's fingerprint",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "candidate-01",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "fingerprint-mismatch",
+    "detail": "the fingerprint 000000000000 belongs to the other order this arm's reverse part measured, not to arm candidate-01's own configuration; a picture of the baseline order illustrates the baseline arm"
+   },
+   {
+    "name": "a fingerprint of no receipt",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "9999999999999999999999999999999999999999999999999999999999999999",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "fingerprint-mismatch",
+    "detail": "the fingerprint 999999999999 does not match any accepted receipt's configuration on arm baseline: this is not an illustration of a verified result"
+   },
+   {
+    "name": "a fingerprint of a measured state",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "gate",
+     "configurationFingerprint": "5555555555555555555555555555555555555555555555555555555555555555",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": null,
+    "detail": null
+   },
+   {
+    "name": "a state fingerprint under the baseline state",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "5555555555555555555555555555555555555555555555555555555555555555",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "fingerprint-mismatch",
+    "detail": "the fingerprint 555555555555 does not match any accepted receipt's configuration on arm baseline: this is not an illustration of a verified result"
+   },
+   {
+    "name": "a state fingerprint of another state",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "other",
+     "configurationFingerprint": "5555555555555555555555555555555555555555555555555555555555555555",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     }
+    },
+    "reason": "fingerprint-mismatch",
+    "detail": "the fingerprint 555555555555 does not match any accepted receipt's configuration on arm baseline: this is not an illustration of a verified result"
+   },
+   {
+    "name": "a clip with its source",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     },
+     "sourceInterval": {
+      "sourcePath": "source.mkv",
+      "sourceSha256": "c76767b44f6e30ed7ef402d9ecc11822e96178cd071105f394d8d694c04c4ab1"
+     }
+    },
+    "reason": null,
+    "detail": null
+   },
+   {
+    "name": "a clip interval that is text",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     },
+     "sourceInterval": "0-5"
+    },
+    "reason": "source-missing",
+    "detail": "sourceInterval names no sourcePath"
+   },
+   {
+    "name": "a clip with no source path",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     },
+     "sourceInterval": {
+      "start": 0
+     }
+    },
+    "reason": "source-missing",
+    "detail": "sourceInterval names no sourcePath"
+   },
+   {
+    "name": "a clip whose source is gone",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     },
+     "sourceInterval": {
+      "sourcePath": "gone.mkv",
+      "sourceSha256": "x"
+     }
+    },
+    "reason": "source-missing",
+    "detail": "the clip's source 'gone.mkv' does not exist"
+   },
+   {
+    "name": "a clip whose source is a folder",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     },
+     "sourceInterval": {
+      "sourcePath": "folder",
+      "sourceSha256": "x"
+     }
+    },
+    "reason": "source-missing",
+    "detail": "the clip's source 'folder' does not exist"
+   },
+   {
+    "name": "a clip with no source hash",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     },
+     "sourceInterval": {
+      "sourcePath": "source.mkv"
+     }
+    },
+    "reason": "source-missing",
+    "detail": "sourceInterval names no sourceSha256 to check the source against"
+   },
+   {
+    "name": "a clip whose source changed",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     },
+     "sourceInterval": {
+      "sourcePath": "source.mkv",
+      "sourceSha256": "1111111111111111111111111111111111111111111111111111111111111111"
+     }
+    },
+    "reason": "source-missing",
+    "detail": "the clip's source hashes to c76767b44f6e, not the recorded 111111111111"
+   },
+   {
+    "name": "an original",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     },
+     "original": {
+      "path": "a.png",
+      "sha256": "92b2fa58028958317e408bd84ecfa70f5ee35b121991dbc232c49d166353708b"
+     }
+    },
+    "reason": null,
+    "detail": null
+   },
+   {
+    "name": "an original that is text",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     },
+     "original": "a.png"
+    },
+    "reason": "original-missing",
+    "detail": "original names no path"
+   },
+   {
+    "name": "an original with no path",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     },
+     "original": {
+      "sha256": "x"
+     }
+    },
+    "reason": "original-missing",
+    "detail": "original names no path"
+   },
+   {
+    "name": "an original that is gone",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     },
+     "original": {
+      "path": "gone.png",
+      "sha256": "x"
+     }
+    },
+    "reason": "original-missing",
+    "detail": "the original 'gone.png' does not exist"
+   },
+   {
+    "name": "an original with no hash",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     },
+     "original": {
+      "path": "a.png"
+     }
+    },
+    "reason": "original-missing",
+    "detail": "original names no sha256 to check the file against"
+   },
+   {
+    "name": "an original that changed",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     },
+     "original": {
+      "path": "a.png",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+     }
+    },
+    "reason": "original-missing",
+    "detail": "the original hashes to 92b2fa580289, not the recorded 222222222222"
+   },
+   {
+    "name": "an empty interval and original",
+    "item": {
+     "path": "a.png",
+     "mediaKind": "native-screenshot",
+     "subject": {
+      "checkId": "c",
+      "armId": "baseline",
+      "description": "d"
+     },
+     "state": "baseline",
+     "configurationFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "fingerprintSource": "asserted",
+     "provenance": {
+      "tool": "t",
+      "capturedUtc": "u"
+     },
+     "sourceInterval": {},
+     "original": {}
+    },
+    "reason": "source-missing",
+    "detail": "sourceInterval names no sourcePath"
+   }
+  ],
+  "stateFingerprints": [
+   {
+    "name": "a measured state",
+    "configs": [
+     {
+      "plugins": [
+       {
+        "name": "A.ESP",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+       },
+       {
+        "name": null,
+        "sha256": null
+       }
+      ],
+      "providers": [
+       {
+        "kind": "mod",
+        "name": "The Mod"
+       }
+      ],
+      "overlays": [
+       {
+        "kind": "bos-ini",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+       }
+      ],
+      "population": "load-time+population:0123456789ab",
+      "schemaVersion": 1
+     },
+     {
+      "plugins": null,
+      "population": null
+     },
+     {
+      "population": "flags+population:XYZ",
+      "schemaVersion": null,
+      "plugins": []
+     }
+    ],
+    "measured": [
+     "gate"
+    ],
+    "state": "gate",
+    "want": [
+     "301b27155d4ca035c318e44e8ae66e306ce97914901d70c21a8622f30fc90e63",
+     "6005868f3fef465620df5136dc48c9cd46b3cb74e31d77f63721a4f4b4c03a7e",
+     "c7b65e5feb192f941c3841a3d3009f518e6b2959d304f83d7ad401681f276e2f",
+     "ef51fda0d3d01a4dd33d09c6ce9aff4837299ba2a472967932b2175be4844c9a"
+    ]
+   },
+   {
+    "name": "a state nobody measured",
+    "configs": [
+     {
+      "plugins": [
+       {
+        "name": "A.ESP",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+       },
+       {
+        "name": null,
+        "sha256": null
+       }
+      ],
+      "providers": [
+       {
+        "kind": "mod",
+        "name": "The Mod"
+       }
+      ],
+      "overlays": [
+       {
+        "kind": "bos-ini",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+       }
+      ],
+      "population": "load-time+population:0123456789ab",
+      "schemaVersion": 1
+     },
+     {
+      "plugins": null,
+      "population": null
+     },
+     {
+      "population": "flags+population:XYZ",
+      "schemaVersion": null,
+      "plugins": []
+     }
+    ],
+    "measured": [
+     "gate"
+    ],
+    "state": "door",
+    "want": []
+   },
+   {
+    "name": "no configuration",
+    "configs": [],
+    "measured": [
+     "gate"
+    ],
+    "state": "gate",
+    "want": []
+   },
+   {
+    "name": "one configuration",
+    "configs": [
+     {
+      "plugins": [
+       {
+        "name": "A.ESP",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+       },
+       {
+        "name": null,
+        "sha256": null
+       }
+      ],
+      "providers": [
+       {
+        "kind": "mod",
+        "name": "The Mod"
+       }
+      ],
+      "overlays": [
+       {
+        "kind": "bos-ini",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+       }
+      ],
+      "population": "load-time+population:0123456789ab",
+      "schemaVersion": 1
+     }
+    ],
+    "measured": [
+     "gate",
+     "door"
+    ],
+    "state": "door",
+    "want": [
+     "31384bdd463cb974e2d387888f0c12505b81e08a71e82f3e0056d5e9ce7533ee",
+     "819401b51357a7ec39f4231ce276bfb270038e8feca4ba859053d53f71c169c9"
+    ]
+   }
+  ]
+ },
+ "commands": {
+  "base": [
+   {
+    "path": "candidates/candidate-00-baseline.json",
+    "bytes": "eyJGaWxlIjogImNhbmRpZGF0ZS0wMC1iYXNlbGluZS5qc29uIn0="
+   },
+   {
+    "path": "candidates/candidate-01-patch.json",
+    "bytes": "eyJGaWxlIjogImNhbmRpZGF0ZS0wMS1wYXRjaC5qc29uIn0="
+   },
+   {
+    "path": "candidates/candidates.json",
+    "bytes": "eyJGaWxlIjogImNhbmRpZGF0ZXMuanNvbiJ9"
+   },
+   {
+    "path": "candidates/deep/note.txt",
+    "bytes": "a2VwdDogYW55IGZpbGUgdW5kZXIgY2FuZGlkYXRlcyBpcyBjb3BpZWQK"
+   },
+   {
+    "path": "candidates/Skyrim.esm",
+    "bytes": "VEVTNCBuZXZlciBjb3BpZWQ="
+   },
+   {
+    "path": "decisions/01-accepted.json",
+    "bytes": "eyJjaGVja0lkIjogImUucmVnZW4iLCAiYXJtSWQiOiAiYmFzZWxpbmUiLCAiZGVjaWRlZEJ5IjogIlJldmlld2VyIiwgImRlY2lkZWRVdGMiOiAiMjAyNi0wMS0wM1QwMDowMDowMFoiLCAiZGVjaXNpb24iOiAiY29tcGxldGVkLW5vLWZpbmRpbmciLCAibm90ZSI6ICJyZWdlbmVyYXRlZCIsICJldmlkZW5jZSI6IFsiZGVjaXNpb25zL2V2aWRlbmNlL3JlZ2VuLW5vdGUudHh0Il19"
+   },
+   {
+    "path": "decisions/02-bad-word.json",
+    "bytes": "eyJjaGVja0lkIjogImUucmVnZW4iLCAiYXJtSWQiOiAiYmFzZWxpbmUiLCAiZGVjaWRlZEJ5IjogIlJldmlld2VyIiwgImRlY2lkZWRVdGMiOiAiMjAyNi0wMS0wM1QwMDowMDowMFoiLCAiZGVjaXNpb24iOiAiZmluZSIsICJub3RlIjogInJlZ2VuZXJhdGVkIiwgImV2aWRlbmNlIjogWyJkZWNpc2lvbnMvZXZpZGVuY2UvcmVnZW4tbm90ZS50eHQiXX0="
+   },
+   {
+    "path": "decisions/evidence/regen-note.txt",
+    "bytes": "TE9EIHJlZ2VuZXJhdGVkIG9uIDIwMjYtMDEtMDMK"
+   },
+   {
+    "path": "disposition.json",
+    "bytes": {
+     "z": "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"
+    }
+   },
+   {
+    "path": "game/Base.esm",
+    "bytes": {
+     "z": "eNoLcQ02EWJgYGBkQAAdIPZwdQniYfB4eMseLMTBwOAeFBrwiImBITzIxwVJMSqfG2ECSP0mJogYsunOrj4+cA4PqvoCqBgbknqQeARUnANJPMjVLUgDymbkRZjj5+jrysLACLTSxTHEUQIo8sABSDgyMAg4MqCZK8QEYbOgif+COpgVh7sZ0dx9ihEihu7uTVBxThzuZsLrbgWgexcA8QcUd4P0a0NdzYykH2RmxZzPxV9KUxMTUlISCgp5CqckJCRYJJw/oPDgwIOCQ52MQHdUx7F8BhnBBTWOBasTHJ094I5kxevIBQ4gLMkCohHAzzHMVwjKLkfSD9LFw4DuHWMomx2nTawMxRn5RSUwS2HggQMDjpDlwOtoBwcQPhUS6oCeIi6gp1Co+A5YjKGJL4CymXGkFCYsKZwJRwpnwpNS2PD45+yZM7Znz/jYzZo50w7Z3QAUCGq8"
+    }
+   },
+   {
+    "path": "game/Flagged.esp",
+    "bytes": "VEVTNBIAAAABAAAAAAAAAAAAAAAsAAAASEVEUgwASOHaPwAAAAAACAAA"
+   },
+   {
+    "path": "game/Light.esp",
+    "bytes": "VEVTNBIAAAAAAgAAAAAAAAAAAAAsAAAASEVEUgwASOHaPwAAAAAACAAA"
+   },
+   {
+    "path": "game/NotAPlugin.esp",
+    "bytes": "R1JVUCBub3QgYSBwbHVnaW4="
+   },
+   {
+    "path": "game/Other.esp",
+    "bytes": "VEVTNC8AAAAAAAAAAAAAAAAAAAAsAAAASEVEUgwASOHaPwAAAAAACAAATUFTVAkAQkFTRS5FU00AREFUQQgAAAAAAAAAAABHUlVQQAEAAFdSTEQAAAAAAAAAAAAAAABXUkxEAAAAAAAAAAAACwAAAAAAACwAAABHUlVQEAEAAAALAAABAAAAAAAAAAAAAABHUlVQ+AAAAAAAAAAEAAAAAAAAAAAAAABHUlVQ4AAAAAAAAAAFAAAAAAAAAAAAAABDRUxMAAAAAAAAAAABDAAAAAAAACwAAABHUlVQsAAAAAEMAAAGAAAAAAAAAAAAAABHUlVQmAAAAAEMAAAJAAAAAAAAAAAAAABSRUZSKAAAAAAAAAACDQAAAAAAACwAAABOQU1FBAABAQAAREFUQRgAAAAgQQAAoEEAAMhBAAAAAAAAAAAAAAAAUkVGUigAAAAAAAAAAQ8AAQAAAAAsAAAATkFNRQQAAQEAAERBVEEYAAAAAEAAAABAAAAAQAAAAAAAAAAAAAAAAA=="
+   },
+   {
+    "path": "game/Patch.esp",
+    "bytes": "VEVTNE4AAAAAAAAAAAAAAAAAAAAsAAAASEVEUgwASOHaPwAAAAAACAAATUFTVAkAQmFzZS5lc20AREFUQQgAAAAAAAAAAABNQVNUCwBUYXJnZXQuZXNwAERBVEEIAAAAAAAAAAAAR1JVUEABAABXUkxEAAAAAAAAAAAAAAAAV1JMRAAAAAAAAAAAAAsAAAAAAAAsAAAAR1JVUBABAAAACwAAAQAAAAAAAAAAAAAAR1JVUPgAAAAAAAAABAAAAAAAAAAAAAAAR1JVUOAAAAAAAAAABQAAAAAAAAAAAAAAQ0VMTAAAAAAAAAAAAQwAAAAAAAAsAAAAR1JVULAAAAABDAAABgAAAAAAAAAAAAAAR1JVUJgAAAABDAAACQAAAAAAAAAAAAAAUkVGUigAAAAAAAAAAg0AAAAAAAAsAAAATkFNRQQAAQEAAERBVEEYAAAAIEEAAKBBAAD4QQAAAAAAAAAAAAAAAFJFRlIoAAAAAAAAAAEOAAEAAAAALAAAAE5BTUUEAAEBAABEQVRBGAAAAIA/AACAPwAAAEAAAAAAAAAAAAAAAAA="
+   },
+   {
+    "path": "game/Plain.esp",
+    "bytes": "VEVTNBIAAAAAAAAAAAAAAAAAAAAsAAAASEVEUgwASOHaPwAAAAAACAAA"
+   },
+   {
+    "path": "game/Solo.esm",
+    "bytes": "VEVTNBIAAAAAAAAAAAAAAAAAAAAsAAAASEVEUgwASOHaPwAAAAAACAAA"
+   },
+   {
+    "path": "game/Target.esp",
+    "bytes": {
+     "z": "eNoLcQ020WdABTpA7OHqEsTD4PHwlj1YiIOBwdcxOISTwSmxOFUvtTiXwcUxxJEDrsU9KDTgGRMDQ3iQjwuyUSh8boTxIPXbmCBijEjqnV19fOAcHlT1BVAxNiT1IPEIqDgHkniQq1uQBpTNyIswx8/R15WFgRFoJcj9EkCRBw5AwpGBYYYjA5q5YkwQNgua+D+og1lxuJsRzd3nGCFi6O7eBhXnxOFuJrzuVgC6d4GjLZeiEwM2/cDAYMar/wAwYgWAft+CVb8CyN949WMHKOHOB4la7Pob7BEYVb8KNNTZkewHmVkx53Pxl9LUxISUlISCQp7CKQkNjVu2yLmzATWkzmD+DNLLBTWHA6vbUVwHDGDcrhNwRGDUWLuAnkqh4jtgsYYmvgDKZsaRWpiwpHImHKmcCU9qYcMTW2fPnLE9e8bHbtbMlQ7I7gYA/6pooA=="
+    }
+   },
+   {
+    "path": "game/Truncated.esp",
+    "bytes": "VEVTNC8AAAAAAAAAAAAAAAAAAAAsAAAASEVEUgwASOHaPwAAAAAACA=="
+   },
+   {
+    "path": "imports/r.contested__baseline/01-request.jsonl",
+    "bytes": "eyJpZCI6IDF9Cg=="
+   },
+   {
+    "path": "imports/r.contested__baseline/02-response.jsonl",
+    "bytes": "eyJpZCI6IDEsICJyZXN1bHQiOiB7fX0K"
+   },
+   {
+    "path": "imports/r.contested__baseline/result.json",
+    "bytes": {
+     "z": "eNptksGO3CAQRH9l5PMqgaZpIMf8QHKIcolyaOhmPNKO7Rj7NJp/D5tNNGtlb9Clqle0uA2tjHrl77q2yzwNn0726TTM+7bsW+u3H7dhnZ+1n4ZVf+3atuH+dHo7bMs8NR3uP7uvzFO9nPeVt9es27A87+fL9Ddp4usf02du+kHbdeiWhbfxZXbu2se3QhsZPL1IFU3IEQgsJzWGnbNKkiOrKUC2RkqVsZBargaL9VByEIrZVHYV5LXxP/g3Xs+6dcryH/4oPQpwj8eUDBkjEb2XXHwqzB6oMygJ2hgdowKAT4A5GxJlgQCRQeyxwFfeyvgu/6A88MHZaHyBSjVkVGQ0IFCdJUWDhrJ1RBmSNyIS+rYwG5sTcnA+QolH/Jdt1PVd/EF54FOooLZYtVIwh1BNLTUiJ8ek5PpuAjNEqyLZiu/PLuKxagglkgPsX+N+/w01vbSq"
+    }
+   },
+   {
+    "path": "imports/r.contested__candidate-01/01-request.jsonl",
+    "bytes": "eyJpZCI6IDF9Cg=="
+   },
+   {
+    "path": "imports/r.contested__candidate-01/02-response.jsonl",
+    "bytes": "eyJpZCI6IDEsICJyZXN1bHQiOiB7fX0K"
+   },
+   {
+    "path": "imports/r.contested__candidate-01/result.json",
+    "bytes": "eyJzY2hlbWFWZXJzaW9uIjogMSwgIm91dHB1dHMiOiBbeyJyb2xlIjogInJlcXVlc3QifSwgeyJyb2xlIjogInJlc3BvbnNlIn1dLCAiY29uZmlndXJhdGlvbiI6IG51bGx9"
+   },
+   {
+    "path": "journal.jsonl",
+    "bytes": {
+     "z": "eNrV1E1v3CAQBuB7pf6HFadWqldg8Ad76zH3nnobw8uuWxsszCZpov734q1c7S1S42bVG/bAwMMAz4zieGfZgXU0Y+g92Cdm6DyDHfx5GPLHCeb7pcdxH+4RB5pyF4tE/bD2cTGMa9vjMX02qQ9+/TNRTGs7wqCf0u8ZUdmaGm6azkFJntPGs7+EcE9DbheXyedC5FBOwUpe1oUQhdBfuDwoceDi6xIKOWbCOA1IsOzn+3fPf1iGvO0tJRRcvB2tslxTq0pZSy65o/+WllV59Lycimuf6VRZOVRoy0pqXf8T38snck5Zvzch78OydBqKI8KIFH9sVEfTuc5pDkXO1FzSrZz7+aFP5rSRSmpoa0Tp4LSqbHcjVVwqlzAvQ7eBNfnWCdKubSWnumlueO22x6lGWLhKooV0Au5GVcM+4gh/hWK0m/IbEfzOwvQW8y6d+nkXLln+8v0UukUtSkLHm+611pH8mYaXoAyPfSp88E+IgV2TnzL5G8yWpeyka1UlKqqlUe3reOviPlwDPi7cX7EdeDo="
+    }
+   },
+   {
+    "path": "ledger.json",
+    "bytes": {
+     "z": "eNrtl8lu2zAQhu8F+g6CTi0QuZSo1bcee2rR7dAiMLgMbaWyJJBUmibIu5eU5N2OXdhOAjQGLFvDmeE/nM8ifff6leMqNoEp+Q5S5VXpDp3gwlrrgpQfuLltv6Hu5bvtmIRxrrT882VCgii2PpxSFNIg5YIiLDLqJzhNqc8ywYMIAacgeJTyNAwjzgDT0MeUiYALlGKEEtTnbcyUyuT7ae6cO3vpjXYOuCaFufGMXPZLeZ0W41ATCaX+3LuVTVH0A6yaTknZxpq4mbvSRGrg3zSzAwEKYs/3PT/7ivAw9IfI/+Fax3tzuWxVmeQyByurVeSOB9U1yILUoxElCoq8hNmYmdOK6/TO/WYzEzntRuZhiwr0qnQjUjd2SltEXYARPHNmpFGw6i2BQV7rPjlEPCYJYgkVEGI0i+MmCdOVtD4iL3lejpeGSF6s5izhRr9nukNiyW6akHPS27uiTWWMQW01Dh0tG7jozRKuoE3R9vSytd7PNaum0Es5duszLbgB1vRzLq3IWsJ2ET4RPWk73t2qd1vaNbhS1ZyHvXw1tan3AGAu1ulgBj67VuCZH86/EbISeg5KIo4ykoYBjjHCSJBtlJSV99xB2ZB4MlaWO/AEvIxGEoxdwenAcWcZj6eH0TCIBESQBhHOsviFngfombfynBjZZsKAVWZaq54U3hiqKZhNes8utTvwcbctRgUVGYKQCBYjTP73beuQhp4VqIH6nWs22YdP7/a4sOAMMs78QIDIzImSboOFEU2KatzAs8VlXeGRwGw07Jx4SIumBmUi9hCy5Pm4kCTmhOOTTKTmLwaJk+Rlk7KYbG3cyUnpPfNpXcn1teitH2U+ztsKhKl/shOuvafohwA7+zk6THwOIsKQAhY+iBfINiA760n6ONBgIGEM5Z4nWO911NNrSsqGFAf/O/OzFGI/IEBRQrdStRQ6p8klTm0OmlXpcGA5B+XoSa6caiHxKSFbTLcGV782B5G10bFzbnK3g67WvXvcwvEoSGZJ3sBNrr2yKm9BVm/XoXGXR93tDyWKRRpGfkRizML0QHxO8DASpFA7QOmMs6A99axibR0c7PYj993nCcDbsd4HgbiNjfOwaC7mff8XRogXfA=="
+    }
+   },
+   {
+    "path": "logs/overlap-baseline.txt",
+    "bytes": "JCBvdmVybGFwcHJvYmUgYmFzZWxpbmUKKGV4aXQgMCwgMC4xcykK"
+   },
+   {
+    "path": "logs/overlap-candidate-01.txt",
+    "bytes": "JCBvdmVybGFwcHJvYmUgY2FuZGlkYXRlLTAxCihleGl0IDAsIDAuMXMpCg=="
+   },
+   {
+    "path": "media/a.png",
+    "bytes": "YSBwaWN0dXJl"
+   },
+   {
+    "path": "media/clip.mp4",
+    "bytes": "YSBjbGlw"
+   },
+   {
+    "path": "media/model.nif",
+    "bytes": "YSBtZXNoIGlzIG5ldmVyIG1lZGlh"
+   },
+   {
+    "path": "media/source.mkv",
+    "bytes": "dGhlIHJlY29yZGluZw=="
+   },
+   {
+    "path": "nexus/pages/1234/snapshot.json",
+    "bytes": "eyJuYW1lIjogIlRhcmdldCBNb2QgKGNhdGFsb2d1ZSkifQ=="
+   },
+   {
+    "path": "nexus/pages/99/snapshot.json",
+    "bytes": "eyJ0aXRsZSI6ICJubyBuYW1lIGtleSJ9"
+   },
+   {
+    "path": "outputs/g.overlap/baseline.json",
+    "bytes": {
+     "z": "eNqlVsFuozAQvecrEOduZRtjm55KEri0zUabai+rHow9TtASiIC0qqr8+zqEtEkLabP1bZ49M2+eZwwvA8edlkUC7pXjFo9QZnK1auwLuzMqcpPO16Ws0yK3J14Gjj2eredpXlnzjzUbzKITuWxiDGUFl1Att/5bfLaQxGfbnZgiPhSEERwGEUKh5+GIjYcijNCIMBwLFsQhHbEIhzGiI+yT0ZCPmRiiOPRiMt5HvJNVDWWT/+EIijM5t2hdrqHFb9P5om5hI7MKtvDmooP2vSznUFviq4/EpZGUBgFiCGlBfV8nyg+UlD5hCTIs0BQL4UkKhBA/IDRJENMgNeFESKJxB/EGOBCrsTurOU37Z72Aspt1wA0BrDBgrWjCuUFGGUFl4EkGzLM1cSmJwKB1grVv6SrtUwOcK8E8Qk+wDmfRZTS7O8Ea9TKeylotuhlzDwvkK2KY4QkFKikimhgPM6CIIpZgj7GEBD7SWnNjsQThJKCSe74gSnxB54sWOLju/5V+VmRFd6Ojb65zGr2X3qRo3bu1xt9cHznm6yzrZfORAPnm6hLpLb1baL29WQtt9g9Zlqp63xQNPfcmzXUzRb+jX7fhdBfSjVPIGniaSQVLyOt2I+x6KNxhxxy6E1BQVbJ8fm3Cl7bz4qJc3sBz2ydjRK6OH4Ed/57jEcJX71u3dWgq7vPd342zGbw2uxtmVrjcPu2P8ClL78ss86J2pPPXGgcJB63Hseyz+/A++vFzcm1ThLayfYrrpwXkjlXUmcsanGIF9mtzrq74HF3HyH9/vFeoVsveegpjdgW93ex1VjxB6ShrOmnl5IVT1bayz/rt68XyTvadLLf0zw3PztNSnHE8tuu86LS31kFzYfZ3BnSqrL7Hw35i8HZ6NDPcO2gHSh5ESqR+533YHu0r9DDY/AOA1EuA"
+    }
+   },
+   {
+    "path": "outputs/g.overlap/candidate-01.json",
+    "bytes": "ewogIlByb2JlIjogIm92ZXJsYXBwcm9iZSIsCiAiQ29uZmxpY3RzIjogW10KfQ=="
+   },
+   {
+    "path": "outputs/g.overlap/candidate-01.reverse.json",
+    "bytes": "ewogIlByb2JlIjogIm92ZXJsYXBwcm9iZSIsCiAiQ29uZmlndXJhdGlvbiI6IHsKICAiUGx1Z2lucyI6IFsKICAgewogICAgIk5hbWUiOiAiVGFyZ2V0LmVzcCIsCiAgICAiU2hhMjU2IjogImFmYTQ0OTkwNjAwZDg0NTVkYmM1OWNhYTUyNmIwZjY5ZDQxODgzYTRlMjIyNTkyNGJiMDZkZWFkMjcyOGEyZDEiLAogICAgIk1hc3RlcnMiOiBbCiAgICAgIm5ldmVyIHJlYWQ6IGEgcmV2ZXJzZSBlbWl0IgogICAgXSwKICAgICJNYXN0ZXJGbGFnIjogdHJ1ZQogICB9CiAgXQogfSwKICJDb25mbGljdHMiOiBbXQp9"
+   },
+   {
+    "path": "outputs/s.switch/baseline.json",
+    "bytes": "ewogInN3aXRjaGVzIjogWwogIHsKICAgImtleSI6ICIwMDBBMDE6QmFzZS5lc20iLAogICAidHJpZ2dlciI6IHsKICAgICJieSI6IFsKICAgICAicXVlc3QgTXlRdWVzdCBzdGFnZSAxMCAoUUZfTXlRdWVzdF8wMTAwMDBmMS5GcmFnbWVudF8wKSIsCiAgICAgImEgbGV2ZXIiLAogICAgICJxdWVzdCBPcnBoYW4gc3RhZ2UgNSAoUUZfT3JwaGFuXzAyMDAwMEY5LkZyYWdtZW50XzEpIiwKICAgICAicXVlc3QgQW5vdGhlclF1ZXN0IHN0YWdlIDEgKFFGX0Fub3RoZXJRdWVzdF8wMDAwMDBGMi5GcmFnbWVudF8wKSIsCiAgICAgNwogICAgXQogICB9CiAgfSwKICB7CiAgICJrZXkiOiAiMDAwQTc3OkJhc2UuZXNtIiwKICAgInRyaWdnZXIiOiB7CiAgICAiYnkiOiBbCiAgICAgInF1ZXN0IFVubWVhc3VyZWQgc3RhZ2UgMSAoUUZfVW5tZWFzdXJlZF8wMDAwMDBGMy5GcmFnbWVudF8wKSIKICAgIF0KICAgfQogIH0sCiAgewogICAia2V5IjogIjAwMEEwMTpCYXNlLmVzbSIsCiAgICJ0cmlnZ2VyIjogbnVsbAogIH0sCiAgIm9kZCIKIF0KfQ=="
+   },
+   {
+    "path": "outputs/state.conditional-geometry/baseline.json",
+    "bytes": "ewogIlByb2JlIjogInN0YXRlcHJvYmUiLAogIkNvbmZsaWN0cyI6IFsKICB7CiAgICJLaW5kIjogIlNUQVRFLU9OQDAwMEEwMTpCYXNlLmVzbUBnYXRlIiwKICAgIk5lY2Vzc2FyeSI6IFtdCiAgfSwKICB7CiAgICJLaW5kIjogIk9WRVJMQVAiCiAgfSwKICB7CiAgICJLaW5kIjogNQogIH0KIF0KfQ=="
+   },
+   {
+    "path": "outputs/z.rejected/baseline.json",
+    "bytes": "ewogInJvd3MiOiBbXQp9"
+   },
+   {
+    "path": "outputs/z.rejected/baseline.nif",
+    "bytes": "YSBtZXNoOiBuYW1lZCBieSBhIHJlY2VpcHQsIG5ldmVyIGNvcGllZA=="
+   },
+   {
+    "path": "plan.json",
+    "bytes": {
+     "z": "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"
+    }
+   },
+   {
+    "path": "plan.sha256",
+    "bytes": "NzBlNTU1YjdlMTIxYmE2NmQ0NDljYTFlMmE0YjdhYjQ1MTQwOGJkZTY1OTVlNzEwMzAxZWMyOGUxNmEwNjNmMgo="
+   },
+   {
+    "path": "premises/registry.json",
+    "bytes": "eyJyZWdpc3RyeVZlcnNpb24iOiA3LCAiY2hlY2tzIjogW3siaWQiOiAici5jb250ZXN0ZWQiLCAiZmFtaWx5IjogInJlY29yZHMifSwgeyJpZCI6ICJnLm92ZXJsYXAiLCAiZmFtaWx5IjogImdlb21ldHJ5In0sICJvZGQiXX0="
+   },
+   {
+    "path": "premises/scope.json",
+    "bytes": "eyJjb21wbGV0ZSI6IHRydWUsICJ0YXJnZXRzIjogW3sibmFtZSI6ICJUYXJnZXQuZXNwIiwgImZvb3RwcmludCI6IHsibmV4dXNJZCI6IDEyMzQsICJwbGFjZWQiOiB7ImNlbGxzIjogW3siY2VsbCI6ICIwMDBDMDE6QmFzZS5lc20iLCAibmFtZSI6ICJDZWxsT25lRnJvbVNjb3BlIn0sIHsiY2VsbCI6ICIwMDBDMDI6QmFzZS5lc20iLCAibmFtZSI6ICJDZWxsVHdvRnJvbVNjb3BlIn0sIHsiY2VsbCI6ICIwMDBDMDk6QmFzZS5lc20iLCAibmFtZSI6IG51bGx9LCB7ImNlbGwiOiAibm90IGEga2V5IiwgIm5hbWUiOiAieCJ9LCB7Im5hbWUiOiAibm8gY2VsbCJ9XX19fSwgeyJuYW1lIjogIk90aGVyLmVzcCIsICJmb290cHJpbnQiOiBudWxsfSwgeyJuYW1lIjogIlBhdGNoLmVzcCIsICJmb290cHJpbnQiOiB7Im5leHVzSWQiOiA5OX19XX0="
+   },
+   {
+    "path": "receipts/e.regen__baseline.json",
+    "bytes": {
+     "z": "eNqtU01P4zAQvSPxHyKf6SqJ1ML2ygmJ0y7sAcRhag+pqWNH9rhihfrfGdv5KBcuu5GVxG9m3kyeXz4uLyoR5B57+IM+aGfFtmqvEupRoh7oTjEi1s3PG9w0LeCuvt7hq8gpgwFb4umtLldTYswpDyWIPzx2aAsOvi/oDgIabXGkAk+M2mhMSVMwEHqGPnhbiYO2uaoHG8EIxk4jXXf8vYcBz4t9HMfCIxjerPIwYdXMvdDSrzFprgrEM6B6JJlK27rdrOqG10Ndb/N6KuVo1TdZ6ynrXdOtU2muOgMu0hAp8P75JQPGdeftpbMh9qjmT5ZglVZAyN/XrjepnfzHK4/GAnjXeejD1Co3J++MWRRf0nLjJX41RqcTGUAeoMMZV7rDkM6SfeXZQGH7f6auRk9lhZ4LwiJCtHI/ZbAfpMSBwEoUBXrJj1O6n2bXsC2SssXuRe1SmMnJRyxCeXxDmdKWY6uEVuweTX/vda/H85yJPYZoaCbFd5RxbDNZt5AoJGZ2/swBlXhlSbXtwhdQuiP6JPAyQSA2cEf7zIoQoue5S4hzlZbTr5Tmurw4fQKRQh5I"
+    }
+   },
+   {
+    "path": "receipts/g.overlap__baseline.json",
+    "bytes": {
+     "z": "eNqtVUtv2zgQvhfY/2Do2jghJVmyfdw9Fdi9bNMeWuQwIkcyG71AUkGCIP+9w4ckB0mKAilhWNK8+M3wm+HjXx82iREn7OAraqOGPjlu0gsn1ShQjfaTJElS4U4WUDJRVjXmGUu8ydhCH/TujYXFg45iitugbC6HO9QtjEEDuotBwWCreozBQFuS9lPbBjMJo0VNokf63CS3qg9b6aHC7Q9DUC+8Au/RyeMeXp2Q4ilu1tx9PsGI56H1FGHjHbT0sfVgzZYvSLC3/0ejxctYQojyixXONWVpsWWcfteMHf3vW3DHXv7Cajdb3Sv7zyAdLuYFw2THyRr6/u7S8kk7LPbkswvaq6WWV3P1LtdSEMYTpLvCORTisC8k7AGKrCh2XB6gLAWUPKs44K7Y53VdlweZizqvcvLa7XOW15zlKRNFmc0RqweLDlSaszKKOqs6PE+Q8y0/XLPsmPMj499c9TdP9HfjE2uHxlnSw1xF8NsFvL23kS9Db6YO5XLeAnqpJFj8vOQk3rkiYYgijYbOzFvRYXTKnnFttVkId3xGr4totXASxC00q1yqBo1jc1IPrUR9hHeuJbJnqq/S9yChwsLUi9NsQZQXAkcLvfBtQOvGP57i6VGhrR7a9q10z/S/n6YRmmaFOf6ZE3pfnp594aQpl1o1kwYbJls87lr1DepRq96D/0OH82KO8igfh3FqZwjUByC3roM+rnLqmjTLd0W5P0C1hLNE/hdz0sVrp0b1Zq3N41ySHjrv8Td5XKLp1mKtg6GmRq72aZFyOCBjkGUcC1ntAZlIC17vi0MNuSiQQ81ywXepqEpZ7CtWQ1anMhY70unl3tc0ctHS7uMru7thGv3942ZOSQ93ihrltaRm9nWDXCM+323z3/Amrug+j/Fz77fQhF5/+BWYajBb1avXCozvXMkzSPMsDdcZ3VduJp6xObaBbxWrJwzE1/gDhTPzOYS8Eipwb5V9+FfRuAuKJbBGM7V2CUp3qphmxoqhG1t0W4Q4kt6FHbRnE9WDuilq4peLnc0dSLV0M2OFYSxdr0241joEM+klMtlKJex6NJT500/Vd2sX"
+    }
+   },
+   {
+    "path": "receipts/g.overlap__candidate-01.json",
+    "bytes": {
+     "z": "eNqtVUtv3DYQvhfIf1joWsumnqvdY3IqkF4ap4cEPlDkSMtYIgWSMmwY/u8ZPiStWzsosCUWK2le/Gb4zfD5w2+7xLATjPRv0EYomRx3+ZWTamAgJvsHR0lScXKgTZkXdUEK0tHEm0wDlUHv3khYWdBhTHYflP21egA90CloqB6DnFHJBacW0sVpotqiRs7DEEw5nSxoFD3j5y65FzJsp1UL6Q+DcK+8Ah7ByeM+Xp2g4iVu2D98OdEJzkPrOUKHBzrgR+oBm3RDAtL+FY1WL2MRIfCvljnXnOQ1YsffLSFH//sW3EHyX1hVi9WjsJ8Ud7iIF6jZTrM1+P3dpeWTdljsyWcXtDdrPW/OK3i9lQNxnmhe1c4p2xPYtwfKWFnkwGjFCNCuLvYFlF12IG1WFXnXdXvedE1b8zwvG1bxikBNyj00S8T2yYIDVtZRMFoxwnmKWZZmh1tSHMvsSLJvrv67F/y786kNqneW+DA3EX76Cr59tJE5Spp5BL6e+mr2Zc2KXbgibZAovaajWbbCIxmFPWPcZrPS7viKZFfRamUmZfe03+Rc9GAcp5NODRz0kV641sier75K34MEi0tnyU6LBRKfMZgslcw3A647/3iJJ4iFtloNw3vpnun/e5qGaZwa5vj/nNBleXoGhpPGXDrRz5raMOPicXdC9qAnLaQH31641vb7x0TNonxS0zwsELAXKE9dF/2+ybFz8qKs6n1zoFs4i+T3+KiBQcil7jh2515Is9XmeSmJpKP3+Ige12DGrVjbaOhKsm+bvM4zegBCaFFkUPO2oUBYXmddUx86WrIaMtqRkmVVzto9r5sWL4Ciy3ksdqTTv/e+xcELFnef3tjdjdTo7x93S0paPQhslLeSWtg3Kr5FfL3b7k/1Lq7ovgzzc+/30IRef/oVmFaZVEjxVoHhwpW8grTM03Cp4a3lZuIZm2Mb+FaxeoZAfA0/gDkzn0PIK8ECSyvs02eB4y4o1sAazDzYNSjerGxeGMvUOA3gtghxOL4zq9z8SKRKsZs4NlRUxi+z3G7OHcvpxsaGxFi8Z/twv41AzazX4GjLBbPb6WDyLz8BGHxupw=="
+    }
+   },
+   {
+    "path": "receipts/g.overlap__candidate-01__reverse.json",
+    "bytes": {
+     "z": "eNqtVDtv2zAQ3gPkPxiao1ii5ZfWTgU6NWmHBBko8iQzkSiBPLkJAv/3Hh+S3aFFgYQQbPHe392ne7++WiRWHKDjP8FY1eukXLAbJzUgQA34VZIkEVXB1jWsYcfWq/1+k3iToeU66N1bFk4edBRTvARlc9sfwbR8CBpuuhiUa6kkR0gnp4EbdBoD5GAh2ks+IBiSv9N1kbwoHXKavoL02VLNN14Br+DkMZlXJ6Q4xazN8e7AB2eix7YNGMdYPxx5S5fUV23Tczmg8Xs0mr0sUpkgf6BwrixjGwJAz32Wlf55CO6g5T+s1pPVq8IvvXR1ZV7QjziMaOn+6GB50K4WPHh0Qbucm7q8bONt7NztuS1U74Gz9cY5b2teC1ZUqwJYUbCCyU0hcs72m42o17CtWAZc7rcC5Kbiu1VVSb4SjPEdKziIfIpYvSG4AtluFyUdqg4useZ5mu/vs1VZ5GWWP7hBLE708+Qxtn3jLO0vgGGp9DF1xFmS1C4nBPiKkUm9tmMHcibADPhuBiY+eCKDiDON4Z2dUtF0OoUX5DvbzAws/+DbTbSaScrFC2/OcqkasJ7jdd9KMCX/4Jkje+r6Lj0GCXWZj1ocJgv6BoSAAbkW/rug8+T/TnGG1Gg0fdv+De6F/v9hWmFoi9jycyb0MZyeg2HShKVWzWg4hp0Xx10r3YAZjNL4KbSaWB92EC0Zx9uLjLFUDwfNCKE4A88gnJlfAk9BqCTtIoVv3xRRMijmwAbs2OIclBahGGMaQtoNLbgUIY6kd4G9m3Gi+5QQSwIdlfFmp2Xk3InebrTnSizSWmzCOuqA29HMwclWKoFxW7r6rq9OvwFHbtn/"
+    }
+   },
+   {
+    "path": "receipts/r.contested__baseline.json",
+    "bytes": {
+     "z": "eNq1VE1P3DAQvSPxH1Y5s2A7ztdee6rUU6E9gFbIsSdZQ75qOwiE+O8dx0l2RdVKqG0U7cYz4/F7z/Z7PT/bRFYeoBXfwVjdd9Fuwy581IAEPbjPCiNRRgpBRVHleUxEmmXRVDI0ogt5/0XCQ0MOe8rHkDSXsu8cWAcq5IRpQ6YUFhrdwdxOGIfRbmyaUKbE4MBg6BWHm+hRd9OsVg5b3Q49VmP8bW5ZP10fxACnDcw4w4Mn0eBgO4GyW7quB537Ohets6xDHKC+OemnMsLSLaH43hCym97bMB069YeqZKl61u5TrzwuMgX60Q2jszi+86wmah6LO/hGgZe9OtHs/n6R6cqAHRt3+WBxny7CRHsQLEknDFWSUqEUz0pIBAMGSZwIkpRJmcmSUFUJDmXCSSIVUxURUiVKKE6BsKyqiqVj+YLrYsOUpnOkdbqFU6aUbmlxQ+IdpztCb/02hH34GB0UzMCPEcMTpeZXTjkriawQZkHLVGSItCIxBaYEq0QCirKUKglc5okARlQaq7JQFHIuuIxz/p4TJf+bEkNKdug7C7/jVKZZzClPFcsli7mUpeQqTQuWQZzxgiS4gxDHVUwZI1lKY65UwZMszmmFWiTvOTH+IU74s58OYtPXp8ce2dixBbVeNyk6pZVwcL1Cl3/5BOjRYPraiNYuS02LO9M3zfG2H8umhY/5izm7uMEg5KOoYY0rXeOm+IyVBg3M7v4N6s3saZNCdyGCIoqxk4elAn1IShic6CREIbSf/t4W6YNboR15ZYPdBrXDxKm5MyMEoQw8gPRlk13sQ1ArdC3tXr7oVgcf2a+Ng0GsTeEZ5Dgvgxq2QwOLCaNQ+C1d7xWPun5boZ66q+fkPLKLbfnpT2C80Eck1qGB1uFatCDsaNbmWKu0XOx8xRcuz8kh642u9QSvQuyzkHj0BuebvXdXduLBvuf52dtPy1Lh1Q=="
+    }
+   },
+   {
+    "path": "receipts/r.contested__candidate-01.json",
+    "bytes": {
+     "z": "eNq9VUtv3DYQvgfIfzD27I35EkXusQUKFMipTntIsAgocqhVrFdEykhg+L93JEqrhR0nCFJU0K6kmeHw+4bzeHj96moX7Aka8w8Moera3eGKXU/SASxUffzToWQncurAZxwUcE/B72aTvjZt0k9vJF006dCnvUvK4Y3t2gghgks6MzRJY03rKmci7NdlvRkiatqxrpOpM32EAUUP+Hm1u6vaeWVj+33V9B1ao/xxcVve355MD5cOhnGBCPemxo/9DCzst/2gjX8tRudVISIOcH9HOy1lhElEiPc7Qg7z/T4th9Z9xypbrb5U8ffOTbjILOjG2I8x4PeHidVMbcIST5OjxCvcXMTt48fLUN0MEMY6vvkU8Lyu0+JwMiyT81mZwgvFhHKCK0a5yakXThORaZvlFBy1rLCccpqpHEXacFIIIzSAlEzL1WPxFfdGh1ovgiZWDVySpXRP9TvCD4IeCH0/nUQ6ip9nhHEb4POIqplV/ZyWYgWxPnNG00KaHAjzhFNgzjBvMmTFJHUWhFWZAUac5K7QjoJCapYr8ZQWJf8HLYa0Qt+1AV7iVcicCyqkY8oyLqwtrHBSapYDz4UmmRP4xj2njJFcUi6c0yLLuaIe45E95cXET/HCv+Ock3VXXlYAMgpjA+5ceWdet2fo9hevBH3XD105mCasW82bx6Gr663wN7N5401/vWjXxtAbe2dKOMtdVeLBTJpgB+xn4fDfoL5aWtwcoQ9JgkE0Y2tPqwW2JGuhj6a1sEui4/x43FJq4uKrchxMTN13zbF6LKs2bM4fVp+taaZOsvvNYFJBaLbd1rws0eLmuXrLOS9IXigmGTUaCDEcC0m6QhkgFsvIK6k9Vo0EajwRlmbMFrmTqiDecM/cQubx+gVot13dfQfac/UGDXyhQORK+dw5BpTnFlOf5gIbGtHTgCkyQzXC8TkpZOYQKpoqqUSudfFDaH/UpizB4fb9C+i+aXERO6NkRrBtUs64E4A/br1mAiSVTgJnmdZGC08smMxChqWnvVaGSK2tsSvA+XFcazBNMBxRU4ldJMKSQXOWxWGElDMDfAI7mc35cUzCyuEkq+LXt1VTpdlyPDtOA+PsFL6AHZdtMAGbvoZ1OGPF4LuN3VR6u7bbeyysqi0X5fIV1lE2Lb+HYaq4DUmIOFTLFNIGTBiHs3O0dZVdR/wZX+qkF92mGypM/zneiH2pKOxBfZycPZ247GIuTz5fv3r8F6v0ZO4="
+    }
+   },
+   {
+    "path": "receipts/s.switch__baseline.json",
+    "bytes": {
+     "z": "eNqtVEtv2zAMvhfofwh8blrLjhPb150G7LR2O7TogZZoR41fkOSsRZH/PkryIzlsGJAJhm19fIikPvLz9mYVaL7HBn6i0rJrg3wV3VlUIUfZm6+CkCDOMBOcRSWW2SYRReBU+hpaL7d/oV/My8gnP3ihvte/pOF7LwDVeLgAjbVscfQFyhDaDnXt1QT0BhVBn7RdBQfZ+pNUV+D6TVOkd06A72hxgb0TjahCPdRmsl7MORiou2rAwOInep3GqKrj4x56PI9BDWN6eISaNmuXlF6zOWRszfdRabbShlJB8cNwaxqF0XYdMnqewjB3z7M3x1b8RSuZtN6l+dIJG1fogG4w/WA07V9sCmN+PZi9dTRKH6aaP0xVvl9KRiHuIUq2rh4FKzZpmu22mECKKSvKrBR8A2USZ9u0IHgXbXZYFFnMeMhEVmDB+C4WMex4KiaPxYdBG1MSZSPSGNngeXqMrVn2FMb5huUhe54v4NWlRZdyXkTetXpoUMz3z6EVUoDBxyX2K9dIFaJNpaDRC1mwkeaMe4vOTMD8km7n/AR+gGrBhaxQWyIGZVcLVDlcuWbPjoyuQi8eoSLC0I595vbAOfYGWu7pvlq9us9pvCIqslFdXf8p1TP5v6epuaKxofP/czvX5XnZ49TElkF+yHlWeUPn3KgBp9nxhtyquSZ79aAU1OvSfHyTRA4vmB1fDhs7kfgwHkM1bPoa7RHej6B/bjp1OYy8rKTiyrbS0wy21kdUts5LINrQ1Kl8tzcIelCzb9IVkk9j1IZ3e3P6DUWzqtw="
+    }
+   },
+   {
+    "path": "receipts/state.conditional-geometry__baseline.json",
+    "bytes": {
+     "z": "eNqtVUtv2zAMvhfofwh8blrJjl85bqcBO63dDi16oCXaUesXJLloUeS/j5JsJ8CwYUArGLHFl/iRn5j3y4tNZMQBO/iF2qihj/ab+MpJNQpUo/0mSRKJqq7qkuEOapGxBCJvMrbQB737YmHxoKOY4jkojQWL12LopbJ0ArTbBocOrX4LpqC7YFiBwVb1OEcHbUnaT20bzCSMFjWJ3mm7iZ5VH87WQ4Vb7JT1fpsIX3E91isjEh/no5qX2wOMeB5YTzMKfIGWNlufu9nyNQ/s7Y/ZaPWi8Nqi/GmFc41ZnG0Zp+eOsb1/7oM79vIfVuli9ars10G6vJgXDJMdJ2to/+BAecguF3twgWbtzd9Le7MU8/rJUFevgr85QJxmLkLBZVblRVrtkqJIsyrNU5HtBMuSEipWJnGOJWY5sFSUZY5Y1XVeyqrmkgOQ4RKxerPosuRZOUs6qzo8B8z5lpd3LNnv+J7xe9eNzZF+Hj3QdmjOy0pYzNShXNssgMBJgnm75i4+uGaeEDcaDZ1ZjqIuEInOKHayWXm2P2PV1WyzEhHEMzQnuVQNGkfhqB5aiXoPH1xrZE9QX6OHIKEywtSLw2JBTBcCRwu98Oyn9ehfx7lJVGarh7b9G9gz/f/DNELTxDD7z+nPx3B6koU+E5ZaNZMGG+bb3Oxa9Q3qUaveJ/9JzfljmvJZPg7j1C4pEOtBbt1FWd0cr/4Ygs6vnRrVm1MN3hfoPXTe4wt5XKPpTkU5XfN6x/KqiLOYQ4mMQZJwzGRVADIRZ7wusrKGnciQQ812gqexqHKZFRWrIaljORfVlzOU9rgOU5qW7mKeFXXuhu+Y1ROG+mt8QuHMPIjHIFSShqqyb98V3bmgWANrNFNr16A0z8W0FE4M3diiOyLEkfQt7KA9WGIoNXXWzDuz9oB8X1A76p7SMJaGexOGaodgJr1GJlupxPIX5JK7vDj+BqaGDrw="
+    }
+   },
+   {
+    "path": "receipts/z.rejected__baseline.json",
+    "bytes": {
+     "z": "eNqtVUtv2zAMvhfofyh82oCmtWT5letOA3Zaux1a5CBLdKLWlgNJLvpA//soyXayDRtWdIIRRyRFfqQ+0i+nJ2eJFTvo+XcwVg06WZ/Rcy81IEDt3WeJkoSVTdZWLCc5LzLBqiSY7Duuo97/S+MiUYc+xX1UPl8YuAPhQEYVN31UNNxCpzRM3rhxKNVj10UzyfcODIpecHuW3CsdY5mhgdWdRaznQQGP4OUS9kGVoPB1CrR9uNrxPRy7NeOEGR54h5tVQGpXZEEB2n2djJZT1iE6kN+c8EdpSotVSvC5TtN1eG7icdDyL1b5bPWo3KdBelxpEAyj24/O4v7WpxQS9ljczjuatJeHQl7Opbs41AFB7jjNC3+ibWnNSFGleVnnFS0LSUXNWgppSyVnvGVFU7UpmqUCCEBJm5q3GeEtAdYW1eyxeXLgUZF8EvRO9XCcHyErUl+n2ZqRdUpufPFj9d+ShFbt7zlUjIo8LyEH3pSiyWhZc86qoinbggiW1wRSSQtEK2hT1UBzxrOqyYqGQY3p/5oDS9+UA/5swt10w/aYCWLQduxBLrwUXEsluYOrBbp455qIjXTeGt7bORQSp1fuqCcONktjrJc2OJ8slr7h4p5vD3KptmBdYMvQSTBr/s61eA4dFSp0GyVYRD5qsZstsDWFgL3jWoR2xbUJr9fpirDIzgxd96dUj/T/nqYVBgeaXf+f23lfnjPF4qDCSeQZFMdvZFU8GJy3vLMQGRFbB+2WUbFUR/DRhjnoh8tKD/oZzHCoAjiuull9liUHGJvoWkmce8o9fVHIseB+s+AzYMfOLdhw4IpxQpvM3fzhOO7HicEYFpWDOWogpBvelNJb+5NQDA9g/L35wFFkHY7ibZwePXA7mukLggUDI5WYPxce5+nJ6w/LcubK"
+    }
+   },
+   {
+    "path": "STATUS.md",
+    "bytes": {
+     "z": "eNqtVtuO2zYQfQ+Qfxh4H9Y2LGeTFkjhfSraBCiQNkCQtyCAaGksM0uRKkmt1+0W6Ef0C/slPUNKijd1AhTpwmvrMjyc2znDC3pxq0yvonaWQlSxD/T3n39RZ5SlUr6v8t/T8vGjx48K8tzoEP2RbtkHWfSc5mW93V59u332Xb3bXpULMVO+DRsqtyqw0ZZLmo+XixWVlbK1rlXkArg0n27TUvGCA8Gaq8j1hsaV8nK55MnfdeXaznDkDb31PS+XRFQZpVtsvNOAtE0oZVF0zpCu2UYdjxvxXO801ylQxt2RVFVxh83IuEoZBBl6E0kH2rre1ivq2JN3hlfAorhn6rxrvGonVDyEdcrazrvf+JpO/NQ2cuPFyiB3gZQ9YouKdRexTqWNrIuS4LcCg4/s4flW84EQCd+txGB42jkf16ibOC55oS0bd5BVNSK7RRRwoU3GhusGriO/6RYupTzX4/bhWnD3yBTt2bNgKPrQY1GLuHJQvrcWGK2qmRTykd1oXb0Why8u6OWQa7m9p2rP1Q3dSwfgu1M+4mcsBy7hdq0reYg2YtvEPd1jXVEUZ/8FsmzWDsuM6kosG9sBlwX+vxl+W1ah9wgtL0ldhA7BvlIDZYqGXcvo3DMYT89gpNB+GDqsJtsbk2MLmQinTr07bej3qa+sG4Ne0RVVYqoaTvWahwUqhU7FTl9EeuKlOwP/d0QvkYNF8ByYY7Rfi/MVUX6SzUpFZVzTg+dz7w4h0wCmoI1QquLc8DXvIAJhMaQ8rMNBx2r/r5ieUUKZYGsRleF6cY2enu5oFA3QDFTM3Sr8EA5KumE8hDR4/VMrhAPk6FoyP2S+RCC3nAgn5q+9brQVrAQsVHRe1CXpRFIWo0BXI4xz1kCNxLcuousgLTdsM1d1i5yrtgspJ12/NbpKbzwfICRqK1IUXCZoVg+RJLcjfFQPgkKVKijO+hwpXfbyU9ol3jyo+AOi7KCK+83obY5sUr3LkLDn52MZs7Ggs5uc9tX/uFGq3s86BEl2pi7NWVV7umHussZ+VGno7NgaQ7tZJzMnobz2kNZTYxkI8GPoy3NjbiOzCHvvdJWXLJf2iVouVzJCEaEMzw29VCaglKjdljEw85bFFybkV8CmSF7pFv0jK8PQxyDeQeUWAjAQMl+nQSwv+K4zzsswfvf7LD2fbWa/gr6xqIE9W80O+yMeie04uGd/vBeUyfWAEWNqdFR1A5j0bqdabTTe9Db03UAzJ7PG9srAasb2VntnZRrN0pJQuQ5lu4t4kku4cy52HjM2h0u1G5z2rMTh2avvf/lxXJFBWq612uQfoU+e4ulMIDkZ00DbI2qLA4BhKopkXV4jPk77Di/gq94hEelw1FvpQkn4eE1uG9jf5lpJniVQIztFN83XzcMpHNQx5MKkFrWNEBBJJDwBB46p1Yd6vuGGMZ4zvmWuw8fmnfRXAslnh+HwlinFIysgBhPBBtwXqLgoiGBoaaoBtyhyfZPL1Ic8KIqC7yrT13z6OPMvlfJTlJLXXhx/IOQj/erCumLQYPH8TToHgXCi9ONJLZ/5Pou1S+eiz65N/LievKJLsb8clVRSBx2VBMW9R7nBdrBGmlMUgMPIpXS6ygo7nJ3vUa7opaVP1TWJ3hSeSN7zQQlzp5f5DJK1kT8k+szX6/VievEP30L0ng=="
+    }
+   },
+   {
+    "path": "sweep/inv-0001/cache.bin",
+    "bytes": "bm90IGNvcGllZA=="
+   },
+   {
+    "path": "sweep/inv-0001/jobs.jsonl",
+    "bytes": ""
+   },
+   {
+    "path": "sweep/inv-0001/logs/reverse.txt",
+    "bytes": "JCBvdmVybGFwcHJvYmUgcmV2ZXJzZQooZXhpdCAwLCAwLjJzKQo="
+   },
+   {
+    "path": "sweep/inv-0001/Notes.TXT",
+    "bytes": "Y29waWVkOiB0aGUgc3VmZml4IGlzIG1hdGNoZWQgd2l0aG91dCBjYXNlCg=="
+   },
+   {
+    "path": "sweep/inv-0001/overlapprobe/pairs.jsonl.gz",
+    "bytes": "bm90IGNvcGllZA=="
+   },
+   {
+    "path": "sweep/inv-0001/summary.json",
+    "bytes": "e30="
+   },
+   {
+    "path": "sweep/inv-0001/SUMMARY.md",
+    "bytes": "IyBzd2VlcAo="
+   }
+  ],
+  "tool": [
+   {
+    "file": "bundleenrich.py",
+    "sha256": "7c785d64308970e237463f6188f665a4ba3c2803a4bba41cc7ddb06b8880a2a5"
+   }
+  ],
+  "catalogue": "nexus",
+  "cases": [
+   {
+    "name": "media: accepted and unassessed items",
+    "ops": [
+     {
+      "op": "write",
+      "path": "media.json",
+      "text": {
+       "z": "eNrtlE2P0zAQhv9KlTMN/sqHe4MD0ooL0sIFxMEZj1PTxIkct3uo+t+x04qKLohDV0ClOjkk885MZuaJvc9swH7KVosv+2xUYR2fsh61Va9VPro2e3V6fW+dTtpgTGcdLj06jT7J07b5hhCiuM9gjbB5mB3bfNih79SYfJTvj9ZGTZjik1HjBN6OwQ4uSWGNC+jUtM4OKWtQAS8jYHDGtluvUsw761r0o7cufTtTV66U35xTPg5bD3MB2NsQUCd99LEnp9ws7LMwDF3y2Fl8ilJzrFGNYetRfwqQNEZYuSR0ScRHQlbz/XluMPmdOt/gGBaDW6QJ+OEpZbHztBzGES6SPA96rVhRXthjqktw0Nkx70fxjF2relzurMbhL3AjhLwhdPU2BuY49X/CB1wYQKE4csMqXoLmQKRguiFaEsMLCQIFlFUlGAM0pJBIREXKqohTIfxG8SX7XOqDC+h3qpsrO5o+/ET1aMv7ze4c9PgjJVRlvBohTImcoK7QCMK0RABKa8ZQlrSqQZOKUlIYLoWudSkFEAFCNTQ7ovOJBc2L1OHgbWvdqaLfHA3nniRrmFFFTVgti5rTCgWpG10LBKMqYgpEXjSUUSmpboBxBkJqWpa84FX0zA6/+JPvR9CNHkG9nabYyB3fbeI77+87mf+UzEtuKVBOWx2ZxGZeHh5cue7w/tGu01euWwX39fAdWywzkg=="
+      }
+     }
+    ],
+    "args": [
+     "--reader-cmd",
+     "python ../../../reader/fake.py ../../../reader/table2.json",
+     "--reader-env",
+     "HouseCarl__DataDir=names-instance/Data",
+     "--reader-env",
+     "HOUSECARL_DATA_DIR=names-instance/data",
+     "--reader-env",
+     "odd",
+     "--media",
+     "media.json",
+     "--no-names"
+    ],
+    "exit": 0,
+    "crash": null,
+    "stdout": "   search: the search step was not run\nbundle: 46 evidence file(s) under bundle; 4 media item(s) unassessed\n",
+    "stderr": "names: skipped: The names enrichment was skipped by request (--no-names), so the report cannot tell which objects have a body until `evalrun enrich --kind names` adds it.\n",
+    "out": "bundle",
+    "tree": [
+     {
+      "path": "candidates/candidate-00-baseline.json",
+      "sha256": "6b714168dd62564a2c44597531ae80cf60cbe8862713370a280f2f753a0e1acb",
+      "linked": false
+     },
+     {
+      "path": "candidates/candidate-01-patch.json",
+      "sha256": "6ad22b1f26166942ce17ee368cb0005a166308c8a44183fe70384cd19a5800a0",
+      "linked": false
+     },
+     {
+      "path": "candidates/candidates.json",
+      "sha256": "5868b62f443e8ceb8ce5ee5ecea74d1b3e8771c7653521ed22587edd530144ab",
+      "linked": false
+     },
+     {
+      "path": "candidates/deep/note.txt",
+      "sha256": "c12b5e93a281d58270d2082273afbc6f6b746d1e6cbd963b933f214aeb22d5e7",
+      "linked": false
+     },
+     {
+      "path": "decisions/01-accepted.json",
+      "sha256": "17c29d65d74f3634bd2fa2708884ef9c1abb9534c1ec6ebab484cec482b3fc00",
+      "linked": false
+     },
+     {
+      "path": "decisions/02-bad-word.json",
+      "sha256": "21feb77987f5c8799ef8ff8cf0120a5303ed495a7d1088efc81b4666035f81df",
+      "linked": false
+     },
+     {
+      "path": "decisions/evidence/regen-note.txt",
+      "sha256": "631ede2fe82a13b6d94fc798c3844016a8f33e7c87d5c7f543d346f056c6b266",
+      "linked": false
+     },
+     {
+      "path": "disposition.json",
+      "sha256": "fc4f029c0430e6593135675a4c5f5ccbf37f3bcdb98c484dd0618ad7a490fd1d",
+      "linked": false
+     },
+     {
+      "path": "evidence/decisions/evidence/regen-note.txt",
+      "sha256": "631ede2fe82a13b6d94fc798c3844016a8f33e7c87d5c7f543d346f056c6b266",
+      "linked": false
+     },
+     {
+      "path": "evidence/imports/r.contested__baseline/01-request.jsonl",
+      "sha256": "82b0cf5da91b6a7e02f031e2da2fa5ed1261dce4c85ae20d63db9d1e84a4c384",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__baseline/02-response.jsonl",
+      "sha256": "b6734146d28c234ccbc4d66927e374905d47e33f3122076134dd9457381fcf55",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__baseline/result.json",
+      "sha256": "2f561add47be5a2e2e535a05b5b7cb01dfa4eb5405cd2df0acd5dad41e027ff9",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__candidate-01/01-request.jsonl",
+      "sha256": "82b0cf5da91b6a7e02f031e2da2fa5ed1261dce4c85ae20d63db9d1e84a4c384",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__candidate-01/02-response.jsonl",
+      "sha256": "b6734146d28c234ccbc4d66927e374905d47e33f3122076134dd9457381fcf55",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__candidate-01/result.json",
+      "sha256": "4abf48248d438213a71f4d90459c571ed1c2bc31315879c59a30b4a49ee66296",
+      "linked": true
+     },
+     {
+      "path": "evidence/outputs/g.overlap/baseline.json",
+      "sha256": "6c986da8aa636651d9a77ca713b1ae5684fff79d4cf4b4a2558404f10420c673",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/g.overlap/candidate-01.json",
+      "sha256": "170e7b9acc432eca5c0eaf6373e4f190b1532fff7d8f8b6d2248c5d50e6047e8",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/g.overlap/candidate-01.reverse.json",
+      "sha256": "7fafc24b34e244242d64c1a2966cf5e7b20ead97ced6ba83bbda3c22a824aec1",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/s.switch/baseline.json",
+      "sha256": "cb1b488976e5a8e81bf9fdc4af53968b6e57247ebb931c01d9beb1c73d3a7c8d",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/state.conditional-geometry/baseline.json",
+      "sha256": "81d6b785b438856b575c64c0639ab09327e9e67a05c997eebff79dbf1d1aa64c",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/z.rejected/baseline.json",
+      "sha256": "ff294168057958276d2c94f2e0f2da4af46b8f0ff20ce1ee72b9af31af1e4f68",
+      "linked": false
+     },
+     {
+      "path": "journal.jsonl",
+      "sha256": "d60157652946eb3e530a8406b53dc6b5a403636e55a0d3ab2892a2b6e8ff35b0",
+      "linked": false
+     },
+     {
+      "path": "ledger.json",
+      "sha256": "42075b655d4c508a514d0cc547150c52743cc09a12ca6586106f88b261472702",
+      "linked": false
+     },
+     {
+      "path": "logs/overlap-baseline.txt",
+      "sha256": "06084858f9c2e4fef196491a05a04f7d86e604ebacff33d47263505101f0d4b6",
+      "linked": false
+     },
+     {
+      "path": "logs/overlap-candidate-01.txt",
+      "sha256": "b7b18bf7f7677f865ec2716a6d00ac9d5eae295b6a7c39ff5fd85c4487c2dcbc",
+      "linked": false
+     },
+     {
+      "path": "manifest.json",
+      "sha256": "ee1ace2f99b2a9a72f4e9f0aa406a51ccc243086ed0b59d84ebb9ba25341542e",
+      "linked": false,
+      "text": {
+       "z": "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"
+      }
+     },
+     {
+      "path": "media/92b2fa580289-a.png",
+      "sha256": "92b2fa58028958317e408bd84ecfa70f5ee35b121991dbc232c49d166353708b",
+      "linked": false
+     },
+     {
+      "path": "media/e899537b4c91-clip.mp4",
+      "sha256": "e899537b4c9149cd5edb2000ea1e14f1d8eb76be0ceec7868ad01c7e389eb5b9",
+      "linked": false
+     },
+     {
+      "path": "plan.json",
+      "sha256": "70e555b7e121ba66d449ca1e2a4b7ab451408bde6595e710301ec28e16a063f2",
+      "linked": false
+     },
+     {
+      "path": "plan.sha256",
+      "sha256": "0fb97193cd2697df87c05f4652a9f5b79ad8788d4d132bfc4198495b9adba2c4",
+      "linked": false
+     },
+     {
+      "path": "receipts/e.regen__baseline.json",
+      "sha256": "dd56b316e4c06bb7ccd7c4fd67752470653a6d3aed00fe51288e223a4557a49e",
+      "linked": false
+     },
+     {
+      "path": "receipts/g.overlap__baseline.json",
+      "sha256": "14272cc570a716b87be8a8e1c9026c67a1f8d165cbd9c58872255613021112de",
+      "linked": false
+     },
+     {
+      "path": "receipts/g.overlap__candidate-01.json",
+      "sha256": "8f6e48c87ac4c8ef18d5b22b8223805ce84fbd635e1fa0c44354bc3dbd89ca1d",
+      "linked": false
+     },
+     {
+      "path": "receipts/g.overlap__candidate-01__reverse.json",
+      "sha256": "d977fc21c60925359d4ff73f3e5e47145ceb8b818c7d53071d4fe194d4ad3f6c",
+      "linked": false
+     },
+     {
+      "path": "receipts/r.contested__baseline.json",
+      "sha256": "ab893c7a95da9500debec2e8cc0b3a60078d23b2e7c33ab2658c2176d4d78474",
+      "linked": false
+     },
+     {
+      "path": "receipts/r.contested__candidate-01.json",
+      "sha256": "2c592cab89f72c15c7dc39298c9fec8faa60763a1813705baf002683bc4f92f4",
+      "linked": false
+     },
+     {
+      "path": "receipts/s.switch__baseline.json",
+      "sha256": "2d0ad5a55c42603c68a7099467225686fccfe6a0e3899def56b0b3ff7ecff144",
+      "linked": false
+     },
+     {
+      "path": "receipts/state.conditional-geometry__baseline.json",
+      "sha256": "745c8085b615101868e50edcc5dfb2d821816c70099a3f30e1f5bc44fde8adb3",
+      "linked": false
+     },
+     {
+      "path": "receipts/z.rejected__baseline.json",
+      "sha256": "41a7cd7b3cb26913bd861ffe04801fbe2be64eee2739eb392ad7c2ea5aacc8b5",
+      "linked": false
+     },
+     {
+      "path": "registry/check-registry.json",
+      "sha256": "dbb04b28dfb03f9b17388b1c9fd250edbefd58d8445dce3b413bcf2df0830070",
+      "linked": false
+     },
+     {
+      "path": "scope/scope.json",
+      "sha256": "6894cec774caa59acb250e095053767630d630689e6a27bb4dc21fccaa412695",
+      "linked": false
+     },
+     {
+      "path": "STATUS.md",
+      "sha256": "90e6cb46a30188d42fb1d73dcc6828545a90e257fbb224ee01ec58af136dfe03",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/jobs.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/logs/reverse.txt",
+      "sha256": "db975d74818a57e5ad1ee61d25524b0c817132a0dced6dd173bcf63646ac4215",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/Notes.TXT",
+      "sha256": "2c3b41d4bcaa2c18b8be9410a62e125c31b8819df92a395f15adcaedec14e20a",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/summary.json",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/SUMMARY.md",
+      "sha256": "6233467b892f3887f3d468eedcc667e3a4483cecbbc844ce7190d9ce42e4bb53",
+      "linked": false
+     }
+    ],
+    "wire": [],
+    "intended": null,
+    "runtimeText": false
+   },
+   {
+    "name": "media: a list file",
+    "ops": [
+     {
+      "op": "write",
+      "path": "media.json",
+      "text": "[{\"path\": \"media/a.png\", \"mediaKind\": \"offline-render\", \"subject\": {\"checkId\": \"g.overlap\", \"armId\": \"baseline\", \"description\": \"the clash\"}, \"state\": \"baseline\", \"configurationFingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"fingerprintSource\": \"emitted\", \"provenance\": {\"tool\": \"viewprobe\", \"capturedUtc\": \"2026-01-04T00:00:00Z\"}, \"caption\": \"kept on the row\", \"id\": \"never kept\", \"sha256\": \"never kept\"}]"
+     }
+    ],
+    "args": [
+     "--reader-cmd",
+     "python ../../../reader/fake.py ../../../reader/table2.json",
+     "--reader-env",
+     "HouseCarl__DataDir=names-instance/Data",
+     "--reader-env",
+     "HOUSECARL_DATA_DIR=names-instance/data",
+     "--reader-env",
+     "odd",
+     "--media",
+     "media.json",
+     "--no-names"
+    ],
+    "exit": 0,
+    "crash": null,
+    "stdout": "   search: the search step was not run\nbundle: 45 evidence file(s) under bundle\n",
+    "stderr": "names: skipped: The names enrichment was skipped by request (--no-names), so the report cannot tell which objects have a body until `evalrun enrich --kind names` adds it.\n",
+    "out": "bundle",
+    "tree": [
+     {
+      "path": "candidates/candidate-00-baseline.json",
+      "sha256": "6b714168dd62564a2c44597531ae80cf60cbe8862713370a280f2f753a0e1acb",
+      "linked": false
+     },
+     {
+      "path": "candidates/candidate-01-patch.json",
+      "sha256": "6ad22b1f26166942ce17ee368cb0005a166308c8a44183fe70384cd19a5800a0",
+      "linked": false
+     },
+     {
+      "path": "candidates/candidates.json",
+      "sha256": "5868b62f443e8ceb8ce5ee5ecea74d1b3e8771c7653521ed22587edd530144ab",
+      "linked": false
+     },
+     {
+      "path": "candidates/deep/note.txt",
+      "sha256": "c12b5e93a281d58270d2082273afbc6f6b746d1e6cbd963b933f214aeb22d5e7",
+      "linked": false
+     },
+     {
+      "path": "decisions/01-accepted.json",
+      "sha256": "17c29d65d74f3634bd2fa2708884ef9c1abb9534c1ec6ebab484cec482b3fc00",
+      "linked": false
+     },
+     {
+      "path": "decisions/02-bad-word.json",
+      "sha256": "21feb77987f5c8799ef8ff8cf0120a5303ed495a7d1088efc81b4666035f81df",
+      "linked": false
+     },
+     {
+      "path": "decisions/evidence/regen-note.txt",
+      "sha256": "631ede2fe82a13b6d94fc798c3844016a8f33e7c87d5c7f543d346f056c6b266",
+      "linked": false
+     },
+     {
+      "path": "disposition.json",
+      "sha256": "fc4f029c0430e6593135675a4c5f5ccbf37f3bcdb98c484dd0618ad7a490fd1d",
+      "linked": false
+     },
+     {
+      "path": "evidence/decisions/evidence/regen-note.txt",
+      "sha256": "631ede2fe82a13b6d94fc798c3844016a8f33e7c87d5c7f543d346f056c6b266",
+      "linked": false
+     },
+     {
+      "path": "evidence/imports/r.contested__baseline/01-request.jsonl",
+      "sha256": "82b0cf5da91b6a7e02f031e2da2fa5ed1261dce4c85ae20d63db9d1e84a4c384",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__baseline/02-response.jsonl",
+      "sha256": "b6734146d28c234ccbc4d66927e374905d47e33f3122076134dd9457381fcf55",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__baseline/result.json",
+      "sha256": "2f561add47be5a2e2e535a05b5b7cb01dfa4eb5405cd2df0acd5dad41e027ff9",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__candidate-01/01-request.jsonl",
+      "sha256": "82b0cf5da91b6a7e02f031e2da2fa5ed1261dce4c85ae20d63db9d1e84a4c384",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__candidate-01/02-response.jsonl",
+      "sha256": "b6734146d28c234ccbc4d66927e374905d47e33f3122076134dd9457381fcf55",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__candidate-01/result.json",
+      "sha256": "4abf48248d438213a71f4d90459c571ed1c2bc31315879c59a30b4a49ee66296",
+      "linked": true
+     },
+     {
+      "path": "evidence/outputs/g.overlap/baseline.json",
+      "sha256": "6c986da8aa636651d9a77ca713b1ae5684fff79d4cf4b4a2558404f10420c673",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/g.overlap/candidate-01.json",
+      "sha256": "170e7b9acc432eca5c0eaf6373e4f190b1532fff7d8f8b6d2248c5d50e6047e8",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/g.overlap/candidate-01.reverse.json",
+      "sha256": "7fafc24b34e244242d64c1a2966cf5e7b20ead97ced6ba83bbda3c22a824aec1",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/s.switch/baseline.json",
+      "sha256": "cb1b488976e5a8e81bf9fdc4af53968b6e57247ebb931c01d9beb1c73d3a7c8d",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/state.conditional-geometry/baseline.json",
+      "sha256": "81d6b785b438856b575c64c0639ab09327e9e67a05c997eebff79dbf1d1aa64c",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/z.rejected/baseline.json",
+      "sha256": "ff294168057958276d2c94f2e0f2da4af46b8f0ff20ce1ee72b9af31af1e4f68",
+      "linked": false
+     },
+     {
+      "path": "journal.jsonl",
+      "sha256": "d60157652946eb3e530a8406b53dc6b5a403636e55a0d3ab2892a2b6e8ff35b0",
+      "linked": false
+     },
+     {
+      "path": "ledger.json",
+      "sha256": "42075b655d4c508a514d0cc547150c52743cc09a12ca6586106f88b261472702",
+      "linked": false
+     },
+     {
+      "path": "logs/overlap-baseline.txt",
+      "sha256": "06084858f9c2e4fef196491a05a04f7d86e604ebacff33d47263505101f0d4b6",
+      "linked": false
+     },
+     {
+      "path": "logs/overlap-candidate-01.txt",
+      "sha256": "b7b18bf7f7677f865ec2716a6d00ac9d5eae295b6a7c39ff5fd85c4487c2dcbc",
+      "linked": false
+     },
+     {
+      "path": "manifest.json",
+      "sha256": "66421e30b87d34b553d96616819880ccdf11c27bd1e93c707e91309766ef4a55",
+      "linked": false,
+      "text": {
+       "z": "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"
+      }
+     },
+     {
+      "path": "media/92b2fa580289-a.png",
+      "sha256": "92b2fa58028958317e408bd84ecfa70f5ee35b121991dbc232c49d166353708b",
+      "linked": false
+     },
+     {
+      "path": "plan.json",
+      "sha256": "70e555b7e121ba66d449ca1e2a4b7ab451408bde6595e710301ec28e16a063f2",
+      "linked": false
+     },
+     {
+      "path": "plan.sha256",
+      "sha256": "0fb97193cd2697df87c05f4652a9f5b79ad8788d4d132bfc4198495b9adba2c4",
+      "linked": false
+     },
+     {
+      "path": "receipts/e.regen__baseline.json",
+      "sha256": "dd56b316e4c06bb7ccd7c4fd67752470653a6d3aed00fe51288e223a4557a49e",
+      "linked": false
+     },
+     {
+      "path": "receipts/g.overlap__baseline.json",
+      "sha256": "14272cc570a716b87be8a8e1c9026c67a1f8d165cbd9c58872255613021112de",
+      "linked": false
+     },
+     {
+      "path": "receipts/g.overlap__candidate-01.json",
+      "sha256": "8f6e48c87ac4c8ef18d5b22b8223805ce84fbd635e1fa0c44354bc3dbd89ca1d",
+      "linked": false
+     },
+     {
+      "path": "receipts/g.overlap__candidate-01__reverse.json",
+      "sha256": "d977fc21c60925359d4ff73f3e5e47145ceb8b818c7d53071d4fe194d4ad3f6c",
+      "linked": false
+     },
+     {
+      "path": "receipts/r.contested__baseline.json",
+      "sha256": "ab893c7a95da9500debec2e8cc0b3a60078d23b2e7c33ab2658c2176d4d78474",
+      "linked": false
+     },
+     {
+      "path": "receipts/r.contested__candidate-01.json",
+      "sha256": "2c592cab89f72c15c7dc39298c9fec8faa60763a1813705baf002683bc4f92f4",
+      "linked": false
+     },
+     {
+      "path": "receipts/s.switch__baseline.json",
+      "sha256": "2d0ad5a55c42603c68a7099467225686fccfe6a0e3899def56b0b3ff7ecff144",
+      "linked": false
+     },
+     {
+      "path": "receipts/state.conditional-geometry__baseline.json",
+      "sha256": "745c8085b615101868e50edcc5dfb2d821816c70099a3f30e1f5bc44fde8adb3",
+      "linked": false
+     },
+     {
+      "path": "receipts/z.rejected__baseline.json",
+      "sha256": "41a7cd7b3cb26913bd861ffe04801fbe2be64eee2739eb392ad7c2ea5aacc8b5",
+      "linked": false
+     },
+     {
+      "path": "registry/check-registry.json",
+      "sha256": "dbb04b28dfb03f9b17388b1c9fd250edbefd58d8445dce3b413bcf2df0830070",
+      "linked": false
+     },
+     {
+      "path": "scope/scope.json",
+      "sha256": "6894cec774caa59acb250e095053767630d630689e6a27bb4dc21fccaa412695",
+      "linked": false
+     },
+     {
+      "path": "STATUS.md",
+      "sha256": "90e6cb46a30188d42fb1d73dcc6828545a90e257fbb224ee01ec58af136dfe03",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/jobs.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/logs/reverse.txt",
+      "sha256": "db975d74818a57e5ad1ee61d25524b0c817132a0dced6dd173bcf63646ac4215",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/Notes.TXT",
+      "sha256": "2c3b41d4bcaa2c18b8be9410a62e125c31b8819df92a395f15adcaedec14e20a",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/summary.json",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/SUMMARY.md",
+      "sha256": "6233467b892f3887f3d468eedcc667e3a4483cecbbc844ce7190d9ce42e4bb53",
+      "linked": false
+     }
+    ],
+    "wire": [],
+    "intended": null,
+    "runtimeText": false
+   },
+   {
+    "name": "media: not JSON",
+    "ops": [
+     {
+      "op": "write",
+      "path": "media.json",
+      "text": "{"
+     }
+    ],
+    "args": [
+     "--reader-cmd",
+     "python ../../../reader/fake.py ../../../reader/table2.json",
+     "--reader-env",
+     "HouseCarl__DataDir=names-instance/Data",
+     "--reader-env",
+     "HOUSECARL_DATA_DIR=names-instance/data",
+     "--reader-env",
+     "odd",
+     "--media",
+     "media.json"
+    ],
+    "exit": 2,
+    "crash": null,
+    "stdout": "   search: the search step was not run\n",
+    "stderr": "REFUSED: --media media.json: not readable as JSON\n",
+    "out": "bundle",
+    "tree": [
+     {
+      "path": "candidates/candidate-00-baseline.json",
+      "sha256": "6b714168dd62564a2c44597531ae80cf60cbe8862713370a280f2f753a0e1acb",
+      "linked": false
+     },
+     {
+      "path": "candidates/candidate-01-patch.json",
+      "sha256": "6ad22b1f26166942ce17ee368cb0005a166308c8a44183fe70384cd19a5800a0",
+      "linked": false
+     },
+     {
+      "path": "candidates/candidates.json",
+      "sha256": "5868b62f443e8ceb8ce5ee5ecea74d1b3e8771c7653521ed22587edd530144ab",
+      "linked": false
+     },
+     {
+      "path": "candidates/deep/note.txt",
+      "sha256": "c12b5e93a281d58270d2082273afbc6f6b746d1e6cbd963b933f214aeb22d5e7",
+      "linked": false
+     },
+     {
+      "path": "decisions/01-accepted.json",
+      "sha256": "17c29d65d74f3634bd2fa2708884ef9c1abb9534c1ec6ebab484cec482b3fc00",
+      "linked": false
+     },
+     {
+      "path": "decisions/02-bad-word.json",
+      "sha256": "21feb77987f5c8799ef8ff8cf0120a5303ed495a7d1088efc81b4666035f81df",
+      "linked": false
+     },
+     {
+      "path": "decisions/evidence/regen-note.txt",
+      "sha256": "631ede2fe82a13b6d94fc798c3844016a8f33e7c87d5c7f543d346f056c6b266",
+      "linked": false
+     },
+     {
+      "path": "disposition.json",
+      "sha256": "fc4f029c0430e6593135675a4c5f5ccbf37f3bcdb98c484dd0618ad7a490fd1d",
+      "linked": false
+     },
+     {
+      "path": "evidence/decisions/evidence/regen-note.txt",
+      "sha256": "631ede2fe82a13b6d94fc798c3844016a8f33e7c87d5c7f543d346f056c6b266",
+      "linked": false
+     },
+     {
+      "path": "evidence/imports/r.contested__baseline/01-request.jsonl",
+      "sha256": "82b0cf5da91b6a7e02f031e2da2fa5ed1261dce4c85ae20d63db9d1e84a4c384",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__baseline/02-response.jsonl",
+      "sha256": "b6734146d28c234ccbc4d66927e374905d47e33f3122076134dd9457381fcf55",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__baseline/result.json",
+      "sha256": "2f561add47be5a2e2e535a05b5b7cb01dfa4eb5405cd2df0acd5dad41e027ff9",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__candidate-01/01-request.jsonl",
+      "sha256": "82b0cf5da91b6a7e02f031e2da2fa5ed1261dce4c85ae20d63db9d1e84a4c384",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__candidate-01/02-response.jsonl",
+      "sha256": "b6734146d28c234ccbc4d66927e374905d47e33f3122076134dd9457381fcf55",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__candidate-01/result.json",
+      "sha256": "4abf48248d438213a71f4d90459c571ed1c2bc31315879c59a30b4a49ee66296",
+      "linked": true
+     },
+     {
+      "path": "evidence/outputs/g.overlap/baseline.json",
+      "sha256": "6c986da8aa636651d9a77ca713b1ae5684fff79d4cf4b4a2558404f10420c673",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/g.overlap/candidate-01.json",
+      "sha256": "170e7b9acc432eca5c0eaf6373e4f190b1532fff7d8f8b6d2248c5d50e6047e8",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/g.overlap/candidate-01.reverse.json",
+      "sha256": "7fafc24b34e244242d64c1a2966cf5e7b20ead97ced6ba83bbda3c22a824aec1",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/s.switch/baseline.json",
+      "sha256": "cb1b488976e5a8e81bf9fdc4af53968b6e57247ebb931c01d9beb1c73d3a7c8d",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/state.conditional-geometry/baseline.json",
+      "sha256": "81d6b785b438856b575c64c0639ab09327e9e67a05c997eebff79dbf1d1aa64c",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/z.rejected/baseline.json",
+      "sha256": "ff294168057958276d2c94f2e0f2da4af46b8f0ff20ce1ee72b9af31af1e4f68",
+      "linked": false
+     },
+     {
+      "path": "journal.jsonl",
+      "sha256": "d60157652946eb3e530a8406b53dc6b5a403636e55a0d3ab2892a2b6e8ff35b0",
+      "linked": false
+     },
+     {
+      "path": "ledger.json",
+      "sha256": "42075b655d4c508a514d0cc547150c52743cc09a12ca6586106f88b261472702",
+      "linked": false
+     },
+     {
+      "path": "logs/overlap-baseline.txt",
+      "sha256": "06084858f9c2e4fef196491a05a04f7d86e604ebacff33d47263505101f0d4b6",
+      "linked": false
+     },
+     {
+      "path": "logs/overlap-candidate-01.txt",
+      "sha256": "b7b18bf7f7677f865ec2716a6d00ac9d5eae295b6a7c39ff5fd85c4487c2dcbc",
+      "linked": false
+     },
+     {
+      "path": "plan.json",
+      "sha256": "70e555b7e121ba66d449ca1e2a4b7ab451408bde6595e710301ec28e16a063f2",
+      "linked": false
+     },
+     {
+      "path": "plan.sha256",
+      "sha256": "0fb97193cd2697df87c05f4652a9f5b79ad8788d4d132bfc4198495b9adba2c4",
+      "linked": false
+     },
+     {
+      "path": "receipts/e.regen__baseline.json",
+      "sha256": "dd56b316e4c06bb7ccd7c4fd67752470653a6d3aed00fe51288e223a4557a49e",
+      "linked": false
+     },
+     {
+      "path": "receipts/g.overlap__baseline.json",
+      "sha256": "14272cc570a716b87be8a8e1c9026c67a1f8d165cbd9c58872255613021112de",
+      "linked": false
+     },
+     {
+      "path": "receipts/g.overlap__candidate-01.json",
+      "sha256": "8f6e48c87ac4c8ef18d5b22b8223805ce84fbd635e1fa0c44354bc3dbd89ca1d",
+      "linked": false
+     },
+     {
+      "path": "receipts/g.overlap__candidate-01__reverse.json",
+      "sha256": "d977fc21c60925359d4ff73f3e5e47145ceb8b818c7d53071d4fe194d4ad3f6c",
+      "linked": false
+     },
+     {
+      "path": "receipts/r.contested__baseline.json",
+      "sha256": "ab893c7a95da9500debec2e8cc0b3a60078d23b2e7c33ab2658c2176d4d78474",
+      "linked": false
+     },
+     {
+      "path": "receipts/r.contested__candidate-01.json",
+      "sha256": "2c592cab89f72c15c7dc39298c9fec8faa60763a1813705baf002683bc4f92f4",
+      "linked": false
+     },
+     {
+      "path": "receipts/s.switch__baseline.json",
+      "sha256": "2d0ad5a55c42603c68a7099467225686fccfe6a0e3899def56b0b3ff7ecff144",
+      "linked": false
+     },
+     {
+      "path": "receipts/state.conditional-geometry__baseline.json",
+      "sha256": "745c8085b615101868e50edcc5dfb2d821816c70099a3f30e1f5bc44fde8adb3",
+      "linked": false
+     },
+     {
+      "path": "receipts/z.rejected__baseline.json",
+      "sha256": "41a7cd7b3cb26913bd861ffe04801fbe2be64eee2739eb392ad7c2ea5aacc8b5",
+      "linked": false
+     },
+     {
+      "path": "registry/check-registry.json",
+      "sha256": "dbb04b28dfb03f9b17388b1c9fd250edbefd58d8445dce3b413bcf2df0830070",
+      "linked": false
+     },
+     {
+      "path": "scope/scope.json",
+      "sha256": "6894cec774caa59acb250e095053767630d630689e6a27bb4dc21fccaa412695",
+      "linked": false
+     },
+     {
+      "path": "STATUS.md",
+      "sha256": "90e6cb46a30188d42fb1d73dcc6828545a90e257fbb224ee01ec58af136dfe03",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/jobs.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/logs/reverse.txt",
+      "sha256": "db975d74818a57e5ad1ee61d25524b0c817132a0dced6dd173bcf63646ac4215",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/Notes.TXT",
+      "sha256": "2c3b41d4bcaa2c18b8be9410a62e125c31b8819df92a395f15adcaedec14e20a",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/summary.json",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/SUMMARY.md",
+      "sha256": "6233467b892f3887f3d468eedcc667e3a4483cecbbc844ce7190d9ce42e4bb53",
+      "linked": false
+     }
+    ],
+    "wire": [],
+    "intended": null,
+    "runtimeText": false
+   },
+   {
+    "name": "media: an item that is not an object",
+    "ops": [
+     {
+      "op": "write",
+      "path": "media.json",
+      "text": {
+       "z": "eNrNkMFOwzAMhl8lypmOUsEOewAkxBG4gDi4iduatU7kutth4t2ps0lIu3IhyiX+fv+x/4+Tz6CD3zk/YSS4hU3m3t9cns/E0VjqupEYK0GOKIbnpf3CoCs8+TBg2D8VYb9JB5QRsmlApnO1hRmt34oR5yCUlRIb0gFdGGEe/Le5Kihed4TEHfWLgPU8EvcoWYjtbw9/PObf/Vq+pEVCGQAnUsVoPMu6EwMXcPKa0miKA+FxRe15Rsi6CMY3DcaautlW9V1V37/W9a7c97Kg6S6b7zGrS+wsAUlHc6GSFuMaoTNcgh6gedhe1c0K3KzrzL0jxcn935f//AGmas0a"
+      }
+     }
+    ],
+    "args": [
+     "--reader-cmd",
+     "python ../../../reader/fake.py ../../../reader/table2.json",
+     "--reader-env",
+     "HouseCarl__DataDir=names-instance/Data",
+     "--reader-env",
+     "HOUSECARL_DATA_DIR=names-instance/data",
+     "--reader-env",
+     "odd",
+     "--media",
+     "media.json"
+    ],
+    "exit": 2,
+    "crash": null,
+    "stdout": "   search: the search step was not run\n",
+    "stderr": "REFUSED: --media media.json: an item is not an object: 'a string item a string item a string item a string item a string item a string i'\n",
+    "out": "bundle",
+    "tree": [
+     {
+      "path": "candidates/candidate-00-baseline.json",
+      "sha256": "6b714168dd62564a2c44597531ae80cf60cbe8862713370a280f2f753a0e1acb",
+      "linked": false
+     },
+     {
+      "path": "candidates/candidate-01-patch.json",
+      "sha256": "6ad22b1f26166942ce17ee368cb0005a166308c8a44183fe70384cd19a5800a0",
+      "linked": false
+     },
+     {
+      "path": "candidates/candidates.json",
+      "sha256": "5868b62f443e8ceb8ce5ee5ecea74d1b3e8771c7653521ed22587edd530144ab",
+      "linked": false
+     },
+     {
+      "path": "candidates/deep/note.txt",
+      "sha256": "c12b5e93a281d58270d2082273afbc6f6b746d1e6cbd963b933f214aeb22d5e7",
+      "linked": false
+     },
+     {
+      "path": "decisions/01-accepted.json",
+      "sha256": "17c29d65d74f3634bd2fa2708884ef9c1abb9534c1ec6ebab484cec482b3fc00",
+      "linked": false
+     },
+     {
+      "path": "decisions/02-bad-word.json",
+      "sha256": "21feb77987f5c8799ef8ff8cf0120a5303ed495a7d1088efc81b4666035f81df",
+      "linked": false
+     },
+     {
+      "path": "decisions/evidence/regen-note.txt",
+      "sha256": "631ede2fe82a13b6d94fc798c3844016a8f33e7c87d5c7f543d346f056c6b266",
+      "linked": false
+     },
+     {
+      "path": "disposition.json",
+      "sha256": "fc4f029c0430e6593135675a4c5f5ccbf37f3bcdb98c484dd0618ad7a490fd1d",
+      "linked": false
+     },
+     {
+      "path": "evidence/decisions/evidence/regen-note.txt",
+      "sha256": "631ede2fe82a13b6d94fc798c3844016a8f33e7c87d5c7f543d346f056c6b266",
+      "linked": false
+     },
+     {
+      "path": "evidence/imports/r.contested__baseline/01-request.jsonl",
+      "sha256": "82b0cf5da91b6a7e02f031e2da2fa5ed1261dce4c85ae20d63db9d1e84a4c384",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__baseline/02-response.jsonl",
+      "sha256": "b6734146d28c234ccbc4d66927e374905d47e33f3122076134dd9457381fcf55",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__baseline/result.json",
+      "sha256": "2f561add47be5a2e2e535a05b5b7cb01dfa4eb5405cd2df0acd5dad41e027ff9",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__candidate-01/01-request.jsonl",
+      "sha256": "82b0cf5da91b6a7e02f031e2da2fa5ed1261dce4c85ae20d63db9d1e84a4c384",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__candidate-01/02-response.jsonl",
+      "sha256": "b6734146d28c234ccbc4d66927e374905d47e33f3122076134dd9457381fcf55",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__candidate-01/result.json",
+      "sha256": "4abf48248d438213a71f4d90459c571ed1c2bc31315879c59a30b4a49ee66296",
+      "linked": true
+     },
+     {
+      "path": "evidence/outputs/g.overlap/baseline.json",
+      "sha256": "6c986da8aa636651d9a77ca713b1ae5684fff79d4cf4b4a2558404f10420c673",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/g.overlap/candidate-01.json",
+      "sha256": "170e7b9acc432eca5c0eaf6373e4f190b1532fff7d8f8b6d2248c5d50e6047e8",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/g.overlap/candidate-01.reverse.json",
+      "sha256": "7fafc24b34e244242d64c1a2966cf5e7b20ead97ced6ba83bbda3c22a824aec1",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/s.switch/baseline.json",
+      "sha256": "cb1b488976e5a8e81bf9fdc4af53968b6e57247ebb931c01d9beb1c73d3a7c8d",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/state.conditional-geometry/baseline.json",
+      "sha256": "81d6b785b438856b575c64c0639ab09327e9e67a05c997eebff79dbf1d1aa64c",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/z.rejected/baseline.json",
+      "sha256": "ff294168057958276d2c94f2e0f2da4af46b8f0ff20ce1ee72b9af31af1e4f68",
+      "linked": false
+     },
+     {
+      "path": "journal.jsonl",
+      "sha256": "d60157652946eb3e530a8406b53dc6b5a403636e55a0d3ab2892a2b6e8ff35b0",
+      "linked": false
+     },
+     {
+      "path": "ledger.json",
+      "sha256": "42075b655d4c508a514d0cc547150c52743cc09a12ca6586106f88b261472702",
+      "linked": false
+     },
+     {
+      "path": "logs/overlap-baseline.txt",
+      "sha256": "06084858f9c2e4fef196491a05a04f7d86e604ebacff33d47263505101f0d4b6",
+      "linked": false
+     },
+     {
+      "path": "logs/overlap-candidate-01.txt",
+      "sha256": "b7b18bf7f7677f865ec2716a6d00ac9d5eae295b6a7c39ff5fd85c4487c2dcbc",
+      "linked": false
+     },
+     {
+      "path": "media/92b2fa580289-a.png",
+      "sha256": "92b2fa58028958317e408bd84ecfa70f5ee35b121991dbc232c49d166353708b",
+      "linked": false
+     },
+     {
+      "path": "plan.json",
+      "sha256": "70e555b7e121ba66d449ca1e2a4b7ab451408bde6595e710301ec28e16a063f2",
+      "linked": false
+     },
+     {
+      "path": "plan.sha256",
+      "sha256": "0fb97193cd2697df87c05f4652a9f5b79ad8788d4d132bfc4198495b9adba2c4",
+      "linked": false
+     },
+     {
+      "path": "receipts/e.regen__baseline.json",
+      "sha256": "dd56b316e4c06bb7ccd7c4fd67752470653a6d3aed00fe51288e223a4557a49e",
+      "linked": false
+     },
+     {
+      "path": "receipts/g.overlap__baseline.json",
+      "sha256": "14272cc570a716b87be8a8e1c9026c67a1f8d165cbd9c58872255613021112de",
+      "linked": false
+     },
+     {
+      "path": "receipts/g.overlap__candidate-01.json",
+      "sha256": "8f6e48c87ac4c8ef18d5b22b8223805ce84fbd635e1fa0c44354bc3dbd89ca1d",
+      "linked": false
+     },
+     {
+      "path": "receipts/g.overlap__candidate-01__reverse.json",
+      "sha256": "d977fc21c60925359d4ff73f3e5e47145ceb8b818c7d53071d4fe194d4ad3f6c",
+      "linked": false
+     },
+     {
+      "path": "receipts/r.contested__baseline.json",
+      "sha256": "ab893c7a95da9500debec2e8cc0b3a60078d23b2e7c33ab2658c2176d4d78474",
+      "linked": false
+     },
+     {
+      "path": "receipts/r.contested__candidate-01.json",
+      "sha256": "2c592cab89f72c15c7dc39298c9fec8faa60763a1813705baf002683bc4f92f4",
+      "linked": false
+     },
+     {
+      "path": "receipts/s.switch__baseline.json",
+      "sha256": "2d0ad5a55c42603c68a7099467225686fccfe6a0e3899def56b0b3ff7ecff144",
+      "linked": false
+     },
+     {
+      "path": "receipts/state.conditional-geometry__baseline.json",
+      "sha256": "745c8085b615101868e50edcc5dfb2d821816c70099a3f30e1f5bc44fde8adb3",
+      "linked": false
+     },
+     {
+      "path": "receipts/z.rejected__baseline.json",
+      "sha256": "41a7cd7b3cb26913bd861ffe04801fbe2be64eee2739eb392ad7c2ea5aacc8b5",
+      "linked": false
+     },
+     {
+      "path": "registry/check-registry.json",
+      "sha256": "dbb04b28dfb03f9b17388b1c9fd250edbefd58d8445dce3b413bcf2df0830070",
+      "linked": false
+     },
+     {
+      "path": "scope/scope.json",
+      "sha256": "6894cec774caa59acb250e095053767630d630689e6a27bb4dc21fccaa412695",
+      "linked": false
+     },
+     {
+      "path": "STATUS.md",
+      "sha256": "90e6cb46a30188d42fb1d73dcc6828545a90e257fbb224ee01ec58af136dfe03",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/jobs.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/logs/reverse.txt",
+      "sha256": "db975d74818a57e5ad1ee61d25524b0c817132a0dced6dd173bcf63646ac4215",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/Notes.TXT",
+      "sha256": "2c3b41d4bcaa2c18b8be9410a62e125c31b8819df92a395f15adcaedec14e20a",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/summary.json",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/SUMMARY.md",
+      "sha256": "6233467b892f3887f3d468eedcc667e3a4483cecbbc844ce7190d9ce42e4bb53",
+      "linked": false
+     }
+    ],
+    "wire": [],
+    "intended": null,
+    "runtimeText": false
+   },
+   {
+    "name": "media: a binary suffix",
+    "ops": [
+     {
+      "op": "write",
+      "path": "media.json",
+      "text": "[{\"path\": \"media/model.nif\", \"mediaKind\": \"offline-render\", \"subject\": {\"checkId\": \"g.overlap\", \"armId\": \"baseline\", \"description\": \"the clash\"}, \"state\": \"baseline\", \"configurationFingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"fingerprintSource\": \"emitted\", \"provenance\": {\"tool\": \"viewprobe\", \"capturedUtc\": \"2026-01-04T00:00:00Z\"}, \"caption\": \"kept on the row\", \"id\": \"never kept\", \"sha256\": \"never kept\"}]"
+     }
+    ],
+    "args": [
+     "--reader-cmd",
+     "python ../../../reader/fake.py ../../../reader/table2.json",
+     "--reader-env",
+     "HouseCarl__DataDir=names-instance/Data",
+     "--reader-env",
+     "HOUSECARL_DATA_DIR=names-instance/data",
+     "--reader-env",
+     "odd",
+     "--media",
+     "media.json"
+    ],
+    "exit": 2,
+    "crash": null,
+    "stdout": "   search: the search step was not run\n",
+    "stderr": "REFUSED: --media media.json: model.nif has a suffix that is never copied by policy (.nif); a media item is an image or video file\n",
+    "out": "bundle",
+    "tree": [
+     {
+      "path": "candidates/candidate-00-baseline.json",
+      "sha256": "6b714168dd62564a2c44597531ae80cf60cbe8862713370a280f2f753a0e1acb",
+      "linked": false
+     },
+     {
+      "path": "candidates/candidate-01-patch.json",
+      "sha256": "6ad22b1f26166942ce17ee368cb0005a166308c8a44183fe70384cd19a5800a0",
+      "linked": false
+     },
+     {
+      "path": "candidates/candidates.json",
+      "sha256": "5868b62f443e8ceb8ce5ee5ecea74d1b3e8771c7653521ed22587edd530144ab",
+      "linked": false
+     },
+     {
+      "path": "candidates/deep/note.txt",
+      "sha256": "c12b5e93a281d58270d2082273afbc6f6b746d1e6cbd963b933f214aeb22d5e7",
+      "linked": false
+     },
+     {
+      "path": "decisions/01-accepted.json",
+      "sha256": "17c29d65d74f3634bd2fa2708884ef9c1abb9534c1ec6ebab484cec482b3fc00",
+      "linked": false
+     },
+     {
+      "path": "decisions/02-bad-word.json",
+      "sha256": "21feb77987f5c8799ef8ff8cf0120a5303ed495a7d1088efc81b4666035f81df",
+      "linked": false
+     },
+     {
+      "path": "decisions/evidence/regen-note.txt",
+      "sha256": "631ede2fe82a13b6d94fc798c3844016a8f33e7c87d5c7f543d346f056c6b266",
+      "linked": false
+     },
+     {
+      "path": "disposition.json",
+      "sha256": "fc4f029c0430e6593135675a4c5f5ccbf37f3bcdb98c484dd0618ad7a490fd1d",
+      "linked": false
+     },
+     {
+      "path": "evidence/decisions/evidence/regen-note.txt",
+      "sha256": "631ede2fe82a13b6d94fc798c3844016a8f33e7c87d5c7f543d346f056c6b266",
+      "linked": false
+     },
+     {
+      "path": "evidence/imports/r.contested__baseline/01-request.jsonl",
+      "sha256": "82b0cf5da91b6a7e02f031e2da2fa5ed1261dce4c85ae20d63db9d1e84a4c384",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__baseline/02-response.jsonl",
+      "sha256": "b6734146d28c234ccbc4d66927e374905d47e33f3122076134dd9457381fcf55",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__baseline/result.json",
+      "sha256": "2f561add47be5a2e2e535a05b5b7cb01dfa4eb5405cd2df0acd5dad41e027ff9",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__candidate-01/01-request.jsonl",
+      "sha256": "82b0cf5da91b6a7e02f031e2da2fa5ed1261dce4c85ae20d63db9d1e84a4c384",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__candidate-01/02-response.jsonl",
+      "sha256": "b6734146d28c234ccbc4d66927e374905d47e33f3122076134dd9457381fcf55",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__candidate-01/result.json",
+      "sha256": "4abf48248d438213a71f4d90459c571ed1c2bc31315879c59a30b4a49ee66296",
+      "linked": true
+     },
+     {
+      "path": "evidence/outputs/g.overlap/baseline.json",
+      "sha256": "6c986da8aa636651d9a77ca713b1ae5684fff79d4cf4b4a2558404f10420c673",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/g.overlap/candidate-01.json",
+      "sha256": "170e7b9acc432eca5c0eaf6373e4f190b1532fff7d8f8b6d2248c5d50e6047e8",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/g.overlap/candidate-01.reverse.json",
+      "sha256": "7fafc24b34e244242d64c1a2966cf5e7b20ead97ced6ba83bbda3c22a824aec1",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/s.switch/baseline.json",
+      "sha256": "cb1b488976e5a8e81bf9fdc4af53968b6e57247ebb931c01d9beb1c73d3a7c8d",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/state.conditional-geometry/baseline.json",
+      "sha256": "81d6b785b438856b575c64c0639ab09327e9e67a05c997eebff79dbf1d1aa64c",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/z.rejected/baseline.json",
+      "sha256": "ff294168057958276d2c94f2e0f2da4af46b8f0ff20ce1ee72b9af31af1e4f68",
+      "linked": false
+     },
+     {
+      "path": "journal.jsonl",
+      "sha256": "d60157652946eb3e530a8406b53dc6b5a403636e55a0d3ab2892a2b6e8ff35b0",
+      "linked": false
+     },
+     {
+      "path": "ledger.json",
+      "sha256": "42075b655d4c508a514d0cc547150c52743cc09a12ca6586106f88b261472702",
+      "linked": false
+     },
+     {
+      "path": "logs/overlap-baseline.txt",
+      "sha256": "06084858f9c2e4fef196491a05a04f7d86e604ebacff33d47263505101f0d4b6",
+      "linked": false
+     },
+     {
+      "path": "logs/overlap-candidate-01.txt",
+      "sha256": "b7b18bf7f7677f865ec2716a6d00ac9d5eae295b6a7c39ff5fd85c4487c2dcbc",
+      "linked": false
+     },
+     {
+      "path": "plan.json",
+      "sha256": "70e555b7e121ba66d449ca1e2a4b7ab451408bde6595e710301ec28e16a063f2",
+      "linked": false
+     },
+     {
+      "path": "plan.sha256",
+      "sha256": "0fb97193cd2697df87c05f4652a9f5b79ad8788d4d132bfc4198495b9adba2c4",
+      "linked": false
+     },
+     {
+      "path": "receipts/e.regen__baseline.json",
+      "sha256": "dd56b316e4c06bb7ccd7c4fd67752470653a6d3aed00fe51288e223a4557a49e",
+      "linked": false
+     },
+     {
+      "path": "receipts/g.overlap__baseline.json",
+      "sha256": "14272cc570a716b87be8a8e1c9026c67a1f8d165cbd9c58872255613021112de",
+      "linked": false
+     },
+     {
+      "path": "receipts/g.overlap__candidate-01.json",
+      "sha256": "8f6e48c87ac4c8ef18d5b22b8223805ce84fbd635e1fa0c44354bc3dbd89ca1d",
+      "linked": false
+     },
+     {
+      "path": "receipts/g.overlap__candidate-01__reverse.json",
+      "sha256": "d977fc21c60925359d4ff73f3e5e47145ceb8b818c7d53071d4fe194d4ad3f6c",
+      "linked": false
+     },
+     {
+      "path": "receipts/r.contested__baseline.json",
+      "sha256": "ab893c7a95da9500debec2e8cc0b3a60078d23b2e7c33ab2658c2176d4d78474",
+      "linked": false
+     },
+     {
+      "path": "receipts/r.contested__candidate-01.json",
+      "sha256": "2c592cab89f72c15c7dc39298c9fec8faa60763a1813705baf002683bc4f92f4",
+      "linked": false
+     },
+     {
+      "path": "receipts/s.switch__baseline.json",
+      "sha256": "2d0ad5a55c42603c68a7099467225686fccfe6a0e3899def56b0b3ff7ecff144",
+      "linked": false
+     },
+     {
+      "path": "receipts/state.conditional-geometry__baseline.json",
+      "sha256": "745c8085b615101868e50edcc5dfb2d821816c70099a3f30e1f5bc44fde8adb3",
+      "linked": false
+     },
+     {
+      "path": "receipts/z.rejected__baseline.json",
+      "sha256": "41a7cd7b3cb26913bd861ffe04801fbe2be64eee2739eb392ad7c2ea5aacc8b5",
+      "linked": false
+     },
+     {
+      "path": "registry/check-registry.json",
+      "sha256": "dbb04b28dfb03f9b17388b1c9fd250edbefd58d8445dce3b413bcf2df0830070",
+      "linked": false
+     },
+     {
+      "path": "scope/scope.json",
+      "sha256": "6894cec774caa59acb250e095053767630d630689e6a27bb4dc21fccaa412695",
+      "linked": false
+     },
+     {
+      "path": "STATUS.md",
+      "sha256": "90e6cb46a30188d42fb1d73dcc6828545a90e257fbb224ee01ec58af136dfe03",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/jobs.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/logs/reverse.txt",
+      "sha256": "db975d74818a57e5ad1ee61d25524b0c817132a0dced6dd173bcf63646ac4215",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/Notes.TXT",
+      "sha256": "2c3b41d4bcaa2c18b8be9410a62e125c31b8819df92a395f15adcaedec14e20a",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/summary.json",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/SUMMARY.md",
+      "sha256": "6233467b892f3887f3d468eedcc667e3a4483cecbbc844ce7190d9ce42e4bb53",
+      "linked": false
+     }
+    ],
+    "wire": [],
+    "intended": null,
+    "runtimeText": false
+   },
+   {
+    "name": "media: a file with no items",
+    "ops": [
+     {
+      "op": "write",
+      "path": "media.json",
+      "text": "{}"
+     }
+    ],
+    "args": [
+     "--reader-cmd",
+     "python ../../../reader/fake.py ../../../reader/table2.json",
+     "--reader-env",
+     "HouseCarl__DataDir=names-instance/Data",
+     "--reader-env",
+     "HOUSECARL_DATA_DIR=names-instance/data",
+     "--reader-env",
+     "odd",
+     "--media",
+     "media.json",
+     "--no-names"
+    ],
+    "exit": 0,
+    "crash": null,
+    "stdout": "   search: the search step was not run\nbundle: 44 evidence file(s) under bundle\n",
+    "stderr": "names: skipped: The names enrichment was skipped by request (--no-names), so the report cannot tell which objects have a body until `evalrun enrich --kind names` adds it.\n",
+    "out": "bundle",
+    "tree": [
+     {
+      "path": "candidates/candidate-00-baseline.json",
+      "sha256": "6b714168dd62564a2c44597531ae80cf60cbe8862713370a280f2f753a0e1acb",
+      "linked": false
+     },
+     {
+      "path": "candidates/candidate-01-patch.json",
+      "sha256": "6ad22b1f26166942ce17ee368cb0005a166308c8a44183fe70384cd19a5800a0",
+      "linked": false
+     },
+     {
+      "path": "candidates/candidates.json",
+      "sha256": "5868b62f443e8ceb8ce5ee5ecea74d1b3e8771c7653521ed22587edd530144ab",
+      "linked": false
+     },
+     {
+      "path": "candidates/deep/note.txt",
+      "sha256": "c12b5e93a281d58270d2082273afbc6f6b746d1e6cbd963b933f214aeb22d5e7",
+      "linked": false
+     },
+     {
+      "path": "decisions/01-accepted.json",
+      "sha256": "17c29d65d74f3634bd2fa2708884ef9c1abb9534c1ec6ebab484cec482b3fc00",
+      "linked": false
+     },
+     {
+      "path": "decisions/02-bad-word.json",
+      "sha256": "21feb77987f5c8799ef8ff8cf0120a5303ed495a7d1088efc81b4666035f81df",
+      "linked": false
+     },
+     {
+      "path": "decisions/evidence/regen-note.txt",
+      "sha256": "631ede2fe82a13b6d94fc798c3844016a8f33e7c87d5c7f543d346f056c6b266",
+      "linked": false
+     },
+     {
+      "path": "disposition.json",
+      "sha256": "fc4f029c0430e6593135675a4c5f5ccbf37f3bcdb98c484dd0618ad7a490fd1d",
+      "linked": false
+     },
+     {
+      "path": "evidence/decisions/evidence/regen-note.txt",
+      "sha256": "631ede2fe82a13b6d94fc798c3844016a8f33e7c87d5c7f543d346f056c6b266",
+      "linked": false
+     },
+     {
+      "path": "evidence/imports/r.contested__baseline/01-request.jsonl",
+      "sha256": "82b0cf5da91b6a7e02f031e2da2fa5ed1261dce4c85ae20d63db9d1e84a4c384",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__baseline/02-response.jsonl",
+      "sha256": "b6734146d28c234ccbc4d66927e374905d47e33f3122076134dd9457381fcf55",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__baseline/result.json",
+      "sha256": "2f561add47be5a2e2e535a05b5b7cb01dfa4eb5405cd2df0acd5dad41e027ff9",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__candidate-01/01-request.jsonl",
+      "sha256": "82b0cf5da91b6a7e02f031e2da2fa5ed1261dce4c85ae20d63db9d1e84a4c384",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__candidate-01/02-response.jsonl",
+      "sha256": "b6734146d28c234ccbc4d66927e374905d47e33f3122076134dd9457381fcf55",
+      "linked": true
+     },
+     {
+      "path": "evidence/imports/r.contested__candidate-01/result.json",
+      "sha256": "4abf48248d438213a71f4d90459c571ed1c2bc31315879c59a30b4a49ee66296",
+      "linked": true
+     },
+     {
+      "path": "evidence/outputs/g.overlap/baseline.json",
+      "sha256": "6c986da8aa636651d9a77ca713b1ae5684fff79d4cf4b4a2558404f10420c673",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/g.overlap/candidate-01.json",
+      "sha256": "170e7b9acc432eca5c0eaf6373e4f190b1532fff7d8f8b6d2248c5d50e6047e8",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/g.overlap/candidate-01.reverse.json",
+      "sha256": "7fafc24b34e244242d64c1a2966cf5e7b20ead97ced6ba83bbda3c22a824aec1",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/s.switch/baseline.json",
+      "sha256": "cb1b488976e5a8e81bf9fdc4af53968b6e57247ebb931c01d9beb1c73d3a7c8d",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/state.conditional-geometry/baseline.json",
+      "sha256": "81d6b785b438856b575c64c0639ab09327e9e67a05c997eebff79dbf1d1aa64c",
+      "linked": false
+     },
+     {
+      "path": "evidence/outputs/z.rejected/baseline.json",
+      "sha256": "ff294168057958276d2c94f2e0f2da4af46b8f0ff20ce1ee72b9af31af1e4f68",
+      "linked": false
+     },
+     {
+      "path": "journal.jsonl",
+      "sha256": "d60157652946eb3e530a8406b53dc6b5a403636e55a0d3ab2892a2b6e8ff35b0",
+      "linked": false
+     },
+     {
+      "path": "ledger.json",
+      "sha256": "42075b655d4c508a514d0cc547150c52743cc09a12ca6586106f88b261472702",
+      "linked": false
+     },
+     {
+      "path": "logs/overlap-baseline.txt",
+      "sha256": "06084858f9c2e4fef196491a05a04f7d86e604ebacff33d47263505101f0d4b6",
+      "linked": false
+     },
+     {
+      "path": "logs/overlap-candidate-01.txt",
+      "sha256": "b7b18bf7f7677f865ec2716a6d00ac9d5eae295b6a7c39ff5fd85c4487c2dcbc",
+      "linked": false
+     },
+     {
+      "path": "manifest.json",
+      "sha256": "776e44e2cae5016b400c7391d17cc8fd95bb275c41b98416fc0be089895e8dd8",
+      "linked": false,
+      "text": {
+       "z": "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"
+      }
+     },
+     {
+      "path": "plan.json",
+      "sha256": "70e555b7e121ba66d449ca1e2a4b7ab451408bde6595e710301ec28e16a063f2",
+      "linked": false
+     },
+     {
+      "path": "plan.sha256",
+      "sha256": "0fb97193cd2697df87c05f4652a9f5b79ad8788d4d132bfc4198495b9adba2c4",
+      "linked": false
+     },
+     {
+      "path": "receipts/e.regen__baseline.json",
+      "sha256": "dd56b316e4c06bb7ccd7c4fd67752470653a6d3aed00fe51288e223a4557a49e",
+      "linked": false
+     },
+     {
+      "path": "receipts/g.overlap__baseline.json",
+      "sha256": "14272cc570a716b87be8a8e1c9026c67a1f8d165cbd9c58872255613021112de",
+      "linked": false
+     },
+     {
+      "path": "receipts/g.overlap__candidate-01.json",
+      "sha256": "8f6e48c87ac4c8ef18d5b22b8223805ce84fbd635e1fa0c44354bc3dbd89ca1d",
+      "linked": false
+     },
+     {
+      "path": "receipts/g.overlap__candidate-01__reverse.json",
+      "sha256": "d977fc21c60925359d4ff73f3e5e47145ceb8b818c7d53071d4fe194d4ad3f6c",
+      "linked": false
+     },
+     {
+      "path": "receipts/r.contested__baseline.json",
+      "sha256": "ab893c7a95da9500debec2e8cc0b3a60078d23b2e7c33ab2658c2176d4d78474",
+      "linked": false
+     },
+     {
+      "path": "receipts/r.contested__candidate-01.json",
+      "sha256": "2c592cab89f72c15c7dc39298c9fec8faa60763a1813705baf002683bc4f92f4",
+      "linked": false
+     },
+     {
+      "path": "receipts/s.switch__baseline.json",
+      "sha256": "2d0ad5a55c42603c68a7099467225686fccfe6a0e3899def56b0b3ff7ecff144",
+      "linked": false
+     },
+     {
+      "path": "receipts/state.conditional-geometry__baseline.json",
+      "sha256": "745c8085b615101868e50edcc5dfb2d821816c70099a3f30e1f5bc44fde8adb3",
+      "linked": false
+     },
+     {
+      "path": "receipts/z.rejected__baseline.json",
+      "sha256": "41a7cd7b3cb26913bd861ffe04801fbe2be64eee2739eb392ad7c2ea5aacc8b5",
+      "linked": false
+     },
+     {
+      "path": "registry/check-registry.json",
+      "sha256": "dbb04b28dfb03f9b17388b1c9fd250edbefd58d8445dce3b413bcf2df0830070",
+      "linked": false
+     },
+     {
+      "path": "scope/scope.json",
+      "sha256": "6894cec774caa59acb250e095053767630d630689e6a27bb4dc21fccaa412695",
+      "linked": false
+     },
+     {
+      "path": "STATUS.md",
+      "sha256": "90e6cb46a30188d42fb1d73dcc6828545a90e257fbb224ee01ec58af136dfe03",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/jobs.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/logs/reverse.txt",
+      "sha256": "db975d74818a57e5ad1ee61d25524b0c817132a0dced6dd173bcf63646ac4215",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/Notes.TXT",
+      "sha256": "2c3b41d4bcaa2c18b8be9410a62e125c31b8819df92a395f15adcaedec14e20a",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/summary.json",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "linked": false
+     },
+     {
+      "path": "sweep/inv-0001/SUMMARY.md",
+      "sha256": "6233467b892f3887f3d468eedcc667e3a4483cecbbc844ce7190d9ce42e4bb53",
+      "linked": false
+     }
+    ],
+    "wire": [],
+    "intended": null,
+    "runtimeText": false
+   }
+  ]
+ },
+ "note": "moved unchanged from runcontrol's known-answers/bundle.json in step 3 of the SkyWright / houseCARL boundary (slice 9A): the media rule and the six bundle --media command cases, recorded from evalrun.py"
+}

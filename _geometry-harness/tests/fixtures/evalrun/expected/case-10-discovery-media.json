@@ -58,10 +58,6 @@
    "patch.order-evaluation": {
     "applicability": "yes",
     "status": "planned"
-   },
-   "runtime.supplied-observations": {
-    "applicability": "yes",
-    "status": "planned"
    }
   }
  },
@@ -82,32 +78,7 @@
   ],
   "discovery": {
    "sourcesNotSearchedPresent": true
-  },
-  "mediaEvidenceStrength": "supplied-media",
-  "unassessedMediaIncludes": [
-   "old-shot.png",
-   "wrong-arm-shot.png",
-   "unsourced-shot.png"
-  ],
-  "unassessedMediaExcludes": [
-   "matched-shot.png"
-  ],
-  "unassessedMediaReasons": {
-   "old-shot.png": "fingerprint-mismatch",
-   "wrong-arm-shot.png": "fingerprint-mismatch",
-   "unsourced-shot.png": "provenance-missing"
-  },
-  "mediaRowCarries": [
-   "id",
-   "sha256",
-   "bytes",
-   "mediaKind",
-   "subject",
-   "state",
-   "configurationFingerprint",
-   "fingerprintSource",
-   "provenance"
-  ]
+  }
  },
  "verifyBundleExit": 0,
  "notes": [

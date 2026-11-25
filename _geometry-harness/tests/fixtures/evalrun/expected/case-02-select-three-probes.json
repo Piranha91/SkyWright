@@ -58,10 +58,6 @@
    "patch.order-evaluation": {
     "applicability": "yes",
     "status": "skipped-user"
-   },
-   "runtime.supplied-observations": {
-    "applicability": "yes",
-    "status": "skipped-user"
    }
   }
  },

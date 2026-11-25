@@ -14,8 +14,10 @@ Cases (EXPECTED.md section 1):
   R2 null-vs-missing              case-03
   R3 many-findings-long-names     a new case: 62 rows per arm in four (Kind, A, B) groups, 80+ char names
   R4 repaired-plus-regression     case-07
-  R5 media-mismatch-same-basenames case-10's run + a D5 schema-2 media.json (five items)
-  R6 changed-or-missing-source    two damaged COPIES of R5's / R1's bundle
+  R5 media-mismatch-same-basenames case-10's run + a D5 schema-2 media.json (five items), written for the caller's
+                                  ai_hook to bundle (supplied media is an AI-side overlay's: the houseCARL integration
+                                  module's suite passes the hook; without one R5 has no media bundle)
+  R6 changed-or-missing-source    two damaged COPIES: of R5's bundles (when the hook made them) and of R1's bundle
   R7 import-origin                one mcp-only check imported fresh and reused, and one arm blocked by its prerequisite
                                   (a pre-origin receipt is no longer made: its only writer was the Python controller)
 
@@ -243,8 +245,9 @@ def run_case(root: Path, case: str, fixture_case: str, media: Path | None = None
     f = T.evalrun(["finalize", "--run", run], scen)
     if media is None and case.startswith("R5"):
         media = write_media(run, root / "media" / case)
-    # the report fixtures' expectations are written without names: the names step is skipped (stated in the manifest)
-    bargs = ["bundle", "--run", run, "--no-names"] + (["--media", media] if media else [])
+    # the report fixtures' expectations are written without names: the names step is skipped (stated in the manifest);
+    # the media file is the caller's hook's to bundle (generate's ai_hook)
+    bargs = ["bundle", "--run", run, "--no-names"]
     b = T.evalrun(bargs, scen)
     if b.returncode != 0:
         raise SystemExit(f"{case}: the controller's bundle exited {b.returncode}\n{b.stdout[-2000:]}\n{b.stderr[-2000:]}")
@@ -324,21 +327,27 @@ def make_import_origin_case(root: Path) -> dict:
 
 
 def make_r6(root: Path, index: dict) -> dict:
-    """Two damaged copies. (a) an accepted media file's bytes altered after bundling; (b) a schema-1 manifest."""
+    """Two damaged copies. (a) an accepted media file's bytes altered after bundling (R5's app bundle and the overlay
+    bundle bound to it, copied side by side; only when the caller's hook bundled R5's media); (b) a schema-1 manifest."""
     out = {}
-    src5 = Path(index["R5-media-mismatch-same-basenames"]["bundle"])
-    a = root / "bundles" / "R6-media-bytes-altered"
-    if a.exists():
-        shutil.rmtree(a)
-    shutil.copytree(src5, a)
-    (a / "verify.json").unlink(missing_ok=True)
-    media_files = sorted(p for p in (a / "media").glob("*") if p.is_file()) if (a / "media").exists() else []
-    if not media_files:
-        raise SystemExit("R6: R5's bundle copied no media file, so there is nothing to alter "
-                         "(bundle --media accepted nothing - see the R5 manifest's unassessedMedia)")
-    victim = media_files[0]
-    victim.write_bytes(victim.read_bytes() + b"\nbytes altered after bundling\n")
-    out["media-bytes-altered"] = {"bundle": str(a), "altered": victim.name}
+    r5 = index.get("R5-media-mismatch-same-basenames") or {}
+    if r5.get("aiBundle"):
+        a = root / "bundles" / "R6-media-bytes-altered"
+        if a.exists():
+            shutil.rmtree(a)
+        shutil.copytree(r5["bundle"], a / "bundle")
+        shutil.copytree(r5["aiBundle"], a / Path(r5["aiBundle"]).name)
+        for f in (a / "bundle" / "verify.json", a / Path(r5["aiBundle"]).name / "verify.json"):
+            f.unlink(missing_ok=True)
+        media = a / Path(r5["aiBundle"]).name / "media"
+        media_files = sorted(p for p in media.glob("*") if p.is_file()) if media.exists() else []
+        if not media_files:
+            raise SystemExit("R6: R5's overlay bundle copied no media file, so there is nothing to alter "
+                             "(bundle --media accepted nothing - see its manifest's unassessedMedia)")
+        victim = media_files[0]
+        victim.write_bytes(victim.read_bytes() + b"\nbytes altered after bundling\n")
+        out["media-bytes-altered"] = {"bundle": str(a / "bundle"), "aiBundle": str(a / Path(r5["aiBundle"]).name),
+                                      "altered": victim.name}
 
     src1 = Path(index["R1-intact-incomplete"]["bundle"])
     b = root / "bundles" / "R6-manifest-schema-1"
@@ -353,7 +362,9 @@ def make_r6(root: Path, index: dict) -> dict:
     return out
 
 
-def generate(root: Path, only: str | None = None) -> dict:
+def generate(root: Path, only: str | None = None, ai_hook=None) -> dict:
+    """ai_hook(root, index): the caller's step that adds what an AI-side evaluation adds (R5's media), run after the app
+    bundles; it records each overlay bundle in its case as aiBundle."""
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
     gen = root / "evalrun-fixtures"
@@ -381,6 +392,8 @@ def generate(root: Path, only: str | None = None) -> dict:
             continue
         index[case] = run_case(root, case, fixture_case)
         print(f"  {case}: bundle at {index[case]['bundle']}")
+    if ai_hook is not None:
+        ai_hook(root, index)
     if not only or only.startswith("R6"):
         index["R6-changed-or-missing-source"] = make_r6(root, index)
         print("  R6-changed-or-missing-source: damaged copies written")

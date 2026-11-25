@@ -1,0 +1,4 @@
+$ python S:\Dev\SkyWright\.claude\worktrees\boundary-3-opt-in-d24ba9\_geometry-harness\tests\fixtures\evalrun\fakeprobes\navownprobe.py --order C:\Users\Piranha\AppData\Local\Temp\tmp7vy3bsk5\old-lab-bundle-run\candidates\candidate-00-baseline.json --emit C:\Users\Piranha\AppData\Local\Temp\tmp7vy3bsk5\old-lab-bundle-run\sweep\inv-0001\navownprobe\baseline.json
+(exit 0, 0.0s)
+
+fakeprobe navownprobe: arm 'baseline' behaviour 'ok'

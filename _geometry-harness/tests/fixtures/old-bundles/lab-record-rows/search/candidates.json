@@ -1,0 +1,21 @@
+{
+ "SchemaVersion": 1,
+ "Candidates": [
+  {
+   "File": "candidate-00-baseline.json",
+   "ViolatesAdvice": [],
+   "SatisfiesAdvice": []
+  },
+  {
+   "File": "candidate-01-reorder.json",
+   "ViolatesAdvice": [],
+   "SatisfiesAdvice": []
+  }
+ ],
+ "Budget": {
+  "evaluated": 1,
+  "legalNotEvaluated": 0,
+  "note": "fixture manifest: the search was not run"
+ },
+ "Contradictions": []
+}
