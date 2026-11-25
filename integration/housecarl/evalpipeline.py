@@ -353,6 +353,13 @@ class Context:
             self.profile = ip["profile"]
             return
         lab = {**self.machine.get("lab", {}), **self.entry.get("lab", {})}
+        absent = [k for k in ("instance", "game") if not lab.get(k)]
+        if absent:
+            where = fwd(self.machine_path) if self.machine_path else "no machine file (--machine)"
+            raise Refusal(f"a lab entry needs the lab's MO2 instance and game folder, and the lab block of "
+                          f"{where} and of the entry name no {' or '.join(absent)}; add a \"lab\" block with "
+                          f"\"instance\" and \"game\" (and \"templateProfile\") to the machine file, or run an "
+                          f"in-place entry.")
         self.instance = Path(lab["instance"])
         self.game = Path(lab["game"])
         self.template = lab.get("templateProfile")

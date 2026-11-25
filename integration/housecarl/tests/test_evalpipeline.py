@@ -979,6 +979,26 @@ def case_2332_a_controller_run_folder_is_continued_reusing_census_to_bundle_and_
     assert len(ran) == 1, "a stage ran after the entry changed under the measuring stages"
 
 
+def case_2340_a_lab_entry_with_no_lab_block_is_refused_in_one_sentence():
+    # step 2's first lab try stopped with a bare KeyError: 'instance' for a machine file with no lab block
+    with tempfile.TemporaryDirectory() as t:
+        t = Path(t)
+        entry = {"id": "nolab", "source": {"instance": str(t / "src"), "profile": "P"}}
+        (t / "entry.json").write_text(json.dumps(entry), encoding="utf-8")
+        for name, machine in (("an empty machine file", {}), ("a lab block with no game", {"lab": {"instance": str(t / "lab")}})):
+            (t / "machine.json").write_text(json.dumps(machine), encoding="utf-8")
+            try:
+                EP.Context(t / "entry.json", t / "machine.json", t / "out")
+            except EP.Refusal as r:
+                s = str(r)
+                assert "lab" in s and "machine" in s and str(t / "machine.json").replace("\\", "/") in s, f"{name}: {s}"
+                assert s.count(". ") == 0 and s.endswith(".") and "\n" not in s, f"{name}: not one sentence: {s}"
+                continue
+            except KeyError as e:
+                raise AssertionError(f"{name}: a bare KeyError {e} instead of a sentence")
+            raise AssertionError(f"{name}: accepted")
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):
