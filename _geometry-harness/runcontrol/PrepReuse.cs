@@ -78,7 +78,7 @@ public static class PrepReuse
     }
 
     /// <summary>The programs the preparation runs: this controller and the scopeprobe build, each by its package
-    /// digest, and the field schema the probe's contributor walk reads (generated/corpus.json).</summary>
+    /// digest, and houseCARL's rulebook the probe's contributor walk reads (the build's, <see cref="Checkout.Corpus"/>).</summary>
     public static PyDict ToolsDigest(string? scopeprobeFolder = null, string? corpus = null)
     {
         corpus ??= Checkout.Corpus;
