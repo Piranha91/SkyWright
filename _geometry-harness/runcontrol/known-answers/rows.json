@@ -9099,7 +9099,7 @@
    "instance": null
   },
   {
-   "name": "no record reader named",
+   "name": "no record reader named: the names are read in process",
    "exits": [
     0,
     0,
@@ -9110,10 +9110,65 @@
    "exists": false,
    "log": "names: enriched 2 plugins\n",
    "envReader": null,
-   "refusal": "no record reader is named: set readerCmd in the machine file (a houseCARL server whose folder carries its generated corpus.json).",
-   "started": [],
-   "record": null,
-   "instance": null
+   "bound": {
+    "disposition": "cbe1c70c58f4d1ae62b78d731f121da65a26551a7823a793ae9450d55d38fafc"
+   },
+   "outputs": [
+    "<ROOT\\>\\run\\bundle-stage\\bundle.json",
+    "<ROOT\\>\\run\\bundle\\evidence\\manifest.json"
+   ],
+   "refusal": null,
+   "started": [
+    {
+     "op": "finalize",
+     "dir": "<ROOT\\>\\run\\bundle-stage\\commands",
+     "argv": [
+      "finalize",
+      "--run",
+      "<ROOT/>/run/evaluation"
+     ],
+     "more": []
+    },
+    {
+     "op": "bundle",
+     "dir": "<ROOT\\>\\run\\bundle-stage\\commands",
+     "argv": [
+      "bundle",
+      "--run",
+      "<ROOT/>/run/evaluation",
+      "--out",
+      "<ROOT/>/run/bundle/evidence",
+      "--reader-env",
+      "HOUSECARL_DATA_DIR=<ROOT/>/run/names-instance/data",
+      "--reader-env",
+      "HouseCarl__DataDir=<ROOT/>/run/names-instance/Data",
+      "--reader-env",
+      "HouseCarl__ModsDir=<ROOT/>/run/names-instance/mods",
+      "--reader-env",
+      "HouseCarl__ProfileDir=<ROOT/>/run/names-instance/profile"
+     ],
+     "more": []
+    },
+    {
+     "op": "verify-bundle",
+     "dir": "<ROOT\\>\\run\\bundle-stage\\commands",
+     "argv": [
+      "verify-bundle",
+      "<ROOT/>/run/bundle/evidence"
+     ],
+     "more": []
+    }
+   ],
+   "record": "{\n  \"steps\": [\n    {\n      \"step\": \"finalize\",\n      \"exitCode\": 0\n    },\n    {\n      \"step\": \"bundle\",\n      \"exitCode\": 0\n    },\n    {\n      \"step\": \"verify-bundle\",\n      \"exitCode\": 0\n    }\n  ],\n  \"bundle\": \"<ROOT/>/run/bundle/evidence\",\n  \"evaluation\": \"findings\",\n  \"complete\": false,\n  \"ledgerCounts\": {\n    \"completed\": 3\n  }\n}\n",
+   "instance": [
+    "names-instance/data",
+    "names-instance/data/PrivateInstanceAnchor.esp",
+    "names-instance/mods",
+    "names-instance/profile",
+    "names-instance/profile/loadorder.txt",
+    "names-instance/profile/modlist.txt",
+    "names-instance/profile/plugins.txt"
+   ]
   },
   {
    "name": "the record reader named by the environment",

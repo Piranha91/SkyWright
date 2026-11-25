@@ -83,6 +83,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does extraction scratch preserve other files and refuse failures consistently?](#tool-_geometry-harness-tests-test_extraction_scratch.py) — `_geometry-harness/tests/test_extraction_scratch.py`
 - [Does flipping a mod's script-driven enable switches crash or stall the game under this load order?](#tool-switchflip) — `switchflip`
 - [Does hiding these objects remove anything a clashing object touches or rests on?](#tool-viewprobe.protect) — `viewprobe.protect`
+- [Does houseCARL's server program, from the module's build, write navownprobe's navmesh repair plan into one patch that reads back as the winner plus the plan (its carried cell forwarded from its winner, its NAVI changed only where planned), and does the re-check credit relinked, cut and refused links truly?](#tool-integration-housecarl-tests-test_navmesh_repair_write.py) — `integration/housecarl/tests/test_navmesh_repair_write.py`
 - [Does mask deduplication preserve exact output bytes and distinguish different masks?](#tool-_geometry-harness-tests-test_mask_evidence.py) — `_geometry-harness/tests/test_mask_evidence.py`
 - [Does miss diagnosis cluster edits and preserve unknown reasons correctly?](#tool-_geometry-harness-tests-test_missdiag.py) — `_geometry-harness/tests/test_missdiag.py`
 - [Does narration preparation enforce its contracts without model weights or network access?](#tool-integration-housecarl-tests-test_evalspeech.py) — `integration/housecarl/tests/test_evalspeech.py`
@@ -2972,7 +2973,7 @@ Modifiers (do not select a separate mode):
 - `--mod-name` — the name the review reel speaks for a plugin's mod (PLUGIN=NAME), over its Nexus page's name and its MO2 mod folder
 - `--mode` — Set mode for this invocation; consult the linked parser for accepted values.
 - `--nexus-names` — the review reel's mod names from the Nexus catalogue: offline reads stored pages only, fetch also asks once for each page the catalogue lacks and records each fetch in evidence/mod-names.json
-- `--nexus-reader-cmd` — the houseCARL server --nexus-names fetch asks through (default HOUSECARL_RECORD_READER_CMD, else this checkout's built server)
+- `--nexus-reader-cmd` — the houseCARL server --nexus-names fetch asks through (default HOUSECARL_RECORD_READER_CMD, else the module's built server)
 - `--no-print` — skip the browser; print.status is not-rendered
 - `--order-setup` — bind the record lane's rows measured on the setup without the patch with its plugins in another order (ARM@PLAN=ROWS); changes lost there between a pair whose order differs are said as a load-order risk
 - `--out` — Set out for this invocation; consult the linked parser for accepted values.
@@ -3022,7 +3023,7 @@ Modifiers (do not select a separate mode):
 - `--bundle` — enrich: the bundle to add derived evidence to (a copy, for retained evidence)
 - `--kind` — enrich: record-rows (lost edits from the record imports' transcripts) or names (in-game and mod names)
 - `--mod-name` — enrich names: a mod's declared ordinary name, PLUGIN=NAME (repeatable)
-- `--reader-cmd` — enrich names: the houseCARL MCP server command line the records are read with (default: HOUSECARL_RECORD_READER_CMD, else this checkout's built server)
+- `--reader-cmd` — enrich names: the houseCARL MCP server command line the records are read with (default: HOUSECARL_RECORD_READER_CMD; with neither the names step is refused)
 - `--reader-env` — enrich names: KEY=VALUE for the reader's environment; absent, a private instance with no setup plugin active is made
 - `--sweep` — enrich order-geometry: an ordersweep out folder over the measured order and its reversal (repeatable; a probe is taken from the first folder that ran it)
 
@@ -3785,6 +3786,21 @@ Inputs: A hand-built Clockwork-shaped presentation, the shipped skill data, test
 Outputs: One GREEN, RED or CRASH line per case (C1970-C1978).
 
 Source: [integration/housecarl/tests/test_navmesh_reel.py](../integration/housecarl/tests/test_navmesh_reel.py) — `Known answers for a navmesh clash pictured in the review reel`
+
+
+<a id="tool-integration-housecarl-tests-test_navmesh_repair_write.py"></a>
+
+### integration/housecarl/tests/test_navmesh_repair_write.py
+
+**Does houseCARL's server program, from the module's build, write navownprobe's navmesh repair plan into one patch that reads back as the winner plus the plan (its carried cell forwarded from its winner, its NAVI changed only where planned), and does the re-check credit relinked, cut and refused links truly?**
+
+Qualify a change to the module's server layout (skywright_paths.server), navownprobe's --repair-readback or --recheck-plan, or the relink plan's ops as the server writes them (C2494-C2499, C2504-C2505, C2650).
+
+Inputs: The Release navownprobe, test_navmesh_repair_rules.py's NavRepairFixture lab, houseCARL's server in the module's build and the pin's rulebook generator.
+
+Outputs: One ok or FAIL line per case (C2494-C2499, C2504-C2505, C2650).
+
+Source: [integration/housecarl/tests/test_navmesh_repair_write.py](../integration/housecarl/tests/test_navmesh_repair_write.py) — `Known answers for the navmesh repair's write, read-back and re-check through houseCARL's server program`
 
 
 <a id="tool-integration-housecarl-tests-test_navown_edge_identity.py"></a>
@@ -7710,7 +7726,7 @@ Modifiers (do not select a separate mode):
 
 **How do I browse any load order's worldspaces, cells and placed objects as a tree with each record's winning plugin, from an MO2 profile or a game Data folder, and open a cell in 3D?**
 
-Judge a placed-object conflict by eye and fix it by moving or turning a reference, with the edit written to a new patch plugin through the houseCARL server.
+Judge a placed-object conflict by eye and fix it by moving or turning a reference, with the edit written to a new patch plugin through houseCARL's code, run in process.
 
 Inputs: With no arguments: the launcher (Start tab; workbench_act open_profile, select_mods, select_probes, set_output, set_work_folder, run), in free mode on any MO2 instance or houseCARL mode (WB_HOUSECARL_LAUNCH or the housecarl entry of ~/.claude.json); WB_MACHINE for the pipeline's machine file. Or --bundle DIR [--arm A] (a verified evaluation bundle; WB_OUTPUT names the Output Folder writes go under), then viewprobe's command line; optionally WB_SCRIPT steps for a headless run, and WB_MCP_PORT for the MCP state tools on 127.0.0.1.
 

@@ -24,7 +24,7 @@ internal sealed class ServerContextSource : IContextSource
         var text = await (await _writer.ConfigureAwait(false)).CallAsync("housecarl_records", args).ConfigureAwait(false);
         using var doc = JsonDocument.Parse(text);
         if (doc.RootElement.TryGetProperty("truncated", out var cut) && cut.ValueKind == JsonValueKind.True)
-            throw new InvalidOperationException("the server cut its answer short, so it is not read.");
+            throw new InvalidOperationException("houseCARL cut its answer short, so it is not read; reopen the scene to read it again.");
         return doc.RootElement.Clone();
     }
 
@@ -39,7 +39,7 @@ internal sealed class ServerContextSource : IContextSource
         var d = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var r in Rows(root, "records"))
         {
-            if (S(r, "error") is { } err) throw new InvalidOperationException($"the server could not read {key}: {err}");
+            if (S(r, "error") is { } err) throw new InvalidOperationException($"houseCARL could not read {key}: {err}");
             foreach (var f in Rows(r, "fields"))
                 if (S(f, "path") is { } p && f.TryGetProperty("value", out var v)) d[p] = v.ValueKind == JsonValueKind.String ? v.GetString()! : v.GetRawText();
         }

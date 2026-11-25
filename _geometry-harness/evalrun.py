@@ -30,7 +30,6 @@ sys.path.insert(0, str(HERE.parent / "scripts"))
 from runlog import Run  # noqa: E402
 
 sys.path.insert(0, str(HERE))
-import buildlayout  # noqa: E402  where the build put houseCARL's server
 
 # Exit codes, spelled once.
 EXIT_OK = 0
@@ -234,25 +233,17 @@ def verify_quiet(d: Path) -> tuple[int | None, str | None]:
 READER_ENV = "HOUSECARL_RECORD_READER_CMD"
 
 
-def server_exe() -> Path:
-    """houseCARL's server in this checkout's build (buildlayout owns where)."""
-    return buildlayout.server()
-
-
 def default_reader_cmd(explicit: str | None) -> tuple[str | None, str]:
-    """The record reader the names enrichment starts: --reader-cmd, else HOUSECARL_RECORD_READER_CMD, else the
-    houseCARL server in this checkout's build. Returns (command, where it came from), or (None, one sentence why none).
-    "build" is the source runcontrol's names step reports for the same reader (BundleSteps.ReaderSource)."""
+    """The record reader the names enrichment starts: --reader-cmd, else HOUSECARL_RECORD_READER_CMD. Returns (command,
+    where it came from), or (None, one sentence why none). SkyWright's build holds no houseCARL program (the app and
+    runcontrol run houseCARL's code in process), so without a named reader this controller has none to start."""
     if explicit:
         return explicit, "--reader-cmd"
     env = (os.environ.get(READER_ENV) or "").strip()
     if env:
         return env, READER_ENV
-    exe = server_exe()
-    if exe.is_file():
-        return f'"{exe}"', "build"
-    return None, (f"no record reader was given (--reader-cmd or {READER_ENV}) and this checkout's build has no "
-                  f"houseCARL server at {exe}; build SkyWright (scripts/build.ps1).")
+    return None, (f"no record reader was given; pass --reader-cmd (or set {READER_ENV}) with the houseCARL server "
+                  f"command, or make the bundle with runcontrol, which reads the names in process.")
 
 
 def mod_names(pairs) -> dict:
@@ -314,7 +305,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sweep", action="append", default=[],
                    help="order-geometry: an ordersweep out folder over the measured order and its reversal (repeatable)")
     p.add_argument("--reader-cmd", help="names: the houseCARL MCP server command line to read records with (default: "
-                                        f"{READER_ENV}, else this checkout's built server)")
+                                        f"{READER_ENV}; with neither the names step is refused)")
     p.add_argument("--reader-env", action="append", metavar="KEY=VALUE",
                    help="names: an environment variable for the reader, such as a private HOUSECARL_DATA_DIR")
     p.add_argument("--mod-name", action="append", metavar="PLUGIN=NAME", help="names: a mod's declared ordinary name")

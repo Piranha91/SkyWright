@@ -11,25 +11,15 @@ using Xunit;
 
 namespace WorkbenchTests;
 
-/// <summary>Items 2, 3 and 4 against the houseCARL server this checkout builds, on the synthetic tilted-reference world:
-/// the one placement check before any server answer is used, the objects a decision is keyed on, undoing a written
-/// edit by removal, and view-only controls leaving a written patch alone.</summary>
+/// <summary>Items 2, 3 and 4 against houseCARL's code compiled into the app (rewritten from the server path at step 4),
+/// on the synthetic tilted-reference world: the one placement check before any houseCARL answer is used, the objects a
+/// decision is keyed on, undoing a written edit by removal, and view-only controls leaving a written patch alone.</summary>
 [Trait("tier", "integration")]
 public class ReviewSpeedServerTests
 {
-    static string ServerExe()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, HarnessShared.CheckoutLayout.Marker))) dir = dir.Parent;
-        Assert.NotNull(dir);
-        var exe = TestBuild.Server;
-        Assert.True(File.Exists(exe), $"build src/housecarl-mcp in Release first: {exe}");
-        return exe;
-    }
-
-    static Task<PatchWriter> Start(TiltedRefWorld w) => PatchWriter.StartAsync(ServerExe(),
+    static Task<PatchWriter> Start(TiltedRefWorld w) => Task.FromResult(PatchWriter.OpenInProcess(
         new WriteTarget(w.Instance, "Default", w.DataDir, Path.Combine(w.Instance, "mods")),
-        Path.Combine(w.Root, "hcdata-" + Guid.NewGuid().ToString("N")), TestCorpus.Path, _ => { });
+        Path.Combine(w.Root, "hcdata-" + Guid.NewGuid().ToString("N")), TestCorpus.Path, _ => { }));
 
     static readonly RefPlacementEdit.Pose Drawn = new(TiltedRefWorld.Pos, TiltedRefWorld.Rot, 1f);
 

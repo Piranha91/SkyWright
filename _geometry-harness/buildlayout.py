@@ -69,7 +69,7 @@ def _spec(config: str | None) -> dict | None:
 
 
 def program(name: str, config: str | None = None) -> Path:
-    """A probe's (or conflictdiff's, navedit's) exe; runcontrol and housecarl-mcp are tools and come back as such."""
+    """A probe's (or conflictdiff's, navedit's) exe; runcontrol is a tool and comes back as such."""
     spec = _spec(config)
     if spec is None:
         return root(config) / f"{name}.exe"
@@ -118,8 +118,7 @@ def piece_under(build_root: Path | str, key: str) -> Path:
 # owns the real one; this copy only stands in so tests can plant programs without a build.
 _FALLBACK_MARKER = {
     "kind": "skywright-build", "configuration": "Release", "framework": "net9.0-windows10.0.19041.0", "app": "SkyWright.exe", "program": "Probes/{name}/{name}.exe",
-    "tool": "Tools/{name}/{name}.exe", "tools": ["runcontrol", "housecarl-mcp"],
-    "server": "Tools/housecarl-mcp/housecarl-mcp.exe", "corpus": "Tools/housecarl-mcp/corpus.json",
+    "tool": "Tools/{name}/{name}.exe", "tools": ["runcontrol"], "corpus": "Data/corpus.json",
     "registry": "Data/check-registry.json", "severity": "Data/workbench-severity.json",
     "scenePolicy": "Data/scene-policy.json",
 }
@@ -136,7 +135,8 @@ def plant_marker(build_root: Path | str, config: str | None = None) -> dict:
 
 
 def piece(key: str, config: str | None = None) -> Path:
-    """A named piece: "server", "corpus", "registry", "severity", "scenePolicy", or "app"."""
+    """A named piece: "corpus", "registry", "severity", "scenePolicy", or "app". The build holds no houseCARL program
+    (the app and runcontrol run houseCARL's code in process); the integration module's build holds the server."""
     spec = _spec(config)
     if spec is None:
         return root(config) / key
@@ -145,10 +145,6 @@ def piece(key: str, config: str | None = None) -> Path:
 
 def runcontrol(config: str | None = None) -> Path:
     return program("runcontrol", config)
-
-
-def server(config: str | None = None) -> Path:
-    return piece("server", config)
 
 
 def app(config: str | None = None) -> Path:

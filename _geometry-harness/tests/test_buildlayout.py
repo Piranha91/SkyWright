@@ -32,9 +32,10 @@ for key in sorted(set(real) | set(fallback)):
 check("the build's configuration", real.get("configuration") == "Release", real.get("configuration"))
 for label, path in [("overlapprobe", buildlayout.program("overlapprobe", "Release")),
                     ("runcontrol", buildlayout.runcontrol("Release")),
-                    ("server", buildlayout.server("Release")),
                     ("app", buildlayout.app("Release"))]:
     check(f"{label} exists at {path}", path.is_file())
+check("the build's marker names no houseCARL server", "server" not in real and "housecarl-mcp" not in real.get("tools", []), real)
+check("buildlayout has no server piece", not hasattr(buildlayout, "server"))
 check("a fake build folder gets the placeholder", "no SkyWright build here" in str(buildlayout.program_under(Path("Z:/nowhere"), "x")))
 
 print(f"{len(failures)} failed")

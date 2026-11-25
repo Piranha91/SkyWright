@@ -485,7 +485,7 @@ internal sealed class StateTools
         if (s.Scene is not { } sc) return new { refused = "no scene is shown." };
         if (sc.Session.Selected is not { } k) return new { refused = "nothing is selected; select a reference first." };
         var key = k.ToString();
-        if (ContextCache.Read(sc, key) is not { } read) return new { @ref = key, refused = "this scene has no houseCARL server to read the reference's context from." };
+        if (ContextCache.Read(sc, key) is not { } read) return new { @ref = key, refused = "this scene has no write target to read the reference's context from; open it from the launcher's profile." };
         if (!read.IsCompleted) return new { @ref = key, sections = ContextRead.SectionNames.ToDictionary(n => n, _ => "reading") };
         if (read.IsFaulted) return new { @ref = key, refused = read.Exception!.GetBaseException().Message };
         var a = read.Result;
@@ -537,7 +537,7 @@ internal sealed class StateTools
     {
         var sc = SceneOr(s, out var none); if (sc is null) return none!;
         if (sc.Session.Selected is not { } key) return Refuse("nothing is selected; select the reference to find a clear position for.");
-        if (sc.Trials is not { } lane) return Refuse("this scene cannot run trials: it has no houseCARL server or no bundle to re-check with.");
+        if (sc.Trials is not { } lane) return Refuse("this scene cannot run trials: it has no write target or no bundle to re-check with.");
         if (s.OpenRow is not { } row) return Refuse("find_clear needs an open conflict, whose re-check judges each candidate; open one first.");
         if (!Recheck.ProbeOfCheck.TryGetValue(row.Row.CheckId, out var probe)) return Refuse($"a {row.Row.CheckId} row has no probe re-run here, so its candidates cannot be judged.");
         if (sc.PairBoxes(key) is not { } boxes) return Refuse($"{key} or the open row's other reference is not drawn in this scene, so no candidate can be made.");

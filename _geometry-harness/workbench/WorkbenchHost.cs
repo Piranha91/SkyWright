@@ -416,7 +416,6 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         if (Shell.Closed && Frames.Logging) Say(Frames.StopLog());
         if (Shell.Closed && Environment.GetEnvironmentVariable("WB_DUMP") is { Length: > 0 } dump) Shell.Dump(this, dump);
         System.Windows.Media.CompositionTarget.Rendering -= tick;
-        if (_writer is not null) _writer.DisposeAsync().AsTask().GetAwaiter().GetResult();
         Shell.Current = null;
         SceneDirector.SceneClosed();
         Shell.Unmount();
@@ -1913,7 +1912,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _contextRows.Children.Clear();
         if (_session.Selected is not { } k) { Line("Select a reference to see its doors, what names it, what rests on it and the navmesh under it."); _viewState.HighlightNav(Array.Empty<(Vector3, Vector3, Vector3)>()); return; }
         var key = k.ToString();
-        if (ContextCache.Read(scene, key) is not { } read) { Line("This scene has no houseCARL server to read the context from."); return; }
+        if (ContextCache.Read(scene, key) is not { } read) { Line("This scene has no write target to read the context from; open it from the launcher's profile."); return; }
         if (!read.IsCompleted)
         {
             Line($"{key}: reading its doors, what names it, what rests on it and the navmesh under it", System.Windows.Media.Brushes.DimGray);
@@ -2043,7 +2042,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         if (notDrawn.Count > 0)
             throw new InvalidOperationException($"{string.Join(" and ", notDrawn)} is not drawn in this scene, so its objects are not compared until its cell is open.");
         var objects = await w.ReadObjectsAsync(keys.Select(k => (k, RefPlacementEdit.BakedPose(_session.RefOf(k).Ref))).ToList());
-        return (((IWorkbenchSurface)new LiveSurface()).RowStateOf(row), objects, w.ServerSha256);
+        return (((IWorkbenchSurface)new LiveSurface()).RowStateOf(row), objects, w.ReaderBuild);
     }
 
     /// <summary>The session file follows every change; a failed write is said, never silent.</summary>
@@ -2090,19 +2089,21 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         return ManualTarget ?? (inst is { Length: > 0 } && prof is { Length: > 0 } && data is { Length: > 0 } ? new WriteTarget(inst, prof, data, output) : null);
     }
 
-    internal async Task<PatchWriter> WriterAsync()
+    /// <summary>The houseCARL writer for the write target the scene has now, from its one owner (<see cref="HousecarlWriters"/>):
+    /// houseCARL's code in this process, no program started; asked for on every use, never kept past a profile change.</summary>
+    internal Task<PatchWriter> WriterAsync()
     {
-        if (_writer is not null) return _writer;
-        var target = TargetFromEnv()
-            ?? throw new InvalidOperationException("no write target: set WB_INSTANCE, WB_PROFILE and WB_GAME_DATA to the MO2 instance, profile and game Data folder the scene was built from.");
-        var exe = Program.ServerExe();
-        var dataDir = Path.Combine(_outDir, "housecarl-data");
-        var corpus = Program.Corpus();
-        _writer = await PatchWriter.StartAsync(exe, target, dataDir, corpus, Say);
-        // the await may resume off the window's thread (the context read waits on this task from the pool), and the status
-        // line belongs to the window: it is updated there
-        if (_window?.Dispatcher is { } d && !d.CheckAccess()) _ = d.BeginInvoke(UpdateStatus); else UpdateStatus();
-        return _writer;
+        try
+        {
+            var target = TargetFromEnv()
+                ?? throw new InvalidOperationException("no write target: set WB_INSTANCE, WB_PROFILE and WB_GAME_DATA to the MO2 instance, profile and game Data folder the scene was built from.");
+            var fresh = _writer?.Target != target;
+            _writer = HousecarlWriters.For(target, Path.Combine(_outDir, "housecarl-data"), Program.Corpus(), Say);
+            // the status line belongs to the window: it is updated there
+            if (fresh) { if (_window?.Dispatcher is { } d && !d.CheckAccess()) _ = d.BeginInvoke(UpdateStatus); else UpdateStatus(); }
+            return Task.FromResult(_writer);
+        }
+        catch (Exception ex) { return Task.FromException<PatchWriter>(ex); }
     }
 
     /// <summary>Dry-run or write the staged edits (the bar's buttons, the script's <c>commit</c>, the MCP <c>commit</c> verb).

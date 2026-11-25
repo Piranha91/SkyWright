@@ -74,27 +74,17 @@ public static class TestCorpus
     public static string Path => Generated.Value;
 }
 
-/// <summary>The write path end to end: the edit staged in the workbench, written by the houseCARL server this checkout
-/// builds (<c>src/housecarl-mcp/bin/Release</c>), read back from the written file.</summary>
+/// <summary>The write path end to end: the edit staged in the workbench, written by houseCARL's code compiled into the
+/// app (rewritten from the server path at step 4), read back from the written file.</summary>
 [Trait("tier", "integration")]
 public class PatchWriteTests : IClassFixture<TiltedRefWorld>
 {
     readonly TiltedRefWorld _w;
     public PatchWriteTests(TiltedRefWorld w) => _w = w;
 
-    static string ServerExe()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, HarnessShared.CheckoutLayout.Marker))) dir = dir.Parent;
-        Assert.NotNull(dir);
-        var exe = TestBuild.Server;
-        Assert.True(File.Exists(exe), $"build src/housecarl-mcp in Release first: {exe}");
-        return exe;
-    }
-
-    Task<PatchWriter> Start() => PatchWriter.StartAsync(ServerExe(),
+    Task<PatchWriter> Start() => Task.FromResult(PatchWriter.OpenInProcess(
         new WriteTarget(_w.Instance, "Default", _w.DataDir, Path.Combine(_w.Instance, "mods")),
-        Path.Combine(_w.Root, "hcdata-" + Guid.NewGuid().ToString("N")), TestCorpus.Path, _ => { });
+        Path.Combine(_w.Root, "hcdata-" + Guid.NewGuid().ToString("N")), TestCorpus.Path, _ => { }));
 
     [Fact]
     public async Task A_staged_move_and_turn_is_written_as_one_override_whose_placement_reads_back_as_staged()

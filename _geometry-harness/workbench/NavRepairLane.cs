@@ -149,8 +149,9 @@ internal static class NavRepairLane
 
 /// <summary>A navmesh Findings row's repair (the window's Findings tab buttons, the state tools' repair_preview and
 /// repair_write): a navmesh row names a navmesh, not a placed reference, so it opens no viewer and needs no scene. The
-/// inputs (the arm's candidate order, the write target, navownprobe, the work folder) and the houseCARL server come from
-/// the caller: the app's own in <see cref="Shell"/>, a fixture's in the tests.</summary>
+/// inputs (the arm's candidate order, the write target, navownprobe, the work folder) and the houseCARL writer come from
+/// the caller: the app's own in <see cref="Shell"/> (<see cref="HousecarlWriters"/>), a fixture's in the tests. The
+/// writer is the one of the target the inputs name at each write.</summary>
 internal sealed class RepairDesk(Func<(string Candidate, WriteTarget Target, string Probe, string Work)> inputs, Func<WriteTarget, Task<PatchWriter>> startWriter)
 {
     readonly NavRepairLane.State _state = new();
@@ -177,10 +178,17 @@ internal sealed class RepairDesk(Func<(string Candidate, WriteTarget Target, str
         Check(f);
         var p = _state.ForWrite(f.Row.Identity);
         var (_, t, probe, work) = inputs();
-        _writer ??= await startWriter(t);
+        // the writer of the target the inputs name now: a desk never keeps the writer of a profile it was given before
+        if (_writer is null || _writer.Target != t)
+        {
+            var old = _writer;
+            _writer = await startWriter(t);
+            if (old is not null && old != _writer && !HousecarlWriters.Owns(old)) await Task.Run(async () => await old.DisposeAsync());
+        }
         var dir = Path.Combine(work, "repair-write-" + DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmssfff"));
         return _state.Wrote(await NavRepairLane.WriteAsync(_writer, p, patch, probe, t.Instance, t.Profile, t.Game, dir));
     }
 
-    internal async ValueTask DisposeWriterAsync() { if (_writer is not null) await _writer.DisposeAsync(); }
+    /// <summary>Closes a writer the desk's own factory made; one from <see cref="HousecarlWriters"/> is that owner's to close.</summary>
+    internal async ValueTask DisposeWriterAsync() { if (_writer is not null && !HousecarlWriters.Owns(_writer)) await Task.Run(async () => await _writer.DisposeAsync()); }
 }

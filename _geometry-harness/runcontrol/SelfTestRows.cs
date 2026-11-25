@@ -45,7 +45,9 @@ public static partial class SelfTestFinalize
                 return Same("complete", Ev.Str(ev["complete"]), "True") ?? Same("claim", S(ev["claim"]), S(row["claim"]));
             });
         });
-        Case("case 566 the reader's default order: the flag, the environment, the checkout's build", () =>
+        // case 566, revised when the names read moved in process (step 4): the third choice is houseCARL's records tool
+        // compiled in, no longer the build's server program
+        Case("case 566 the reader's default order: the flag, the environment, houseCARL in process", () =>
         {
             string? before = Environment.GetEnvironmentVariable(BundleSteps.ReaderVariable);
             try
@@ -54,14 +56,10 @@ public static partial class SelfTestFinalize
                 var flag = BundleSteps.DefaultReaderCmd("F:/flag-reader.exe");
                 var env = BundleSteps.DefaultReaderCmd(null);
                 Environment.SetEnvironmentVariable(BundleSteps.ReaderVariable, "   ");
-                var built = BundleSteps.DefaultReaderCmd("");
-                string exe = BundleSteps.CheckoutReader();
-                string want = File.Exists(exe) ? $"\"{exe}\" {BundleSteps.ReaderSource()}"
-                    : $" no record reader was given (--reader-cmd or {BundleSteps.ReaderVariable}) and this {BundleSteps.ReaderSource()}'s houseCARL server is not at {exe}.";
+                var inProcess = BundleSteps.DefaultReaderCmd("");
                 return Same("the flag first", $"{flag.command} {flag.source}", "F:/flag-reader.exe --reader-cmd")
                        ?? Same("then the environment, stripped", $"{env.command} {env.source}", $"E:/env-reader.exe --stdio {BundleSteps.ReaderVariable}")
-                       ?? Same("then the build's server, or one sentence", $"{built.command} {built.source}", want)
-                       ?? Same("the build's reader", exe, PyPath.Str(Checkout.Layout.PathOf(HarnessShared.CheckoutLayout.Piece.Server)));
+                       ?? Same("then houseCARL in process", $"{inProcess.command} {inProcess.source}", $"{InProcessReader.Command} {InProcessReader.Source}");
             }
             finally { Environment.SetEnvironmentVariable(BundleSteps.ReaderVariable, before); }
         });

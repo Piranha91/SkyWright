@@ -11,10 +11,7 @@ internal static class Program
     /// else the checkout it was built in (<see cref="HarnessShared.CheckoutLayout"/> owns where). One sentence when none.</summary>
     internal static string Piece(HarnessShared.CheckoutLayout.Piece p, string what) => HarnessShared.CheckoutLayout.Resolve(p, what);
 
-    /// <summary>houseCARL's server: WB_SERVER, else the build's Tools\\housecarl-mcp (built from the pinned houseCARL).</summary>
-    internal static string ServerExe() => Piece(HarnessShared.CheckoutLayout.Piece.Server, "housecarl-mcp.exe it should use");
-
-    /// <summary>The rulebook the server reads: WB_CORPUS, else the build's (beside its server in Tools\\housecarl-mcp).</summary>
+    /// <summary>The rulebook the in-process houseCARL reads: WB_CORPUS, else the build's (Data\\corpus.json).</summary>
     internal static string Corpus() => Piece(HarnessShared.CheckoutLayout.Piece.Corpus, "rulebook corpus.json");
 
     /// <summary>--bundle DIR [--arm A]: verify and read the bundle, rank its rows, and turn the cells its rows sit in into

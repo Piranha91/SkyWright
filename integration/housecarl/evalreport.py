@@ -47,7 +47,6 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is: its tools and run log on sys.path
 from runlog import Run  # noqa: E402
-import buildlayout  # noqa: E402  where the build put houseCARL's server
 import evalsettings  # noqa: E402
 import recordrows  # noqa: E402
 import refscan  # noqa: E402
@@ -11586,7 +11585,7 @@ def resolve_mod_names(bundle: Path, siblings, a, out: Path) -> tuple[dict, dict]
     nexus_mode = getattr(a, "nexus_names", None) or "offline"
     reader_ = getattr(a, "nexus_reader_cmd", None) or os.environ.get("HOUSECARL_RECORD_READER_CMD") or None
     if nexus_mode == "fetch" and not reader_:
-        exe_ = buildlayout.server()
+        exe_ = SW.server()
         reader_ = f'"{exe_}"' if exe_.is_file() else None
     mod_names, names_doc = modnames.resolve([b.plan] + [x.plan for x in sbs],
                                             ((b.scope or {}).get("targets") or [])
@@ -13346,7 +13345,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "records each fetch in evidence/mod-names.json; a failed fetch leaves the folder name with its reason")
     p.add_argument("--nexus-reader-cmd", default=None, metavar="CMD",
                    help="the houseCARL server --nexus-names fetch asks through (default HOUSECARL_RECORD_READER_CMD, else "
-                        "this checkout's built server)")
+                        "the module's built server)")
     p.add_argument("--captures-final", action="store_true",
                    help="the capture stage is closed: the review reel pictures only clashes with captured frames and "
                         "says in one sentence when a kind has none (the report's own plan after the last capture round)")

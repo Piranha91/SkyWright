@@ -55,24 +55,11 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
     2490-2493  the plan on in-memory navmeshes (navownprobe --navrepair-selftest): a cut renumbers a later table entry; a
           height move that would leave a matched link 200 u apart is refused; the same move with the neighbour moving too
           is planned; a vertex that cannot be told refuses its navmesh.
-    2494  the write: the plan's ops through housecarl_apply (this checkout's server, out_path) make one new patch holding
-          exactly the planned navmeshes.
-    2495  the read-back: every planned navmesh in the patch is its winner with exactly the plan applied, and every record
-          the patch carries (its CELL and WRLD containers) is its winner's.
-    2498  the read-back refuses a carried container that is not the winner's: the plan's ops alone carry the border cell
-          (0,0) from Skyrim.esm, the navmeshes' winner, while RpD.esp wins that cell (review of Gate C part 1, finding 1).
-    2499  the forward the read-back names to fix it is exactly that cell from RpD.esp; after it, the cell is RpD's.
-    2496  the read-back's arm: a patch written with one unplanned edit (L5's vertex 1 moved 1 u) fails it, naming the field.
     2503  plan, NAVI: L6's relink into R6n adds R6n to L6's NAVI entry and L6 to R6n's, both ways. L6's entry is stated only
           by Skyrim.esm, so the patch adds it whole from there (its door, island data and old neighbour kept); R6n's is in
           RpA.esp's list, the NAVI winner, and gains L6 in place. Relinks within one navmesh change no entry.
-    2504  the read-back holds the patch's NAVI to RpA.esp's with exactly those two entries changed, and holds.
-    2505  the read-back's NAVI arm: a patch whose NAVI also changes an entry the plan leaves (R5's) fails, naming that entry.
     2506  self-test: a relink whose new neighbour no plugin's NAVI states is refused by name with its link back; with both
           entries stated it names each navmesh in the other's entry.
-    2497  the re-check, by the same rule on the order with the patch added: relinked links and the ground rows go
-          Holds -> Gone (repaired), L7's and SL's cut links are reported as cut, L4's as refused, and no border, link or
-          ground row is created.
     2551  self-test (RowsAt, navownprobe's --base summary): a row whose triangles a patch renumbered but did not move is
           unchanged, matched by where they stand (ConflictRecord.At), not by index
     2552  self-test: a row whose triangle moved counts gone, a new one new; a row on another navmesh is not counted
@@ -93,8 +80,10 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
     2566  self-test: NAVI linked doors: added in place on the winner's entry with the base game's Unknown; a door already linked,
           an unstated navmesh, and a whole interior entry (the write engine's compose gap) are refused by name
 
-Probes come from this checkout's Release builds unless HC_NR_HARNESS names another build folder; the houseCARL server
-and generator from this checkout's src (HC_NR_SRC another). HC_NR_CASES (e.g. "2463,2483") runs those cases only.
+The write of the plan through houseCARL's server program, its read-back and the re-check (2494-2499, 2504, 2505) are the
+module's suite integration/housecarl/tests/test_navmesh_repair_write.py, on this fixture: only the module holds that
+program. Probes come from this checkout's Release builds unless HC_NR_HARNESS names another build folder. HC_NR_CASES
+(e.g. "2463,2483") runs those cases only.
 """
 
 import json
@@ -112,7 +101,6 @@ HARNESS = HERE.parent
 sys.path.append(str(HARNESS))
 import buildlayout  # noqa: E402  where the build put each program
 PROBES = Path(os.environ.get("HC_NR_HARNESS") or buildlayout.root())
-SRC = Path(os.environ.get("HC_NR_SRC") or HARNESS.parent / "external" / "houseCARL" / "src")
 sys.path.insert(0, str(HARNESS))
 ONLY = {s.strip() for s in (os.environ.get("HC_NR_CASES") or "").split(",") if s.strip()}
 FAILURES, PASSED = [], []
@@ -502,7 +490,6 @@ def t2485():
     assert any(e[0] == "R3" and e[1] == "Data.EdgeLinks" and e[2] == "Add" for e in got), got
 
 
-
 def t2486():
     """Rejects: a relink written one way only (R11 triangle 1 left linking nothing back)."""
     pl = plan_for("L11")
@@ -574,24 +561,6 @@ def t2503():
     assert c["type"] == "NavigationMapInfo" and nm(c["fields"]["NavigationMesh"]) == "L6" and c["fields"]["Unknown2"] == str(0x1234), c["fields"]
     assert sets == [("MergedTo", "Add", "R6"), ("MergedTo", "Add", "R6n"), ("LinkedDoors", "Add", "LinkedDoor"),
                     ("Parent", "Set", "NavigationMapInfoWorldParent"), ("Island", "Set", "IslandData")], sets
-
-
-def t2504():
-    """Rejects: a read-back that does not check the patch's NAVI, or a written NAVI other than the winner's plus the plan."""
-    f = flow()
-    assert "error" not in f, f["error"]
-    doc = f["NavRepair.readback.doc"] or {}
-    nv = [c for c in doc.get("carried") or [] if c["type"] == "NavigationMeshInfoMap"]
-    assert len(nv) == 1 and nv[0]["holds"] is True and nv[0].get("planned") is True and nv[0]["winner"] == "RpA.esp" and nv[0]["compared"] == 4,         f"the NAVI read-back: {nv}; apply said {f['NavRepair.answer'][:800]}"
-
-
-def t2505():
-    """Rejects: a NAVI read-back that misses a change to an entry the plan leaves alone (R5's, entry 0 of RpA's list)."""
-    f = flow()
-    assert "error" not in f, f["error"]
-    rb, doc = f["NavRepairNaviArm.readback"], f["NavRepairNaviArm.readback.doc"] or {}
-    nv = [c for c in doc.get("carried") or [] if c["type"] == "NavigationMeshInfoMap"]
-    assert rb.returncode == 1 and len(nv) == 1 and nv[0]["holds"] is False and any(d.startswith("NAVI entry 0 (" + N["R5"]) for d in nv[0]["differences"]),         f"the NAVI arm's read-back exit {rb.returncode}: {nv}; apply said {f['NavRepairNaviArm.answer'][:500]}"
 
 
 def t2506():
@@ -671,141 +640,6 @@ def t2492():
 def t2493():
     """Rejects: a move written around a vertex whose ground cannot be told."""
     selftest("2493")
-
-
-# ---- the write, read-back and re-check, through this checkout's houseCARL server ----
-
-def flow():
-    """The plan's ops written by housecarl_apply into a new patch under an out folder; the arm's patch with one unplanned edit;
-    each read back; the order with the patch re-checked. Done once, shared by 2494-2497."""
-    L = lab()
-    if getattr(L, "flow", None) is not None:
-        return L.flow
-    f = L.flow = {}
-    assert L.plan is not None, f"no repair plan{L.why('plan')}"
-    # The rulebook generator is houseCARL's own project, built in the pin by houseCARL's layout (scripts/build.ps1 makes
-    # it), not a piece of SkyWright's build; the server is SkyWright's build's (buildlayout).
-    gen = SRC / "housecarl-generator" / "bin" / "Release" / "net9.0" / "housecarl-generator.exe"
-    mcp = buildlayout.server()
-    corpus = L.tmp / "corpus" / "gen" / "corpus.json"
-    g = run([gen, L.tmp / "corpus" / "gen", L.tmp / "corpus" / "ref"])
-    if not corpus.exists():
-        f["error"] = f"the rulebook was not generated by {gen} (exit {g.returncode}): {(g.stdout + g.stderr)[-300:]}"
-        return f
-    import evalrecords
-    out = L.tmp / "out"
-    out.mkdir()
-    args = [mcp, f"--HouseCarl:DataDir={L.game / 'Data'}", f"--HouseCarl:ModsDir={L.inst / 'mods'}",
-            f"--HouseCarl:ProfileDir={L.inst / 'profiles' / 'P'}", f"--HouseCarl:CorpusPath={corpus}"]
-    assert not any(" " in str(a) for a in args), f"a path holds a space, which this test's command line does not quote: {args}"
-    env = {"HOUSECARL_DATA_DIR": str(L.tmp / "hcdata"), "HOUSECARL_RUNLOG_DIR": str(L.tmp / "hcdata" / "runs")}
-    v1 = (4097, 2500, 0)                                  # L5's vertex 1 is (4096, 2500, 0); the arm moves it 1 u
-    arm_ops = L.plan["ops"] + [{"formid": N["L5"], "field_path": "Data.Vertices", "op": "SetAtIndex", "key": "1", "value": "%d,%d,%d" % v1}]
-    navi_arm_ops = L.plan["ops"] + [{"formid": N["NV"], "field_path": "MapInfos[0].MergedTo", "op": "Add", "value": N["R6"]}]
-    def readback(name, patch, tag):
-        rb = L.tmp / f"readback-{name}{tag}.json"
-        f[name + tag + ".readback"] = run([exe("navownprobe"), "--repair-readback", L.tmp / "plan.json", patch, rb])
-        f[name + tag + ".readback.doc"] = json.loads(rb.read_text(encoding="utf-8")) if rb.exists() else None
-    for name, ops in (("NavRepair", L.plan["ops"]), ("NavRepairArm", arm_ops), ("NavRepairNaviArm", navi_arm_ops)):
-        s = evalrecords.Session(" ".join(str(a) for a in args), env, "navmesh-repair-test")
-        try:
-            f[name + ".answer"] = s.tool("housecarl_apply", {"ops": ops, "patch": name, "out_path": str(out)}, want_json=False)
-            patch = out / f"houseCARL - {name}" / f"{name}.esp"
-            f[name] = patch
-            if name == "NavRepair":
-                # the write as the lane makes it: the plan's ops, then each carried container the read-back names forwarded
-                # from its winner into the same patch, then the read-back again
-                readback(name, patch, ".applied")
-                f["fixes"] = (f[name + ".applied.readback.doc"] or {}).get("carriedFixes") or []
-                f["forward.answers"] = [s.tool("housecarl_forward", {"formids": x["formids"], "source": x["source"], "into": str(patch.parent)}, want_json=False)
-                                        for x in f["fixes"]]
-        except Exception as ex:
-            f[name + ".answer"] = f"refused: {ex}"
-        finally:
-            s.close()
-        f.setdefault(name, out / f"houseCARL - {name}" / f"{name}.esp")
-        readback(name, f[name], "")
-    # the order with the patch added: its plugin last, its folder at the top of the asset view (as the workbench's re-check)
-    c = json.loads(L.cand.read_text(encoding="utf-8"))
-    c["Plugins"] = c["Plugins"] + ["NavRepair.esp"]
-    c["Mods"] = [str(f["NavRepair"].parent)] + c["Mods"]
-    c["Name"] = "nr with the patch"
-    pc = L.tmp / "candidate-patched.json"
-    pc.write_text(json.dumps(c), encoding="utf-8")
-    common = ["--order", pc, "--instance", L.inst, "--game", L.game, "--profile", "P"]
-    emit, rc = L.tmp / "nr-patched.json", L.tmp / "recheck.json"
-    f["recheck.log"] = run([exe("navownprobe"), *common, "--edge-tolerance", TOL, "--emit", emit, "--base", L.tmp / "nr-plan.json",
-                            "--recheck-plan", L.tmp / "plan.json", "--recheck-out", rc])
-    f["recheck"] = json.loads(rc.read_text(encoding="utf-8")) if rc.exists() else None
-    return f
-
-
-def t2494():
-    """Rejects: a plan the write path cannot carry, or a patch holding other navmeshes than the planned ones."""
-    f = flow()
-    assert "error" not in f, f["error"]
-    assert f["NavRepair"].exists(), f"no patch at {f['NavRepair']}: {f['NavRepair.answer'][:600]}"
-    planned = sorted(nm(p["source"]) for p in lab().plan["plans"] if p["status"] != "refused")
-    doc = f["NavRepair.readback.doc"] or {}
-    got = sorted(nm(r["navmesh"]) for r in doc.get("records") or [])
-    assert got == planned and not doc.get("unplannedNavmeshes"), f"patch navmeshes {got}, planned {planned}, unplanned {doc.get('unplannedNavmeshes')}"
-
-
-def t2495():
-    """Rejects: a written patch whose records differ from the winner plus the plan anywhere (Gate A review finding 4)."""
-    f = flow()
-    assert "error" not in f, f["error"]
-    rb = f["NavRepair.readback"]
-    assert rb.returncode == 0 and (f["NavRepair.readback.doc"] or {}).get("holds") is True, f"read-back exit {rb.returncode}: {rb.stdout[-1500:]} {rb.stderr[-300:]}"
-
-
-def t2496():
-    """Rejects: a read-back that misses one unplanned edit (L5's vertex 1 moved 1 u by the arm's extra op)."""
-    f = flow()
-    assert "error" not in f, f["error"]
-    rb, doc = f["NavRepairArm.readback"], f["NavRepairArm.readback.doc"] or {}
-    bad = [r for r in doc.get("records") or [] if not r["holds"]]
-    assert rb.returncode == 1 and [nm(r["navmesh"]) for r in bad] == ["L5"] and any("Vertices[1]" in d for d in bad[0]["differences"]), \
-        f"the arm's read-back exit {rb.returncode}, failing {[(nm(r['navmesh']), r['differences']) for r in bad]}: {rb.stdout[-800:]}"
-
-
-def t2498():
-    """Rejects: a read-back that passes a patch reverting another plugin's container (the cell's name back to Skyrim.esm's)."""
-    f = flow()
-    assert "error" not in f, f["error"]
-    rb, doc = f["NavRepair.applied.readback"], f["NavRepair.applied.readback.doc"] or {}
-    bad = [c for c in doc.get("carried") or [] if not c["holds"]]
-    nav_bad = [r for r in doc.get("records") or [] if not r["holds"]]
-    assert rb.returncode == 1 and doc.get("holds") is False and not nav_bad         and [(c["type"], c["record"], c["winner"]) for c in bad] == [("Cell", "000900:Skyrim.esm", "RpD.esp")]         and any(d.startswith("EditorID") for d in bad[0]["differences"]),         f"read-back of the plan's ops alone: exit {rb.returncode}, holds {doc.get('holds')}, failing navmeshes {nav_bad}, carried {doc.get('carried')}: {rb.stdout[-800:]}"
-
-
-def t2499():
-    """Rejects: a fix that forwards the wrong record or from another plugin than the winner, or leaves the cell reverted."""
-    f = flow()
-    assert "error" not in f, f["error"]
-    assert f.get("fixes") == [{"source": "RpD.esp", "formids": ["000900:Skyrim.esm"]}], f"the read-back's fixes: {f.get('fixes')}"
-    cells = [c for c in (f["NavRepair.readback.doc"] or {}).get("carried") or [] if c["record"] == "000900:Skyrim.esm"]
-    assert len(cells) == 1 and cells[0]["holds"] and cells[0]["winner"] == "RpD.esp" and cells[0]["compared"] > 10,         f"after the forward ({f.get('forward.answers')}): {cells}"
-
-
-def t2497():
-    """Rejects: a re-check that credits a cut or refused link as repaired, misses a repaired one, or hides a row the patch made."""
-    f = flow()
-    assert "error" not in f, f["error"]
-    r = f["recheck"]
-    assert r is not None, f"no re-check (exit {f['recheck.log'].returncode}): {f['recheck.log'].stdout[-800:]} {f['recheck.log'].stderr[-300:]}"
-    v = {}
-    for l in r["links"]:
-        v.setdefault((l["kind"], nm(l["row"])), set()).add(l["verdict"])
-    want = {("EDGE-IDX", "L5"): {"repaired"}, ("EDGE-IDX", "L6"): {"repaired"}, ("EDGE-IDX", "L11"): {"repaired"},
-            ("EDGE-NOMATCH", "L2"): {"repaired"}, ("EDGE-ONEWAY", "L3"): {"repaired"}, ("EDGE-ONEWAY", "R2"): {"repaired"},
-            ("EDGE-IDX", "L7"): {"cut"}, ("EDGE-NAV", "SL"): {"cut"}, ("EDGE-NOMATCH", "L8"): {"cut"}, ("EDGE-NOMATCH", "R8"): {"cut"},
-            ("EDGE-NOMATCH", "L4"): {"refused"}, ("EDGE-ONEWAY", "R4a"): {"refused"}, ("EDGE-ONEWAY", "R4b"): {"refused"},
-            ("NAV-GROUND", "G1"): {"repaired"}, ("NAV-GROUND", "G4"): {"repaired"}, ("NAV-GROUND", "G5"): {"repaired"}, ("NAV-GROUND", "G6"): {"repaired"}}
-    wrong = {k: (v.get(k), w) for k, w in want.items() if v.get(k) != w}
-    assert not wrong, f"verdicts (got, want): {wrong}; all: {sorted((k, sorted(x)) for k, x in v.items())}"
-    made = [c for c in r["created"] if c["kind"].startswith(("EDGE", "NAV-GROUND"))]
-    assert not made, f"rows the patch made: {made}"
 
 
 # ---- the mover case: a ground row whose mover ships its own re-cut, carried by a use_version row (2026-11-22) ----
@@ -1044,15 +878,8 @@ CASES = [
     ("2491 self-test: a move that breaks a link is refused", t2491),
     ("2492 self-test: a move with its neighbour is planned", t2492),
     ("2493 self-test: a vertex that cannot be told refuses", t2493),
-    ("2494 the write: one patch of the planned navmeshes", t2494),
-    ("2495 the read-back holds", t2495),
-    ("2496 the read-back's arm: one unplanned edit fails it", t2496),
-    ("2497 the re-check: repaired, cut and refused", t2497),
     ("2503 plan, NAVI: L6 and R6n name each other, L6's entry whole from Skyrim.esm", t2503),
-    ("2504 the read-back holds the patch's NAVI to the winner plus the plan", t2504),
-    ("2505 the read-back's NAVI arm: an unplanned entry change fails it", t2505),
     ("2506 self-test: a relink with no NAVI entry to write is refused", t2506),
-    ("2498 the read-back refuses a carried cell that is not the winner's", t2498),
     ("2551 self-test: a renumbered row is unchanged by place", lambda: selftest("2551")),
     ("2552 self-test: rows gone, new and on another navmesh", lambda: selftest("2552")),
     ("2553 self-test: a base emit without places is refused", lambda: selftest("2553")),
@@ -1065,7 +892,6 @@ CASES = [
     ("2594 self-test: a one-way refusal names its own neighbour", lambda: selftest("2594")),
     ("2563 a use_version patch masters what it supersedes", t2563),
     ("2566 self-test: NAVI linked doors", lambda: selftest("2566")),
-    ("2499 the fix forwards that cell from its winner, and it holds", t2499),
     ("2595 self-test: the ground plan prefers the mover's own re-cut", lambda: selftest("2595")),
     ("2596 self-test: which mover's version replaces following the ground", lambda: selftest("2596")),
     ("2597 self-test: the mover refusal keeps the refusal order", lambda: selftest("2597")),

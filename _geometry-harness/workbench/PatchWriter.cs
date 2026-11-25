@@ -1,8 +1,5 @@
 using System.Globalization;
-using System.Security.Cryptography;
 using System.Text.Json;
-using ModelContextProtocol.Client;
-using ModelContextProtocol.Protocol;
 
 namespace Workbench;
 
@@ -19,80 +16,48 @@ internal sealed record WriteTarget(string Instance, string Profile, string DataD
     public override string ToString() => $"instance '{Instance}', profile '{Profile}'" + (Output is null ? "" : $", output '{Output}'");
 }
 
-/// <summary>Writes the staged edits as placement overrides through the houseCARL server's own write path
-/// (<c>housecarl_apply</c>; <c>housecarl_records</c> to check and read back). The app is an MCP client of the
-/// <c>housecarl-mcp.exe</c> it was built with, started over stdio (ModelContextProtocol.Core 2.2.0:
-/// <c>StdioClientTransport</c> + <c>McpClient.CreateAsync</c> + <c>CallToolAsync</c>).</summary>
+/// <summary>Writes the staged edits as placement overrides through houseCARL's own write path (<c>housecarl_apply</c>;
+/// <c>housecarl_records</c> to check and read back), its tool code compiled in (<see cref="HousecarlLibrary"/>): no
+/// houseCARL program is started. Opened by <see cref="OpenInProcess"/>; the app's callers get one from
+/// <see cref="HousecarlWriters"/>.</summary>
 internal sealed class PatchWriter : IAsyncDisposable
 {
-    readonly McpClient _client;
+    readonly HousecarlLibrary _library;
     internal WriteTarget Target { get; }
-    internal string ServerExe { get; }
-    internal string ServerSha256 { get; }
+    internal string CodePath { get; }
+    internal string ReaderBuild { get; }
     internal Action<string> Log { get; }
 
-    PatchWriter(McpClient client, WriteTarget target, string exe, string sha, Action<string> log)
-    { _client = client; Target = target; ServerExe = exe; ServerSha256 = sha; Log = log; }
+    PatchWriter(HousecarlLibrary library, WriteTarget target, string exe, string sha, Action<string> log)
+    { _library = library; Target = target; CodePath = exe; ReaderBuild = sha; Log = log; }
 
-    /// <summary>Start the server at <paramref name="serverExe"/> against <paramref name="target"/>. Refused when the
-    /// target's patch folder is one the output-folder rule refuses, whatever the instance.</summary>
-    internal static async Task<PatchWriter> StartAsync(string serverExe, WriteTarget target,
-                                                       string dataDir, string corpusPath, Action<string> log, CancellationToken ct = default)
+    /// <summary>The refusals before anything opens: the Output Folder rule, the rulebook, the profile.</summary>
+    static void Preflight(WriteTarget target, string corpusPath)
     {
         if (target.Output is null)
             throw new InvalidOperationException($"writes to {target} are refused: no Output Folder is chosen; choose one in the launcher or set WB_OUTPUT (the instance's mods folder itself is allowed).");
         if (OutputFolderRule.Check(target.PatchRoot, target.Instance, target.Profile, target.Game) is { } why)
             throw new InvalidOperationException($"writes to {target} are refused: {why}");
-        if (!File.Exists(serverExe))
-            throw new InvalidOperationException($"the houseCARL server is not at '{serverExe}'; build the solution (scripts\\build.ps1), or set WB_SERVER.");
         if (!File.Exists(corpusPath))
             throw new InvalidOperationException($"the houseCARL rulebook is not at '{corpusPath}'; run scripts\\build.ps1 -Rulebook, or set WB_CORPUS.");
         if (!Directory.Exists(target.ProfileDir))
             throw new InvalidOperationException($"the profile folder '{target.ProfileDir}' does not exist; name a profile of that instance.");
-        string sha;
-        using (var fs = File.OpenRead(serverExe)) sha = Convert.ToHexString(SHA256.HashData(fs)).ToLowerInvariant();
-        var dll = Path.ChangeExtension(serverExe, ".dll");
-        string dllSha = File.Exists(dll) ? Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(dll))).ToLowerInvariant() : "(no dll)";
-        Directory.CreateDirectory(dataDir);
-        var transport = new StdioClientTransport(new StdioClientTransportOptions
-        {
-            Name = "housecarl",
-            Command = serverExe,
-            Arguments = new[]
-            {
-                $"--HouseCarl:DataDir={target.DataDir}",
-                $"--HouseCarl:ModsDir={target.ModsDir}",
-                $"--HouseCarl:ProfileDir={target.ProfileDir}",
-                $"--HouseCarl:CorpusPath={corpusPath}",
-            },
-            // A data folder of the workbench's own: no saved user config in it, so the explicit paths above are what
-            // the server reads (a saved instance would otherwise win), and its run log stays beside it.
-            EnvironmentVariables = new Dictionary<string, string?>
-            {
-                ["HOUSECARL_DATA_DIR"] = dataDir,
-                ["HOUSECARL_RUNLOG_DIR"] = Path.Combine(dataDir, "runs"),
-            },
-        });
-        var client = await McpClient.CreateAsync(transport, cancellationToken: ct);
-        log($"houseCARL server: {serverExe} (exe sha256 {sha}, dll sha256 {dllSha}); writes go to {target}");
-        return new PatchWriter(client, target, serverExe, sha, log);
     }
 
-    internal async Task<string> CallAsync(string tool, Dictionary<string, object?> args, CancellationToken ct = default)
+    /// <summary>houseCARL's code in this process against <paramref name="target"/>, with no program started, after the
+    /// refusals of <see cref="Preflight"/>. <paramref name="dataDir"/> holds its store and spilled results.</summary>
+    internal static PatchWriter OpenInProcess(WriteTarget target, string dataDir, string corpusPath, Action<string> log)
     {
-        var r = await _client.CallToolAsync(tool, args, cancellationToken: ct);
-        var text = string.Join("\n", r.Content.OfType<TextContentBlock>().Select(c => c.Text));
-        if (r.IsError == true) throw new InvalidOperationException($"{tool} refused: {text}");
-        return text;
+        Preflight(target, corpusPath);
+        var lib = HousecarlLibrary.Open(target, dataDir, corpusPath);
+        log($"houseCARL in process: {HousecarlLibrary.AssemblyPath} ({HousecarlLibrary.Identity}); writes go to {target}");
+        return new PatchWriter(lib, target, HousecarlLibrary.AssemblyPath, HousecarlLibrary.Identity, log);
     }
 
-    /// <summary>A forwarded call (the workbench endpoint's houseCARL surface): the arguments as the client sent them,
-    /// after the manual-mode rule, and the server's own answer.</summary>
-    internal async Task<CallToolResult> ForwardAsync(string tool, IReadOnlyDictionary<string, System.Text.Json.JsonElement> args, CancellationToken ct = default)
-    {
-        Log($"forwarded {tool} to the houseCARL server of {Target}");
-        return await _client.CallToolAsync(new CallToolRequestParams { Name = tool, Arguments = args.ToDictionary(kv => kv.Key, kv => kv.Value) }, ct);
-    }
+    /// <summary>One houseCARL tool call: the tool's own answer, or its refusal as one sentence keeping houseCARL's reason
+    /// (<see cref="HousecarlAnswer"/>, the app's one reading of a refusal).</summary>
+    internal async Task<string> CallAsync(string tool, Dictionary<string, object?> args, CancellationToken ct = default) =>
+        HousecarlAnswer.Checked(tool, await _library.CallAsync(tool, args, ct));
 
     static string F(float v) => v.ToString("R", CultureInfo.InvariantCulture);
     static string V(HousecarlCore.Vec3 v) => $"{F(v.X)},{F(v.Y)},{F(v.Z)}";
@@ -132,7 +97,7 @@ internal sealed class PatchWriter : IAsyncDisposable
             else if (path == "Placement.Rotation") rot = Parse(v);
         }
         if (pos is null || rot is null)
-            throw new InvalidOperationException($"the server's answer for {formKey} carried no Placement.Position and Placement.Rotation; read it with housecarl_records to see why.");
+            throw new InvalidOperationException($"houseCARL's answer for {formKey} carried no Placement.Position and Placement.Rotation; reopen the scene to read it again.");
         return (pos.Value, rot.Value);
 
         static HousecarlCore.Vec3 Parse(JsonElement v)
@@ -199,7 +164,7 @@ internal sealed class PatchWriter : IAsyncDisposable
     internal string? Mismatch(Mutagen.Bethesda.Plugins.FormKey key, HousecarlCore.Vec3 pos, HousecarlCore.Vec3 rot, ViewProbe.RefPlacementEdit.Pose drawn,
                               float tolerance = 0.01f)
         => Near(pos, drawn.Position, tolerance) && NearAngles(rot, drawn.Rotation, 1e-4f) ? null
-         : $"{key}'s winning placement on the server ({V(pos)} / {V(rot)}) is not the one the scene drew "
+         : $"{key}'s winning placement in the load order ({V(pos)} / {V(rot)}) is not the one the scene drew "
            + $"({V(drawn.Position)} / {V(drawn.Rotation)}); the scene and {Target} are not the same configuration.";
 
     /// <summary>Null when the server's winning placement of <paramref name="key"/> is the one the scene drew, else the one
@@ -226,15 +191,15 @@ internal sealed class PatchWriter : IAsyncDisposable
         }, ct);
         using var doc = JsonDocument.Parse(text);
         if (!doc.RootElement.TryGetProperty("records", out var recs))
-            throw new InvalidOperationException("the server's records answer carried no records; read it with housecarl_records to see why.");
+            throw new InvalidOperationException("houseCARL's records answer carried no records; reopen the scene to read it again.");
         if (doc.RootElement.TryGetProperty("truncated", out var cut) && cut.ValueKind == JsonValueKind.True)
-            throw new InvalidOperationException($"the server cut its records answer for {chunk.Length} references short; read them with housecarl_records to see why.");
+            throw new InvalidOperationException($"houseCARL cut its records answer for {chunk.Length} references short; reopen the scene to read it again.");
         foreach (var r in recs.EnumerateArray())
         {
             var fid = r.TryGetProperty("formid", out var f) ? f.GetString() : null;
             if (fid is null || !Mutagen.Bethesda.Plugins.FormKey.TryFactory(fid, out var k)) continue;
             if (r.TryGetProperty("error", out var err))
-                throw new InvalidOperationException($"the server could not read {fid}: {err.GetString()}");
+                throw new InvalidOperationException($"houseCARL could not read {fid}: {err.GetString()}");
             var fields = new List<FieldValue>();
             if (r.TryGetProperty("fields", out var fs))
                 foreach (var x in fs.EnumerateArray())
@@ -244,7 +209,7 @@ internal sealed class PatchWriter : IAsyncDisposable
         }
         }
         foreach (var k in list)
-            if (!result.ContainsKey(k)) throw new InvalidOperationException($"the server's answer had no row for {k}; read it with housecarl_records to see why.");
+            if (!result.ContainsKey(k)) throw new InvalidOperationException($"houseCARL's answer had no row for {k}; reopen the scene to read it again.");
         return result;
     }
 
@@ -267,7 +232,7 @@ internal sealed class PatchWriter : IAsyncDisposable
         foreach (var (k, drawn) in refs)
         {
             if (PlacementOf(read[k].Fields) is not { } pr)
-                throw new InvalidOperationException($"the server's answer for {k} carried no Placement.Position and Placement.Rotation; read it with housecarl_records to see why.");
+                throw new InvalidOperationException($"houseCARL's answer for {k} carried no Placement.Position and Placement.Rotation; reopen the scene to read it again.");
             if (Mismatch(k, pr.Pos, pr.Rot, drawn) is { } why) throw new InvalidOperationException(why);
         }
     }
@@ -346,5 +311,6 @@ internal sealed class PatchWriter : IAsyncDisposable
                + (left == 0 ? "; the patch now holds no placed reference, and the file is kept (delete it yourself if you no longer want it)." : left > 0 ? $"; {left} placed reference(s) remain in it." : ".");
     }
 
-    public async ValueTask DisposeAsync() => await _client.DisposeAsync();
+    /// <summary>Closes the service, waiting for its calls; never on a window's thread (<see cref="HousecarlLibrary.Dispose"/>).</summary>
+    public ValueTask DisposeAsync() { _library.Dispose(); return ValueTask.CompletedTask; }
 }

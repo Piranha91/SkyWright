@@ -5081,8 +5081,8 @@ def case_565(tmp):
 
 
 def case_566(tmp):
-    """C566: the reader default: --reader-cmd, else HOUSECARL_RECORD_READER_CMD, else the server in this checkout's
-    build (source "build", as runcontrol's names step reports it); with none, one sentence naming where it looked."""
+    """C566: the reader default: --reader-cmd, else HOUSECARL_RECORD_READER_CMD; with neither, one sentence saying to
+    name a reader (SkyWright's build holds no houseCARL program to fall back on), never a reader found elsewhere."""
     import importlib.util
     case = "case-566-reader-default"
     spec = importlib.util.spec_from_file_location("evalrun_case566", EVALRUN)
@@ -5095,18 +5095,10 @@ def case_566(tmp):
         expect(mod.default_reader_cmd(None), ("from-env", "HOUSECARL_RECORD_READER_CMD"),
                f"{case}: the variable is next", "C566")
         os.environ.pop("HOUSECARL_RECORD_READER_CMD")
-        fake_build = tmp / f"{case}-build"           # a fake build folder; its marker names where the server goes
-        buildlayout.plant_marker(fake_build)
-        exe = buildlayout.piece_under(fake_build, "server")
-        mod.server_exe = lambda: exe
         cmd, why = mod.default_reader_cmd(None)
-        check(cmd is None and str(exe) in why and why.endswith("."),
-              f"{case}: with no server built, one sentence naming where it was looked for ({cmd!r}, {why!r})")
-        exe.parent.mkdir(parents=True, exist_ok=True)
-        exe.write_bytes(b"")
-        cmd, why = mod.default_reader_cmd(None)
-        check(cmd is not None and str(exe) in cmd and why == "build",
-              f"{case}: the build's server is the default ({cmd!r}, {why!r})")
+        check(cmd is None and "--reader-cmd" in why and why.endswith(".") and why.count(". ") == 0,
+              f"{case}: with no reader named, one sentence saying to name one ({cmd!r}, {why!r})")
+        check(not hasattr(mod, "server_exe"), f"{case}: the controller has no build server to fall back on")
     finally:
         if saved is None:
             os.environ.pop("HOUSECARL_RECORD_READER_CMD", None)

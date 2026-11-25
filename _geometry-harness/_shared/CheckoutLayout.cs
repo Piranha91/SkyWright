@@ -4,7 +4,8 @@ using System.Text.Json.Nodes;
 namespace HarnessShared;
 
 /// <summary>Where a program finds the pieces it takes from SkyWright: the other programs (runcontrol, the probes),
-/// houseCARL's server and rulebook, and the app data. The one owner of that lookup.
+/// houseCARL's rulebook, and the app data. The one owner of that lookup. The build holds no houseCARL program: the app
+/// and runcontrol run houseCARL's code in process.
 /// <para>A build of the solution writes one folder per configuration, <c>bin\&lt;Configuration&gt;\&lt;.NET version&gt;\</c>:
 /// SkyWright.exe at its root, <c>Probes\&lt;name&gt;\</c>, <c>Tools\&lt;name&gt;\</c>, <c>Data\</c>, and the marker
 /// <c>skywright-layout.json</c>, which names where each piece is. <c>Directory.Build.props</c> owns that layout and
@@ -22,11 +23,11 @@ internal static class CheckoutLayout
     public const string LayoutMarker = "skywright-layout.json";
 
     /// <summary>The pieces a program can ask for, and the variable that overrides each.</summary>
-    public enum Piece { Server, Corpus, Registry, Severity, Runcontrol, Harness, ScenePolicy }
+    public enum Piece { Corpus, Registry, Severity, Runcontrol, Harness, ScenePolicy }
 
     public static string OverrideVariable(Piece p) => p switch
     {
-        Piece.Server => "WB_SERVER", Piece.Corpus => "WB_CORPUS", Piece.Registry => "WB_REGISTRY", Piece.Severity => "WB_SEVERITY",
+        Piece.Corpus => "WB_CORPUS", Piece.Registry => "WB_REGISTRY", Piece.Severity => "WB_SEVERITY",
         Piece.Runcontrol => "WB_RUNCONTROL", Piece.Harness => "WB_HARNESS", Piece.ScenePolicy => "WB_SCENE_POLICY",
         _ => throw new ArgumentOutOfRangeException(nameof(p)),
     };
@@ -39,13 +40,12 @@ internal static class CheckoutLayout
 
     /// <summary>The layout a build's marker names: relative paths, with {name} standing for a program's name.</summary>
     public sealed record Spec(string Configuration, string Program, string Tool, IReadOnlyList<string> Tools,
-                              string Server, string Corpus, string Registry, string Severity, string ScenePolicy)
+                              string Corpus, string Registry, string Severity, string ScenePolicy)
     {
         /// <summary>The names used only to say where a piece was expected when a folder has no marker. A test holds
         /// them equal to the marker a build writes.</summary>
-        public static readonly Spec Expected = new("", "Probes/{name}/{name}.exe", "Tools/{name}/{name}.exe", ["runcontrol", "housecarl-mcp"],
-            "Tools/housecarl-mcp/housecarl-mcp.exe", "Tools/housecarl-mcp/corpus.json", "Data/check-registry.json",
-            "Data/workbench-severity.json", "Data/scene-policy.json");
+        public static readonly Spec Expected = new("", "Probes/{name}/{name}.exe", "Tools/{name}/{name}.exe", ["runcontrol"],
+            "Data/corpus.json", "Data/check-registry.json", "Data/workbench-severity.json", "Data/scene-policy.json");
 
         public static Spec Read(string path)
         {
@@ -55,7 +55,7 @@ internal static class CheckoutLayout
                 if ((string?)o["kind"] != "skywright-build") throw new InvalidDataException("its kind is not skywright-build");
                 string S(string k) => (string?)o[k] is { Length: > 0 } v ? v : throw new InvalidDataException($"it has no {k}");
                 var tools = (o["tools"] as JsonArray ?? throw new InvalidDataException("it has no tools")).Select(n => (string?)n ?? "").ToList();
-                return new Spec(S("configuration"), S("program"), S("tool"), tools, S("server"), S("corpus"), S("registry"), S("severity"), S("scenePolicy"));
+                return new Spec(S("configuration"), S("program"), S("tool"), tools, S("corpus"), S("registry"), S("severity"), S("scenePolicy"));
             }
             catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException or ArgumentException)
             { throw new InvalidDataException(ex.Message, ex); }
@@ -96,7 +96,6 @@ internal static class CheckoutLayout
         /// <summary>A piece's path in this build (no override).</summary>
         public string PathOf(Piece p) => p switch
         {
-            Piece.Server => Path.Combine(Root, Native(Spec.Server)),
             Piece.Corpus => Path.Combine(Root, Native(Spec.Corpus)),
             Piece.Registry => Path.Combine(Root, Native(Spec.Registry)),
             Piece.Severity => Path.Combine(Root, Native(Spec.Severity)),

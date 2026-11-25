@@ -107,7 +107,7 @@ public sealed class OutputFolderRuleTests : IDisposable
         Assert.Null(Check(Path.Combine(_root, rel)));
 }
 
-/// <summary>B3, B3b, B3c: the houseCARL server writes a patch under the chosen output folder, extends it there and drops
+/// <summary>B3, B3b, B3c: houseCARL (compiled in since step 4) writes a patch under the chosen output folder, extends it there and drops
 /// an override from it; and the workbench has no lab constant left as its write guard.</summary>
 [Trait("tier", "integration")]
 public sealed class OutputWriteTests : IClassFixture<TiltedRefWorld>
@@ -115,31 +115,22 @@ public sealed class OutputWriteTests : IClassFixture<TiltedRefWorld>
     readonly TiltedRefWorld _w;
     public OutputWriteTests(TiltedRefWorld w) => _w = w;
 
-    static string ServerExe()
+    /// <summary>houseCARL's tools compiled into the app over this world (rewritten from the started server at step 4):
+    /// the same tool calls, the tool's own answer back.</summary>
+    sealed class Library : IAsyncDisposable
     {
-        var exe = TestBuild.Server;
-        Assert.True(File.Exists(exe), $"build src/housecarl-mcp in Release first: {exe}");
-        return exe;
+        internal readonly HousecarlLibrary Lib;
+        internal Library(HousecarlLibrary lib) => Lib = lib;
+        public async ValueTask DisposeAsync() => await Task.Run(Lib.Dispose);
     }
 
-    async Task<McpClient> Server()
-    {
-        var data = Path.Combine(_w.Root, "hcdata-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(data);
-        return await McpClient.CreateAsync(new StdioClientTransport(new StdioClientTransportOptions
-        {
-            Name = "housecarl", Command = ServerExe(),
-            Arguments = new[] { $"--HouseCarl:DataDir={_w.DataDir}", $"--HouseCarl:ModsDir={Path.Combine(_w.Instance, "mods")}",
-                                $"--HouseCarl:ProfileDir={Path.Combine(_w.Instance, "profiles", "Default")}", $"--HouseCarl:CorpusPath={TestCorpus.Path}" },
-            EnvironmentVariables = new Dictionary<string, string?> { ["HOUSECARL_DATA_DIR"] = data, ["HOUSECARL_RUNLOG_DIR"] = Path.Combine(data, "runs") },
-        }));
-    }
+    Task<Library> Server() => Task.FromResult(new Library(HousecarlLibrary.Open(
+        new WriteTarget(_w.Instance, "Default", _w.DataDir, Path.Combine(_w.Instance, "mods")),
+        Path.Combine(_w.Root, "hcdata-" + Guid.NewGuid().ToString("N")), TestCorpus.Path)));
 
-    static async Task<(bool Error, string Text)> Call(McpClient c, string tool, Dictionary<string, object?> args)
-    {
-        var r = await c.CallToolAsync(tool, args);
-        return (r.IsError == true, string.Join("\n", r.Content.OfType<TextContentBlock>().Select(b => b.Text)));
-    }
+    /// <summary>A refusal in process is houseCARL's own text (it never sets the flag the server's argument shim set), so
+    /// the flag here is always false and the tests read the text, as they did for most of the server's refusals.</summary>
+    static async Task<(bool Error, string Text)> Call(Library c, string tool, Dictionary<string, object?> args) => (false, await c.Lib.CallAsync(tool, args));
 
     static List<Dictionary<string, object?>> Move(float z) => new()
     {
@@ -742,7 +733,7 @@ public sealed class InPlaceRunTests
              .ToDictionary(p => p, p => File.Exists(p) ? (new FileInfo(p).Length, File.GetLastWriteTimeUtc(p)) : (-1L, Directory.GetLastWriteTimeUtc(p)));
 
     /// <summary>The synthetic world with a selection: mod folder SelMod, whose plugin places one reference in the master's cell.</summary>
-    static ModKey SelWorld(TiltedRefWorld w)
+    internal static ModKey SelWorld(TiltedRefWorld w)
     {
         var sel = new ModKey("HcWbSel", ModType.Plugin);
         var m = new SkyrimMod(sel, SkyrimRelease.SkyrimSE);
@@ -1010,7 +1001,6 @@ public sealed class OutputFolderLayoutTests : IDisposable
 public sealed class ManualWriteTests
 {
     static string Checkout() => R3Bundle.Checkout();
-    static string ServerExe() => TestBuild.Server;
 
     static Dictionary<string, (long, DateTime)> Listing(params string[] roots) =>
         roots.Where(Directory.Exists).SelectMany(r => Directory.EnumerateFileSystemEntries(r, "*", SearchOption.AllDirectories))
@@ -1027,19 +1017,20 @@ public sealed class ManualWriteTests
         return ctor.Invoke(args);
     }
 
-    static async Task<PatchWriter> Start(TiltedRefWorld w, string output)
+    // step 4: the writer is houseCARL's code compiled in (OpenInProcess); the server it started before is gone
+    static Task<PatchWriter> Start(TiltedRefWorld w, string output)
     {
-        var m = typeof(PatchWriter).GetMethod("StartAsync", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)!;
+        var m = typeof(PatchWriter).GetMethod("OpenInProcess", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)!;
         var args = m.GetParameters().Select(p => p.Name switch
         {
-            "serverExe" => (object?)ServerExe(), "target" => Target(w, output),
+            "target" => (object?)Target(w, output),
             "allowedInstances" => Array.Empty<string>(),            // the base's lab guard: no instance named as allowed
             "dataDir" => Path.Combine(w.Root, "hcdata-" + Guid.NewGuid().ToString("N")), "corpusPath" => TestCorpus.Path,
             "log" => (Action<string>)(_ => { }), "ct" => CancellationToken.None,
             _ => throw new Xunit.Sdk.XunitException($"PatchWriter.StartAsync has a parameter {p.Name} this test does not know"),
         }).ToArray();
-        try { return await (Task<PatchWriter>)m.Invoke(null, args)!; }
-        catch (InvalidOperationException ex) { throw new Xunit.Sdk.XunitException("the write on a non-lab instance in a manual session was refused: " + ex.Message); }
+        try { return Task.FromResult((PatchWriter)m.Invoke(null, args)!); }
+        catch (TargetInvocationException ex) when (ex.InnerException is InvalidOperationException ioe) { throw new Xunit.Sdk.XunitException("the write on a non-lab instance in a manual session was refused: " + ioe.Message); }
     }
 
     [Fact]
@@ -1076,22 +1067,15 @@ public sealed class ManualWriteTests
         File.WriteAllText(Path.Combine(w.Instance, "ModOrganizer.ini"), "[General]\r\ngameName=Skyrim Special Edition\r\ngamePath=@ByteArray(" + game.Replace("\\", "\\\\") + ")\r\nselected_profile=@ByteArray(Default)\r\n");
         Directory.CreateDirectory(Path.Combine(w.Instance, "overwrite"));
         var o = Path.Combine(w.Root, "out");
-        // the patch, written under the Output Folder by the server's out_path lane
-        var data = Path.Combine(w.Root, "hcdata"); Directory.CreateDirectory(data);
-        await using (var c = await McpClient.CreateAsync(new StdioClientTransport(new StdioClientTransportOptions
+        // the patch, written under the Output Folder by houseCARL's out_path lane (in process since step 4)
+        using (var lib = HousecarlLibrary.Open(new WriteTarget(w.Instance, "Default", w.DataDir, o), Path.Combine(w.Root, "hcdata"), TestCorpus.Path))
         {
-            Name = "housecarl", Command = ServerExe(),
-            Arguments = new[] { $"--HouseCarl:DataDir={w.DataDir}", $"--HouseCarl:ModsDir={Path.Combine(w.Instance, "mods")}",
-                                $"--HouseCarl:ProfileDir={Path.Combine(w.Instance, "profiles", "Default")}", $"--HouseCarl:CorpusPath={TestCorpus.Path}" },
-            EnvironmentVariables = new Dictionary<string, string?> { ["HOUSECARL_DATA_DIR"] = data, ["HOUSECARL_RUNLOG_DIR"] = Path.Combine(data, "runs") },
-        })))
-        {
-            var r = await c.CallToolAsync("housecarl_apply", new Dictionary<string, object?>
+            var said = await lib.CallAsync("housecarl_apply", new Dictionary<string, object?>
             {
                 ["ops"] = new[] { new Dictionary<string, object?> { ["formid"] = TiltedRefWorld.Ref.ToString(), ["field_path"] = "Placement.Position", ["value"] = "600,-256,64" } },
                 ["patch"] = "WbRe", ["out_path"] = o,
             });
-            Assert.False(r.IsError == true, string.Join("\n", r.Content.OfType<TextContentBlock>().Select(b => b.Text)));
+            Assert.False(said.TrimStart().StartsWith("error:"), said);
         }
         var folder = Path.Combine(o, "houseCARL - WbRe");
         Assert.True(File.Exists(Path.Combine(folder, "WbRe.esp")));
@@ -1129,71 +1113,3 @@ public sealed class ManualWriteTests
     }
 }
 
-/// <summary>the write tools whose lanes are patch= and into= (a new or existing houseCARL
-/// folder in the instance's mods folder) are forwarded when the Output Folder is that mods folder, which the output rule
-/// allows; a tool with its own out_path gets it mapped to the Output Folder; the rest are refused naming the concrete
-/// reason (no out_path lane) and what to choose instead.</summary>
-public sealed class ForwardRuleTests : IDisposable
-{
-    readonly string _root = Path.Combine(Path.GetTempPath(), "hc-wb-fwdrule-" + Guid.NewGuid().ToString("N"));
-    string Inst => Path.Combine(_root, "instance");
-    string Game => Path.Combine(_root, "game");
-    string Mods => Path.Combine(Inst, "mods");
-    string Elsewhere => Path.Combine(_root, "out");
-    public ForwardRuleTests()
-    {
-        foreach (var d in new[] { "mods/Enabled", "profiles/P", "overwrite" }) Directory.CreateDirectory(Path.Combine(Inst, d));
-        Directory.CreateDirectory(Path.Combine(Game, "Data"));
-    }
-    public void Dispose() { try { Directory.Delete(_root, true); } catch { } }
-
-    (Dictionary<string, JsonElement>? Args, string? Refusal) Prepare(string tool, string output, object args)
-    {
-        var given = JsonSerializer.SerializeToElement(args).EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone());
-        return ForwardRule.Prepare(tool, given, output, HousecarlCore.Mo2OutputLayout.Of(Inst, "P", Game));
-    }
-
-    public static readonly TheoryData<string> PatchLaneTools = new()
-    {
-        "housecarl_create_plugin", "housecarl_place", "housecarl_nif_set", "housecarl_compile_script", "housecarl_bsa_extract",
-        "housecarl_bsa_repack", "housecarl_write_seq", "housecarl_compact_plugin", "housecarl_merge_plugins",
-    };
-
-    [Theory, MemberData(nameof(PatchLaneTools))]
-    public void With_the_mods_folder_as_output_a_patch_lane_tool_is_forwarded_and_in_place_is_refused(string tool)
-    {
-        var (args, why) = Prepare(tool, Mods, new { patch = "WbNew" });
-        Assert.True(why is null, $"{tool} was refused with the mods folder as the Output Folder: {why}");
-        Assert.Equal("WbNew", args!["patch"].GetString());
-        Assert.NotNull(Prepare(tool, Mods, new { patch = "WbNew", in_place = true }).Refusal);
-    }
-
-    [Theory]
-    [InlineData("housecarl_compile_script")]
-    [InlineData("housecarl_bsa_extract")]
-    [InlineData("housecarl_write_seq")]
-    public void A_tool_with_its_own_out_path_gets_the_output_folder_and_an_out_path_outside_it_is_refused(string tool)
-    {
-        var (args, why) = Prepare(tool, Elsewhere, new { patch = "WbNew" });
-        Assert.True(why is null, $"{tool} was refused: {why}");
-        Assert.True(args!.ContainsKey("out_path"), $"{tool} was forwarded without the Output Folder as its out_path");
-        Assert.Equal(Elsewhere, args["out_path"].GetString());
-        Assert.Contains("Output Folder", Prepare(tool, Elsewhere, new { out_path = Path.Combine(_root, "other") }).Refusal);
-    }
-
-    [Theory]
-    [InlineData("housecarl_create_plugin")]
-    [InlineData("housecarl_place")]
-    [InlineData("housecarl_nif_set")]
-    [InlineData("housecarl_bsa_repack")]
-    [InlineData("housecarl_compact_plugin")]
-    [InlineData("housecarl_merge_plugins")]
-    public void A_tool_with_no_out_path_lane_is_refused_with_the_output_folder_elsewhere_naming_why_and_what_to_choose(string tool)
-    {
-        var why = Prepare(tool, Elsewhere, new { patch = "WbNew" }).Refusal;
-        Assert.NotNull(why);
-        Assert.DoesNotContain("\n", why);
-        Assert.Contains("out_path", why);                                   // the concrete reason: its lane takes none
-        Assert.Contains(HousecarlCore.OutputFolderPolicy.Full(Mods), why);   // and the folder that would let it run
-    }
-}

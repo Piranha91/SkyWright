@@ -75,11 +75,11 @@ internal interface IWorkbenchScene
         Task.FromResult<(IReadOnlyList<FormKey>, string?, string)>((Array.Empty<FormKey>(), "this scene cannot read which mod provides a reference.", ""));
     /// <summary>The detector row and the objects a decision on this row is keyed on, read now.</summary>
     Task<(RowState Row, IReadOnlyList<ObjectState> Objects, string ServerBuild)> DecisionInputsAsync(RankedRow row) =>
-        throw new InvalidOperationException("this scene has no houseCARL server to read the row's objects from.");
+        throw new InvalidOperationException("this scene has no write target to read the row's objects from; open it from the launcher's profile.");
     /// <summary>What the screen-centre ray hits first (a drawn, not hidden, reference or the terrain); null for nothing.</summary>
     PickHit? PickCentre() => null;
     /// <summary>Undo a written edit by removing its override from its patch; one sentence saying what was done.</summary>
-    Task<string> RevertWrittenAsync(FormKey key) => throw new InvalidOperationException("this scene has no houseCARL server to remove a written edit with.");
+    Task<string> RevertWrittenAsync(FormKey key) => throw new InvalidOperationException("this scene has no write target to remove a written edit with; open it from the launcher's profile.");
     /// <summary>The folder of a patch this session wrote, by its plugin name; null when not known.</summary>
     string? PatchFolderOf(string patch) => null;
     /// <summary>Item 5: the server's answers the context read composes; null where the scene has no server.</summary>
