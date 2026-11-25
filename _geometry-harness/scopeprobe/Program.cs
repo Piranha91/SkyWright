@@ -62,7 +62,13 @@ using Mutagen.Bethesda.Skyrim;
 //                 FormKey, signature, why, and whether the file's bytes located it or it is the record being read),
 //                 a walk failure says so in one sentence, and the scope is incomplete. Never an unhandled exception.
 //
-// EXIT CODES: 0 complete, 1 written but incomplete (walk failures named in the file and on the console), 2 refused.
+//   houseCARL's rulebook (corpus.json): the one this build carries, or WB_CORPUS. The location-contributor walk reads
+//                 each worldspace record's fields through it, so it is loaded before any walk; missing or unreadable, the
+//                 run says so in one sentence on stderr, writes no scope.json (deleting one an earlier run left at --json),
+//                 and exits 2.
+//
+// EXIT CODES: 0 complete, 1 written but incomplete (walk failures named in the file and on the console), 2 refused
+// (a configuration the engine would not load, an argument it cannot use, or no readable rulebook).
 
 // The probe's own output encoding: without it the bytes follow whatever code page the console was left in.
 Console.OutputEncoding = Encoding.UTF8;
@@ -127,6 +133,10 @@ var sw = Stopwatch.StartNew();
 var cfg = HarnessOrderCli.Resolve(profileName, profileDir, modsDir, dataDir, overwriteDir, GamePath,
                                   orderFile, enablePlugins, disablePlugins);
 if (cfg.Refused) return ScopeOutcome.Refuse(cfg.RefusedReason);
+// houseCARL's rulebook, from this build (or WB_CORPUS), loaded before any walk: the contributor walk reads every
+// worldspace record's fields through it. Without it the scope would look complete and miss who else edits the places.
+if (HousecarlRulebook.Require("scopeprobe", "it cannot tell which other plugins change the same places as the mod you are checking") is { } noRulebook)
+    return ScopeOutcome.Fail(noRulebook, jsonPath, __run);
 HarnessOrderCli.Print(cfg);
 
 var identity = cfg.Identity("load-time", "baseline");

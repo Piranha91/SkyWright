@@ -21,5 +21,7 @@
     <Compile Include="..\_shared\PlaceIndex.cs" Link="PlaceIndex.cs" />
     <Compile Include="..\_shared\MovedRefFixture.cs" Link="MovedRefFixture.cs" />
     <Compile Include="..\_shared\ProbeSelfTest.cs" Link="ProbeSelfTest.cs" />
+    <Compile Include="..\_shared\CheckoutLayout.cs" Link="CheckoutLayout.cs" />
+    <Compile Include="..\_shared\HousecarlRulebook.cs" Link="HousecarlRulebook.cs" />
   </ItemGroup>
 </Project>

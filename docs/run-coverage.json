@@ -1201,7 +1201,8 @@
         }
       ],
       "inputs": [
-        "Target plugin and configured load order."
+        "Target plugin and configured load order.",
+        "houseCARL's rulebook (corpus.json): the one this build carries, or WB_CORPUS; missing or unreadable, the run exits 2 in one sentence and writes no scope."
       ],
       "outputs": [
         "Content counts and measured evaluation scope."

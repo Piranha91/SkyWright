@@ -5781,7 +5781,7 @@ Modifiers (do not select a separate mode):
 
 Establish the target population before choosing checks for a mod evaluation.
 
-Inputs: Target plugin and configured load order.
+Inputs: Target plugin and configured load order.; houseCARL's rulebook (corpus.json): the one this build carries, or WB_CORPUS; missing or unreadable, the run exits 2 in one sentence and writes no scope.
 
 Outputs: Content counts and measured evaluation scope.
 
