@@ -611,6 +611,7 @@ static class NavEditCli
         var corpus = layout.PathOf(CheckoutLayout.Piece.Corpus);
         if (!File.Exists(corpus)) throw new Refusal($"navedit write: the rulebook {corpus} is missing; generate it (see CLAUDE.md, Build and check).");
         var rulebook = CorpusRulebook.Load(corpus);
+        HousecarlRulebook.Use(corpus);   // houseCARL's own reads in the write (its confirmation notes) take the same rulebook
         Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
 
         var edits = again.SelectMany(p => p.Ops).Select(o => new WritePatchBuilder.PatchEdit
@@ -773,6 +774,7 @@ static class NavEditCli
         var corpus = layout.PathOf(CheckoutLayout.Piece.Corpus);
         if (!File.Exists(corpus)) throw new Refusal($"navedit write: the rulebook {corpus} is missing; generate it (see CLAUDE.md, Build and check).");
         var rulebook = CorpusRulebook.Load(corpus);
+        HousecarlRulebook.Use(corpus);   // houseCARL's own reads in the write (its confirmation notes) take the same rulebook
         Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
         var edits = ops.Select(o => new WritePatchBuilder.PatchEdit
         {
