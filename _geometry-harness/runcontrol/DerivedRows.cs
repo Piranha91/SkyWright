@@ -25,6 +25,45 @@ public static class DerivedRows
     // A count read from a receipt, 0 when absent.
     static object Count(PyDict d, string key) => d.ContainsKey(key) ? d[key]! : 0L;
 
+    /// <summary>What the accepted receipts consumed, by content: each plugin sha256 with the arms that consumed it, and
+    /// each lower-cased plugin file name with the sha256s consumed under it.</summary>
+    public sealed record Consumed(Dictionary<string, SortedSet<string>> ByHash, Dictionary<string, HashSet<string>> ByName);
+
+    /// <summary>The plugins every accepted receipt consumed (its consumed.configuration.plugins), by sha256.</summary>
+    public static Consumed ConsumedBy(PyDict receipts)
+    {
+        // qualification compares bytes: the sha256 each accepted receipt consumed. The name only labels the row.
+        var consumedBy = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
+        var byName = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var r in Vals(receipts).Where(Accepted))
+            foreach (var p in Ev.Items(Ev.OrEmpty(PyValue.Dict(Ev.G(r, "consumed", new PyDict())).Get("configuration")).Get("plugins")).Select(PyValue.Dict))
+            {
+                if (Sha(p.Get("sha256")) is not { } sha) continue;
+                if (!consumedBy.ContainsKey(sha)) consumedBy[sha] = new SortedSet<string>(PyOrder.CodePoint);
+                consumedBy[sha].Add(Ev.Str(r.Get("armId")));
+                if (!PyValue.Truthy(p.Get("name"))) continue;
+                string name = PyText.Lower(PyPath.Name(Ev.Str(p["name"])));
+                if (!byName.ContainsKey(name)) byName[name] = new HashSet<string>(StringComparer.Ordinal);
+                byName[name].Add(sha);
+            }
+        return new Consumed(consumedBy, byName);
+    }
+
+    /// <summary>The byte rule of a patch's qualification: a file is qualified only when its sha256 (taken from
+    /// <paramref name="from"/>) equals a plugin an accepted receipt consumed. <paramref name="noHash"/> is the clause
+    /// saying why there is no sha256; <paramref name="name"/> labels the file and finds same-named plugins.</summary>
+    public static (bool qualified, string why) Qualify(Consumed consumed, string? sha, string name, string from, string noHash)
+    {
+        if (sha == null)
+            return (false, noHash + ", so its bytes cannot be compared with any evaluated arm's: a downloadable hit stays a lead until its payload is measured");
+        if (consumed.ByHash.TryGetValue(sha, out var arms))
+            return (true, $"its sha256 {Short(sha)} (from {from}) equals a plugin an accepted receipt consumed on {string.Join(", ", arms)}");
+        var sameName = PyOrder.SortedByCodePoint((consumed.ByName.GetValueOrDefault(PyText.Lower(PyPath.Name(name))) ?? []).Where(s => s != sha));
+        return (false, $"its sha256 {Short(sha)} (from {from}) matches no plugin any accepted receipt consumed"
+                       + (sameName.Count > 0 ? $"; an accepted receipt consumed a different {name} (sha256 " + string.Join(", ", sameName.Select(Short)) + ")" : "")
+                       + ": a downloadable hit stays a lead until its payload is measured");
+    }
+
     /// <summary>The receipt ids of the accepted discovery receipts, in receipt order.</summary>
     public static List<object?> DiscoveryReceiptIds(PyDict receipts) =>
         Vals(receipts).Where(r => Accepted(r) && DiscoveryReceipt(r)).Select(r => r["receiptId"]).ToList();
@@ -34,7 +73,7 @@ public static class DerivedRows
     /// a plan pair's plugin; it is qualified only when its sha256 equals a plugin an accepted receipt consumed. An
     /// output file is read only after its sha256 matches the one its receipt recorded.</summary>
     public static (List<object?> rows, PyDict notRelevant, List<object?> unreadable, List<object?> notSearched) DiscoveryHitRows(
-        Executor ex, PyDict receipts, Dictionary<string, SortedSet<string>> consumedBy, Dictionary<string, HashSet<string>> byName)
+        Executor ex, PyDict receipts, Consumed consumed)
     {
         var relevant = Discovery.RelevantPlugins(ex.Run, ex.Plan);
         var rows = new List<object?>();
@@ -91,20 +130,8 @@ public static class DerivedRows
                         .Cast<object?>().ToList();
                     continue;
                 }
-                bool hitOk = hsha != null && consumedBy.ContainsKey(hsha);
-                string why;
-                if (hsha == null)
-                    why = $"the {exe} hit records no content hash ({(PyValue.Truthy(h.Get("unhashedReason")) ? Ev.Str(h["unhashedReason"]) : "no reason given")}), so "
-                          + "its bytes cannot be compared with any evaluated arm's: a downloadable hit stays a lead until its payload is measured";
-                else if (hitOk)
-                    why = $"its sha256 {Short(hsha)} (from {exe}'s hit list) equals a plugin an accepted receipt consumed on {string.Join(", ", consumedBy[hsha])}";
-                else
-                {
-                    var sameName = PyOrder.SortedByCodePoint((byName.GetValueOrDefault(PyText.Lower(PyPath.Name(file))) ?? []).Where(s => s != hsha));
-                    why = $"its sha256 {Short(hsha)} (from {exe}'s hit list) matches no plugin any accepted receipt consumed"
-                          + (sameName.Count > 0 ? $"; an accepted receipt consumed a different {file} (sha256 " + string.Join(", ", sameName.Select(Short)) + ")" : "")
-                          + ": a downloadable hit stays a lead until its payload is measured";
-                }
+                var (hitOk, why) = Qualify(consumed, hsha, file, $"{exe}'s hit list",
+                    $"the {exe} hit records no content hash ({(PyValue.Truthy(h.Get("unhashedReason")) ? Ev.Str(h["unhashedReason"]) : "no reason given")})");
                 var row = new PyDict
                 {
                     ["file"] = file, ["armId"] = null, ["source"] = source, ["foundOn"] = new List<object?> { Ev.Str(r.Get("armId")) },
@@ -209,20 +236,7 @@ public static class DerivedRows
         else if (Ev.Eq(adapter.Get("derives"), "candidate-qualification") || cid.EndsWith("candidate-qualification", StringComparison.Ordinal))
         {
             if (Blocked()) return;
-            // qualification compares bytes: the sha256 each accepted receipt consumed. The name only labels the row.
-            var consumedBy = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
-            var byName = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
-            foreach (var r in Vals(receipts).Where(Accepted))
-                foreach (var p in Ev.Items(Ev.OrEmpty(PyValue.Dict(Ev.G(r, "consumed", new PyDict())).Get("configuration")).Get("plugins")).Select(PyValue.Dict))
-                {
-                    if (Sha(p.Get("sha256")) is not { } sha) continue;
-                    if (!consumedBy.ContainsKey(sha)) consumedBy[sha] = new SortedSet<string>(PyOrder.CodePoint);
-                    consumedBy[sha].Add(Ev.Str(r.Get("armId")));
-                    if (!PyValue.Truthy(p.Get("name"))) continue;
-                    string name = PyText.Lower(PyPath.Name(Ev.Str(p["name"])));
-                    if (!byName.ContainsKey(name)) byName[name] = new HashSet<string>(StringComparer.Ordinal);
-                    byName[name].Add(sha);
-                }
+            var consumed = ConsumedBy(receipts);
             derivedFrom = Vals(receipts).Where(Accepted).Select(r => r["receiptId"]).ToList();
             var manifest = PyJson.LoadEvalFile(PyPath.Join(ex.Run, "candidates", "candidates.json"));
             var rows = new List<object?>();
@@ -238,21 +252,9 @@ public static class DerivedRows
                     string key = PyText.Lower(name);
                     var req = recorded.GetValueOrDefault(key);
                     string? sha = Sha(req?.Get("sha256"));
-                    bool qualified = sha != null && consumedBy.ContainsKey(sha);
-                    string why;
-                    if (sha == null)
-                        why = $"this arm's request records no content hash (sha256) for {name} ("
-                              + (PyValue.Truthy(req?.Get("unstatedReason")) ? Ev.Str(req!["unstatedReason"]) : "the request does not list it")
-                              + "), so its bytes cannot be compared with any evaluated arm's: a downloadable hit stays a lead until its payload is measured";
-                    else if (qualified)
-                        why = $"its sha256 {Short(sha)} (from this arm's request) equals a plugin an accepted receipt consumed on {string.Join(", ", consumedBy[sha])}";
-                    else
-                    {
-                        var sameName = PyOrder.SortedByCodePoint((byName.GetValueOrDefault(key) ?? []).Where(s => s != sha));
-                        why = $"its sha256 {Short(sha)} (from this arm's request) matches no plugin any accepted receipt consumed"
-                              + (sameName.Count > 0 ? $"; an accepted receipt consumed a different {name} (sha256 " + string.Join(", ", sameName.Select(Short)) + ")" : "")
-                              + ": a downloadable hit stays a lead until its payload is measured";
-                    }
+                    var (qualified, why) = Qualify(consumed, sha, name, "this arm's request",
+                        $"this arm's request records no content hash (sha256) for {name} ("
+                        + (PyValue.Truthy(req?.Get("unstatedReason")) ? Ev.Str(req!["unstatedReason"]) : "the request does not list it") + ")");
                     rows.Add(new PyDict
                     {
                         ["file"] = name, ["armId"] = arm2["armId"], ["sha256"] = sha,
@@ -272,7 +274,7 @@ public static class DerivedRows
                         });
                 }
             // every discovered patch: each relevant hit of an accepted discovery receipt is one row, qualified by the same rule
-            var (hitRows, notRelevant, unreadable, notSearched) = DiscoveryHitRows(ex, receipts, consumedBy, byName);
+            var (hitRows, notRelevant, unreadable, notSearched) = DiscoveryHitRows(ex, receipts, consumed);
             rows.AddRange(hitRows);
             foreach (var rid in DiscoveryReceiptIds(receipts))
                 if (!PyValue.In(rid, derivedFrom)) derivedFrom.Add(rid);
