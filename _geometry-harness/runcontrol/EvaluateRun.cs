@@ -171,25 +171,7 @@ public static class EvaluateRun
                     advance();
                     continue;
                 }
-                if (Ev.Eq(st, "not-applicable"))
-                    ex.Account(check, arm, "not-applicable", null, PyValue.Truthy(check.Get("applicabilityEvidence")) ? (string)check["applicabilityEvidence"]! : "");
-                else if (Ev.Eq(st, "excluded"))
-                    ex.Account(check, arm, "skipped-user", null,
-                        Ev.Str(Ev.G(PyValue.Dict(PyValue.Dict(plan["explicitDecisions"])["exclude"]), cid, "excluded by the caller")));
-                else if (Ev.Eq(st, "skipped-user"))
-                    ex.Account(check, arm, "skipped-user", null, "not in --select; --select narrows what runs, never what is planned");
-                else if (Ev.Eq(st, "unsupported-for-arm"))
-                    ex.Account(check, arm, "unsupported", null, $"this adapter does not accept the {Ev.Str(arm["kind"])} arm as an input the plan can hand it");
-                else if (Ev.Eq(st, "skipped-budget"))
-                    ex.Account(check, arm, "skipped-budget", "budget-exhausted",
-                        $"arm {Ev.Str(aid)} was held back by --max-candidates {Ev.Str(PyValue.Dict(plan["budgets"])["maxCandidates"])}: it was planned and not evaluated");
-                else if (Ev.Eq(st, "blocked-payload-missing"))
-                    ex.Account(check, arm, "blocked(payload-missing)", "blocked-prerequisite",
-                        "the supplied arm declares files that are not in the configuration: "
-                        + string.Join(", ", PyValue.Iter(PyValue.Dict(arm["supplied"])["payloadMissing"]).Select(x => (string)x!)));
-                else if (Ev.Eq(st, EvalStore.NotOptedIn))
-                    ex.Account(check, arm, "skipped-user", null,
-                        "opt-in check, not requested (`plan --opt-in " + cid + "`): it was not run and this evaluation says nothing about it");
+                if (AccountPlanStatus(ex, check, arm, st)) { }
                 else if (Import(st) && Prerequisites.UncreditedImportStillBlocked(ex, check, aid))
                 {
                     // an import this gate un-credited earlier stays blocked, by name, while its prerequisite still fails
@@ -271,6 +253,37 @@ public static class EvaluateRun
                 DerivedRows.Run(ex, check, arm);
             }
         }
+    }
+
+    /// <summary>A row the plan already answered (not applicable, excluded, not selected, an arm the adapter does not
+    /// take, a held-back arm, a missing payload, an opt-in check not opted in), accounted by its plan status; false for
+    /// a status this rule does not answer. runcontrol's evaluation and another program evaluating a plan of its own
+    /// use the same rule.</summary>
+    public static bool AccountPlanStatus(Executor ex, PyDict check, PyDict arm, object? st)
+    {
+        var plan = ex.Plan;
+        string cid = Ev.Str(check["checkId"]);
+        if (Ev.Eq(st, "not-applicable"))
+            ex.Account(check, arm, "not-applicable", null, PyValue.Truthy(check.Get("applicabilityEvidence")) ? (string)check["applicabilityEvidence"]! : "");
+        else if (Ev.Eq(st, "excluded"))
+            ex.Account(check, arm, "skipped-user", null,
+                Ev.Str(Ev.G(PyValue.Dict(PyValue.Dict(plan["explicitDecisions"])["exclude"]), cid, "excluded by the caller")));
+        else if (Ev.Eq(st, "skipped-user"))
+            ex.Account(check, arm, "skipped-user", null, "not in --select; --select narrows what runs, never what is planned");
+        else if (Ev.Eq(st, "unsupported-for-arm"))
+            ex.Account(check, arm, "unsupported", null, $"this adapter does not accept the {Ev.Str(arm["kind"])} arm as an input the plan can hand it");
+        else if (Ev.Eq(st, "skipped-budget"))
+            ex.Account(check, arm, "skipped-budget", "budget-exhausted",
+                $"arm {Ev.Str(arm["armId"])} was held back by --max-candidates {Ev.Str(PyValue.Dict(plan["budgets"])["maxCandidates"])}: it was planned and not evaluated");
+        else if (Ev.Eq(st, "blocked-payload-missing"))
+            ex.Account(check, arm, "blocked(payload-missing)", "blocked-prerequisite",
+                "the supplied arm declares files that are not in the configuration: "
+                + string.Join(", ", PyValue.Iter(PyValue.Dict(arm["supplied"])["payloadMissing"]).Select(x => (string)x!)));
+        else if (Ev.Eq(st, EvalStore.NotOptedIn))
+            ex.Account(check, arm, "skipped-user", null,
+                "opt-in check, not requested (`plan --opt-in " + cid + "`): it was not run and this evaluation says nothing about it");
+        else return false;
+        return true;
     }
 
     /// <summary>Whether an earlier invocation settled this (check, arm, part): completed or reused, or an accepted
