@@ -99,6 +99,68 @@ public static class GenericRows
     /// with when it cannot be filled.</summary>
     public delegate (string status, string why)? Placeholder(Executor ex, PyDict plan, PyDict check, PyDict arm, List<string> args);
 
+    /// <summary>runcontrol's own placeholders beyond the plain substitutions; a caller's entry of the same token wins.</summary>
+    public static readonly IReadOnlyDictionary<string, Placeholder> OwnPlaceholders = new Dictionary<string, Placeholder>(StringComparer.Ordinal)
+    {
+        ["{nexusId}"] = NexusIdPlaceholder,
+        ["{pair}"] = PairPlaceholder,
+    };
+
+    /// <summary>runcontrol's own rules over a built command line (each may add to it, or refuse the row with a status
+    /// and a sentence), run after the common flags and before the outputs are named.</summary>
+    public static readonly IReadOnlyList<Placeholder> OwnArgvRules = [AdviceArgv];
+
+    static (string status, string why)? NexusIdPlaceholder(Executor ex, PyDict plan, PyDict check, PyDict arm, List<string> args)
+    {
+        object? nid = PlanNexusId(plan);
+        if (!PyValue.Truthy(nid))
+            return ("blocked(no-nexus-id)",
+                "the scope records no Nexus id for any target (the mod folder's meta.ini carries none), so there is no page to read offline");
+        args.Add(Ev.Str(nid));
+        return null;
+    }
+
+    static (string status, string why)? PairPlaceholder(Executor ex, PyDict plan, PyDict check, PyDict arm, List<string> args)
+    {
+        // the reference arm runs once with the plan-wide set; another arm runs with the moves that arm makes
+        object? review = plan.Get("reviewArm");
+        bool reference = Ev.Eq(arm["armId"], review) || (!PyValue.Truthy(review) && Ev.Eq(arm["kind"], "baseline"));
+        var pairs = reference ? Discovery.AllPlanPairs(ex.Run, plan) : Discovery.TargetPairs(plan, arm);
+        if (pairs.Count == 0 && !reference) pairs = Discovery.AllPlanPairs(ex.Run, plan);
+        if (pairs.Count == 0)
+            return ("blocked(no-pair-source)",
+                PyValue.Truthy(review) ? PairSourceNone
+                    : "the candidate manifest records no move involving a target plugin, so there is no plugin pair for this check to verify");
+        string flag = "--pair";
+        if (args.Count > 0 && args[^1].StartsWith("--", StringComparison.Ordinal))
+        {
+            flag = args[^1];
+            args.RemoveAt(args.Count - 1);
+        }
+        foreach (var (a, b) in pairs) args.AddRange([flag, a, b]);
+        return null;
+    }
+
+    /// <summary>adviceprobe's command line: offline only, and the evaluated mod's neighbours by Nexus id.</summary>
+    static (string status, string why)? AdviceArgv(Executor ex, PyDict plan, PyDict check, PyDict arm, List<string> argv)
+    {
+        if (!Ev.Eq(Ev.OrEmpty(check.Get("adapter")).Get("kind"), "adviceprobe")) return null;
+        int at = argv.IndexOf("--refresh");
+        if (at >= 0)
+        {
+            string word = at + 1 < argv.Count ? argv[at + 1] : "";
+            if (word != "offline")
+                return ("blocked(network-refused)",
+                    $"the registry adapter asks for --refresh {PyText.Repr(word)}; evalrun never fetches. "
+                    + "Use --refresh offline, or run adviceprobe yourself and supply its output.");
+        }
+        else if (!argv.Contains("--offline")) argv.Add("--offline");
+        if (!argv.Contains("--with"))
+            // the evaluated mod's neighbours: a clash stated on their page is author advice for the pair
+            foreach (long id in AdviceNeighbourIds(plan)) argv.AddRange(["--with", id.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+        return null;
+    }
+
     public static void Build(Executor ex, PyDict check, PyDict arm, Action<List<string>, List<string>, object?> launch,
         IReadOnlyDictionary<string, Placeholder>? placeholders = null)
     {
@@ -143,9 +205,11 @@ public static class GenericRows
 
         var raw = Ev.Items(adapter.Get("args")).Select(a => (string)a!).ToList();
         var args = new List<string>();
+        var fills = new Dictionary<string, Placeholder>(OwnPlaceholders, StringComparer.Ordinal);
+        foreach (var (k, v) in placeholders ?? new Dictionary<string, Placeholder>()) fills[k] = v;
         foreach (string token in raw)
         {
-            if (placeholders != null && placeholders.TryGetValue(token, out var fill))
+            if (fills.TryGetValue(token, out var fill))
             {
                 if (fill(ex, plan, check, arm, args) is { } unfilled)
                 {
@@ -183,18 +247,6 @@ public static class GenericRows
                 else args.AddRange(names);
                 continue;
             }
-            if (token == "{nexusId}")
-            {
-                object? nid = PlanNexusId(plan);
-                if (!PyValue.Truthy(nid))
-                {
-                    ex.Account(check, arm, "blocked(no-nexus-id)", null,
-                        "the scope records no Nexus id for any target (the mod folder's meta.ini carries none), so there is no page to read offline");
-                    return;
-                }
-                args.Add(Ev.Str(nid));
-                continue;
-            }
             if (token == "{switchMap}")
             {
                 string? path = DeepStates.AcceptedCensus(ex, arm);
@@ -205,29 +257,6 @@ public static class GenericRows
                     return;
                 }
                 args.Add(path);
-                continue;
-            }
-            if (token == "{pair}")
-            {
-                // the reference arm runs once with the plan-wide set; another arm runs with the moves that arm makes
-                object? review = plan.Get("reviewArm");
-                bool reference = Ev.Eq(arm["armId"], review) || (!PyValue.Truthy(review) && Ev.Eq(arm["kind"], "baseline"));
-                var pairs = reference ? Discovery.AllPlanPairs(ex.Run, plan) : Discovery.TargetPairs(plan, arm);
-                if (pairs.Count == 0 && !reference) pairs = Discovery.AllPlanPairs(ex.Run, plan);
-                if (pairs.Count == 0)
-                {
-                    ex.Account(check, arm, "blocked(no-pair-source)", null,
-                        PyValue.Truthy(review) ? PairSourceNone
-                            : "the candidate manifest records no move involving a target plugin, so there is no plugin pair for this check to verify");
-                    return;
-                }
-                string flag = "--pair";
-                if (args.Count > 0 && args[^1].StartsWith("--", StringComparison.Ordinal))
-                {
-                    flag = args[^1];
-                    args.RemoveAt(args.Count - 1);
-                }
-                foreach (var (a, b) in pairs) args.AddRange([flag, a, b]);
                 continue;
             }
             args.Add(token.Replace("{order}", Ev.Str(arm["candidatePath"])).Replace("{emit}", emit).Replace("{json}", emit)
@@ -292,25 +321,12 @@ public static class GenericRows
             argv.AddRange([(string)adapter["primitiveSolidityFlag"]!, tfile]);
         }
 
-        if (Ev.Eq(kind, "adviceprobe"))
-        {
-            int at = argv.IndexOf("--refresh");
-            if (at >= 0)
+        foreach (var rule in OwnArgvRules)
+            if (rule(ex, plan, check, arm, argv) is { } refused)
             {
-                string word = at + 1 < argv.Count ? argv[at + 1] : "";
-                if (word != "offline")
-                {
-                    ex.Account(check, arm, "blocked(network-refused)", null,
-                        $"the registry adapter asks for --refresh {PyText.Repr(word)}; evalrun never fetches. "
-                        + "Use --refresh offline, or run adviceprobe yourself and supply its output.");
-                    return;
-                }
+                ex.Account(check, arm, refused.status, null, refused.why);
+                return;
             }
-            else if (!argv.Contains("--offline")) argv.Add("--offline");
-            if (!argv.Contains("--with"))
-                // the evaluated mod's neighbours: a clash stated on their page is author advice for the pair
-                foreach (long id in AdviceNeighbourIds(plan)) argv.AddRange(["--with", id.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
-        }
 
         // where the result lands: the file the probe writes, not a file named for it
         var outputs = new List<string> { emit };
