@@ -1429,3 +1429,28 @@ def case_800(tmp):
 
 
 # ---- moved from test_evalrun.py (end)
+
+
+def case_802(tmp):
+    """The report's load-order split ("fields on records the declared patch has a version of") reads the patched
+    setup's record transcripts. Since the record checks left the app's registry those imports are in the AI-side
+    overlay, not in the app bundle's folder: on a joined bundle evalreport.record_imports must find the overlay's
+    credited import (the wrong answer it rejects: reading only the app bundle's folder, finding none, and the split
+    silently counting nothing)."""
+    import importlib.util
+    case = "case-802-report-reads-overlay-record-imports"
+    bundle, plan, cid, arm, names = recorded_bundle(tmp, case)
+    app = tmp / f"{case}-run" / "ai-app-bundle"
+    check((app / "manifest.json").is_file(), f"{case}: premise - the app bundle the overlay was planned over is at {app}")
+    spec = importlib.util.spec_from_file_location("evalreport_case_802", SW.MODULE / "evalreport.py")
+    er = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(er)
+    er.AI_BUNDLES[str(app.resolve())] = bundle.resolve()
+    joined = er.Bundle(app)
+    check(joined.overlay is not None, f"{case}: premise - the app bundle is read joined with its overlay")
+    found = [(rc.get("checkId"), rc.get("armId")) for rc, *_ in er.record_imports(joined)]
+    expect(found, [(cid, arm["armId"])],
+           f"{case}: the joined bundle's credited record imports are the overlay's one import", "load-order split")
+    er.AI_BUNDLES.clear()
+    expect([(rc.get("checkId"), rc.get("armId")) for rc, *_ in er.record_imports(er.Bundle(app))], [],
+           f"{case}: the app bundle read alone holds no record import (the premise of the overlay read)", "load-order split")

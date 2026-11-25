@@ -1915,6 +1915,16 @@ def _pair_lost_keys(b: "Bundle", arm_id: str, pair: list, variant: bool = False)
     return keys, dict(by_loser)
 
 
+def record_imports(b: "Bundle") -> list:
+    """The credited record imports a reader of bundle `b` can use (recordenrich._record_imports' tuples): the app
+    bundle's own (a bundle made before the record checks left the app's registry holds them there) and, on a bundle
+    joined with its AI-side overlay, the overlay's, read from the overlay's own folder and manifest."""
+    out = list(recordenrich._record_imports(b.dir, load_json(b.dir / "manifest.json") or {}))
+    if b.overlay is not None:
+        out += recordenrich._record_imports(b.overlay, load_json(b.overlay / "manifest.json") or {})
+    return out
+
+
 def load_order_fact(ctx: dict, p_arm: str, patched_arm, pair: list, words: dict) -> dict | None:
     """Item 18 (roadmap 4.24 phase 3): whether the evaluated pair's order is a choice, which orders were weighed, the
     record fields that change hands between them (the union of the pair's lost edits over the measured order and the
@@ -1928,9 +1938,14 @@ def load_order_fact(ctx: dict, p_arm: str, patched_arm, pair: list, words: dict)
     if main_b is None:
         return None
     w = words.get("loadOrderWords") or {}
-    heads = bundleenrich.pair_headers(main_b.dir, main_b.manifest, main_b.plan, pair)
+    # the plan's setups, then the record imports' own configurations (the bytes they read), the app bundle's and,
+    # joined, the overlay's
+    heads = bundleenrich.pair_headers(main_b.dir, main_b.manifest, main_b.plan, pair,
+                                      extra_sources=[cfg.get("plugins") or [] for *_, cfg in record_imports(main_b)])
     if len(heads) < 2 and sib is not None:
-        heads = {**bundleenrich.pair_headers(sib.dir, sib.manifest, sib.plan, pair), **heads}
+        heads = {**bundleenrich.pair_headers(sib.dir, sib.manifest, sib.plan, pair,
+                                             extra_sources=[c.get("plugins") or [] for *_, c in record_imports(sib)]),
+                 **heads}
     ch = bundleenrich.order_choice(pair, heads)
     arm = next((a for a in main_b.plan.get("arms") or [] if a.get("armId") == p_arm), {}) or {}
     names = [str(x.get("name")) for x in (arm.get("requested") or {}).get("plugins") or []]
@@ -1968,7 +1983,7 @@ def load_order_fact(ctx: dict, p_arm: str, patched_arm, pair: list, words: dict)
         import recordrows as RR_
         scope_ = RR_.load_scope()
         carried = set()
-        for rc_, _, req_, resp_, cfg_ in recordenrich._record_imports(main_b.dir, main_b.manifest):
+        for rc_, _, req_, resp_, cfg_ in record_imports(main_b):
             if rc_.get("armId") != patched_arm:
                 continue
             for fk_, c_ in RR_.read_chains(req_, resp_, cfg_.get("plugins") or [], scope_).items():

@@ -215,7 +215,7 @@ CASES = {"case-10": case_10, "C1933": c1933, "plan-oracles": plan_oracles, "reco
 # The app suite's cases about importing a record check's evidence (17, 42, 43, 44, 65, and case 18's import half) and
 # about the rows derived from an import (61, 800) moved here with the record checks (evalrun_record_cases.py), on the
 # AI-side overlay; they run under their names over the app suite's engine.
-RECORD_CASES = ["case-17", "case-18", "case-42", "case-43", "case-44", "case-61", "case-65", "case-800"]
+RECORD_CASES = ["case-17", "case-18", "case-42", "case-43", "case-44", "case-61", "case-65", "case-800", "case-802"]
 
 
 def run_record_cases(argv) -> int:
