@@ -5,6 +5,9 @@ R5's supplied media goes to an overlay (evalcontrol, this module's controller of
 app run, evaluated, finalized, bundled with --media beside the app bundle, and verified with it. The overlay run is
 RUN/ai, its bundle RUN/ai-bundle (bound to RUN/bundle as ../bundle), recorded in the case as aiBundle.
 
+R1 (UNANSWERED_OVERLAY_CASES) gets the same overlay with nothing supplied: its AI-side rows (the record and
+dangling-reference rows among them) are left unanswered, so the joined report must list each as a missing finding.
+
 R7 (imported evidence: where it came from) is made here whole, since its subject is an import: the app run (a small
 derived-registry setup, masters-and-order only, its last arm refused) is planned, run, finalized and bundled by
 SkyWright's controller; the overlay over it imports one record result fresh on the first arm and one reused, declaring
@@ -92,16 +95,21 @@ def make_import_origin_case(root: Path) -> dict:
             "prerequisite": T.MAO, "reusedFrom": IMPORT_REUSED_FROM, "planId": plan["planId"]}
 
 
+#: cases whose app bundle gets an overlay with nothing supplied: its AI-side rows stay unanswered, so the joined report
+#: lists them as missing (R1: the record and dangling-reference rows R1's report listed before they left the app)
+UNANSWERED_OVERLAY_CASES = ("R1-intact-incomplete",)
+
+
 def add_overlays(root: Path, index: dict, only: str | None = None) -> None:
     for case, entry in index.items():
-        if not isinstance(entry, dict) or not entry.get("media"):
+        if not isinstance(entry, dict) or not (entry.get("media") or case in UNANSWERED_OVERLAY_CASES):
             continue
         run = Path(entry["run"])
         ai, ai_bundle = run / "ai", run / "ai-bundle"
         steps = [("plan", ["plan", "--app", run, "--app-bundle", entry["bundle"], "--out", ai]),
                  ("evaluate", ["evaluate", "--run", ai]),
                  ("finalize", ["finalize", "--run", ai]),
-                 ("bundle", ["bundle", "--run", ai, "--out", ai_bundle, "--media", entry["media"]]),
+                 ("bundle", ["bundle", "--run", ai, "--out", ai_bundle, *(["--media", entry["media"]] if entry.get("media") else [])]),
                  ("verify", ["verify", ai_bundle])]
         for name, argv in steps:
             r = evalcontrol(*argv)

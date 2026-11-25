@@ -1808,6 +1808,8 @@ def case_r1(tmp, index, common):
     for k in o["findings"]["kindAbsent"]:
         check(k not in kinds, f"{case}: no finding of kind {k}")
     req = required_missing(disp)
+    if str(bundle) in AI_OF:      # the overlay's unanswered rows are the evaluation's missing rows too (the report joins them)
+        req += required_missing(load(Path(AI_OF[str(bundle)]) / "disposition.json") or {})
     for m in req:
         hit = finding_where(pres, kind="missing", checkId=m["checkId"], armId=m["armId"])
         check(bool(hit), f"{case}: a `missing` finding for {m['checkId']} [{m['armId']}] (D3 (2))")
