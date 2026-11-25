@@ -514,7 +514,7 @@ def capture_records(ctx, res: dict, sdir: Path) -> tuple[dict, list]:
         raise Refusal(str(ex))
     n = len(list(sdir.glob("capture-*")))
     cap = sdir / f"capture-{n + 1:02d}"
-    argv = [capture_python(ctx), fwd(SW.HARNESS / "evalrecords.py"), "capture", "--run", fwd(run),
+    argv = [capture_python(ctx), fwd(HERE / "evalrecords.py"), "capture", "--run", fwd(run),
             *[x for a in open_arms for x in ("--arm", a)],
             "--baseline-from", fwd(ctx.out / "prepare" / "preparation.json"), "--reader-cmd", reader_cmd(ctx),
             "--data", fwd(ctx.game / "Data"), "--mods", fwd(ctx.instance / "mods"),

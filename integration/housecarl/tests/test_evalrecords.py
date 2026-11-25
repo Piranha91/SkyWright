@@ -1,6 +1,6 @@
 """Known answers for evalrecords.py's selection rules (the record capture for the registry's mcp-only checks).
 
-Dependency-free: `python _geometry-harness/tests/test_evalrecords.py`. EVALRECORDS_PATH, if set, loads the module
+Dependency-free: `python integration/housecarl/tests/test_evalrecords.py`. EVALRECORDS_PATH, if set, loads the module
 from that file instead (the sabotage arms use it). Rows are synthetic, in the summary-row shape the record reader's
 summary exports carry (formid, type, parent cell, override_depth).
 

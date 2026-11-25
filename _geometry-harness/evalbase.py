@@ -1,14 +1,15 @@
 """evalbase - what the evaluation tools on both sides of the houseCARL integration fence share.
 
-A library with no entry point. The record capture (evalrecords), bundle enrichment (evalrun enrich, bundleenrich) and
-the post-bundle pipeline in the module (integration/housecarl/evalpipeline.py) all use these, and the pipeline imports
-them from here, so `evalpipeline.Refusal is evalbase.Refusal` and one `except` catches both:
+A library with no entry point. Bundle enrichment (evalrun enrich, bundleenrich), and in the module the record capture
+(evalrecords) and the post-bundle pipeline (evalpipeline), all use these, and the pipeline imports them from here, so
+`evalpipeline.Refusal is evalbase.Refusal` and one `except` catches both:
 
   Refusal             one sentence: what went wrong and what to try
   plugin_header       a plugin's TES4 header (masters, ESM/ESL flags) and the file's sha256
   plugin_records      the record count a header states
   runcontrol_exe      the built-in controller: the machine file's, else HOUSECARL_RUNCONTROL, else this checkout's build
   verify_bundle_argv  the bundle check, `runcontrol verify-bundle`, its one owner
+  arm_masters         each plugin's masters, closed transitively, and which closures meet an unreadable header
 """
 from __future__ import annotations
 
@@ -102,3 +103,36 @@ def runcontrol_exe(machine: dict | None) -> Path:
 def verify_bundle_argv(machine: dict | None, bundle: Path) -> list[str]:
     """The bundle check: the built-in controller's `verify-bundle`, its one owner."""
     return [fwd(runcontrol_exe(machine)), "verify-bundle", fwd(bundle)]
+
+
+def arm_masters(arm: dict, recorded: dict | None = None):
+    """(masters_of, masters_unread) for one arm: each plugin's masters, transitively, from the TES4 header of the file the arm
+    loads (the master list the engine resolves the plugin's records against), named without case; and whether a plugin's
+    closure meets a header that could not be read (no file for it in the arm, a file that is gone or not a plugin).
+    `recorded` ({plugin casefold: [masters]}): master lists a measurement recorded for these very bytes, used before the
+    file's header, so a file changed after the measurement does not blind its dependents."""
+    files = {str(p.get("name")).casefold(): p.get("path") for p in (arm.get("requested") or {}).get("plugins") or []}
+    direct = {}
+    for name in arm["plugins"]:
+        if recorded and name.casefold() in recorded:
+            direct[name.casefold()] = [str(m).casefold() for m in recorded[name.casefold()]]
+            continue
+        path = files.get(name.casefold())
+        try:
+            direct[name.casefold()] = [str(m).casefold() for m in plugin_header(path)["masters"]] if path else None
+        except (OSError, ValueError, struct.error, Refusal):
+            direct[name.casefold()] = None
+    closure = {}
+    for name in direct:
+        seen, blind, stack = set(), direct[name] is None, list(direct[name] or [])
+        while stack:
+            m = stack.pop()
+            if m in seen:
+                continue
+            seen.add(m)
+            if direct.get(m) is None:
+                blind = True
+            else:
+                stack.extend(direct[m])
+        closure[name] = (seen, blind)
+    return (lambda p: closure.get(p.casefold(), (set(), True))[0]), (lambda p: closure.get(p.casefold(), (set(), True))[1])

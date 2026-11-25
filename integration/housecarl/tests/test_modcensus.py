@@ -1,7 +1,7 @@
 """Known answers for modcensus.py: a census row reports a count only when its read completed, and novelty ranks a
 candidate by the features the covered set lacks.
 
-Dependency-free: `python _geometry-harness/tests/test_modcensus.py`. MODCENSUS_PATH, if set, loads the module from
+Dependency-free: `python integration/housecarl/tests/test_modcensus.py`. MODCENSUS_PATH, if set, loads the module from
 that file instead (the sabotage arms use it). Plugins and reads are synthetic.
 """
 import importlib.util

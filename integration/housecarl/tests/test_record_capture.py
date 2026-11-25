@@ -96,7 +96,7 @@ def run_row(c: dict):
         ctx = context(root, c["entry"], machine)
         started, wrong = [], []
         imports = iter(c["importExits"])
-        script = EP.fwd(SW.HARNESS / "evalrecords.py")
+        script = EP.fwd(HERE.parent / "evalrecords.py")
         controller = EP.fwd(EP.runcontrol_exe(machine))
 
         def child(ctx_, ledger_dir, op, argv, *, heavy=False, purpose=None, deadline_min=None, env=None, hold_min=None):

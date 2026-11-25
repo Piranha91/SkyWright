@@ -59,7 +59,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does a placed-object geometry row that holds in one order of a free pair and not the other reach the report as a load-order risk, with rows in both orders left out, unmeasured rows counted, drifted plugins named and mismatched orders refused?](#tool-integration-housecarl-tests-test_order_geometry.py) — `integration/housecarl/tests/test_order_geometry.py`
 - [Does a refused camera plan leave a labelled top-down fallback and keep its refusal?](#tool-_geometry-harness-viewprobe-tools-test_shotplan_fallback.py) — `_geometry-harness/viewprobe/tools/test_shotplan_fallback.py`
 - [Does a report join several separate evaluations of the same order, each lending the setups it can stand in for, and refuse one it cannot use by name?](#tool-integration-housecarl-tests-test_evalreport_siblings.py) — `integration/housecarl/tests/test_evalreport_siblings.py`
-- [Does a run keep each reader transcript once: does import-results link the capture's request and response (a copy across volumes), refuse a changed transcript, do the bundle and media bundle link the import's files and still verify, and does a records rerun or resume leave every byte reachable through a link unchanged?](#tool-_geometry-harness-tests-test_transcript_links.py) — `_geometry-harness/tests/test_transcript_links.py`
+- [Does a run keep each reader transcript once: does import-results link the capture's request and response (a copy across volumes), refuse a changed transcript, do the bundle and media bundle link the import's files and still verify, and does a records rerun or resume leave every byte reachable through a link unchanged?](#tool-integration-housecarl-tests-test_transcript_links.py) — `integration/housecarl/tests/test_transcript_links.py`
 - [Does a scene import skip a declared cell whose owning plugin the setup neither loads nor masters?](#tool-_geometry-harness-tests-test_declared_cell_presence.py) — `_geometry-harness/tests/test_declared_cell_presence.py`
 - [Does a shot in a batch equal the same shot rendered in a fresh process?](#tool-rendertwin) — `rendertwin`
 - [Does a vignette's capture camera pass the measured state's camera checks (inside test, the sightlines of the participants that setup places) in every other state it renders, try the next pose of the chain when one fails, refuse naming the state and the object when none passes, and keep its single camera when every state is clear?](#tool-integration-housecarl-tests-test_capture_every_state.py) — `integration/housecarl/tests/test_capture_every_state.py`
@@ -100,7 +100,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does overlap triage preserve locality, counterpart identity and incomplete reviews?](#tool-integration-housecarl-tests-test_overlap_triage.py) — `integration/housecarl/tests/test_overlap_triage.py`
 - [Does overlapprobe --reverse-of give the full reverse's emit, and refuse a baseline emit that is not this run's own?](#tool-_geometry-harness-tests-test_reverse_reconcile.py) — `_geometry-harness/tests/test_reverse_reconcile.py`
 - [Does planeassess class plane edits, read placed primitives and test the frustum and rule shapes correctly?](#tool-_geometry-harness-planeassess-test_planeassess.py) — `_geometry-harness/planeassess/test_planeassess.py`
-- [Does reading a capture's arms side by side keep each arm's evidence its own, choose workers from memory, and report failure, stop and resume as one worker does?](#tool-_geometry-harness-tests-test_records_parallel.py) — `_geometry-harness/tests/test_records_parallel.py`
+- [Does reading a capture's arms side by side keep each arm's evidence its own, choose workers from memory, and report failure, stop and resume as one worker does?](#tool-integration-housecarl-tests-test_records_parallel.py) — `integration/housecarl/tests/test_records_parallel.py`
 - [Does render-batch readiness enforce the offline planning and refusal contracts?](#tool-_geometry-harness-viewprobe-tools-test_renderbatch.py) — `_geometry-harness/viewprobe/tools/test_renderbatch.py`
 - [Does runcontrol accept a judged-0 import only when it states no members on an arm without the targets, and refuse every other?](#tool-_geometry-harness-tests-test_import_empty_population.py) — `_geometry-harness/tests/test_import_empty_population.py`
 - [Does runcontrol plan refuse an arm that overlapprobe's scene preflight would refuse?](#tool-_geometry-harness-tests-test_plan_scene_preflight.py) — `_geometry-harness/tests/test_plan_scene_preflight.py`
@@ -120,7 +120,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does the capture point picker return visible faces, the right floor and plain refusals on the shapes real requests were refused on?](#tool-integration-housecarl-tests-test_capture_points.py) — `integration/housecarl/tests/test_capture_points.py`
 - [Does the capture ring stand on the navmesh storey rather than a floor high up a tall focus, does a flat partner box still find the floor, does the reel say how many camera spots a buried clash rests on, is a see-through partner never said to bury the other object, and does the reel picture a group's strongest crossing?](#tool-integration-housecarl-tests-test_capture_follow_ups.py) — `integration/housecarl/tests/test_capture_follow_ups.py`
 - [Does the cell scene resource lifetime diagnostic satisfy its expected contract?](#tool-viewprobe.cell-scene-selftest) — `viewprobe.cell-scene-selftest`
-- [Does the census report a count only from a completed read, and rank candidates by uncovered features?](#tool-_geometry-harness-tests-test_modcensus.py) — `_geometry-harness/tests/test_modcensus.py`
+- [Does the census report a count only from a completed read, and rank candidates by uncovered features?](#tool-integration-housecarl-tests-test_modcensus.py) — `integration/housecarl/tests/test_modcensus.py`
 - [Does the configuration fingerprint have one owner, runcontrol, that the Python tools ask?](#tool-_geometry-harness-tests-test_fingerprint_owner.py) — `_geometry-harness/tests/test_fingerprint_owner.py`
 - [Does the driver of the stages after the bundle reuse a stage only when nothing changed, continue a run folder the built-in controller carried through the bundle, and refuse one it did not?](#tool-integration-housecarl-tests-test_evalpipeline.py) — `integration/housecarl/tests/test_evalpipeline.py`
 - [Does the edit-kind classifier give one edit per record per kind, absorb the disable idiom and drop bookkeeping?](#tool-_geometry-harness-tests-test_editkinds.py) — `_geometry-harness/tests/test_editkinds.py`
@@ -154,8 +154,8 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does the proposed narration preserve every required factual binding, and did the fidelity judge find its meaning kept?](#tool-evalreport.narrate-apply) — `evalreport.narrate-apply`
 - [Does the reader's document list only clashes between the two mods and give the right install advice?](#tool-integration-housecarl-tests-test_readerdoc.py) — `integration/housecarl/tests/test_readerdoc.py`
 - [Does the real reporting request-to-camera path satisfy its offline contract?](#tool-integration-housecarl-tests-test_capture_acquire.py) — `integration/housecarl/tests/test_capture_acquire.py`
-- [Does the record capture read only what an evaluated plugin touches, reread when an arm's inputs change, and does a stopped sweep or a raised budget keep finished work?](#tool-_geometry-harness-tests-test_records_keep_work.py) — `_geometry-harness/tests/test_records_keep_work.py`
-- [Does the record capture's selection refuse empty and short reads and keep unjudged rows apart?](#tool-_geometry-harness-tests-test_evalrecords.py) — `_geometry-harness/tests/test_evalrecords.py`
+- [Does the record capture read only what an evaluated plugin touches, reread when an arm's inputs change, and does a stopped sweep or a raised budget keep finished work?](#tool-integration-housecarl-tests-test_records_keep_work.py) — `integration/housecarl/tests/test_records_keep_work.py`
+- [Does the record capture's selection refuse empty and short reads and keep unjudged rows apart?](#tool-integration-housecarl-tests-test_evalrecords.py) — `integration/housecarl/tests/test_evalrecords.py`
 - [Does the record-lane comparator emit a row only for a lost change, within the schema's field scope?](#tool-integration-housecarl-tests-test_recordrows.py) — `integration/housecarl/tests/test_recordrows.py`
 - [Does the record-lane comparator leave a field unjudged, never equal, when a read printed it without its values (an item as its type name, a list as its summary), while a field read with its values or by content hash stays judged?](#tool-_geometry-harness-tests-test_record_unexpanded_leaves.py) — `_geometry-harness/tests/test_record_unexpanded_leaves.py`
 - [Does the record-lane comparator list every field it cannot judge on a houseCARL 2.0 capture (a cut-off, unread, unnamed or depth-mismatched field, a failed read, a tree answer that could not compare a plugin in full or whose plugin list was cut off), with its reason and plugins, and never drop it?](#tool-_geometry-harness-tests-test_record_2_0_unjudged.py) — `_geometry-harness/tests/test_record_2_0_unjudged.py`
@@ -229,7 +229,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [How can a test stand in for the machine's slot command with a real lock holder a hard kill leaves behind?](#tool-integration-housecarl-tests-fixtures-standin_hold.py) — `integration/housecarl/tests/fixtures/standin_hold.py`
 - [How can camera planning use this profile’s actual projection?](#tool-shotplan.profile) — `shotplan.profile`
 - [How can the names enrichment be tested without a houseCARL server?](#tool-_geometry-harness-tests-fixtures-evalrun-fake_records_mcp.py) — `_geometry-harness/tests/fixtures/evalrun/fake_records_mcp.py`
-- [How can the record capture be tested without a houseCARL server?](#tool-_geometry-harness-tests-fixtures-evalrun-fake_capture_mcp.py) — `_geometry-harness/tests/fixtures/evalrun/fake_capture_mcp.py`
+- [How can the record capture be tested without a houseCARL server?](#tool-integration-housecarl-tests-fixtures-record_capture-fake_capture_mcp.py) — `integration/housecarl/tests/fixtures/record_capture/fake_capture_mcp.py`
 - [How do I add derived evidence to an evaluation bundle in Python?](#tool-evalrun) — `evalrun`
 - [How do I add record rows or in-game names to an evaluation bundle without changing its results?](#tool-evalrun.enrich) — `evalrun.enrich`
 - [How do I browse any load order's worldspaces, cells and placed objects as a tree with each record's winning plugin, from an MO2 profile or a game Data folder, and open a cell in 3D?](#tool-workbench) — `workbench`
@@ -593,21 +593,6 @@ Inputs: Controlled fixtures for make_expected.
 Outputs: Assertion results or generated fixture data for: How can I write the hand-derived expected evaluation outputs in a consistent schema?
 
 Source: [_geometry-harness/tests/fixtures/evalrun/expected/make_expected.py](../_geometry-harness/tests/fixtures/evalrun/expected/make_expected.py) — `Dump the hand-derived oracle JSONs (one per case). The values are typed by hand from PLAN.md D1-D8;`
-
-
-<a id="tool-_geometry-harness-tests-fixtures-evalrun-fake_capture_mcp.py"></a>
-
-### _geometry-harness/tests/fixtures/evalrun/fake_capture_mcp.py
-
-**How can the record capture be tested without a houseCARL server?**
-
-Stand in for the record reader in evalrecords' capture tests.
-
-Inputs: Controlled fixtures for fake_capture_mcp.
-
-Outputs: Assertion results or generated fixture data for: How can the record capture be tested without a houseCARL server?
-
-Source: [_geometry-harness/tests/fixtures/evalrun/fake_capture_mcp.py](../_geometry-harness/tests/fixtures/evalrun/fake_capture_mcp.py) — `A stand-in record reader for evalrecords' capture tests`
 
 
 <a id="tool-_geometry-harness-tests-fixtures-evalrun-fake_records_mcp.py"></a>
@@ -1005,21 +990,6 @@ Outputs: Assertion results or generated fixture data for: Do opt-in live checks 
 Source: [_geometry-harness/tests/test_evallive.py](../_geometry-harness/tests/test_evallive.py) — `Known answers for the opt-in live-import lane`
 
 
-<a id="tool-_geometry-harness-tests-test_evalrecords.py"></a>
-
-### _geometry-harness/tests/test_evalrecords.py
-
-**Does the record capture's selection refuse empty and short reads and keep unjudged rows apart?**
-
-Check evalrecords selection rule changes against synthetic rows.
-
-Inputs: Controlled fixtures for test_evalrecords.
-
-Outputs: Assertion results for: Does the record capture's selection refuse empty and short reads and keep unjudged rows apart?
-
-Source: [_geometry-harness/tests/test_evalrecords.py](../_geometry-harness/tests/test_evalrecords.py) — `Known answers for evalrecords.py's selection rules (the record capture for the registry's mcp-only checks).`
-
-
 <a id="tool-_geometry-harness-tests-test_evalrun.py"></a>
 
 ### _geometry-harness/tests/test_evalrun.py
@@ -1198,21 +1168,6 @@ Inputs: Release builds of the probes that read a load order; a temporary MO2 lay
 Outputs: Assertion results for: Does every probe refuse, in one sentence, a load order whose plugin lacks a master?
 
 Source: [_geometry-harness/tests/test_missing_master_refusal.py](../_geometry-harness/tests/test_missing_master_refusal.py) — `Known answers for ruling 12: every probe refuses an order whose plugin lacks a master, in one sentence, exit 2.`
-
-
-<a id="tool-_geometry-harness-tests-test_modcensus.py"></a>
-
-### _geometry-harness/tests/test_modcensus.py
-
-**Does the census report a count only from a completed read, and rank candidates by uncovered features?**
-
-Check modcensus changes against synthetic scopes and reads.
-
-Inputs: Controlled fixtures for test_modcensus.
-
-Outputs: Assertion results for: Does the census report a count only from a completed read, and rank candidates by uncovered features?
-
-Source: [_geometry-harness/tests/test_modcensus.py](../_geometry-harness/tests/test_modcensus.py) — `Known answers for modcensus.py: a census row reports a count only when its read completed, and novelty ranks a`
 
 
 <a id="tool-_geometry-harness-tests-test_modelless_activators_doors.py"></a>
@@ -1500,36 +1455,6 @@ Outputs: One PASS or FAIL line per case (C2170, C2172, C2173).
 Source: [_geometry-harness/tests/test_record_unexpanded_leaves.py](../_geometry-harness/tests/test_record_unexpanded_leaves.py) — `a leaf that carries no value is unjudged with its reason, never equal`
 
 
-<a id="tool-_geometry-harness-tests-test_records_keep_work.py"></a>
-
-### _geometry-harness/tests/test_records_keep_work.py
-
-**Does the record capture read only what an evaluated plugin touches, reread when an arm's inputs change, and does a stopped sweep or a raised budget keep finished work?**
-
-Check changes to evalrecords' selection and key, or how the controller credits a stopped sweep.
-
-Inputs: Controlled fixtures for test_records_keep_work.
-
-Outputs: Assertion results for: Does the record capture read only what an evaluated plugin touches, reread when an arm's inputs change, and does a stopped sweep or a raised budget keep finished work?
-
-Source: [_geometry-harness/tests/test_records_keep_work.py](../_geometry-harness/tests/test_records_keep_work.py) — `Known answers for the records stage's reads and for keeping finished work across a stop or a budget change.`
-
-
-<a id="tool-_geometry-harness-tests-test_records_parallel.py"></a>
-
-### _geometry-harness/tests/test_records_parallel.py
-
-**Does reading a capture's arms side by side keep each arm's evidence its own, choose workers from memory, and report failure, stop and resume as one worker does?**
-
-Check changes to evalrecords' workers, evalrecords_workers' choice and scheduler, or how the records stage asks for workers.
-
-Inputs: Controlled fixtures for test_records_parallel.
-
-Outputs: Assertion results for: Does reading a capture's arms side by side keep each arm's evidence its own, choose workers from memory, and report failure, stop and resume as one worker does?
-
-Source: [_geometry-harness/tests/test_records_parallel.py](../_geometry-harness/tests/test_records_parallel.py) — `Known answers for reading a capture's arms side by side: what arms share, how many run, and what a failure leaves.`
-
-
 <a id="tool-_geometry-harness-tests-test_replay_command.py"></a>
 
 ### _geometry-harness/tests/test_replay_command.py
@@ -1748,21 +1673,6 @@ Inputs: The Release motionprobe and contactprobe (or HC_OOM_HARNESS); the test_c
 Outputs: Assertion results for: When motionprobe sweep or deltacheck, or contactprobe's swept review, runs out of memory, does it say so in one sentence that says what to try, and does that advice work?
 
 Source: [_geometry-harness/tests/test_swept_oom_sentence.py](../_geometry-harness/tests/test_swept_oom_sentence.py) — `Running out of memory on the swept paths ends in one sentence that says what to try (cases 1880-1885).`
-
-
-<a id="tool-_geometry-harness-tests-test_transcript_links.py"></a>
-
-### _geometry-harness/tests/test_transcript_links.py
-
-**Does a run keep each reader transcript once: does import-results link the capture's request and response (a copy across volumes), refuse a changed transcript, do the bundle and media bundle link the import's files and still verify, and does a records rerun or resume leave every byte reachable through a link unchanged?**
-
-Qualify changes to the controller's import-results transcript storage, bundle's copy-in, or evalrecords' transcript writers (TranscriptFile, Session.write) (C2160, C2162-C2165); offline, no game.
-
-Inputs: The evalrun fixtures (case-01) with the shipped registry trimmed to three checks, and transcripts laid out as evalrecords lays them out.
-
-Outputs: One PASS or FAIL line per case (C2160-C2165).
-
-Source: [_geometry-harness/tests/test_transcript_links.py](../_geometry-harness/tests/test_transcript_links.py) — `A run keeps each reader transcript once`
 
 
 <a id="tool-_geometry-harness-tests-test_workbench_manual_names.py"></a>
@@ -2710,7 +2620,7 @@ Inputs: An evaluation plan, the dependency baseline, the lab's Data and mods fol
 
 Outputs: Per arm: the session's request and response transcripts; per check and arm: rows and an import document.
 
-Source: [_geometry-harness/evalrecords.py](../_geometry-harness/evalrecords.py) — `evalrecords - the record capture for an evaluation's mcp-only checks, one reader session per arm.`
+Source: [integration/housecarl/evalrecords.py](../integration/housecarl/evalrecords.py) — `evalrecords - the record capture for an evaluation's mcp-only checks, one reader session per arm.`
 
 
 <a id="tool-evalrecords.capture"></a>
@@ -2727,7 +2637,7 @@ Inputs: An evaluation plan, the dependency baseline, the lab's Data and mods fol
 
 Outputs: Per arm: the session's request and response transcripts; per check and arm: rows and an import document.
 
-Source: [_geometry-harness/evalrecords.py](../_geometry-harness/evalrecords.py) — `add_parser(`
+Source: [integration/housecarl/evalrecords.py](../integration/housecarl/evalrecords.py) — `add_parser(`
 
 
 Modifiers (do not select a separate mode):
@@ -2758,7 +2668,7 @@ Inputs: The capture's arms and their estimated need, and the machine's memory re
 
 Outputs: One capture process per arm through the shared Runner, and each attempt's record for capture-workers.json.
 
-Source: [_geometry-harness/evalrecords_workers.py](../_geometry-harness/evalrecords_workers.py) — `evalrecords_workers - how many of a capture's arms read at once, and running them side by side.`
+Source: [integration/housecarl/evalrecords_workers.py](../integration/housecarl/evalrecords_workers.py) — `evalrecords_workers - how many of a capture's arms read at once, and running them side by side.`
 
 
 <a id="tool-evalreel"></a>
@@ -3377,6 +3287,21 @@ Outputs: Assertion results or generated fixture data for: How can a test stand i
 Source: [integration/housecarl/tests/fixtures/evalsettings/stub_opener.py](../integration/housecarl/tests/fixtures/evalsettings/stub_opener.py) — `The browser stand-in for test_evalsettings.py: 'evalsettings.py ensure|window --opener THIS' runs 'python THIS URL'.`
 
 
+<a id="tool-integration-housecarl-tests-fixtures-record_capture-fake_capture_mcp.py"></a>
+
+### integration/housecarl/tests/fixtures/record_capture/fake_capture_mcp.py
+
+**How can the record capture be tested without a houseCARL server?**
+
+Stand in for the record reader in evalrecords' capture tests.
+
+Inputs: Controlled fixtures for fake_capture_mcp.
+
+Outputs: Assertion results or generated fixture data for: How can the record capture be tested without a houseCARL server?
+
+Source: [integration/housecarl/tests/fixtures/record_capture/fake_capture_mcp.py](../integration/housecarl/tests/fixtures/record_capture/fake_capture_mcp.py) — `A stand-in record reader for evalrecords' capture tests`
+
+
 <a id="tool-integration-housecarl-tests-fixtures-standin_hold.py"></a>
 
 ### integration/housecarl/tests/fixtures/standin_hold.py
@@ -3527,6 +3452,21 @@ Inputs: Controlled fixtures for test_evalpipeline.
 Outputs: Assertion results for: Does the driver of the stages after the bundle reuse a stage only when nothing changed, continue a run folder the built-in controller carried through the bundle, and refuse one it did not?
 
 Source: [integration/housecarl/tests/test_evalpipeline.py](../integration/housecarl/tests/test_evalpipeline.py) — `Known answers for evalpipeline.py, the driver of the stages after the bundle`
+
+
+<a id="tool-integration-housecarl-tests-test_evalrecords.py"></a>
+
+### integration/housecarl/tests/test_evalrecords.py
+
+**Does the record capture's selection refuse empty and short reads and keep unjudged rows apart?**
+
+Check evalrecords selection rule changes against synthetic rows.
+
+Inputs: Controlled fixtures for test_evalrecords.
+
+Outputs: Assertion results for: Does the record capture's selection refuse empty and short reads and keep unjudged rows apart?
+
+Source: [integration/housecarl/tests/test_evalrecords.py](../integration/housecarl/tests/test_evalrecords.py) — `Known answers for evalrecords.py's selection rules (the record capture for the registry's mcp-only checks).`
 
 
 <a id="tool-integration-housecarl-tests-test_evalreel.py"></a>
@@ -3743,6 +3683,21 @@ Outputs: Assertion results or generated fixture data for: Does a lab run's measu
 Source: [integration/housecarl/tests/test_measuring_entry.py](../integration/housecarl/tests/test_measuring_entry.py) — `Known answers for the measuring entry and the settings record`
 
 
+<a id="tool-integration-housecarl-tests-test_modcensus.py"></a>
+
+### integration/housecarl/tests/test_modcensus.py
+
+**Does the census report a count only from a completed read, and rank candidates by uncovered features?**
+
+Check modcensus changes against synthetic scopes and reads.
+
+Inputs: Controlled fixtures for test_modcensus.
+
+Outputs: Assertion results for: Does the census report a count only from a completed read, and rank candidates by uncovered features?
+
+Source: [integration/housecarl/tests/test_modcensus.py](../integration/housecarl/tests/test_modcensus.py) — `Known answers for modcensus.py: a census row reports a count only when its read completed, and novelty ranks a`
+
+
 <a id="tool-integration-housecarl-tests-test_narration_fidelity.py"></a>
 
 ### integration/housecarl/tests/test_narration_fidelity.py
@@ -3936,6 +3891,36 @@ Inputs: Controlled fixtures for test_recordrows.
 Outputs: Assertion results for: Does the record-lane comparator emit a row only for a lost change, within the schema's field scope?
 
 Source: [integration/housecarl/tests/test_recordrows.py](../integration/housecarl/tests/test_recordrows.py) — `Tests for recordrows.py — record-lane rows derived from a record import's own MCP transcripts.`
+
+
+<a id="tool-integration-housecarl-tests-test_records_keep_work.py"></a>
+
+### integration/housecarl/tests/test_records_keep_work.py
+
+**Does the record capture read only what an evaluated plugin touches, reread when an arm's inputs change, and does a stopped sweep or a raised budget keep finished work?**
+
+Check changes to evalrecords' selection and key, or how the controller credits a stopped sweep.
+
+Inputs: Controlled fixtures for test_records_keep_work.
+
+Outputs: Assertion results for: Does the record capture read only what an evaluated plugin touches, reread when an arm's inputs change, and does a stopped sweep or a raised budget keep finished work?
+
+Source: [integration/housecarl/tests/test_records_keep_work.py](../integration/housecarl/tests/test_records_keep_work.py) — `Known answers for the records stage's reads and for keeping finished work across a stop or a budget change.`
+
+
+<a id="tool-integration-housecarl-tests-test_records_parallel.py"></a>
+
+### integration/housecarl/tests/test_records_parallel.py
+
+**Does reading a capture's arms side by side keep each arm's evidence its own, choose workers from memory, and report failure, stop and resume as one worker does?**
+
+Check changes to evalrecords' workers, evalrecords_workers' choice and scheduler, or how the records stage asks for workers.
+
+Inputs: Controlled fixtures for test_records_parallel.
+
+Outputs: Assertion results for: Does reading a capture's arms side by side keep each arm's evidence its own, choose workers from memory, and report failure, stop and resume as one worker does?
+
+Source: [integration/housecarl/tests/test_records_parallel.py](../integration/housecarl/tests/test_records_parallel.py) — `Known answers for reading a capture's arms side by side: what arms share, how many run, and what a failure leaves.`
 
 
 <a id="tool-integration-housecarl-tests-test_reel_names.py"></a>
@@ -4208,6 +4193,21 @@ Outputs: One ok/FAIL line per check; exit 1 on any failure.
 Source: [integration/housecarl/tests/test_terrain_stations.py](../integration/housecarl/tests/test_terrain_stations.py) — `Offline known answers for terrain stations`
 
 
+<a id="tool-integration-housecarl-tests-test_transcript_links.py"></a>
+
+### integration/housecarl/tests/test_transcript_links.py
+
+**Does a run keep each reader transcript once: does import-results link the capture's request and response (a copy across volumes), refuse a changed transcript, do the bundle and media bundle link the import's files and still verify, and does a records rerun or resume leave every byte reachable through a link unchanged?**
+
+Qualify changes to the controller's import-results transcript storage, bundle's copy-in, or evalrecords' transcript writers (TranscriptFile, Session.write) (C2160, C2162-C2165); offline, no game.
+
+Inputs: The evalrun fixtures (case-01) with the shipped registry trimmed to three checks, and transcripts laid out as evalrecords lays them out.
+
+Outputs: One PASS or FAIL line per case (C2160-C2165).
+
+Source: [integration/housecarl/tests/test_transcript_links.py](../integration/housecarl/tests/test_transcript_links.py) — `A run keeps each reader transcript once`
+
+
 <a id="tool-leftbehindprobe"></a>
 
 ### leftbehindprobe
@@ -4354,7 +4354,7 @@ Inputs: Candidate entries (mod folder and plugins), the source MO2 instance and 
 
 Outputs: One census row per candidate (counts only from completed reads, refusals otherwise) and a novelty ranking.
 
-Source: [_geometry-harness/modcensus.py](../_geometry-harness/modcensus.py) — `modcensus - a no-game, no-render census of candidate mods, and which of them add something not yet evaluated.`
+Source: [integration/housecarl/modcensus.py](../integration/housecarl/modcensus.py) — `modcensus - a no-game, no-render census of candidate mods, and which of them add something not yet evaluated.`
 
 
 <a id="tool-modcensus.novelty"></a>
@@ -4371,7 +4371,7 @@ Inputs: Candidate entries (mod folder and plugins), the source MO2 instance and 
 
 Outputs: One census row per candidate (counts only from completed reads, refusals otherwise) and a novelty ranking.
 
-Source: [_geometry-harness/modcensus.py](../_geometry-harness/modcensus.py) — `add_parser(`
+Source: [integration/housecarl/modcensus.py](../integration/housecarl/modcensus.py) — `add_parser(`
 
 
 <a id="tool-modcensus.run"></a>
@@ -4388,7 +4388,7 @@ Inputs: Candidate entries (mod folder and plugins), the source MO2 instance and 
 
 Outputs: One census row per candidate (counts only from completed reads, refusals otherwise) and a novelty ranking.
 
-Source: [_geometry-harness/modcensus.py](../_geometry-harness/modcensus.py) — `add_parser(`
+Source: [integration/housecarl/modcensus.py](../integration/housecarl/modcensus.py) — `add_parser(`
 
 
 Modifiers (do not select a separate mode):

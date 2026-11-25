@@ -16,13 +16,16 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-HARNESS = Path(os.environ.get("KEEP_HARNESS") or HERE.parent).resolve()
+sys.path.insert(0, str(HERE.parent))  # the module's folder
+import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is
+MODULE = SW.MODULE   # evalrecords.py, the record capture under test
+HARNESS = Path(os.environ.get("KEEP_HARNESS") or SW.HARNESS).resolve()   # SkyWright's tools: evalrun.py and its suite
 sys.dont_write_bytecode = True
 sys.path[:0] = [str(HARNESS / "tests"), str(HARNESS), str(HARNESS.parent / "scripts")]
 import test_evalrun as T  # noqa: E402
 
 T.EVALRUN = HARNESS / "evalrun.py"
-FAKE = HERE / "fake_capture_mcp.py" if (HERE / "fake_capture_mcp.py").is_file() else HERE / "fixtures/evalrun/fake_capture_mcp.py"
+FAKE = HERE / "fixtures" / "record_capture" / "fake_capture_mcp.py"
 NAV = "geometry.navmesh-ownership"
 BUDGET = 0.3
 CHECKS = ["loadability.dangling-references", "records.contested-fields", "records.cell-attributes",
@@ -87,7 +90,7 @@ class Lab:
         """Returns how many reader sessions this capture started."""
         before = sum(1 for r in self.requests() if r.get("method") == "initialize")
         self.n += 1
-        er = str(HARNESS / "evalrecords.py")
+        er = str(MODULE / "evalrecords.py")
         args = [sys.executable, er, "capture", "--run", str(self.run_dir), "--baseline-from", str(self.t / "prep.json"),
                 "--reader-cmd", f'"{sys.executable}" "{FAKE}"', "--data", str(self.data), "--mods", str(self.mods),
                 "--profile-dir", str(self.profile), "--out", str(self.t / f"out-{self.n}"),
@@ -169,7 +172,7 @@ def case_r6_what_a_game_launch_leaves_behind_does_not_reread(tmp):
 
 
 def case_r5_a_reader_rebuilt_beside_its_exe_is_another_reader(tmp):
-    er = load_module("er_under_test", HARNESS / "evalrecords.py")
+    er = load_module("er_under_test", MODULE / "evalrecords.py")
     d = tmp / "r5"
     d.mkdir()
     (d / "reader.exe").write_bytes(b"apphost")

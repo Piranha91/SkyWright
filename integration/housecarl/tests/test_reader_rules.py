@@ -1132,7 +1132,7 @@ def case_item18_g2_record_rows_read_the_1_9_json_form():
 def case_record_rows_unread_reason_is_the_captures():
     """The enrichment and the record capture count an unreadable master header under the same words."""
     import recordrows
-    src = (SW.HARNESS / "evalrecords.py").read_text(encoding="utf-8")
+    src = (SW.MODULE / "evalrecords.py").read_text(encoding="utf-8")
     want = getattr(recordrows, "MASTERS_UNREAD", None)
     ok = bool(want) and f'"{want}"' in src
     return ok, f"reason {want!r} in the capture: {bool(want) and want in src}"

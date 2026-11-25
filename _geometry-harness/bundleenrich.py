@@ -121,12 +121,12 @@ def recorded_plugin_headers(d: Path, manifest: dict) -> dict:
 
 
 def configuration_masters(cfg: dict, recorded: dict | None = None) -> tuple[dict, set]:
-    """Each plugin's masters, closed transitively (the record capture's own rule, evalrecords.arm_masters), and the
+    """Each plugin's masters, closed transitively (evalbase.arm_masters, the rule the record capture shares), and the
     plugins whose closure meets a master list that cannot be had. A plugin's list is the one the bundle's emits recorded
     for the same bytes (`recorded`, from recorded_plugin_headers), else the TES4 header of the file the configuration
     names, read only when the file hashes to the sha256 the configuration recorded. ({plugin lower: masters},
     {plugin lower})."""
-    import evalrecords
+    import evalbase
     plugins = [p for p in cfg.get("plugins") or [] if isinstance(p, dict) and p.get("name")]
     checked, lists = [], {}
     for p in plugins:
@@ -138,7 +138,7 @@ def configuration_masters(cfg: dict, recorded: dict | None = None) -> tuple[dict
             continue
         ok = bool(path) and Path(path).is_file() and (not want or sha(Path(path)) == want)
         checked.append({"name": p["name"], "path": path if ok else None})
-    masters_of, unread_of = evalrecords.arm_masters({"plugins": [p["name"] for p in checked],
+    masters_of, unread_of = evalbase.arm_masters({"plugins": [p["name"] for p in checked],
                                                      "requested": {"plugins": checked}}, recorded=lists)
     names = [p["name"] for p in checked]
     return ({n.lower(): set(masters_of(n)) for n in names}, {n.lower() for n in names if unread_of(n)})

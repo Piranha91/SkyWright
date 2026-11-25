@@ -1,8 +1,8 @@
 """modcensus - a no-game, no-render census of candidate mods, and which of them add something not yet evaluated.
 
-    python _geometry-harness/modcensus.py run     --candidates FILE --instance DIR --profile NAME --game DIR
+    python integration/housecarl/modcensus.py run     --candidates FILE --instance DIR --profile NAME --game DIR
                                                  --reader-cmd CMD --out DIR [--batch N]
-    python _geometry-harness/modcensus.py novelty --census DIR [--census DIR ...] --covered DIR [--covered DIR ...] --out FILE
+    python integration/housecarl/modcensus.py novelty --census DIR [--census DIR ...] --covered DIR [--covered DIR ...] --out FILE
 
 What this is for. A shakedown should spend a full evaluation, report and review only on a mod whose profile shows a
 kind of clash or edit the shakedown has not yet exercised. The census reads each candidate on its source profile in
@@ -32,9 +32,9 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent
-sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(HERE))
+import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is: its tools and run log on sys.path
+ROOT = SW.CHECKOUT
 from runlog import Run, Runner  # noqa: E402
 import buildlayout  # noqa: E402  where the build put scopeprobe
 

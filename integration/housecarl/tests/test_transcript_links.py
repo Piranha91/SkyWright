@@ -1,6 +1,6 @@
 """A run keeps each reader transcript once: imports and bundles link it (cases 2160-2165).
 
-    python _geometry-harness/tests/test_transcript_links.py
+    python integration/housecarl/tests/test_transcript_links.py
 
 `evalrun import-results` copied an arm's request and response transcripts into the run once per check, and
 `evalrun bundle` copied them again into the bundle and the media bundle: about 134 KB per evaluated record, so
@@ -37,19 +37,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-HARNESS = HERE.parent
-sys.path.append(str(HARNESS))
+sys.path.insert(0, str(HERE.parent))  # the module's folder: evalrecords
+import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is
+HARNESS = SW.HARNESS
+sys.path.append(str(HARNESS / "tests"))
 import buildlayout  # noqa: E402  where the build put each program
 REPO = HARNESS.parent
 EVALRUN = HARNESS / "evalrun.py"
 from test_evalrun import CONTROLLER  # noqa: E402  (the built-in controller, runcontrol, as test_evalrun starts it)
-FIXT = HERE / "fixtures" / "evalrun"
+FIXT = HARNESS / "tests" / "fixtures" / "evalrun"
 REGISTRY = REPO / "data" / "check-registry.json"
 DIALOGUE = "records.registration-and-dialogue"
 ASSETS = "loadability.missing-assets"
 KEEP = ["loadability.masters-and-order", DIALOGUE, ASSETS]
 REORDER = "candidate-01-reorder"
-sys.path.insert(0, str(HARNESS))
 import evalrecords  # noqa: E402
 
 FAILURES: list[str] = []

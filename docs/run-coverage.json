@@ -6541,7 +6541,7 @@
       "id": "evalrecords_workers",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/evalrecords_workers.py",
+      "path": "integration/housecarl/evalrecords_workers.py",
       "adapter": "python",
       "stageSource": "counted",
       "note": "Called by evalrecords' capture for more than one worker, never run by itself: each arm's capture process goes through the shared Runner.",
@@ -6551,7 +6551,7 @@
       "useWhen": "Read or change how evalrecords chooses workers from memory, schedules arms and judges each attempt.",
       "evidence": [
         {
-          "path": "_geometry-harness/evalrecords_workers.py",
+          "path": "integration/housecarl/evalrecords_workers.py",
           "anchor": "evalrecords_workers - how many of a capture's arms read at once, and running them side by side."
         }
       ],
@@ -6566,7 +6566,7 @@
       "id": "evalrecords",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/evalrecords.py",
+      "path": "integration/housecarl/evalrecords.py",
       "adapter": "python",
       "stageSource": "counted",
       "note": "The record capture for an evaluation's mcp-only checks: one houseCARL server session per arm in explicit-paths mode, writing one schema-1 import document per check and arm for runcontrol import-results. Opens one Run per invocation. tests/test_evalrecords.py is its known-answer suite.",
@@ -6576,7 +6576,7 @@
       "useWhen": "Complete the registry's mcp-only checks of a planned evaluation with fresh, arm-bound reader evidence.",
       "evidence": [
         {
-          "path": "_geometry-harness/evalrecords.py",
+          "path": "integration/housecarl/evalrecords.py",
           "anchor": "evalrecords - the record capture for an evaluation's mcp-only checks, one reader session per arm."
         }
       ],
@@ -6588,7 +6588,7 @@
       ],
       "flagCoverage": {
         "parser": "argparse",
-        "path": "_geometry-harness/evalrecords.py"
+        "path": "integration/housecarl/evalrecords.py"
       },
       "modifiers": {
         "--run": "the evaluation's run folder (plan.json)",
@@ -6626,7 +6626,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/evalrecords.py",
+              "path": "integration/housecarl/evalrecords.py",
               "anchor": "add_parser("
             }
           ]
@@ -6637,7 +6637,7 @@
       "id": "modcensus",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/modcensus.py",
+      "path": "integration/housecarl/modcensus.py",
       "adapter": "python",
       "stageSource": "counted",
       "note": "A no-game, no-render census of candidate mods on their source profile (scopeprobe footprint, edit kinds of their overrides and key patches, loose-asset overrides), and the novelty ranking against the covered set. Opens one Run per invocation. tests/test_modcensus.py is its known-answer suite.",
@@ -6647,7 +6647,7 @@
       "useWhen": "Choose which candidate mods earn a full evaluation, before preparing any of them.",
       "evidence": [
         {
-          "path": "_geometry-harness/modcensus.py",
+          "path": "integration/housecarl/modcensus.py",
           "anchor": "modcensus - a no-game, no-render census of candidate mods, and which of them add something not yet evaluated."
         }
       ],
@@ -6659,7 +6659,7 @@
       ],
       "flagCoverage": {
         "parser": "argparse",
-        "path": "_geometry-harness/modcensus.py"
+        "path": "integration/housecarl/modcensus.py"
       },
       "modifiers": {
         "--candidates": "JSON list of {id, mod, plugins}",
@@ -6694,7 +6694,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/modcensus.py",
+              "path": "integration/housecarl/modcensus.py",
               "anchor": "add_parser("
             }
           ]
@@ -6719,7 +6719,7 @@
           },
           "evidence": [
             {
-              "path": "_geometry-harness/modcensus.py",
+              "path": "integration/housecarl/modcensus.py",
               "anchor": "add_parser("
             }
           ]
@@ -9602,8 +9602,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_records_parallel.py",
-      "path": "_geometry-harness/tests/test_records_parallel.py",
+      "id": "integration/housecarl/tests/test_records_parallel.py",
+      "path": "integration/housecarl/tests/test_records_parallel.py",
       "kind": "script",
       "answers": [
         "Does reading a capture's arms side by side keep each arm's evidence its own, choose workers from memory, and report failure, stop and resume as one worker does?"
@@ -9611,7 +9611,7 @@
       "useWhen": "Check changes to evalrecords' workers, evalrecords_workers' choice and scheduler, or how the records stage asks for workers.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_records_parallel.py",
+          "path": "integration/housecarl/tests/test_records_parallel.py",
           "anchor": "Known answers for reading a capture's arms side by side: what arms share, how many run, and what a failure leaves."
         }
       ],
@@ -9623,8 +9623,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_records_keep_work.py",
-      "path": "_geometry-harness/tests/test_records_keep_work.py",
+      "id": "integration/housecarl/tests/test_records_keep_work.py",
+      "path": "integration/housecarl/tests/test_records_keep_work.py",
       "kind": "script",
       "answers": [
         "Does the record capture read only what an evaluated plugin touches, reread when an arm's inputs change, and does a stopped sweep or a raised budget keep finished work?"
@@ -9632,7 +9632,7 @@
       "useWhen": "Check changes to evalrecords' selection and key, or how the controller credits a stopped sweep.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_records_keep_work.py",
+          "path": "integration/housecarl/tests/test_records_keep_work.py",
           "anchor": "Known answers for the records stage's reads and for keeping finished work across a stop or a budget change."
         }
       ],
@@ -9644,8 +9644,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/fixtures/evalrun/fake_capture_mcp.py",
-      "path": "_geometry-harness/tests/fixtures/evalrun/fake_capture_mcp.py",
+      "id": "integration/housecarl/tests/fixtures/record_capture/fake_capture_mcp.py",
+      "path": "integration/housecarl/tests/fixtures/record_capture/fake_capture_mcp.py",
       "kind": "script",
       "answers": [
         "How can the record capture be tested without a houseCARL server?"
@@ -9653,7 +9653,7 @@
       "useWhen": "Stand in for the record reader in evalrecords' capture tests.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/fixtures/evalrun/fake_capture_mcp.py",
+          "path": "integration/housecarl/tests/fixtures/record_capture/fake_capture_mcp.py",
           "anchor": "A stand-in record reader for evalrecords' capture tests"
         }
       ],
@@ -9665,8 +9665,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_evalrecords.py",
-      "path": "_geometry-harness/tests/test_evalrecords.py",
+      "id": "integration/housecarl/tests/test_evalrecords.py",
+      "path": "integration/housecarl/tests/test_evalrecords.py",
       "kind": "script",
       "answers": [
         "Does the record capture's selection refuse empty and short reads and keep unjudged rows apart?"
@@ -9674,7 +9674,7 @@
       "useWhen": "Check evalrecords selection rule changes against synthetic rows.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_evalrecords.py",
+          "path": "integration/housecarl/tests/test_evalrecords.py",
           "anchor": "Known answers for evalrecords.py's selection rules (the record capture for the registry's mcp-only checks)."
         }
       ],
@@ -9686,8 +9686,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_modcensus.py",
-      "path": "_geometry-harness/tests/test_modcensus.py",
+      "id": "integration/housecarl/tests/test_modcensus.py",
+      "path": "integration/housecarl/tests/test_modcensus.py",
       "kind": "script",
       "answers": [
         "Does the census report a count only from a completed read, and rank candidates by uncovered features?"
@@ -9695,7 +9695,7 @@
       "useWhen": "Check modcensus changes against synthetic scopes and reads.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_modcensus.py",
+          "path": "integration/housecarl/tests/test_modcensus.py",
           "anchor": "Known answers for modcensus.py: a census row reports a count only when its read completed, and novelty ranks a"
         }
       ],
@@ -10065,8 +10065,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_transcript_links.py",
-      "path": "_geometry-harness/tests/test_transcript_links.py",
+      "id": "integration/housecarl/tests/test_transcript_links.py",
+      "path": "integration/housecarl/tests/test_transcript_links.py",
       "kind": "script",
       "answers": [
         "Does a run keep each reader transcript once: does import-results link the capture's request and response (a copy across volumes), refuse a changed transcript, do the bundle and media bundle link the import's files and still verify, and does a records rerun or resume leave every byte reachable through a link unchanged?"
@@ -10074,7 +10074,7 @@
       "useWhen": "Qualify changes to the controller's import-results transcript storage, bundle's copy-in, or evalrecords' transcript writers (TranscriptFile, Session.write) (C2160, C2162-C2165); offline, no game.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_transcript_links.py",
+          "path": "integration/housecarl/tests/test_transcript_links.py",
           "anchor": "A run keeps each reader transcript once"
         }
       ],

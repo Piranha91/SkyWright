@@ -1,6 +1,6 @@
 """evalrecords - the record capture for an evaluation's mcp-only checks, one reader session per arm.
 
-    python _geometry-harness/evalrecords.py capture --run RUN --views DIR --reader-cmd CMD --out DIR
+    python integration/housecarl/evalrecords.py capture --run RUN --views DIR --reader-cmd CMD --out DIR
            --profile-dir PROFILE --data DIR --mods DIR [--arm ARM ...] [--reader-data DIR]
 
 What this is for. Five registry checks are `mcp-only`: their capability is the houseCARL record and check tools,
@@ -51,9 +51,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent
-sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(HERE))
+import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is: its tools and run log on sys.path
+ROOT = SW.CHECKOUT
 from runlog import Run  # noqa: E402
 
 SCOPE_FILE = ROOT / "data/record-field-scope.json"
@@ -550,37 +550,9 @@ def batched(ids, n=400):
 
 
 def arm_masters(arm: dict, recorded: dict | None = None):
-    """(masters_of, masters_unread) for one arm: each plugin's masters, transitively, from the TES4 header of the file the arm
-    loads (the master list the engine resolves the plugin's records against), named without case; and whether a plugin's
-    closure meets a header that could not be read (no file for it in the arm, a file that is gone or not a plugin).
-    `recorded` ({plugin casefold: [masters]}): master lists a measurement recorded for these very bytes, used before the
-    file's header, so a file changed after the measurement does not blind its dependents."""
+    """(masters_of, masters_unread) for one arm: evalbase.arm_masters, the rule bundle enrichment shares."""
     import evalbase
-    files = {str(p.get("name")).casefold(): p.get("path") for p in (arm.get("requested") or {}).get("plugins") or []}
-    direct = {}
-    for name in arm["plugins"]:
-        if recorded and name.casefold() in recorded:
-            direct[name.casefold()] = [str(m).casefold() for m in recorded[name.casefold()]]
-            continue
-        path = files.get(name.casefold())
-        try:
-            direct[name.casefold()] = [str(m).casefold() for m in evalbase.plugin_header(path)["masters"]] if path else None
-        except (OSError, ValueError, struct.error, evalbase.Refusal):
-            direct[name.casefold()] = None
-    closure = {}
-    for name in direct:
-        seen, blind, stack = set(), direct[name] is None, list(direct[name] or [])
-        while stack:
-            m = stack.pop()
-            if m in seen:
-                continue
-            seen.add(m)
-            if direct.get(m) is None:
-                blind = True
-            else:
-                stack.extend(direct[m])
-        closure[name] = (seen, blind)
-    return (lambda p: closure.get(p.casefold(), (set(), True))[0]), (lambda p: closure.get(p.casefold(), (set(), True))[1])
+    return evalbase.arm_masters(arm, recorded)
 
 
 def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldScope, log, deadline_s=None, counters=None,

@@ -25,7 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent / "scripts"))
+sys.path.insert(0, str(HERE))
+import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is: its tools and run log on sys.path
 from runlog import Runner, store_dir  # noqa: E402
 
 # what one arm's reader needs, in MB, from its evaluated plugins' bytes; fitted on serial captures, margins above the

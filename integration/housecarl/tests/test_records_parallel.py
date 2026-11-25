@@ -2,7 +2,7 @@
 
     python test_records_parallel.py [PREFIX]     KEEP_HARNESS names the _geometry-harness copy under test.
 
-Real evalrecords capture processes, a real Runner and real evalpipeline.stage_records with a stand-in reader; memory
+Real evalrecords capture processes and a real Runner, with a stand-in reader; memory
 readings are injected through a file. The slot cases use the real idle_lock on a private runs root, from KEEP_IDLE_LOCK or
 the repository's _claude/tools, and say so when it isn't there. No game, no lab, no houseCARL server.
 """
@@ -19,13 +19,15 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
-HARNESS = Path(os.environ.get("KEEP_HARNESS") or HERE.parent).resolve()
+sys.path.insert(0, str(HERE.parent))  # the module's folder
+import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is
+HARNESS = Path(os.environ.get("KEEP_HARNESS") or SW.HARNESS).resolve()   # SkyWright's tools: evalrun.py and its suite
 sys.path[:0] = [str(HERE), str(HARNESS), str(HARNESS.parent / "scripts")]
 import test_records_keep_work as K  # noqa: E402
 
 T = K.T
 FAKE = K.FAKE
-ER = str(HARNESS / "evalrecords.py")
+ER = str(SW.MODULE / "evalrecords.py")
 PLENTY = {"availMB": 60000, "commitMB": 80000, "totalMB": 64000}
 ARMS = ["baseline", "candidate-01", "candidate-02", "candidate-03"]
 HAS_WORKERS = "--workers" in subprocess.run([sys.executable, ER, "capture", "--help"], capture_output=True, text=True).stdout
