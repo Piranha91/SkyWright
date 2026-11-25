@@ -15,6 +15,11 @@ public static class VerifyBundle
     /// older one (or none) may hold rows of kinds this SkyWright no longer checks.</summary>
     public const int OldBundleBelow = 5;
 
+    /// <summary>The registry version this SkyWright's own registry (data/check-registry.json) carries, so the version
+    /// every plan it makes records (the boundary self-test holds the two equal). In a bundle whose plan records it, a
+    /// check or a credited receipt of a kind this SkyWright does not run is refused.</summary>
+    public const int CurrentRegistryVersion = 5;
+
     const string NotCheckedWhy = "made before the AI-side checks left SkyWright's registry: hashed and chained, not judged here";
 
     /// <summary>The one sentence verify-bundle prints for the rows it did not judge.</summary>
@@ -80,6 +85,15 @@ public static class VerifyBundle
             guarantee = IdentityChecks.Guarantee(plan)["guarantee"];
             object? version = Ev.OrEmpty(plan.Get("registry")).Get("registryVersion");
             bool older = !PyValue.IsIntOrBool(version) || PyValue.Int(version) < OldBundleBelow;
+            // a plan of the current registry names only checks of kinds this SkyWright runs: one naming another kind was
+            // not made here, and its rows would be accepted unjudged
+            bool current = PyValue.IsIntOrBool(version) && PyValue.Int(version) == CurrentRegistryVersion;
+            if (current)
+                foreach (var c in Ev.Items(plan.Get("checks")).Select(PyValue.Dict))
+                    if (Ev.OrEmpty(c.Get("adapter")).Get("kind") is not string pk || !Registry.App.AdapterKinds.Contains(pk))
+                        Defect("plan-kind-unknown", "plan.json",
+                            $"the plan names check {Ev.Str(c.Get("checkId"))} of adapter kind {Ev.Str(Ev.OrEmpty(c.Get("adapter")).Get("kind"))}, "
+                            + $"which this SkyWright does not run, and records registry version {Ev.Str(version)}: a plan this SkyWright made names none, so it is refused");
             string recordedPlan = At("plan.sha256");
             if (!Ev.Exists(At("plan.json")) || !Ev.Exists(recordedPlan))
                 Defect("plan-missing", "plan.json", "the bundle carries no plan and its recorded hash");
@@ -127,8 +141,14 @@ public static class VerifyBundle
                 // a receipt's acceptance, identity and outputs are checked below whatever its kind; in an older bundle
                 // one of an adapter kind this SkyWright's registry no longer has (a record import's) is named as well,
                 // since the rules of its kind were applied by the controller that made it and are not repeated here
-                if (older && (Ev.OrEmpty(rec.Get("adapter")).Get("kind") is not string rk || !Registry.App.AdapterKinds.Contains(rk)))
+                // in a bundle of the current registry such a receipt would count as an app row's answer, so it is refused
+                bool foreignKind = Ev.OrEmpty(rec.Get("adapter")).Get("kind") is not string rk || !Registry.App.AdapterKinds.Contains(rk);
+                if (older && foreignKind)
                     unjudged.Add(($"receipts/{k}.json", $"receipt of adapter kind {Ev.Str(Ev.OrEmpty(rec.Get("adapter")).Get("kind"))}"));
+                else if (current && foreignKind)
+                    Defect("receipt-kind-unknown", $"receipts/{k}.json",
+                        $"receipt {rid} is of adapter kind {Ev.Str(Ev.OrEmpty(rec.Get("adapter")).Get("kind"))}, which this SkyWright neither writes nor "
+                        + $"checks, in a bundle whose plan records registry version {Ev.Str(version)}: a bundle this SkyWright made holds none, so it is refused");
                 if (PyValue.Truthy(e.Get("receiptId")) && !Ev.Eq(rec.Get("receiptId"), e.Get("receiptId")))
                     Defect("receipt-mismatch", $"receipts/{k}.json", $"the ledger names receipt {Ev.Str(e.Get("receiptId"))}, the file is {rid}");
                 if (!PyValue.Truthy(Ev.OrEmpty(rec.Get("validation")).Get("accepted")))

@@ -10,9 +10,17 @@ registry version the bundle's own plan records (hashed, so bound), never on a li
     V2  the same rows in a bundle whose plan records registry version 5 (the fixture's plan edited to 5, plan.sha256
         and the manifest's rows for the two files re-hashed): refused, exit 3, one defect evidence-kind-unknown on the
         enrichment row whose detail is one sentence, and no notChecked list or sentence (a receipt's checks do not
-        depend on its kind, so the import's receipt is chained as any receipt is and is not refused by kind alone)
+        depend on its kind, so the import's receipt is chained as any receipt is; V4 shows it refused by its kind too)
     V3  the fixture's record-rows row relabelled order-variant (Q-B3): in the old bundle it is listed the same way, and
         in the version-5 graft refused the same way, by its own kind's name
+    V4  a record import's receipt credited in a bundle whose plan records registry version 5 (the fixture at version 5
+        with its enrichment rows taken out, so only the receipt is of a kind the app does not write; again with the
+        receipt relabelled onto the app check geometry.object-overlap, its manifest row re-hashed): refused, exit 3,
+        with one defect receipt-kind-unknown on that receipt in one sentence (the wrong answer it rejects: an
+        AI-side import counted as an app row's answer in a current bundle)
+    V5  a version-5 plan naming a check of an adapter kind outside the app's vocabulary (the fixture at version 5, its
+        enrichment rows out, check geometry.object-overlap's kind set to live-import, plan.sha256 re-hashed): refused,
+        exit 3, with a defect plan-kind-unknown naming that check and kind in one sentence
 
 The controller is HOUSECARL_RUNCONTROL, else this checkout's build (buildlayout.runcontrol()). Every case works on a copy
 (verify-bundle writes verify.json into the folder it checks). Exit 0: every case passed; 1: a case failed.
@@ -49,10 +57,27 @@ def sha(p: Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
-def copy(tmp: Path, name: str, version: int | None = None, relabel: str | None = None) -> Path:
+def copy(tmp: Path, name: str, version: int | None = None, relabel: str | None = None, no_enrichment: bool = False,
+         plan_kind: tuple[str, str] | None = None, receipt_check: str | None = None) -> Path:
     b = tmp / name
     shutil.copytree(OLD_LAB, b)
     m = json.loads((b / "manifest.json").read_text(encoding="utf-8"))
+    if no_enrichment:
+        gone = [e for e in m["evidence"] if e.get("kind") == "enrichment"]
+        assert len(gone) == 2, gone
+        m["evidence"] = [e for e in m["evidence"] if e.get("kind") != "enrichment"]
+        m["required"] = [x for x in m["required"] if not str(x).startswith("enrichment/")]
+        m.pop("enrichment")
+        shutil.rmtree(b / "enrichment")
+    if receipt_check:
+        rp = b / RECEIPT
+        rec = json.loads(rp.read_text(encoding="utf-8"))
+        assert rec["adapter"]["kind"] == "mcp-import", rec["adapter"]
+        rec["checkId"] = receipt_check
+        rp.write_text(json.dumps(rec, indent=1), encoding="utf-8")
+        rows = [e for e in m["evidence"] if e.get("path") == RECEIPT]
+        assert len(rows) == 1, rows
+        rows[0]["sha256"], rows[0]["bytes"] = sha(rp), rp.stat().st_size
     if relabel:
         rows = [e for e in m["evidence"] if e.get("path") == ROWS]
         assert len(rows) == 1 and rows[0].get("enrichment") == "record-rows", rows
@@ -62,6 +87,10 @@ def copy(tmp: Path, name: str, version: int | None = None, relabel: str | None =
         plan = json.loads(plan_file.read_text(encoding="utf-8"))
         assert plan["registry"]["registryVersion"] == 4, plan["registry"]
         plan["registry"]["registryVersion"] = version
+        if plan_kind:
+            hit = [c for c in plan["checks"] if c.get("checkId") == plan_kind[0]]
+            assert len(hit) == 1, hit
+            hit[0]["adapter"]["kind"] = plan_kind[1]
         plan_file.write_text(json.dumps(plan, indent=1), encoding="utf-8")
         old = (b / "plan.sha256").read_text(encoding="utf-8")
         (b / "plan.sha256").write_text(sha(plan_file) + old[64:], encoding="utf-8")
@@ -112,6 +141,29 @@ def current_refused(tmp: Path, name: str, kind: str, relabel: str | None) -> Non
           f"notChecked {bundle.get('notChecked')}; lines {sentences(r)!r}")
 
 
+def receipt_refused(tmp: Path, name: str, receipt_check: str | None) -> None:
+    r, bundle = verify(copy(tmp, name, version=5, no_enrichment=True, receipt_check=receipt_check))
+    kind = [d for d in bundle.get("defects") or [] if d.get("kind") == "receipt-kind-unknown"]
+    check(f"{name}: a record import's receipt in a bundle of registry version 5 is refused", r.returncode == 3
+          and bundle.get("complete") is False and not bundle.get("mismatched") and not bundle.get("missing"),
+          f"exit {r.returncode}; {json.dumps(bundle)[:400]}")
+    check(f"{name}: one defect receipt-kind-unknown, on that receipt, in one sentence naming its kind",
+          len(kind) == 1 and kind[0].get("path") == RECEIPT and "mcp-import" in kind[0].get("detail", "")
+          and "\n" not in kind[0].get("detail", ""), f"defects {bundle.get('defects')}")
+
+
+def plan_kind_refused(tmp: Path, name: str) -> None:
+    r, bundle = verify(copy(tmp, name, version=5, no_enrichment=True, plan_kind=("geometry.object-overlap", "live-import")))
+    kind = [d for d in bundle.get("defects") or [] if d.get("kind") == "plan-kind-unknown"]
+    named = [d for d in kind if "geometry.object-overlap" in d.get("detail", "") and "live-import" in d.get("detail", "")]
+    check(f"{name}: a version-5 plan naming a check of a kind outside the app's vocabulary is refused",
+          r.returncode == 3 and bundle.get("complete") is False and not bundle.get("mismatched"),
+          f"exit {r.returncode}; {json.dumps(bundle)[:400]}")
+    check(f"{name}: a defect plan-kind-unknown on plan.json names the check and its kind in one sentence",
+          len(named) == 1 and named[0].get("path") == "plan.json" and "\n" not in named[0].get("detail", ""),
+          f"defects {bundle.get('defects')}")
+
+
 def main() -> int:
     if not Path(RUNCONTROL).is_file():
         print(f"FAIL runcontrol is not built at {RUNCONTROL}; build the solution (scripts/build.ps1).")
@@ -122,6 +174,9 @@ def main() -> int:
         current_refused(tmp, "V2", "record-rows", None)
         old_listed(tmp, "V3-old", "order-variant", "order-variant")
         current_refused(tmp, "V3-current", "order-variant", "order-variant")
+        receipt_refused(tmp, "V4", None)
+        receipt_refused(tmp, "V4-relabelled", "geometry.object-overlap")
+        plan_kind_refused(tmp, "V5")
     print(f"\n{failed} failed")
     return 1 if failed else 0
 
