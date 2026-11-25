@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace HarnessShared;
 
-// The discovery probes' machine-readable answer (patchprobe, poolprobe, fomodprobe `--json PATH`), schema 1.
+// The discovery probes' machine-readable answer (patchfind, poolprobe, fomodprobe `--json PATH`), schema 1.
 //
 // One shape for all three, so evalrun reads every discovered patch the same way: each HIT names a plugin a
 // modder could install, where it was found, and the sha256 of the exact bytes that would be installed (the file on

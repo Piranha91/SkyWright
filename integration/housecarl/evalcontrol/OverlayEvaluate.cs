@@ -120,19 +120,20 @@ public static class OverlayFinalize
         un["familiesUnsupportedOrManual"] = PyOrder.SortedByCodePoint(families).Cast<object?>().ToList();
         un["mediaUnassessed"] = MediaSentence;
         un["runtimeObservations"] = LiveScope.RuntimeObservations(receipts);
-        disposition["discovery"] = DiscoveryBlock(run, plan, receipts);
+        disposition["discovery"] = DiscoveryBlock(disposition, run, plan, receipts);
         disposition[OverlayPlan.Key] = plan[OverlayPlan.Key];
     }
 
-    /// <summary>The overlay's discovery block: the bound app bundle's (what the app's rows searched and qualified),
-    /// with the author advice of this overlay's adviceprobe receipts, and adviceprobe among the sources searched when one
-    /// of them was accepted. A report reads this block of a joined bundle (evalreport's Bundle._join).</summary>
-    static PyDict DiscoveryBlock(string run, PyDict plan, PyDict receipts)
+    /// <summary>The overlay's discovery block (moved from runcontrol's disposition with the discovery rows): what the
+    /// module's probes searched and found, each relevant hit qualified by runcontrol's byte rule over the plugins the
+    /// app scan's accepted receipts consumed (DerivedRows.Qualify, never a second rule), the app's supplied files as its
+    /// qualification receipt states them, and the author's advice. A report reads it on a joined bundle.</summary>
+    static PyDict DiscoveryBlock(PyDict disposition, string run, PyDict plan, PyDict receipts)
     {
-        string app = PyPath.Resolve(PyPath.Join(run, Ev.Str(Ev.OrEmpty(plan.Get(OverlayPlan.Key)).Get("appBundle"))));
-        var appDisp = Ev.OrEmpty(PyJson.LoadEvalFile(PyPath.Join(app, "disposition.json")));
-        var block = appDisp.Get("discovery") is PyDict d ? (PyDict)Py.Copy(d)! : new PyDict();
-        var searched = Ev.Items(block.Get("sourcesSearched")).Select(Ev.Str).ToHashSet(StringComparer.Ordinal);
+        var (app, output) = ModuleDiscovery.AppSource(run, plan);
+        var appReceipts = Receipts.ReadReceipts(app);
+        var relevant = ModuleDiscovery.RelevantPlugins(app, plan, output);
+        var searched = new HashSet<string>(StringComparer.Ordinal);
         foreach (var r in receipts.Select(kv => PyValue.Dict(kv.Value)))
         {
             var ad = Ev.OrEmpty(r.Get("adapter"));
@@ -140,8 +141,27 @@ public static class OverlayFinalize
                 && PyValue.Truthy(Ev.OrEmpty(r.Get("validation")).Get("accepted")))
                 searched.Add(exe);
         }
-        block["sourcesSearched"] = PyOrder.SortedByCodePoint(searched).Cast<object?>().ToList();
-        block["advice"] = ModuleRows.Advice(run, receipts);
+        // the app's qualification receipt: the first one whose derived block carries candidates (the supplied files)
+        var qualified = appReceipts.Select(kv => PyValue.Dict(kv.Value)).FirstOrDefault(r => PyValue.Truthy(Ev.OrEmpty(r.Get("derived")).Get("candidates")));
+        var (hitRows, notRelevant, unreadable, hitsNotSearched) = ModuleDiscovery.DiscoveryHitRows(run, plan, receipts, DerivedRows.ConsumedBy(appReceipts), relevant);
+        var notSearched = new List<object?> { "the Nexus network API (this runner never fetches; advice is read offline from the catalogue snapshot)" };
+        notSearched.AddRange(hitsNotSearched);
+        var candidates = qualified != null ? Ev.Items(Ev.OrEmpty(qualified.Get("derived")).Get("candidates")).ToList() : new List<object?>();
+        candidates.AddRange(hitRows);
+        var catalogues = Ev.Items(disposition.Get("catalogues"));
+        var block = new PyDict
+        {
+            ["sourcesSearched"] = PyOrder.SortedByCodePoint(searched).Cast<object?>().ToList(),
+            ["sourcesNotSearched"] = notSearched,
+            ["notRelevant"] = notRelevant,
+            ["candidates"] = candidates,
+            ["advice"] = ModuleRows.Advice(run, receipts),
+            ["listings"] = catalogues.Where(c => Ev.Eq(Ev.G(c, "kind"), "discovery")).ToList(),
+            ["relevance"] = ModuleDiscovery.Relevance(run, plan, receipts, relevant),
+            ["note"] = "a Nexus hit is a lead: a downloadable file stays unqualified until its actual payload was in an evaluated arm",
+        };
+        // a hit list that cannot be read as written: said, never read as no hit
+        if (unreadable.Count > 0) block["inconclusive"] = unreadable;
         return block;
     }
 }

@@ -15,14 +15,16 @@ public static class AiList
     /// mcp-only: a check only houseCARL's record tools read, left open by the plan for `evalcontrol import`;
     /// live-import: a check a live game driver measures (the live switch check), planned only when opted in, open
     /// until `evalcontrol import` binds the driver's export; adviceprobe: a probe of this module's build that reads a
-    /// mod page's stated order offline, run as a child (ModuleRows), its result a discovery listing.</summary>
+    /// mod page's stated order offline, run as a child (ModuleRows), its result a discovery listing; patchfind: a patch-finding
+    /// probe of this module's build (patchfind, fomodprobe, poolprobe) writing a schema-1 hit list, run as a
+    /// child.</summary>
     public static readonly Registry.Vocabulary Vocabulary = new(
-        AdapterKinds: new HashSet<string>(StringComparer.Ordinal) { "media", "mcp-only", "live-import", "adviceprobe" },
+        AdapterKinds: new HashSet<string>(StringComparer.Ordinal) { "media", "mcp-only", "live-import", "adviceprobe", "patchfind" },
         KindsNeedingReason: new HashSet<string>(StringComparer.Ordinal) { "mcp-only" },
         ResultKinds: new HashSet<string>(StringComparer.Ordinal) { "discovery" },
         KindsWithoutOutput: new HashSet<string>(StringComparer.Ordinal) { "media", "mcp-only", "live-import" },
         KindsRequiringOptIn: new HashSet<string>(StringComparer.Ordinal) { "live-import" },
-        KindsWithChild: new HashSet<string>(StringComparer.Ordinal) { "adviceprobe" },
+        KindsWithChild: new HashSet<string>(StringComparer.Ordinal) { "adviceprobe", "patchfind" },
         EvidenceStrengths: new HashSet<string>(StringComparer.Ordinal) { "supplied-media", "record-fact", "engine-observation" });
 
     /// <summary>The kinds the overlay plan records by their own name and never runs: an mcp-only or live-import row

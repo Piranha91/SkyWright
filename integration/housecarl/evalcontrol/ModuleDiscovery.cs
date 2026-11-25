@@ -1,12 +1,23 @@
-namespace RunControl;
+using RunControl;
+
+namespace EvalControl;
 
 /// <summary>The plugin pairs a plan is about and which discovery hits name them (evalrun.py): the part finalize
 /// reads. A hit is relevant when its own masters, FOMOD condition plugins or pair name a plan target or a plugin
 /// of a plan pair.</summary>
-public static class Discovery
+public static class ModuleDiscovery
 {
+    /// <summary>Where the app scan's measured outputs are, for the plan's pairs: an overlay reads its bound app bundle
+    /// (receipts under it, their outputs under evidence/); any other run its own folder.</summary>
+    public static (string folder, Func<string, string>? output) AppSource(string run, PyDict plan)
+    {
+        if (plan.Get(OverlayPlan.Key) is not PyDict bound) return (run, null);
+        string app = PyPath.Resolve(PyPath.Join(run, Ev.Str(bound.Get("appBundle"))));
+        return (app, p => PyPath.Join(app, VerifyBundle.ReceiptEvidenceRel(p)));
+    }
+
     /// <summary>The discovery probes whose hit list (schema 1) qualification reads.</summary>
-    public static readonly string[] DiscoveryExes = ["patchprobe", "poolprobe", "fomodprobe"];
+    public static readonly string[] DiscoveryExes = ["patchfind", "poolprobe", "fomodprobe"];
 
     public const string NotRelevantWhy = "its masters, FOMOD conditions and pair name no plan target and no plugin of a plan pair (its own "
         + "masters only: a hit that masters just a dependent of a target is counted here)";
@@ -61,7 +72,7 @@ public static class Discovery
 
     /// <summary>A plan with a reviewArm: each target with each plugin it clashes with on that arm, from the A and B
     /// fields of the review arm's accepted conflict-file receipts.</summary>
-    public static List<(string, string)> ReviewPairs(string run, PyDict plan)
+    public static List<(string, string)> ReviewPairs(string run, PyDict plan, Func<string, string>? output = null)
     {
         var found = new List<(string, string)>();
         object? review = plan.Get("reviewArm");
@@ -79,7 +90,7 @@ public static class Discovery
             foreach (var o in Ev.Items(r.Get("outputs")))
             {
                 object? path = Ev.G(o, "path");
-                if (!PyValue.Truthy(path) || PyJson.LoadEvalFile(PyPath.Join(run, Ev.Str(path))) is not PyDict doc) continue;
+                if (!PyValue.Truthy(path) || PyJson.LoadEvalFile((output ?? (p => PyPath.Join(run, p)))(Ev.Str(path))) is not PyDict doc) continue;
                 foreach (var c in Ev.Items(doc.Get("Conflicts")))
                 {
                     string a = PyValue.Truthy(Ev.G(c, "A")) ? Ev.Str(Ev.G(c, "A")) : "", b = PyValue.Truthy(Ev.G(c, "B")) ? Ev.Str(Ev.G(c, "B")) : "";
@@ -96,11 +107,11 @@ public static class Discovery
     }
 
     /// <summary>Every pair the whole plan is about: the review pairs, then each arm's.</summary>
-    public static List<(string, string)> AllPlanPairs(string run, PyDict plan)
+    public static List<(string, string)> AllPlanPairs(string run, PyDict plan, Func<string, string>? output = null)
     {
         var found = new List<(string, string)>();
         var seen = new HashSet<(string, string)>();
-        foreach (var pair in ReviewPairs(run, plan))
+        foreach (var pair in ReviewPairs(run, plan, output))
             if (seen.Add(Ordered(pair.Item1, pair.Item2))) found.Add(Ordered(pair.Item1, pair.Item2));
         foreach (var arm in PyValue.Iter(plan["arms"]))
             foreach (var pair in TargetPairs(plan, PyValue.Dict(arm)))
@@ -109,10 +120,10 @@ public static class Discovery
     }
 
     /// <summary>What makes a discovered patch about this evaluation: a plan target, or a plugin of a pair the plan moves.</summary>
-    public static HashSet<string> RelevantPlugins(string run, PyDict plan)
+    public static HashSet<string> RelevantPlugins(string run, PyDict plan, Func<string, string>? output = null)
     {
         var names = new HashSet<string>(TargetNames(plan).Select(PyText.Lower), StringComparer.Ordinal);
-        foreach (var (x, y) in AllPlanPairs(run, plan))
+        foreach (var (x, y) in AllPlanPairs(run, plan, output))
         {
             names.Add(PyText.Lower(x));
             names.Add(PyText.Lower(y));
@@ -133,9 +144,9 @@ public static class Discovery
 
     /// <summary>{checkId: {armId: {...}}} for every accepted discovery receipt: the relevant hits' files and the
     /// not-relevant count, or computed false with the reason.</summary>
-    public static PyDict Relevance(string run, PyDict plan, PyDict receipts)
+    public static PyDict Relevance(string run, PyDict plan, PyDict receipts, HashSet<string>? relevantPlugins = null)
     {
-        var relevant = RelevantPlugins(run, plan);
+        var relevant = relevantPlugins ?? RelevantPlugins(run, plan);
         var found = new PyDict();
         foreach (var r in PyOrder.SortedBy(receipts.Select(kv => PyValue.Dict(kv.Value)), x => Ev.Str(x.Get("receiptId"))))
         {
@@ -172,5 +183,108 @@ public static class Discovery
             };
         }
         return found;
+    }
+
+    // ---- the hit rows (moved from runcontrol's DerivedRows with the discovery checks)
+
+    static bool Accepted(PyDict r) => PyValue.Truthy(PyValue.Dict(r["validation"])["accepted"]);
+
+    static bool DiscoveryReceipt(PyDict r) => Ev.OrEmpty(r.Get("adapter")).Get("exe") is string exe && DiscoveryExes.Contains(exe);
+
+    static IEnumerable<PyDict> Vals(PyDict d) => d.Select(kv => PyValue.Dict(kv.Value));
+
+    // str(v or "").lower() when that is a sha256, else null.
+    static string? Sha(object? v)
+    {
+        string s = PyText.Lower(PyValue.Truthy(v) ? Ev.Str(v) : "");
+        return PlanArms.IsSha256(s) ? s : null;
+    }
+
+    /// <summary>The receipt ids of the accepted discovery receipts, in receipt order.</summary>
+    public static List<object?> DiscoveryReceiptIds(PyDict receipts) =>
+        Vals(receipts).Where(r => Accepted(r) && DiscoveryReceipt(r)).Select(r => r["receiptId"]).ToList();
+
+    /// <summary>(rows, notRelevant, inconclusive sentences, not-searched sentences) from the accepted discovery
+    /// receipts. A hit is relevant when its own masters, its FOMOD condition plugins or its pair name a plan target or
+    /// a plan pair's plugin; it is qualified only when its sha256 equals a plugin an accepted receipt consumed. An
+    /// output file is read only after its sha256 matches the one its receipt recorded.</summary>
+    public static (List<object?> rows, PyDict notRelevant, List<object?> unreadable, List<object?> notSearched) DiscoveryHitRows(
+        string run, PyDict plan, PyDict receipts, DerivedRows.Consumed consumed, HashSet<string>? relevantPlugins = null)
+    {
+        var relevant = relevantPlugins ?? RelevantPlugins(run, plan);
+        var rows = new List<object?>();
+        var seen = new Dictionary<(string file, string? sha, string source), PyDict>();
+        var unreadable = new List<object?>();
+        var notSearched = new List<object?>();
+        var notRelevant = new PyDict();
+        foreach (var r in PyOrder.SortedBy(Vals(receipts), x => Ev.Str(x.Get("receiptId"))))
+        {
+            if (!DiscoveryReceipt(r) || !Accepted(r)) continue;
+            string exe = (string)PyValue.Dict(r["adapter"])["exe"]!;
+            string rid = Ev.Str(r.Get("receiptId"));
+            var outs = PyValue.Truthy(r.Get("outputs")) ? (List<object?>)r["outputs"]! : [];
+            var o = outs.Count > 0 ? PyValue.Dict(outs[0]) : new PyDict();
+            if (!PyValue.Truthy(o.Get("path")))
+            {
+                unreadable.Add($"receipt {rid} ({exe}) records no output file, so its hits cannot be read (a text-only receipt from before the --json hit list)");
+                continue;
+            }
+            string path = Ev.Str(o["path"]);
+            string f = PyPath.Join(run, path);
+            if (!Ev.Exists(f))
+            {
+                unreadable.Add($"receipt {rid} ({exe}) names {path}, which is missing");
+                continue;
+            }
+            if (!Ev.Eq(Hashing.Sha256FileOrNull(f), o.Get("sha256")))
+            {
+                unreadable.Add($"receipt {rid} ({exe}): {path} has changed since the receipt recorded its sha256");
+                continue;
+            }
+            if (PyJson.LoadEvalFile(f) is not PyDict doc || !Ev.Eq(doc.Get("schemaVersion"), 1L) || doc.Get("hits") is not List<object?> hits)
+            {
+                unreadable.Add($"receipt {rid} ({exe}): {path} is not a schema-1 hit list");
+                continue;
+            }
+            foreach (var h in hits.OfType<PyDict>())
+            {
+                if (!PyValue.Truthy(h.Get("file"))) continue;
+                if (!HitNames(h).Overlaps(relevant))
+                {
+                    if (!notRelevant.ContainsKey(exe)) notRelevant[exe] = new PyDict { ["count"] = 0L, ["why"] = NotRelevantWhy };
+                    var nr = (PyDict)notRelevant[exe]!;
+                    nr["count"] = (long)nr["count"]! + 1;
+                    continue;
+                }
+                string file = Ev.Str(h["file"]);
+                string? hsha = Sha(h.Get("sha256"));
+                string source = $"{exe}:{Ev.Str(h.Get("kind"))}";
+                var key = (PyText.Lower(file), hsha, source);
+                if (seen.TryGetValue(key, out var earlier))
+                {
+                    earlier["foundOn"] = PyOrder.SortedByCodePoint(Ev.Items(earlier["foundOn"]).Select(Ev.Str).Append(Ev.Str(r.Get("armId"))).Distinct(StringComparer.Ordinal))
+                        .Cast<object?>().ToList();
+                    continue;
+                }
+                var (hitOk, why) = DerivedRows.Qualify(consumed, hsha, file, $"{exe}'s hit list",
+                    $"the {exe} hit records no content hash ({(PyValue.Truthy(h.Get("unhashedReason")) ? Ev.Str(h["unhashedReason"]) : "no reason given")})");
+                var row = new PyDict
+                {
+                    ["file"] = file, ["armId"] = null, ["source"] = source, ["foundOn"] = new List<object?> { Ev.Str(r.Get("armId")) },
+                    ["sha256"] = hsha, ["qualification"] = hitOk ? "qualified" : "unqualified", ["why"] = why,
+                };
+                seen[key] = row;
+                rows.Add(row);
+            }
+        }
+        var acceptedChecks = Vals(receipts).Where(r => Accepted(r) && DiscoveryReceipt(r)).Select(r => r.Get("checkId")).ToList();
+        foreach (var c in Ev.Items(plan.Get("checks")).Select(PyValue.Dict))
+        {
+            object? exe = Ev.OrEmpty(c.Get("adapter")).Get("exe");
+            if (exe is string e && DiscoveryExes.Contains(e) && !PyValue.In(c.Get("checkId"), acceptedChecks))
+                notSearched.Add($"{Ev.Str(c.Get("checkId"))} ({e}): no accepted receipt (plan status "
+                                + $"{(PyValue.Truthy(c.Get("status")) ? Ev.Str(c["status"]) : "unknown")}), so the patches it would find are not stated");
+        }
+        return (rows, notRelevant, unreadable, notSearched);
     }
 }

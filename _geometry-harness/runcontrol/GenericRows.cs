@@ -1,7 +1,7 @@
 namespace RunControl;
 
 /// <summary>One row of a check whose probe is launched as a child (evalrun.py's run_generic): scopeprobe,
-/// probe-emit, probe-json, probe-target, patchprobe. The probe's flags come from the registry as data,
+/// probe-emit, probe-json, probe-target. The probe's flags come from the registry as data,
 /// with placeholders filled from named sources; a placeholder whose source is absent blocks the row by name.</summary>
 public static class GenericRows
 {
@@ -9,8 +9,6 @@ public static class GenericRows
     public static readonly HashSet<string> CommonFlagKinds = new(StringComparer.Ordinal)
         { "scopeprobe", "ordersweep-probe", "probe-emit", "probe-json" };
 
-    public const string PairSourceNone = "no geometry check ran on the review arm, so there is no clash to take a plugin pair from; select "
-                                         + "overlap, contact or navmesh ownership with patch discovery.";
 
     public static bool WantsCommonFlags(PyDict adapter)
     {
@@ -63,7 +61,6 @@ public static class GenericRows
     /// <summary>runcontrol's own placeholders beyond the plain substitutions; a caller's entry of the same token wins.</summary>
     public static readonly IReadOnlyDictionary<string, Placeholder> OwnPlaceholders = new Dictionary<string, Placeholder>(StringComparer.Ordinal)
     {
-        ["{pair}"] = PairPlaceholder,
     };
 
     /// <summary>runcontrol's own rules over a built command line (each may add to it, or refuse the row with a status
@@ -78,26 +75,6 @@ public static class GenericRows
     /// <summary>runcontrol's own output rules, asked after a caller's.</summary>
     public static readonly IReadOnlyList<OutputsRule> OwnOutputRules = [];
 
-    static (string status, string why)? PairPlaceholder(Executor ex, PyDict plan, PyDict check, PyDict arm, List<string> args)
-    {
-        // the reference arm runs once with the plan-wide set; another arm runs with the moves that arm makes
-        object? review = plan.Get("reviewArm");
-        bool reference = Ev.Eq(arm["armId"], review) || (!PyValue.Truthy(review) && Ev.Eq(arm["kind"], "baseline"));
-        var pairs = reference ? Discovery.AllPlanPairs(ex.Run, plan) : Discovery.TargetPairs(plan, arm);
-        if (pairs.Count == 0 && !reference) pairs = Discovery.AllPlanPairs(ex.Run, plan);
-        if (pairs.Count == 0)
-            return ("blocked(no-pair-source)",
-                PyValue.Truthy(review) ? PairSourceNone
-                    : "the candidate manifest records no move involving a target plugin, so there is no plugin pair for this check to verify");
-        string flag = "--pair";
-        if (args.Count > 0 && args[^1].StartsWith("--", StringComparison.Ordinal))
-        {
-            flag = args[^1];
-            args.RemoveAt(args.Count - 1);
-        }
-        foreach (var (a, b) in pairs) args.AddRange([flag, a, b]);
-        return null;
-    }
 
     public static void Build(Executor ex, PyDict check, PyDict arm, Action<List<string>, List<string>, object?> launch,
         IReadOnlyDictionary<string, Placeholder>? placeholders = null, IReadOnlyList<Placeholder>? argvRules = null,

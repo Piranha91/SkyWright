@@ -11,7 +11,7 @@
     "unmeasuredExtents": "scope.json's `unmeasured` is a list of {extent, why} over the closed vocabulary script-placement, alias-fill, bos-swaps, asset-replacers, door-destinations, generated-output (PLAN amendment A-1). A check may declare applicability.dependsOnExtents naming any of them; evalregistry then answers unknown whenever the scope lists one, whatever the trigger says.",
     "triggerFields": "Each trigger key reads one scope field and nothing else: placed -> placed.total, exterior -> placed.exterior, land -> placed.land, navmesh -> placed.navm, anyType -> recordTypes, overlays -> configuration.overlays, nexusId -> nexusId, masters -> masters; always reads nothing. placedMeshes reads no scope field: it reads the mesh reach (scope/mesh-reach.json, written by overlapprobe --mesh-reach on the combined arm), credited -> yes, a complete reach with none credited -> no, none or an incomplete reach -> unknown.",
     "adapterResult": "A-6: a check whose adapter output is json or text carries adapter.result {kind, findings, judged, unjudgeable}. A spec is a dotted path into the child's JSON output (a number is that number, a list is its length) or regex:<pattern> with a named group `n` over the child's log. A null spec means the probe prints no such count -- adapter.result.note says so, and the controller records the gap rather than reading a number that means something else. kind detector reads finding when findings > 0, else no-finding; catalogue and discovery read catalogue. scopeprobe is excepted (D2's `complete` field). A kind that runs no child (derived, media, mcp-only, manual, unsupported) has output null: there is no child output to read.",
-    "commonFlags": "A-10(b): --instance/--profile/--game are passed only where adapter.commonFlags is true. blockprobe, patchprobe, fomodprobe and poolprobe parse no --instance at all (grepped) and find the instance through HarnessTarget, which reads HOUSECARL_MO2_INSTANCE / HOUSECARL_MO2_PROFILE / HOUSECARL_GAME_PATH from the environment every child gets. A placeholder is substituted in the shape the args give it: a bare {target} is positional, --target {target} is a flag.",
+    "commonFlags": "A-10(b): --instance/--profile/--game are passed only where adapter.commonFlags is true. blockprobe parses no --instance at all (grepped) and finds the instance through HarnessTarget (the patch-discovery probes' rows left for the houseCARL integration module's list in step 3 of the boundary), which reads HOUSECARL_MO2_INSTANCE / HOUSECARL_MO2_PROFILE / HOUSECARL_GAME_PATH from the environment every child gets. A placeholder is substituted in the shape the args give it: a bare {target} is positional, --target {target} is a flag.",
     "population": "A-10(d)/A-11(d): adapter.population / adapter.state name the population a probe's emit actually declares when it is not the arm's, so the receipt validator compares the emit against the probe's own words rather than the plan's. Three probes differ, each for the same reason -- their population is not placed references: driftprobe (placement history), seamprobe (LAND heightmaps) and waterprobe (CELL water records). navownprobe, overlapprobe, contactprobe and stateprobe emit load-time/baseline and declare nothing."
   },
   "families": [
@@ -829,122 +829,6 @@
       "unsupportedReason": "regenerating LOD, occlusion and patcher output is outside the controller's scope; the check exists so the need is recorded rather than forgotten."
     },
     {
-      "id": "patch.discovery-installed",
-      "family": "patch",
-      "title": "Patches already installed in this instance that cover the target's contested pairs",
-      "required": true,
-      "applicability": {
-        "trigger": {
-          "masters": true
-        },
-        "note": "A patch is a plugin mastering both sides of a pair; with no masters there is no pair to patch."
-      },
-      "prerequisites": [
-        "loadability.masters-and-order"
-      ],
-      "inputs": {
-        "arms": "all",
-        "states": "baseline"
-      },
-      "adapter": {
-        "kind": "patchprobe",
-        "exe": "patchprobe",
-        "args": [
-          "--pair",
-          "{pair}"
-        ],
-        "reverse": false,
-        "output": "json",
-        "result": {
-          "kind": "discovery",
-          "findings": "counts.hits",
-          "judged": "counts.judged",
-          "unjudgeable": "counts.unjudgeable"
-        },
-        "commonFlags": false
-      },
-      "evidence": {
-        "strength": "record-fact",
-        "claim": "FOMOD / POOL / PATCH COVERAGE",
-        "limits": "patchprobe writes its hit list with --json (schema 1, _shared/DiscoveryHits.cs): every plugin that masters an asked pair, with the sha256 of its file, and each download matched only by name with no hash and the reason. patch.candidate-qualification reads it. It runs per ARM because A-10(g) derives its --pair arguments from the arm itself -- the plugin pairs whose relative order flips between the baseline and that candidate -- so a baseline-only run would leave patch.candidate-qualification, which runs on every arm, blocked for want of an input on every candidate. patchprobe itself reads the machine's installed plugins and takes no --order; only the pairs it is asked about change per arm. It searches the configured roots only; roots not configured are sources not searched and are listed as such. A hit is a candidate, never a verified repair."
-      },
-      "manualDecisionAllowed": false
-    },
-    {
-      "id": "patch.discovery-fomod",
-      "family": "patch",
-      "title": "Installer options that fit this order and were not taken",
-      "required": false,
-      "applicability": {
-        "trigger": {
-          "always": true
-        },
-        "note": "Any installed mod may have a FOMOD with an unchosen compatibility option; nothing in the target's footprint predicts it."
-      },
-      "prerequisites": [],
-      "inputs": {
-        "arms": "baseline",
-        "states": "baseline"
-      },
-      "adapter": {
-        "kind": "patchprobe",
-        "exe": "fomodprobe",
-        "args": [],
-        "reverse": false,
-        "output": "json",
-        "result": {
-          "kind": "discovery",
-          "findings": "counts.hits",
-          "judged": "counts.judged",
-          "unjudgeable": "counts.unjudgeable"
-        },
-        "commonFlags": false
-      },
-      "evidence": {
-        "strength": "record-fact",
-        "claim": "FOMOD / POOL / PATCH COVERAGE",
-        "limits": "fomodprobe has no --order: it reads the instance's own installers, so it runs on the baseline profile only. With --json it writes its hit list (schema 1): one hit per plugin an unselected option delivers, with the sha256 of that archive entry, its condition plugins and its tier. Optional, because an unchosen installer option is a lead, not a defect in the evaluated order. Requires the download pool and 7z paths from the harness config; absent, it refuses."
-      },
-      "manualDecisionAllowed": false
-    },
-    {
-      "id": "patch.discovery-pool",
-      "family": "patch",
-      "title": "Downloads in the local pool that were never installed anywhere and whose masters are present",
-      "required": false,
-      "applicability": {
-        "trigger": {
-          "always": true
-        },
-        "note": "The pool is a property of the machine, not of the target; it is searched or it is not."
-      },
-      "prerequisites": [],
-      "inputs": {
-        "arms": "baseline",
-        "states": "baseline"
-      },
-      "adapter": {
-        "kind": "patchprobe",
-        "exe": "poolprobe",
-        "args": [],
-        "reverse": false,
-        "output": "json",
-        "result": {
-          "kind": "discovery",
-          "findings": "counts.hits",
-          "judged": "counts.judged",
-          "unjudgeable": "counts.unjudgeable"
-        },
-        "commonFlags": false
-      },
-      "evidence": {
-        "strength": "record-fact",
-        "claim": "FOMOD / POOL / PATCH COVERAGE",
-        "limits": "poolprobe has no --order: baseline profile only. With --json it writes its hit list (schema 1): each patch-shaped plugin in a never-installed archive, one hit per archive version, with the sha256 of the extracted bytes. A downloadable hit remains UNQUALIFIED until its actual payload has been evaluated in an arm (patch.candidate-qualification)."
-      },
-      "manualDecisionAllowed": false
-    },
-    {
       "id": "patch.order-evaluation",
       "family": "patch",
       "title": "Which of the examined orders passes the checks that were actually run",
@@ -988,7 +872,6 @@
         "note": "The distinction between an evaluated payload and a lead has to be stated for every evaluation, including one that discovered nothing."
       },
       "prerequisites": [
-        "patch.discovery-installed",
         "patch.order-evaluation"
       ],
       "inputs": {

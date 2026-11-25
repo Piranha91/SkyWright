@@ -10,9 +10,8 @@
     <ServerGarbageCollection>true</ServerGarbageCollection>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
-    <Compile Include="..\_shared\DiscoveryHits.cs" Link="DiscoveryHits.cs" />
-    <Compile Include="..\_shared\FomodModel.cs" Link="FomodModel.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
+    <Compile Include="..\patchfind\DiscoveryHits.cs" Link="DiscoveryHits.cs" />
   </ItemGroup>
   <ItemGroup>
     <!-- Q31 run contract (roadmap 4.16): this probe does not reference housecarl-core, so it LINKS the

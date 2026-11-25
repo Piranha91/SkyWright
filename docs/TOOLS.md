@@ -25,7 +25,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Do contactprobe's anchor, surface, volume and motion outputs name the solid rule their results depend on, and say none when no solid rule applied?](#tool-_geometry-harness-tests-test_contact_solid_rule.py) — `_geometry-harness/tests/test_contact_solid_rule.py`
 - [Do motionprobe sweep and lightprobe outputs name the solid rule their results depend on, and say none when no solid rule applied?](#tool-_geometry-harness-tests-test_solid_rule_named.py) — `_geometry-harness/tests/test_solid_rule_named.py`
 - [Do overlapprobe, contactprobe (default pass and --empty-space) and stateprobe with --population keep exactly the whole-order rows of the plan's population, in both arms?](#tool-_geometry-harness-tests-test_population_scope.py) — `_geometry-harness/tests/test_population_scope.py`
-- [Do patchprobe, poolprobe and fomodprobe list every discovered patch with the sha256 of its bytes?](#tool-_geometry-harness-tests-test_discovery_probes.py) — `_geometry-harness/tests/test_discovery_probes.py`
+- [Do patchfind, poolprobe and fomodprobe list every discovered patch with the sha256 of its bytes?](#tool-integration-housecarl-tests-test_discovery_probes.py) — `integration/housecarl/tests/test_discovery_probes.py`
 - [Do placed obstacles cut walkable routes in this plugin or cell?](#tool-blockprobe) — `blockprobe`
 - [Do quest targets and their supporting placement relationships still match the winning world?](#tool-driftprobe) — `driftprobe`
 - [Do real renderer run records report their stages and workload correctly?](#tool-_geometry-harness-tests-test_run_records.py) — `_geometry-harness/tests/test_run_records.py`
@@ -51,6 +51,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does a fresh user get the settings window once, and is a saved choice honoured?](#tool-integration-housecarl-tests-test_evalsettings.py) — `integration/housecarl/tests/test_evalsettings.py`
 - [Does a lab run's measuring entry fold only the two measuring choices, keep every other key, and does the module record the model choice?](#tool-integration-housecarl-tests-test_measuring_entry.py) — `integration/housecarl/tests/test_measuring_entry.py`
 - [Does a lab run's record capture read the open arms, take the machine slot, import only rows that were open, and refuse in one sentence?](#tool-integration-housecarl-tests-test_record_capture.py) — `integration/housecarl/tests/test_record_capture.py`
+- [Does a named compatibility patch cover the exact records a detector reported in conflict?](#tool-patchprobe) — `patchprobe`
 - [Does a navmesh comparison request get its measured top-down camera, both states and its refusals offline?](#tool-integration-housecarl-tests-test_capture_navmesh.py) — `integration/housecarl/tests/test_capture_navmesh.py`
 - [Does a navmesh vignette's earlier-version caption, on the reel strip and in the report, name the plugin the historical frame's own --nav-version draws (never the plan's re-cut history, and none when the frame names none), say which mod replaced that version, and keep a name ending in s free of an "s's" possessive, in the narration too?](#tool-integration-housecarl-tests-test_navmesh_caption.py) — `integration/housecarl/tests/test_navmesh_caption.py`
 - [Does a neighbour mod's page state a clash with the evaluated mod?](#tool-adviceprobe) — `adviceprobe`
@@ -220,12 +221,15 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [How can I substitute bosprobe in evaluation-controller fixture tests?](#tool-_geometry-harness-tests-fixtures-evalrun-fakeprobes-bosprobe.py) — `_geometry-harness/tests/fixtures/evalrun/fakeprobes/bosprobe.py`
 - [How can I substitute contactprobe in evaluation-controller fixture tests?](#tool-_geometry-harness-tests-fixtures-evalrun-fakeprobes-contactprobe.py) — `_geometry-harness/tests/fixtures/evalrun/fakeprobes/contactprobe.py`
 - [How can I substitute driftprobe in evaluation-controller fixture tests?](#tool-_geometry-harness-tests-fixtures-evalrun-fakeprobes-driftprobe.py) — `_geometry-harness/tests/fixtures/evalrun/fakeprobes/driftprobe.py`
+- [How can I substitute fomodprobe in the AI-side overlay's fixture tests?](#tool-integration-housecarl-tests-fixtures-fakeprobes-fomodprobe.py) — `integration/housecarl/tests/fixtures/fakeprobes/fomodprobe.py`
 - [How can I substitute navownprobe in evaluation-controller fixture tests?](#tool-_geometry-harness-tests-fixtures-evalrun-fakeprobes-navownprobe.py) — `_geometry-harness/tests/fixtures/evalrun/fakeprobes/navownprobe.py`
 - [How can I substitute overlapprobe in evaluation-controller fixture tests?](#tool-_geometry-harness-tests-fixtures-evalrun-fakeprobes-overlapprobe.py) — `_geometry-harness/tests/fixtures/evalrun/fakeprobes/overlapprobe.py`
-- [How can I substitute patchprobe in evaluation-controller fixture tests?](#tool-_geometry-harness-tests-fixtures-evalrun-fakeprobes-patchprobe.py) — `_geometry-harness/tests/fixtures/evalrun/fakeprobes/patchprobe.py`
+- [How can I substitute patchfind in the AI-side overlay's fixture tests?](#tool-integration-housecarl-tests-fixtures-fakeprobes-patchfind.py) — `integration/housecarl/tests/fixtures/fakeprobes/patchfind.py`
+- [How can I substitute poolprobe in the AI-side overlay's fixture tests?](#tool-integration-housecarl-tests-fixtures-fakeprobes-poolprobe.py) — `integration/housecarl/tests/fixtures/fakeprobes/poolprobe.py`
 - [How can I substitute scopeprobe in evaluation-controller fixture tests?](#tool-_geometry-harness-tests-fixtures-evalrun-fakeprobes-scopeprobe.py) — `_geometry-harness/tests/fixtures/evalrun/fakeprobes/scopeprobe.py`
 - [How can I substitute stateprobe in evaluation-controller fixture tests?](#tool-_geometry-harness-tests-fixtures-evalrun-fakeprobes-stateprobe.py) — `_geometry-harness/tests/fixtures/evalrun/fakeprobes/stateprobe.py`
 - [How can I substitute switchprobe in evaluation-controller fixture tests?](#tool-_geometry-harness-tests-fixtures-evalrun-fakeprobes-switchprobe.py) — `_geometry-harness/tests/fixtures/evalrun/fakeprobes/switchprobe.py`
+- [How can I substitute the module's discovery probes (patchfind, poolprobe, fomodprobe) in the AI-side overlay's fixture tests?](#tool-integration-housecarl-tests-fixtures-fakeprobes-discovery_fake.py) — `integration/housecarl/tests/fixtures/fakeprobes/discovery_fake.py`
 - [How can I synthesize a local WAV from text using a Windows voice?](#tool-evalreel-speech) — `evalreel-speech`
 - [How can I write the hand-derived expected evaluation outputs in a consistent schema?](#tool-_geometry-harness-tests-fixtures-evalrun-expected-make_expected.py) — `_geometry-harness/tests/fixtures/evalrun/expected/make_expected.py`
 - [How can a test stand in for the browser on the settings window?](#tool-integration-housecarl-tests-fixtures-evalsettings-stub_opener.py) — `integration/housecarl/tests/fixtures/evalsettings/stub_opener.py`
@@ -295,7 +299,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [How many renders can fit side by side given measured process needs and current memory?](#tool-renderlimit) — `renderlimit`
 - [How much Havok collision can be decoded, and how does its unit scale compare with render geometry?](#tool-collprobe) — `collprobe`
 - [Is a clash that appears only with the supplied patches loaded pictured with them loaded, beside the setup without them, and said as such in the reel and the report; is one world-state check's new clashes counted once; and does a terrain station's label reach the picture's caption and reel note?](#tool-integration-housecarl-tests-test_patch_clash_pictures.py) — `integration/housecarl/tests/test_patch_clash_pictures.py`
-- [Is a compatibility patch installed or available elsewhere on this machine?](#tool-patchprobe) — `patchprobe`
+- [Is a compatibility patch installed or available elsewhere on this machine?](#tool-patchfind) — `patchfind`
 - [Is a navmesh clash item 24's camera can draw pictured in the review reel as a vignette of its two navmesh states, bound to its capture request, captured by the pipeline with its control in the setup without the mod, refused without a clean control at the same camera, held for its narration, shown as one report figure with its own captions, and said with the control's result and no form key?](#tool-integration-housecarl-tests-test_navmesh_reel.py) — `integration/housecarl/tests/test_navmesh_reel.py`
 - [Is a same-named plugin from another folder planned and reported as itself, not as the measured copy?](#tool-integration-housecarl-tests-test_same_name_variant.py) — `integration/housecarl/tests/test_same_name_variant.py`
 - [Is a selection whose only effect is its meshes evaluated in place: do object overlap and placement contact apply when a selected folder's mesh wins for a placed object and differs (with a plugin that places nothing or none), does a mesh-only mod get its new crossings, and is the scope line built from the mesh reach?](#tool-_geometry-harness-tests-test_asset_only_selection.py) — `_geometry-harness/tests/test_asset_only_selection.py`
@@ -725,21 +729,6 @@ Outputs: Assertion results or generated fixture data for: How can I substitute o
 Source: [_geometry-harness/tests/fixtures/evalrun/fakeprobes/overlapprobe.py](../_geometry-harness/tests/fixtures/evalrun/fakeprobes/overlapprobe.py) — `Fixture stand-in for overlapprobe — see ../fakeprobe.py.`
 
 
-<a id="tool-_geometry-harness-tests-fixtures-evalrun-fakeprobes-patchprobe.py"></a>
-
-### _geometry-harness/tests/fixtures/evalrun/fakeprobes/patchprobe.py
-
-**How can I substitute patchprobe in evaluation-controller fixture tests?**
-
-Supply controlled patch-discovery outcomes while testing the controller's decision path.
-
-Inputs: Controlled fixtures for patchprobe.
-
-Outputs: Assertion results or generated fixture data for: How can I substitute patchprobe in evaluation-controller fixture tests?
-
-Source: [_geometry-harness/tests/fixtures/evalrun/fakeprobes/patchprobe.py](../_geometry-harness/tests/fixtures/evalrun/fakeprobes/patchprobe.py) — `Fixture stand-in for patchprobe — see ../fakeprobe.py.`
-
-
 <a id="tool-_geometry-harness-tests-fixtures-evalrun-fakeprobes-scopeprobe.py"></a>
 
 ### _geometry-harness/tests/fixtures/evalrun/fakeprobes/scopeprobe.py
@@ -893,21 +882,6 @@ Inputs: Controlled fixtures for test_declared_cell_presence.
 Outputs: Assertion results or generated fixture data for: Does a scene import skip a declared cell whose owning plugin the setup neither loads nor masters?
 
 Source: [_geometry-harness/tests/test_declared_cell_presence.py](../_geometry-harness/tests/test_declared_cell_presence.py) — `Known-answer tests for overlapprobe's declared-cell presence rule.`
-
-
-<a id="tool-_geometry-harness-tests-test_discovery_probes.py"></a>
-
-### _geometry-harness/tests/test_discovery_probes.py
-
-**Do patchprobe, poolprobe and fomodprobe list every discovered patch with the sha256 of its bytes?**
-
-Qualify a change to a discovery probe's --json hit list or to _shared/DiscoveryHits.cs.
-
-Inputs: The three probes built from this checkout; a scratch machine of two MO2 instances, a two-archive pool and a seven-archive ordering pool, selected by environment variables; 7-Zip.
-
-Outputs: Assertion results for: Do patchprobe, poolprobe and fomodprobe list every discovered patch with the sha256 of its bytes?
-
-Source: [_geometry-harness/tests/test_discovery_probes.py](../_geometry-harness/tests/test_discovery_probes.py) — `Known answers for the discovery probes' machine-readable hit list ('--json'): patchprobe, poolprobe, fomodprobe.`
 
 
 <a id="tool-_geometry-harness-tests-test_editkinds.py"></a>
@@ -3202,13 +3176,13 @@ Inputs: Installed mod metadata and installer option definitions.
 
 Outputs: Offered patch options and recorded selection differences.
 
-Source: [_geometry-harness/fomodprobe/Program.cs](../_geometry-harness/fomodprobe/Program.cs) — `// FOMOD OPTIONS NEVER SELECTED — what the installer offered you and you did not take.`
+Source: [integration/housecarl/fomodprobe/Program.cs](../integration/housecarl/fomodprobe/Program.cs) — `// FOMOD OPTIONS NEVER SELECTED — what the installer offered you and you did not take.`
 
 
 Modifiers (do not select a separate mode):
 
 - `--jobs` — Set jobs for this invocation; consult the linked parser for accepted values.
-- `--json` — PATH: write the hit list (schema 1, _shared/DiscoveryHits.cs): one hit per plugin an unselected option delivers, with the sha256 of that archive entry, its conditions and tier, and the added extraction time.
+- `--json` — PATH: write the hit list (schema 1, patchfind/DiscoveryHits.cs): one hit per plugin an unselected option delivers, with the sha256 of that archive entry, its conditions and tier, and the added extraction time.
 - `--list` — Set list for this invocation; consult the linked parser for accepted values.
 - `--mod` — Set mod for this invocation; consult the linked parser for accepted values.
 
@@ -3304,6 +3278,66 @@ Inputs: Controlled fixtures for adviceprobe.
 Outputs: Assertion results or generated fixture data for: How can I substitute adviceprobe in the AI-side overlay's fixture tests?
 
 Source: [integration/housecarl/tests/fixtures/fakeprobes/adviceprobe.py](../integration/housecarl/tests/fixtures/fakeprobes/adviceprobe.py) — `Fixture stand-in for adviceprobe, the module's probe (moved with patch.author-advice from SkyWright's evalrun fixtures,`
+
+
+<a id="tool-integration-housecarl-tests-fixtures-fakeprobes-discovery_fake.py"></a>
+
+### integration/housecarl/tests/fixtures/fakeprobes/discovery_fake.py
+
+**How can I substitute the module's discovery probes (patchfind, poolprobe, fomodprobe) in the AI-side overlay's fixture tests?**
+
+Supply controlled patch-discovery hit lists while testing the overlay's discovery rows and their qualification.
+
+Inputs: Controlled fixtures for patchfind, poolprobe and fomodprobe (the scenario's arms.<probe> entry).
+
+Outputs: The probe's --json hit list (schema 1).
+
+Source: [integration/housecarl/tests/fixtures/fakeprobes/discovery_fake.py](../integration/housecarl/tests/fixtures/fakeprobes/discovery_fake.py) — `Fixture stand-in for the module's discovery probes (patchfind, poolprobe, fomodprobe; moved with them from SkyWright's`
+
+
+<a id="tool-integration-housecarl-tests-fixtures-fakeprobes-fomodprobe.py"></a>
+
+### integration/housecarl/tests/fixtures/fakeprobes/fomodprobe.py
+
+**How can I substitute fomodprobe in the AI-side overlay's fixture tests?**
+
+Route the overlay's fomodprobe invocation to discovery_fake.py's controlled hit list.
+
+Inputs: Controlled fixtures for fomodprobe.
+
+Outputs: Assertion results or generated fixture data for: How can I substitute fomodprobe in the AI-side overlay's fixture tests?
+
+Source: [integration/housecarl/tests/fixtures/fakeprobes/fomodprobe.py](../integration/housecarl/tests/fixtures/fakeprobes/fomodprobe.py) — `Fixture stand-in for fomodprobe, the module's probe -- see discovery_fake.py.`
+
+
+<a id="tool-integration-housecarl-tests-fixtures-fakeprobes-patchfind.py"></a>
+
+### integration/housecarl/tests/fixtures/fakeprobes/patchfind.py
+
+**How can I substitute patchfind in the AI-side overlay's fixture tests?**
+
+Route the overlay's patchfind invocation to discovery_fake.py's controlled hit list.
+
+Inputs: Controlled fixtures for patchfind.
+
+Outputs: Assertion results or generated fixture data for: How can I substitute patchfind in the AI-side overlay's fixture tests?
+
+Source: [integration/housecarl/tests/fixtures/fakeprobes/patchfind.py](../integration/housecarl/tests/fixtures/fakeprobes/patchfind.py) — `Fixture stand-in for patchfind, the module's probe -- see discovery_fake.py.`
+
+
+<a id="tool-integration-housecarl-tests-fixtures-fakeprobes-poolprobe.py"></a>
+
+### integration/housecarl/tests/fixtures/fakeprobes/poolprobe.py
+
+**How can I substitute poolprobe in the AI-side overlay's fixture tests?**
+
+Route the overlay's poolprobe invocation to discovery_fake.py's controlled hit list.
+
+Inputs: Controlled fixtures for poolprobe.
+
+Outputs: Assertion results or generated fixture data for: How can I substitute poolprobe in the AI-side overlay's fixture tests?
+
+Source: [integration/housecarl/tests/fixtures/fakeprobes/poolprobe.py](../integration/housecarl/tests/fixtures/fakeprobes/poolprobe.py) — `Fixture stand-in for poolprobe, the module's probe -- see discovery_fake.py.`
 
 
 <a id="tool-integration-housecarl-tests-fixtures-record_capture-fake_capture_mcp.py"></a>
@@ -3486,6 +3520,21 @@ Inputs: Synthetic capture-results files.
 Outputs: Assertion results for: Does evalreport's reel refuse a capture-results file it cannot read, and still plan without one?
 
 Source: [integration/housecarl/tests/test_capture_results_unreadable.py](../integration/housecarl/tests/test_capture_results_unreadable.py) — `evalreport's reel refuses a --capture-results file it cannot read`
+
+
+<a id="tool-integration-housecarl-tests-test_discovery_probes.py"></a>
+
+### integration/housecarl/tests/test_discovery_probes.py
+
+**Do patchfind, poolprobe and fomodprobe list every discovered patch with the sha256 of its bytes?**
+
+Qualify a change to a discovery probe's --json hit list or to integration/housecarl/patchfind/DiscoveryHits.cs.
+
+Inputs: The three probes built from the module's folder (and SkyWright's patchprobe, for its --json refusal); a scratch machine of two MO2 instances, a two-archive pool and a seven-archive ordering pool, selected by environment variables; 7-Zip.
+
+Outputs: Assertion results for: Do patchfind, poolprobe and fomodprobe list every discovered patch with the sha256 of its bytes?
+
+Source: [integration/housecarl/tests/test_discovery_probes.py](../integration/housecarl/tests/test_discovery_probes.py) — `Known answers for the discovery probes' machine-readable hit list ('--json'): patchfind, poolprobe, fomodprobe.`
 
 
 <a id="tool-integration-housecarl-tests-test_evalcontrol_run.py"></a>
@@ -4993,26 +5042,49 @@ Modifiers (do not select a separate mode):
 - `--switch-map` — A switch map file the --state arm resolves through.
 - `--threads` — N: the pair sweep's measuring threads (default 8; 1 is the sequential sweep). Results do not depend on it.
 
-<a id="tool-patchprobe"></a>
+<a id="tool-patchfind"></a>
 
-### patchprobe
+### patchfind
 
 **Is a compatibility patch installed or available elsewhere on this machine?**
 
-Check existing local compatibility options before deciding to author a new patch.
+Check existing local compatibility options before deciding to author a new patch (the module's patch finder; verifying a candidate is SkyWright's patchprobe --verify).
 
 Inputs: Target plugin pair and configured installed/download locations.
 
 Outputs: Installed or available compatibility-patch evidence.
+
+Source: [integration/housecarl/patchfind/Program.cs](../integration/housecarl/patchfind/Program.cs) — `// PATCH AVAILABILITY — "is there a patch for this anywhere on this machine?" (patchfind: the houseCARL integration`
+
+
+Modifiers (do not select a separate mode):
+
+- `--json` — PATH: write the hit list (schema 1, patchfind/DiscoveryHits.cs) for --pair and the survey: each plugin with the sha256 of its file, each download matched by name with no hash and the reason; refused with --verify.
+- `--list` — Set list for this invocation; consult the linked parser for accepted values.
+- `--pair` — Set pair for this invocation; consult the linked parser for accepted values.
+- `--roots` — Set roots for this invocation; consult the linked parser for accepted values.
+- `--verify` — Refused in one sentence: whether a candidate covers a detector's conflicting records is SkyWright's patchprobe --verify.
+
+<a id="tool-patchprobe"></a>
+
+### patchprobe
+
+**Does a named compatibility patch cover the exact records a detector reported in conflict?**
+
+Verify a candidate patch against a detector's --emit conflicts before calling a clash fixed (finding patches for a pair is the houseCARL integration module's patchfind).
+
+Inputs: A detector's --emit conflicts file and configured installed/download locations.
+
+Outputs: Per candidate, which of the conflicting records it covers.
 
 Source: [_geometry-harness/patchprobe/Program.cs](../_geometry-harness/patchprobe/Program.cs) — `// PATCH AVAILABILITY — "is there a patch for this anywhere on this machine?"`
 
 
 Modifiers (do not select a separate mode):
 
-- `--json` — PATH: write the hit list (schema 1, _shared/DiscoveryHits.cs) for --pair and the survey: each plugin with the sha256 of its file, each download matched by name with no hash and the reason; refused with --verify.
+- `--json` — Refused in one sentence: the discovery hit list is the houseCARL integration module's patchfind.
 - `--list` — Set list for this invocation; consult the linked parser for accepted values.
-- `--pair` — Set pair for this invocation; consult the linked parser for accepted values.
+- `--pair` — Refused in one sentence: finding the patches for a pair is the houseCARL integration module's patchfind.
 - `--roots` — Set roots for this invocation; consult the linked parser for accepted values.
 - `--verify` — Set verify for this invocation; consult the linked parser for accepted values.
 
@@ -5347,13 +5419,13 @@ Inputs: Configured download archive pool and target mod identities.
 
 Outputs: Archive-contained patch candidates.
 
-Source: [_geometry-harness/poolprobe/Program.cs](../_geometry-harness/poolprobe/Program.cs) — `// DOWNLOADS NEVER INSTALLED — the patches you already own and have never unpacked.`
+Source: [integration/housecarl/poolprobe/Program.cs](../integration/housecarl/poolprobe/Program.cs) — `// DOWNLOADS NEVER INSTALLED — the patches you already own and have never unpacked.`
 
 
 Modifiers (do not select a separate mode):
 
 - `--jobs` — Set jobs for this invocation; consult the linked parser for accepted values.
-- `--json` — PATH: write the hit list (schema 1, _shared/DiscoveryHits.cs): each patch-shaped plugin in a never-installed archive, one hit per archive version, with the sha256 of the extracted bytes.
+- `--json` — PATH: write the hit list (schema 1, patchfind/DiscoveryHits.cs): each patch-shaped plugin in a never-installed archive, one hit per archive version, with the sha256 of the extracted bytes.
 - `--list` — Set list for this invocation; consult the linked parser for accepted values.
 - `--max` — Set max for this invocation; consult the linked parser for accepted values.
 

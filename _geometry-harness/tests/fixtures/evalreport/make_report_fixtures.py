@@ -57,7 +57,7 @@ LONG = {
     "C": "FixtureLongNameCharlie-the-third-plugin-whose-name-runs-past-eighty-characters-for-the-print-check.esp",
     "D": "FixtureLongNameDelta-the-fourth-plugin-whose-name-runs-past-eighty-characters-for-the-print-check.esp",
 }
-OTHER_PROBES = ("bosprobe", "switchprobe", "stateprobe", "scopeprobe", "patchprobe", "driftprobe")
+OTHER_PROBES = ("bosprobe", "switchprobe", "stateprobe", "scopeprobe", "driftprobe")
 
 
 def write_json(p: Path, doc):

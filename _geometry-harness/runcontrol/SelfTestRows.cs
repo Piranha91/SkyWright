@@ -175,14 +175,6 @@ public static partial class SelfTestFinalize
                 }
                 if (why != null) return $"step '{S(step["name"])}': {why}";
             }
-            if (c.ContainsKey("relevance"))
-            {
-                // what finalize records of the same receipts (workbench case b8i): the relevant hits of each accepted discovery receipt
-                var plan = D(PyJson.LoadEvalFile(t.At("plan.json")));
-                var bare = new PyDict(plan) { ["targets"] = new List<object?>(), ["arms"] = L(plan["arms"]).Take(1).ToList() };
-                return SameJson("discovery relevance", Discovery.Relevance(t.Root, plan, Receipts.ReadReceipts(t.Root)), c["relevance"])
-                       ?? SameJson("discovery relevance of a plan with no target and no pair", Discovery.Relevance(t.Root, bare, Receipts.ReadReceipts(t.Root)), c["relevanceNoTargets"]);
-            }
             return null;
         });
     }

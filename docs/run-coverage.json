@@ -663,7 +663,7 @@
     {
       "id": "fomodprobe",
       "kind": "csharp-exe",
-      "path": "_geometry-harness/fomodprobe/fomodprobe.csproj",
+      "path": "integration/housecarl/fomodprobe/fomodprobe.csproj",
       "adapter": "csharp",
       "stageSource": "single-stage",
       "linksContract": true,
@@ -673,7 +673,7 @@
       "useWhen": "Audit an installed mod whose optional compatibility selections may have been skipped during setup.",
       "evidence": [
         {
-          "path": "_geometry-harness/fomodprobe/Program.cs",
+          "path": "integration/housecarl/fomodprobe/Program.cs",
           "anchor": "// FOMOD OPTIONS NEVER SELECTED — what the installer offered you and you did not take."
         }
       ],
@@ -685,10 +685,10 @@
       ],
       "flagCoverage": {
         "parser": "csharp-args",
-        "path": "_geometry-harness/fomodprobe/Program.cs"
+        "path": "integration/housecarl/fomodprobe/Program.cs"
       },
       "modifiers": {
-        "--json": "PATH: write the hit list (schema 1, _shared/DiscoveryHits.cs): one hit per plugin an unselected option delivers, with the sha256 of that archive entry, its conditions and tier, and the added extraction time.",
+        "--json": "PATH: write the hit list (schema 1, patchfind/DiscoveryHits.cs): one hit per plugin an unselected option delivers, with the sha256 of that archive entry, its conditions and tier, and the added extraction time.",
         "--jobs": "Set jobs for this invocation; consult the linked parser for accepted values.",
         "--list": "Set list for this invocation; consult the linked parser for accepted values.",
         "--mod": "Set mod for this invocation; consult the linked parser for accepted values."
@@ -1086,19 +1086,19 @@
       }
     },
     {
-      "id": "patchprobe",
+      "id": "patchfind",
       "kind": "csharp-exe",
-      "path": "_geometry-harness/patchprobe/patchprobe.csproj",
+      "path": "integration/housecarl/patchfind/patchfind.csproj",
       "adapter": "csharp",
       "stageSource": "counted",
       "answers": [
         "Is a compatibility patch installed or available elsewhere on this machine?"
       ],
-      "useWhen": "Check existing local compatibility options before deciding to author a new patch.",
+      "useWhen": "Check existing local compatibility options before deciding to author a new patch (the module's patch finder; verifying a candidate is SkyWright's patchprobe --verify).",
       "evidence": [
         {
-          "path": "_geometry-harness/patchprobe/Program.cs",
-          "anchor": "// PATCH AVAILABILITY — \"is there a patch for this anywhere on this machine?\""
+          "path": "integration/housecarl/patchfind/Program.cs",
+          "anchor": "// PATCH AVAILABILITY — \"is there a patch for this anywhere on this machine?\" (patchfind: the houseCARL integration"
         }
       ],
       "inputs": [
@@ -1109,12 +1109,46 @@
       ],
       "flagCoverage": {
         "parser": "csharp-args",
+        "path": "integration/housecarl/patchfind/Program.cs"
+      },
+      "modifiers": {
+        "--json": "PATH: write the hit list (schema 1, patchfind/DiscoveryHits.cs) for --pair and the survey: each plugin with the sha256 of its file, each download matched by name with no hash and the reason; refused with --verify.",
+        "--list": "Set list for this invocation; consult the linked parser for accepted values.",
+        "--pair": "Set pair for this invocation; consult the linked parser for accepted values.",
+        "--roots": "Set roots for this invocation; consult the linked parser for accepted values.",
+        "--verify": "Refused in one sentence: whether a candidate covers a detector's conflicting records is SkyWright's patchprobe --verify."
+      }
+    },
+    {
+      "id": "patchprobe",
+      "kind": "csharp-exe",
+      "path": "_geometry-harness/patchprobe/patchprobe.csproj",
+      "adapter": "csharp",
+      "stageSource": "counted",
+      "answers": [
+        "Does a named compatibility patch cover the exact records a detector reported in conflict?"
+      ],
+      "useWhen": "Verify a candidate patch against a detector's --emit conflicts before calling a clash fixed (finding patches for a pair is the houseCARL integration module's patchfind).",
+      "evidence": [
+        {
+          "path": "_geometry-harness/patchprobe/Program.cs",
+          "anchor": "// PATCH AVAILABILITY — \"is there a patch for this anywhere on this machine?\""
+        }
+      ],
+      "inputs": [
+        "A detector's --emit conflicts file and configured installed/download locations."
+      ],
+      "outputs": [
+        "Per candidate, which of the conflicting records it covers."
+      ],
+      "flagCoverage": {
+        "parser": "csharp-args",
         "path": "_geometry-harness/patchprobe/Program.cs"
       },
       "modifiers": {
-        "--json": "PATH: write the hit list (schema 1, _shared/DiscoveryHits.cs) for --pair and the survey: each plugin with the sha256 of its file, each download matched by name with no hash and the reason; refused with --verify.",
+        "--json": "Refused in one sentence: the discovery hit list is the houseCARL integration module's patchfind.",
         "--list": "Set list for this invocation; consult the linked parser for accepted values.",
-        "--pair": "Set pair for this invocation; consult the linked parser for accepted values.",
+        "--pair": "Refused in one sentence: finding the patches for a pair is the houseCARL integration module's patchfind.",
         "--roots": "Set roots for this invocation; consult the linked parser for accepted values.",
         "--verify": "Set verify for this invocation; consult the linked parser for accepted values."
       }
@@ -1153,7 +1187,7 @@
     {
       "id": "poolprobe",
       "kind": "csharp-exe",
-      "path": "_geometry-harness/poolprobe/poolprobe.csproj",
+      "path": "integration/housecarl/poolprobe/poolprobe.csproj",
       "adapter": "csharp",
       "stageSource": "counted",
       "answers": [
@@ -1162,7 +1196,7 @@
       "useWhen": "Search the download cache when a compatibility option may be available without another download.",
       "evidence": [
         {
-          "path": "_geometry-harness/poolprobe/Program.cs",
+          "path": "integration/housecarl/poolprobe/Program.cs",
           "anchor": "// DOWNLOADS NEVER INSTALLED — the patches you already own and have never unpacked."
         }
       ],
@@ -1174,10 +1208,10 @@
       ],
       "flagCoverage": {
         "parser": "csharp-args",
-        "path": "_geometry-harness/poolprobe/Program.cs"
+        "path": "integration/housecarl/poolprobe/Program.cs"
       },
       "modifiers": {
-        "--json": "PATH: write the hit list (schema 1, _shared/DiscoveryHits.cs): each patch-shaped plugin in a never-installed archive, one hit per archive version, with the sha256 of the extracted bytes.",
+        "--json": "PATH: write the hit list (schema 1, patchfind/DiscoveryHits.cs): each patch-shaped plugin in a never-installed archive, one hit per archive version, with the sha256 of the extracted bytes.",
         "--jobs": "Set jobs for this invocation; consult the linked parser for accepted values.",
         "--list": "Set list for this invocation; consult the linked parser for accepted values.",
         "--max": "Set max for this invocation; consult the linked parser for accepted values."
@@ -7538,6 +7572,90 @@
       ]
     },
     {
+      "id": "integration/housecarl/tests/fixtures/fakeprobes/discovery_fake.py",
+      "path": "integration/housecarl/tests/fixtures/fakeprobes/discovery_fake.py",
+      "kind": "script",
+      "answers": [
+        "How can I substitute the module's discovery probes (patchfind, poolprobe, fomodprobe) in the AI-side overlay's fixture tests?"
+      ],
+      "useWhen": "Supply controlled patch-discovery hit lists while testing the overlay's discovery rows and their qualification.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/tests/fixtures/fakeprobes/discovery_fake.py",
+          "anchor": "Fixture stand-in for the module's discovery probes (patchfind, poolprobe, fomodprobe; moved with them from SkyWright's"
+        }
+      ],
+      "inputs": [
+        "Controlled fixtures for patchfind, poolprobe and fomodprobe (the scenario's arms.<probe> entry)."
+      ],
+      "outputs": [
+        "The probe's --json hit list (schema 1)."
+      ]
+    },
+    {
+      "id": "integration/housecarl/tests/fixtures/fakeprobes/patchfind.py",
+      "path": "integration/housecarl/tests/fixtures/fakeprobes/patchfind.py",
+      "kind": "script",
+      "answers": [
+        "How can I substitute patchfind in the AI-side overlay's fixture tests?"
+      ],
+      "useWhen": "Route the overlay's patchfind invocation to discovery_fake.py's controlled hit list.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/tests/fixtures/fakeprobes/patchfind.py",
+          "anchor": "Fixture stand-in for patchfind, the module's probe -- see discovery_fake.py."
+        }
+      ],
+      "inputs": [
+        "Controlled fixtures for patchfind."
+      ],
+      "outputs": [
+        "Assertion results or generated fixture data for: How can I substitute patchfind in the AI-side overlay's fixture tests?"
+      ]
+    },
+    {
+      "id": "integration/housecarl/tests/fixtures/fakeprobes/poolprobe.py",
+      "path": "integration/housecarl/tests/fixtures/fakeprobes/poolprobe.py",
+      "kind": "script",
+      "answers": [
+        "How can I substitute poolprobe in the AI-side overlay's fixture tests?"
+      ],
+      "useWhen": "Route the overlay's poolprobe invocation to discovery_fake.py's controlled hit list.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/tests/fixtures/fakeprobes/poolprobe.py",
+          "anchor": "Fixture stand-in for poolprobe, the module's probe -- see discovery_fake.py."
+        }
+      ],
+      "inputs": [
+        "Controlled fixtures for poolprobe."
+      ],
+      "outputs": [
+        "Assertion results or generated fixture data for: How can I substitute poolprobe in the AI-side overlay's fixture tests?"
+      ]
+    },
+    {
+      "id": "integration/housecarl/tests/fixtures/fakeprobes/fomodprobe.py",
+      "path": "integration/housecarl/tests/fixtures/fakeprobes/fomodprobe.py",
+      "kind": "script",
+      "answers": [
+        "How can I substitute fomodprobe in the AI-side overlay's fixture tests?"
+      ],
+      "useWhen": "Route the overlay's fomodprobe invocation to discovery_fake.py's controlled hit list.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/tests/fixtures/fakeprobes/fomodprobe.py",
+          "anchor": "Fixture stand-in for fomodprobe, the module's probe -- see discovery_fake.py."
+        }
+      ],
+      "inputs": [
+        "Controlled fixtures for fomodprobe."
+      ],
+      "outputs": [
+        "Assertion results or generated fixture data for: How can I substitute fomodprobe in the AI-side overlay's fixture tests?"
+      ]
+    },
+    {
       "id": "_geometry-harness/tests/fixtures/evalrun/fakeprobes/blockprobe.py",
       "path": "_geometry-harness/tests/fixtures/evalrun/fakeprobes/blockprobe.py",
       "kind": "script",
@@ -7661,27 +7779,6 @@
       ],
       "outputs": [
         "Assertion results or generated fixture data for: How can I substitute overlapprobe in evaluation-controller fixture tests?"
-      ]
-    },
-    {
-      "id": "_geometry-harness/tests/fixtures/evalrun/fakeprobes/patchprobe.py",
-      "path": "_geometry-harness/tests/fixtures/evalrun/fakeprobes/patchprobe.py",
-      "kind": "script",
-      "answers": [
-        "How can I substitute patchprobe in evaluation-controller fixture tests?"
-      ],
-      "useWhen": "Supply controlled patch-discovery outcomes while testing the controller's decision path.",
-      "evidence": [
-        {
-          "path": "_geometry-harness/tests/fixtures/evalrun/fakeprobes/patchprobe.py",
-          "anchor": "Fixture stand-in for patchprobe — see ../fakeprobe.py."
-        }
-      ],
-      "inputs": [
-        "Controlled fixtures for patchprobe."
-      ],
-      "outputs": [
-        "Assertion results or generated fixture data for: How can I substitute patchprobe in evaluation-controller fixture tests?"
       ]
     },
     {
@@ -8120,24 +8217,24 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_discovery_probes.py",
-      "path": "_geometry-harness/tests/test_discovery_probes.py",
+      "id": "integration/housecarl/tests/test_discovery_probes.py",
+      "path": "integration/housecarl/tests/test_discovery_probes.py",
       "kind": "script",
       "answers": [
-        "Do patchprobe, poolprobe and fomodprobe list every discovered patch with the sha256 of its bytes?"
+        "Do patchfind, poolprobe and fomodprobe list every discovered patch with the sha256 of its bytes?"
       ],
-      "useWhen": "Qualify a change to a discovery probe's --json hit list or to _shared/DiscoveryHits.cs.",
+      "useWhen": "Qualify a change to a discovery probe's --json hit list or to integration/housecarl/patchfind/DiscoveryHits.cs.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_discovery_probes.py",
-          "anchor": "Known answers for the discovery probes' machine-readable hit list (`--json`): patchprobe, poolprobe, fomodprobe."
+          "path": "integration/housecarl/tests/test_discovery_probes.py",
+          "anchor": "Known answers for the discovery probes' machine-readable hit list (`--json`): patchfind, poolprobe, fomodprobe."
         }
       ],
       "inputs": [
-        "The three probes built from this checkout; a scratch machine of two MO2 instances, a two-archive pool and a seven-archive ordering pool, selected by environment variables; 7-Zip."
+        "The three probes built from the module's folder (and SkyWright's patchprobe, for its --json refusal); a scratch machine of two MO2 instances, a two-archive pool and a seven-archive ordering pool, selected by environment variables; 7-Zip."
       ],
       "outputs": [
-        "Assertion results for: Do patchprobe, poolprobe and fomodprobe list every discovered patch with the sha256 of its bytes?"
+        "Assertion results for: Do patchfind, poolprobe and fomodprobe list every discovered patch with the sha256 of its bytes?"
       ]
     },
     {
@@ -10744,7 +10841,6 @@
         "_geometry-harness/tests/fixtures/evalrun/fakeprobes/driftprobe.py",
         "_geometry-harness/tests/fixtures/evalrun/fakeprobes/navownprobe.py",
         "_geometry-harness/tests/fixtures/evalrun/fakeprobes/overlapprobe.py",
-        "_geometry-harness/tests/fixtures/evalrun/fakeprobes/patchprobe.py",
         "_geometry-harness/tests/fixtures/evalrun/fakeprobes/scopeprobe.py",
         "_geometry-harness/tests/fixtures/evalrun/fakeprobes/stateprobe.py",
         "_geometry-harness/tests/fixtures/evalrun/fakeprobes/switchprobe.py"
@@ -10755,7 +10851,6 @@
         "_geometry-harness/tests/fixtures/evalrun/fakeprobes/driftprobe.py",
         "_geometry-harness/tests/fixtures/evalrun/fakeprobes/navownprobe.py",
         "_geometry-harness/tests/fixtures/evalrun/fakeprobes/overlapprobe.py",
-        "_geometry-harness/tests/fixtures/evalrun/fakeprobes/patchprobe.py",
         "_geometry-harness/tests/fixtures/evalrun/fakeprobes/scopeprobe.py",
         "_geometry-harness/tests/fixtures/evalrun/fakeprobes/stateprobe.py",
         "_geometry-harness/tests/fixtures/evalrun/fakeprobes/switchprobe.py"

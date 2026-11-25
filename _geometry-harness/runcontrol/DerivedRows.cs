@@ -4,12 +4,12 @@ namespace RunControl;
 
 /// <summary>The rows of the derived checks (adapter kind derived), as evalrun.py's run_derived computes them: from
 /// other receipts, with no child and no measurement of their own. It computes the order evaluation of an arm from
-/// its accepted diff parts, and the qualification of every supplied and discovered patch by its bytes.</summary>
+/// its accepted diff parts, and the qualification of every supplied patch by its bytes (the byte rule, Qualify, is
+/// also the houseCARL integration module's for the patches it discovers).</summary>
 public static class DerivedRows
 {
     static bool Accepted(PyDict r) => PyValue.Truthy(PyValue.Dict(r["validation"])["accepted"]);
 
-    static bool DiscoveryReceipt(PyDict r) => Ev.OrEmpty(r.Get("adapter")).Get("exe") is string exe && Discovery.DiscoveryExes.Contains(exe);
 
     // str(v or "").lower() when that is a sha256, else null.
     static string? Sha(object? v)
@@ -62,94 +62,6 @@ public static class DerivedRows
         return (false, $"its sha256 {Short(sha)} (from {from}) matches no plugin any accepted receipt consumed"
                        + (sameName.Count > 0 ? $"; an accepted receipt consumed a different {name} (sha256 " + string.Join(", ", sameName.Select(Short)) + ")" : "")
                        + ": a downloadable hit stays a lead until its payload is measured");
-    }
-
-    /// <summary>The receipt ids of the accepted discovery receipts, in receipt order.</summary>
-    public static List<object?> DiscoveryReceiptIds(PyDict receipts) =>
-        Vals(receipts).Where(r => Accepted(r) && DiscoveryReceipt(r)).Select(r => r["receiptId"]).ToList();
-
-    /// <summary>(rows, notRelevant, inconclusive sentences, not-searched sentences) from the accepted discovery
-    /// receipts. A hit is relevant when its own masters, its FOMOD condition plugins or its pair name a plan target or
-    /// a plan pair's plugin; it is qualified only when its sha256 equals a plugin an accepted receipt consumed. An
-    /// output file is read only after its sha256 matches the one its receipt recorded.</summary>
-    public static (List<object?> rows, PyDict notRelevant, List<object?> unreadable, List<object?> notSearched) DiscoveryHitRows(
-        Executor ex, PyDict receipts, Consumed consumed)
-    {
-        var relevant = Discovery.RelevantPlugins(ex.Run, ex.Plan);
-        var rows = new List<object?>();
-        var seen = new Dictionary<(string file, string? sha, string source), PyDict>();
-        var unreadable = new List<object?>();
-        var notSearched = new List<object?>();
-        var notRelevant = new PyDict();
-        foreach (var r in PyOrder.SortedBy(Vals(receipts), x => Ev.Str(x.Get("receiptId"))))
-        {
-            if (!DiscoveryReceipt(r) || !Accepted(r)) continue;
-            string exe = (string)PyValue.Dict(r["adapter"])["exe"]!;
-            string rid = Ev.Str(r.Get("receiptId"));
-            var outs = PyValue.Truthy(r.Get("outputs")) ? (List<object?>)r["outputs"]! : [];
-            var o = outs.Count > 0 ? PyValue.Dict(outs[0]) : new PyDict();
-            if (!PyValue.Truthy(o.Get("path")))
-            {
-                unreadable.Add($"receipt {rid} ({exe}) records no output file, so its hits cannot be read (a text-only receipt from before the --json hit list)");
-                continue;
-            }
-            string path = Ev.Str(o["path"]);
-            string f = PyPath.Join(ex.Run, path);
-            if (!Ev.Exists(f))
-            {
-                unreadable.Add($"receipt {rid} ({exe}) names {path}, which is missing");
-                continue;
-            }
-            if (!Ev.Eq(Hashing.Sha256FileOrNull(f), o.Get("sha256")))
-            {
-                unreadable.Add($"receipt {rid} ({exe}): {path} has changed since the receipt recorded its sha256");
-                continue;
-            }
-            if (PyJson.LoadEvalFile(f) is not PyDict doc || !Ev.Eq(doc.Get("schemaVersion"), 1L) || doc.Get("hits") is not List<object?> hits)
-            {
-                unreadable.Add($"receipt {rid} ({exe}): {path} is not a schema-1 hit list");
-                continue;
-            }
-            foreach (var h in hits.OfType<PyDict>())
-            {
-                if (!PyValue.Truthy(h.Get("file"))) continue;
-                if (!Discovery.HitNames(h).Overlaps(relevant))
-                {
-                    if (!notRelevant.ContainsKey(exe)) notRelevant[exe] = new PyDict { ["count"] = 0L, ["why"] = Discovery.NotRelevantWhy };
-                    var nr = (PyDict)notRelevant[exe]!;
-                    nr["count"] = (long)nr["count"]! + 1;
-                    continue;
-                }
-                string file = Ev.Str(h["file"]);
-                string? hsha = Sha(h.Get("sha256"));
-                string source = $"{exe}:{Ev.Str(h.Get("kind"))}";
-                var key = (PyText.Lower(file), hsha, source);
-                if (seen.TryGetValue(key, out var earlier))
-                {
-                    earlier["foundOn"] = PyOrder.SortedByCodePoint(Ev.Items(earlier["foundOn"]).Select(Ev.Str).Append(Ev.Str(r.Get("armId"))).Distinct(StringComparer.Ordinal))
-                        .Cast<object?>().ToList();
-                    continue;
-                }
-                var (hitOk, why) = Qualify(consumed, hsha, file, $"{exe}'s hit list",
-                    $"the {exe} hit records no content hash ({(PyValue.Truthy(h.Get("unhashedReason")) ? Ev.Str(h["unhashedReason"]) : "no reason given")})");
-                var row = new PyDict
-                {
-                    ["file"] = file, ["armId"] = null, ["source"] = source, ["foundOn"] = new List<object?> { Ev.Str(r.Get("armId")) },
-                    ["sha256"] = hsha, ["qualification"] = hitOk ? "qualified" : "unqualified", ["why"] = why,
-                };
-                seen[key] = row;
-                rows.Add(row);
-            }
-        }
-        var acceptedChecks = Vals(receipts).Where(r => Accepted(r) && DiscoveryReceipt(r)).Select(r => r.Get("checkId")).ToList();
-        foreach (var c in Ev.Items(ex.Plan.Get("checks")).Select(PyValue.Dict))
-        {
-            object? exe = Ev.OrEmpty(c.Get("adapter")).Get("exe");
-            if (exe is string e && Discovery.DiscoveryExes.Contains(e) && !PyValue.In(c.Get("checkId"), acceptedChecks))
-                notSearched.Add($"{Ev.Str(c.Get("checkId"))} ({e}): no accepted receipt (plan status "
-                                + $"{(PyValue.Truthy(c.Get("status")) ? Ev.Str(c["status"]) : "unknown")}), so the patches it would find are not stated");
-        }
-        return (rows, notRelevant, unreadable, notSearched);
     }
 
     /// <summary>Settles one planned row of a derived check that no earlier invocation completed: the derivation
@@ -273,21 +185,11 @@ public static class DerivedRows
                             ["why"] = "a candidate-order file, not a supplied patch payload",
                         });
                 }
-            // every discovered patch: each relevant hit of an accepted discovery receipt is one row, qualified by the same rule
-            var (hitRows, notRelevant, unreadable, notSearched) = DiscoveryHitRows(ex, receipts, consumed);
-            rows.AddRange(hitRows);
-            foreach (var rid in DiscoveryReceiptIds(receipts))
-                if (!PyValue.In(rid, derivedFrom)) derivedFrom.Add(rid);
-            payload = new PyDict { ["candidates"] = rows, ["notRelevant"] = notRelevant, ["notSearched"] = notSearched };
+            // (the patches discovered on the machine are the houseCARL integration module's rows: its overlay qualifies
+            // their hits by Qualify over this scan's receipts)
+            payload = new PyDict { ["candidates"] = rows };
             findings = 0L;
             detector = "no-finding";
-            if (unreadable.Count > 0)
-            {
-                // a hit list that cannot be read as written makes the answer inconclusive
-                payload["inconclusive"] = unreadable;
-                detector = "inconclusive";
-                findings = null;
-            }
         }
         else
         {

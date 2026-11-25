@@ -325,36 +325,9 @@ public static class Disposition
                 .Select(c => c["checkId"]).ToList(),
         };
 
-        var all = receipts.Select(kv => PyValue.Dict(kv.Value)).ToList();
-        var searched = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var r in all)
-        {
-            var ad = Ev.OrEmpty(r.Get("adapter"));
-            if (ad.Get("kind") is "patchprobe" && PyValue.Truthy(PyValue.Dict(r["validation"])["accepted"]) && ad.Get("exe") != null)
-                searched.Add((string)ad["exe"]!);
-        }
-        // the qualification receipt: the first one whose derived block carries candidates
-        var qualified = all.FirstOrDefault(r => PyValue.Truthy(Ev.OrEmpty(r.Get("derived")).Get("candidates")));
-        var notSearched = new List<object?>
-        {
-            "the Nexus network API (this runner never fetches; advice is read offline from the catalogue snapshot)",
-        };
-        if (qualified != null) notSearched.AddRange(Ev.Items(Ev.OrEmpty(qualified.Get("derived")).Get("notSearched")));
-        // the author's stated advice (adviceprobe's rows) is the houseCARL integration module's: its finalize writes it
-        // into the overlay's discovery block
-        var advice = new List<object?>();
-        var discovery = new PyDict
-        {
-            ["sourcesSearched"] = PyOrder.SortedByCodePoint(searched).Cast<object?>().ToList(),
-            ["sourcesNotSearched"] = notSearched,
-            ["notRelevant"] = qualified != null && PyValue.Truthy(Ev.OrEmpty(qualified.Get("derived")).Get("notRelevant"))
-                ? PyValue.Dict(qualified["derived"])["notRelevant"] : new PyDict(),
-            ["candidates"] = qualified != null ? Ev.G(Ev.G(qualified, "derived", new PyDict()), "candidates", new List<object?>()) : new List<object?>(),
-            ["advice"] = advice,
-            ["listings"] = catalogues.Where(c => Ev.Eq(Ev.G(c, "kind"), "discovery")).ToList(),
-            ["relevance"] = Discovery.Relevance(run, plan, receipts),
-            ["note"] = "a Nexus hit is a lead: a downloadable file stays unqualified until its actual payload was in an evaluated arm",
-        };
+        // (the discovery of existing patches and the author's advice are the houseCARL integration module's rows: its
+        // overlay's disposition carries the discovery block; this scan's supplied patches are qualified in the
+        // candidate-qualification receipt's derived block)
 
         var disposition = new PyDict
         {
@@ -380,7 +353,6 @@ public static class Disposition
         disposition["explicitDecisions"] = plan["explicitDecisions"];
         var budgets = BudgetsInForce(ledger);
         if (budgets.Count > 0) disposition["budgetsInForce"] = budgets;
-        disposition["discovery"] = discovery;
         disposition["catalogues"] = catalogues;
         disposition["importedEvidence"] = ImportedEvidence(ledger, receipts, badKeys);
         disposition["ledgerCounts"] = Counts(ledger);

@@ -8,7 +8,7 @@ using HousecarlCore.Progress;
 //
 // MO2 installs only the options chosen at install time. Everything else the archive contained is
 // still in the archive and nowhere else, so no amount of reading the mods folder can see it. This
-// is a genuine blind spot in every check built so far: patchprobe can only find a patch that
+// is a genuine blind spot in every check built so far: patchfind can only find a patch that
 // someone unpacked somewhere.
 //
 // The blind spot is worth closing because compatibility patches are overwhelmingly delivered this

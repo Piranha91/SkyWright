@@ -44,6 +44,8 @@
     <!-- adviceprobe's author-stated-order extractor and the shared rules file reader it writes for (AdviceProofTests) -->
     <Compile Include="..\..\adviceprobe\OrderAdvice.cs" Link="OrderAdvice.cs" />
     <Compile Include="$(SkyWrightHarness)_shared\OrderRules.cs" Link="OrderRules.cs" />
+    <!-- fomodprobe's FOMOD decision model, for proofprobe's moved FOMOD section (FomodProofTests) -->
+    <Compile Include="..\..\fomodprobe\FomodModel.cs" Link="FomodModel.cs" />
     <!-- houseCARL's .pex fixture writer, compiled from the pin (OrderLooksTests writes scripts with it). -->
     <Compile Include="$(HousecarlSrc)housecarl-mcp-tests\PexWriter.cs" Link="PexWriter.cs" />
   </ItemGroup>

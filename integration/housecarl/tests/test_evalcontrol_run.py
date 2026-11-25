@@ -38,15 +38,30 @@ def evalcontrol(args, cwd: Path | None = None):
     return r
 
 
-def overlay(run: Path) -> Path:
-    """The overlay over a finished, bundled app run: planned, evaluated and finalized under run/ai."""
+def overlay(run: Path, scenario: Path | None = None) -> Path:
+    """The overlay over a finished, bundled app run: planned, evaluated and finalized under run/ai. `scenario` is the
+    fake probes' scenario file (EVALRUN_FAKE_SCENARIO) for the module's fakes; without it every module probe is `ok`."""
     ai = run / "ai"
+    old = os.environ.get("EVALRUN_FAKE_SCENARIO")
+    if scenario is not None:
+        os.environ["EVALRUN_FAKE_SCENARIO"] = str(scenario)
+    try:
+        _overlay_steps(run, ai)
+    finally:
+        if scenario is not None:
+            if old is None:
+                os.environ.pop("EVALRUN_FAKE_SCENARIO", None)
+            else:
+                os.environ["EVALRUN_FAKE_SCENARIO"] = old
+    return ai
+
+
+def _overlay_steps(run: Path, ai: Path) -> None:
     for what, args in (("plan", ["plan", "--app", run, "--app-bundle", run / "bundle", "--out", ai, *module_fakes.probe_cmds()]),
                        ("evaluate", ["evaluate", "--run", ai]), ("finalize", ["finalize", "--run", ai])):
         r = evalcontrol(args, cwd=run)
         if r.returncode != 0:
             raise RuntimeError(f"evalcontrol {what} exit {r.returncode}: {r.stderr.strip()[:300]}")
-    return ai
 
 
 def case_10(tmp):
@@ -101,6 +116,10 @@ def case_10(tmp):
          "state": "baseline", "configurationFingerprint": fp, "fingerprintSource": "asserted"},
     ], indent=1), encoding="utf-8")
     ai = overlay(run)
+    # moved from the app suite's case 10 (9D-2): the discovery block is the overlay's; the trim plans no qualification
+    # and the scenario gives the module's discovery probes no hit, so no candidate row
+    expect(ER.field(load(ai / "disposition.json") or {}, "discovery", default={}).get("candidates"), [],
+           f"{case}: discovery.candidates is empty (no qualification ran)")
     aib = ai / "bundle"
     evalcontrol(["bundle", "--run", ai, "--out", aib, "--media", mediajson], cwd=run)
     man = load(aib / "manifest.json") or {}
@@ -255,11 +274,41 @@ def case_803(tmp):
     got = [(a.get("checkId"), a.get("armId")) for a in (joined.disposition.get("discovery") or {}).get("advice") or []]
     expect(got, [("patch.author-advice", "baseline")], f"{case}: the joined bundle's discovery advice is the overlay's", "author advice")
     er.AI_BUNDLES.clear()
-    alone = (er.Bundle(app).disposition.get("discovery") or {}).get("advice")
-    expect(alone, [], f"{case}: the app bundle read alone holds no advice (the premise of the overlay read)", "author advice")
+    # since 9D-2 an app disposition holds no discovery block at all (the overlay's finalize writes it): no block, no advice
+    alone = (er.Bundle(app).disposition.get("discovery") or {}).get("advice") or []
+    expect(alone, [],f"{case}: the app bundle read alone holds no advice (the premise of the overlay read)", "author advice")
 
 
-CASES = {"case-10": case_10, "C1933": c1933, "plan-oracles": plan_oracles, "record-oracles": record_oracles,
+def case_51(tmp):
+    """Moved from the app suite with the discovery probes (9D-2), same name. The held red arm of task
+    2026-10-14-discovery-hits-get-no-qualification-row, end to end: case 10's fixture on the trim with the derivation
+    (patch.candidate-qualification), the app run bundled, then the overlay, whose fake patchfind writes the --json hit
+    list (fixtures/evalcontrol-run/case-51-discovery-end-to-end.json); the catalogue hit CommunityPatch.esp (masters
+    the fixture target, bytes f00d..., in no arm) is exactly one row of the overlay's discovery block, unqualified, its
+    why naming its hash."""
+    case = "case-51-discovery-end-to-end"
+    run = tmp / case
+    expect(ER.do_plan(run, "case-10-discovery-media", registry="fixture-check-registry-derived.json").returncode, 0,
+           f"{case}: plan exit")
+    _, _, _, scen = ER.case_paths("case-10-discovery-media")
+    expect(ER.evalrun(["run", "--run", run], scen).returncode, 0, f"{case}: run exit")
+    expect(ER.evalrun(["finalize", "--run", run], scen).returncode, 0, f"{case}: finalize exit")
+    ER.evalrun(["bundle", "--run", run], scen)
+    doc = load(scen) or {}
+    doc.setdefault("arms", {})["patchfind"] = (load(ORACLES / f"{case}.json") or {})["patchfindArm"]
+    scen51 = tmp / f"{case}-scenario.json"
+    scen51.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+    ai = overlay(run, scen51)
+    disp = load(ai / "disposition.json") or {}
+    rows = [r for r in (ER.field(disp, "discovery", default={}).get("candidates") or [])
+            if r.get("file") == "CommunityPatch.esp"]
+    expect([r.get("qualification") for r in rows], ["unqualified"],
+           f"{case}: CommunityPatch.esp is one row, unqualified", "D7")
+    check(bool(rows) and ("f00d" + "0" * 8) in (rows[0].get("why") or ""),
+          f"{case}: its why names the hash compared ({(rows[0].get('why') if rows else None)!r})")
+
+
+CASES = {"case-10": case_10, "case-51": case_51, "C1933": c1933, "plan-oracles": plan_oracles, "record-oracles": record_oracles,
          "case-803": case_803, "advice-oracles": advice_oracles}
 
 

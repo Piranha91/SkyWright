@@ -6,7 +6,7 @@ using HousecarlCore.Progress;
 
 // DOWNLOADS NEVER INSTALLED — the patches you already own and have never unpacked.
 //
-// A shared download pool can hold thousands of archives. patchprobe can only see the ones somebody
+// A shared download pool can hold thousands of archives. patchfind can only see the ones somebody
 // installed somewhere, because its index is built from plugins on disk; for the rest it falls back
 // to matching a .meta file's mod NAME, which surfaces candidates and cannot confirm one. A name is
 // a guess. A master list is a fact.

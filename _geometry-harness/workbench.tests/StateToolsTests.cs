@@ -703,25 +703,8 @@ public sealed class StateToolsTests : IAsyncLifetime
 
     // ---- manual mode: to_file, statuses, refusals ----
 
-    [Fact]
-    public async Task M7h_patch_probes_are_greyed_when_this_machine_names_no_search_roots_or_download_pool()
-    {
-        var saved = new[] { "HOUSECARL_HARNESS_CONFIG", "HOUSECARL_SEARCH_ROOTS", "HOUSECARL_DOWNLOAD_POOL" }.ToDictionary(k => k, Environment.GetEnvironmentVariable);
-        foreach (var k in saved.Keys) Environment.SetEnvironmentVariable(k, null);
-        // the harness config is read once per process; read it afresh with these variables, and again after
-        var reload = typeof(Workbench.PatchWriter).Assembly.GetReferencedAssemblies().Select(n => System.Reflection.Assembly.Load(n)).First(x => x.GetName().Name == "viewprobe").GetType("HarnessTarget")!.GetMethod("Reload", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
-        reload.Invoke(null, null);
-        try
-        {
-            var inst = LauncherInstanceL5();
-            await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", inst), ("profile", "P"), ("game", inst)));
-            var s = await Ok("workbench_state", A(("project", new[] { "launcher" })));
-            var p = P(s, "launcher", "probes").EnumerateArray().Single(x => P(x, "checkId").GetString() == "patch.discovery-installed");
-            Assert.False(P(p, "selectable").GetBoolean(), "patch discovery was offered with no search roots configured");
-            Assert.Contains("search roots", P(p, "whyNot").GetString());
-        }
-        finally { foreach (var (k, v) in saved) Environment.SetEnvironmentVariable(k, v); reload.Invoke(null, null); }
-    }
+    // M7h (patch discovery greyed when this machine names no search roots or download pool) left with the patch
+    // discovery rows for the houseCARL integration module (9D-2): its test_discovery_probes.py "M7h: ..." checks.
 
     [Fact]
     public async Task M7i_an_unmanaged_modlist_entry_is_listed_but_cannot_be_ticked()

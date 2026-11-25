@@ -232,7 +232,7 @@ internal sealed class Launcher : IAsyncDisposable
     }
 
     /// <summary>The registry's checks whose adapter runs a probe; every other kind is not a probe.</summary>
-    internal static readonly string[] ProbeKinds = { "scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target", "patchprobe" };
+    internal static readonly string[] ProbeKinds = { "scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target" };
 
     internal sealed record RegistryCheck(string Id, string Kind, string Title, string? Exe);
 

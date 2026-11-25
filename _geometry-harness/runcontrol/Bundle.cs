@@ -391,7 +391,6 @@ public static class Bundle
         };
         manifest.Update(searchNote);
         manifest["scope"] = "scope/scope.json";
-        manifest["discovery"] = Ev.G(Ev.OrEmpty(PyJson.LoadEvalFile(PyPath.Join(run, "disposition.json"))), "discovery", new PyDict());
         manifest["excluded"] = new List<object?>
         {
             new PyDict

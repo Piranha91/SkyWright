@@ -1,12 +1,16 @@
-"""Known answers for the discovery probes' machine-readable hit list (`--json`): patchprobe, poolprobe, fomodprobe.
+"""Known answers for the discovery probes' machine-readable hit list (`--json`): patchfind, poolprobe, fomodprobe.
 
-    python _geometry-harness/tests/test_discovery_probes.py [--installed [HARNESS_DIR]]
+    python integration/housecarl/tests/test_discovery_probes.py [--installed [CONFIGURATION]]
 
---installed runs the same cases against the copies evalrun runs (the probes of the build folder HARNESS_DIR, default
-this checkout's build) instead of a fresh build: the deploy smoke, and the check that would have caught a stale deployed
+The three probes are the houseCARL integration module's (moved from SkyWright's harness with the patch-discovery
+rows in step 3 of the boundary; patchfind is patchprobe's discovery modes). Verifying a candidate stays SkyWright's
+patchprobe --verify, which this suite also builds, from SkyWright's harness, for its one --json refusal.
+
+--installed runs the same cases against the copies the overlay runs (the module build's probes for CONFIGURATION,
+default the one buildlayout picks, and the app build's patchprobe) instead of a fresh build: the deploy smoke, and the check that would have caught a stale deployed
 fomodprobe that ignored --json and exited 0 with no hit list. fomodprobe must also refuse an argument it does not know.
 
-Builds the three probes from this checkout into a temporary folder (never an older binary), writes a tiny scratch
+Builds the three probes (and patchprobe) from this checkout into a temporary folder (never an older binary), writes a tiny scratch
 machine - two MO2 instances, a download pool of two 7-Zip archives, hand-written plugin headers - and runs each REAL
 probe against it with HOUSECARL_SEARCH_ROOTS / HOUSECARL_MO2_INSTANCE / HOUSECARL_MO2_PROFILE /
 HOUSECARL_DOWNLOAD_POOL / HOUSECARL_SEVENZIP set for that run only, so no real instance or pool is read. Each run
@@ -32,10 +36,12 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-HARNESS = HERE.parent
-sys.path.append(str(HARNESS))
-import buildlayout  # noqa: E402  where the build put each program
-PROBES = ("patchprobe", "poolprobe", "fomodprobe")
+sys.path.insert(0, str(HERE.parent))  # the module's folder
+import skywright_paths as SW  # noqa: E402  where the module's build put each program, and SkyWright's checkout
+import buildlayout  # noqa: E402  where SkyWright's build put patchprobe
+PROBES = ("patchfind", "poolprobe", "fomodprobe")
+# the module's three probes, and SkyWright's patchprobe (verify-only) for its --json refusal
+CSPROJ = {p: SW.MODULE / p / f"{p}.csproj" for p in PROBES} | {"patchprobe": SW.HARNESS / "patchprobe" / "patchprobe.csproj"}
 FAILURES: list[str] = []
 
 
@@ -75,8 +81,7 @@ def seven_zip() -> str | None:
 def build(tmp: Path) -> dict[str, Path]:
     """Each probe built from this checkout into an empty folder; a failed build raises SystemExit with one sentence."""
     exes = {}
-    for p in PROBES:
-        csproj = HARNESS / p / f"{p}.csproj"
+    for p, csproj in CSPROJ.items():
         out = tmp / "bin" / p
         r = subprocess.run(["dotnet", "build", str(csproj), "-c", "Release", "--nologo", "--disable-build-servers",
                             "--artifacts-path", str(tmp / "artifacts" / p), "-o", str(out)],
@@ -232,12 +237,12 @@ def inside(path, root: Path) -> bool:
         return False
 
 
-def installed(harness: Path) -> dict[str, Path]:
-    """The copies evalrun runs (each probe where the build folder `harness`'s marker puts it), not a fresh build: a
-    deploy check."""
+def installed(config: str | None) -> dict[str, Path]:
+    """The copies the overlay runs (each module probe where the module build's marker puts it; patchprobe where the
+    app build's does), not a fresh build: a deploy check."""
     exes = {}
-    for p in PROBES:
-        exe = buildlayout.program_under(harness, p)
+    for p in (*PROBES, "patchprobe"):
+        exe = SW.program(p, config) if p in PROBES else buildlayout.program_under(buildlayout.root(), p)
         if not exe.exists():
             raise SystemExit(f"  FAIL  no installed {p} at {exe}")
         dll = exe.with_suffix(".dll")
@@ -412,7 +417,7 @@ def main() -> int:
     try:
         if "--installed" in sys.argv:
             i = sys.argv.index("--installed")
-            exes = installed(Path(sys.argv[i + 1]) if len(sys.argv) > i + 1 else buildlayout.root())
+            exes = installed(sys.argv[i + 1] if len(sys.argv) > i + 1 else None)
         else:
             exes = build(tmp)
         m = machine(tmp / "machine", sz)
@@ -420,17 +425,17 @@ def main() -> int:
         out = tmp / "out"
         out.mkdir()
 
-        # ---- patchprobe --pair
-        run(exes["patchprobe"], ["--pair", "A.esp", "B.esp"], m, "patchprobe --pair, warm-up (start-up cost, not timed)")
-        _, plain = run(exes["patchprobe"], ["--pair", "A.esp", "B.esp"], m, "patchprobe --pair, no --json (cost baseline)")
-        r, secs = run(exes["patchprobe"], ["--pair", "A.esp", "B.esp", "--json", out / "patch.json"], m, "patchprobe --pair")
-        print(f"    patchprobe wall with --json {secs:.2f}s, without {plain:.2f}s (one run each, scratch machine)")
-        check(r.returncode == 0, f"patchprobe --pair exits 0 (got {r.returncode})")
-        check("MO2 instances found: 2" in r.stdout, "patchprobe found exactly the two scratch instances")
-        doc = common_shape(load(out / "patch.json"), "patchprobe", "patchprobe --pair")
+        # ---- patchfind --pair
+        run(exes["patchfind"], ["--pair", "A.esp", "B.esp"], m, "patchfind --pair, warm-up (start-up cost, not timed)")
+        _, plain = run(exes["patchfind"], ["--pair", "A.esp", "B.esp"], m, "patchfind --pair, no --json (cost baseline)")
+        r, secs = run(exes["patchfind"], ["--pair", "A.esp", "B.esp", "--json", out / "patch.json"], m, "patchfind --pair")
+        print(f"    patchfind wall with --json {secs:.2f}s, without {plain:.2f}s (one run each, scratch machine)")
+        check(r.returncode == 0, f"patchfind --pair exits 0 (got {r.returncode})")
+        check("MO2 instances found: 2" in r.stdout, "patchfind found exactly the two scratch instances")
+        doc = common_shape(load(out / "patch.json"), "patchfind", "patchfind --pair")
         inst_paths = [s.get("path") for s in doc.get("sourcesSearched") or [] if s.get("kind") == "instance"]
         check(len(inst_paths) == 2 and all(inside(x, m["roots"]) for x in inst_paths),
-              f"patchprobe searched only scratch instances ({inst_paths})")
+              f"patchfind searched only scratch instances ({inst_paths})")
         h = hits_named(doc, "AB Patch.esp")
         check(len(h) == 1 and h[0].get("kind") == "installed" and h[0].get("sha256") == sha(p["AB Patch.esp"]),
               f"the installed patch is one hit, kind installed, sha256 of its bytes ({h})")
@@ -444,9 +449,9 @@ def main() -> int:
               f"the pool archive matched by name is a download-name hit with no hash and a reason ({dl})")
         on_disk = sum(1 for f in m["roots"].glob("*/mods/*/*") if f.suffix.lower() in (".esp", ".esm", ".esl"))
         check((doc.get("counts") or {}).get("judged") == on_disk and (doc.get("counts") or {}).get("unjudgeable") == 0,
-              f"patchprobe counts.judged is every plugin in both instances' mods ({doc.get('counts')})")
-        check(doc.get("complete") is True, "patchprobe --pair is complete")
-        check("AB Patch.esp" in r.stdout and "[Installed" in r.stdout, "patchprobe's printed answer is unchanged")
+              f"patchfind counts.judged is every plugin in both instances' mods ({doc.get('counts')})")
+        check(doc.get("complete") is True, "patchfind --pair is complete")
+        check("AB Patch.esp" in r.stdout and "[Installed" in r.stdout, "patchfind's printed answer is unchanged")
 
         # ---- patchprobe --verify with --json: refused, not silently ignored
         cf = out / "conf.json"
@@ -454,6 +459,21 @@ def main() -> int:
         r, _ = run(exes["patchprobe"], ["--verify", cf, "--json", out / "verify.json"], m, "patchprobe --verify --json")
         check(r.returncode == 2 and not (out / "verify.json").exists() and "--json" in (r.stdout + r.stderr),
               f"patchprobe refuses --json with --verify in one sentence (exit {r.returncode})")
+        r, _ = run(exes["patchfind"], ["--verify", cf], m, "patchfind --verify")
+        check(r.returncode == 2 and "patchprobe --verify" in (r.stdout + r.stderr),
+              f"patchfind refuses --verify in one sentence naming SkyWright's patchprobe --verify (exit {r.returncode})")
+
+        # ---- no search roots / no download pool on this machine (the workbench's M7h greyed these rows in the app's
+        # launcher until they left the app's registry, 9D-2; the module's probes now say it themselves)
+        empty_cfg = tmp / "empty-harness.json"
+        empty_cfg.write_text("{}", encoding="utf-8")
+        for probe, unset, word in (("patchfind", "HOUSECARL_SEARCH_ROOTS", "search roots"),
+                                   ("poolprobe", "HOUSECARL_DOWNLOAD_POOL", "download pool")):
+            bare = {**m, "env": {**m["env"], unset: "", "HOUSECARL_HARNESS_CONFIG": str(empty_cfg)}}
+            r, _ = run(exes[probe], ["--json", out / f"{probe}-unset.json"] + (["--pair", "A.esp", "B.esp"] if probe == "patchfind" else []),
+                       bare, f"{probe} with {unset} empty")
+            check(r.returncode == 2 and not (out / f"{probe}-unset.json").exists() and word in (r.stdout + r.stderr).lower(),
+                  f"M7h: {probe} refuses when this machine names no {word}, saying so (exit {r.returncode})")
 
         # ---- poolprobe
         run(exes["poolprobe"], [], m, "poolprobe, warm-up (start-up cost, not timed)")

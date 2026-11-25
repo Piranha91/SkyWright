@@ -1,0 +1,1757 @@
+{
+ "pairs": {
+  "plans": {
+   "targets and a baseline": {
+    "arms": [
+     {
+      "armId": "b",
+      "kind": "baseline",
+      "plugins": [
+       "Skyrim.esm",
+       "b.esp",
+       "A.esp",
+       "Z.esp",
+       "a.esp",
+       "Target.esp"
+      ]
+     },
+     {
+      "armId": "c1",
+      "kind": "candidate",
+      "plugins": [
+       "Skyrim.esm",
+       "A.esp",
+       "B.esp",
+       "Target.esp",
+       "New.esp",
+       "Z.esp"
+      ]
+     },
+     {
+      "armId": "c2",
+      "kind": "candidate",
+      "plugins": [
+       "z.esp",
+       "target.esp",
+       "skyrim.esm"
+      ]
+     },
+     {
+      "armId": "s1",
+      "kind": "supplied-combination",
+      "plugins": [
+       "Skyrim.esm"
+      ],
+      "supplied": {
+       "declaredFiles": [
+        "mods/P/patch.esp",
+        "TARGET.esp",
+        "mods\\Q\\Other Patch.esp"
+       ]
+      }
+     },
+     {
+      "armId": "s2",
+      "kind": "supplied-combination",
+      "supplied": null
+     },
+     {
+      "armId": "s3",
+      "kind": "candidate",
+      "plugins": null
+     }
+    ],
+    "targets": [
+     {
+      "name": "Target.esp"
+     },
+     {
+      "name": "alpha.esp"
+     },
+     {
+      "name": ""
+     },
+     "odd",
+     {
+      "x": 1
+     }
+    ]
+   },
+   "no baseline": {
+    "arms": [
+     {
+      "armId": "c1",
+      "kind": "candidate",
+      "plugins": [
+       "Skyrim.esm",
+       "A.esp",
+       "B.esp",
+       "Target.esp",
+       "New.esp",
+       "Z.esp"
+      ]
+     },
+     {
+      "armId": "c2",
+      "kind": "candidate",
+      "plugins": [
+       "z.esp",
+       "target.esp",
+       "skyrim.esm"
+      ]
+     },
+     {
+      "armId": "s1",
+      "kind": "supplied-combination",
+      "plugins": [
+       "Skyrim.esm"
+      ],
+      "supplied": {
+       "declaredFiles": [
+        "mods/P/patch.esp",
+        "TARGET.esp",
+        "mods\\Q\\Other Patch.esp"
+       ]
+      }
+     },
+     {
+      "armId": "s2",
+      "kind": "supplied-combination",
+      "supplied": null
+     },
+     {
+      "armId": "s3",
+      "kind": "candidate",
+      "plugins": null
+     }
+    ],
+    "targets": [
+     {
+      "name": "Target.esp"
+     }
+    ]
+   },
+   "no targets": {
+    "arms": [
+     {
+      "armId": "b",
+      "kind": "baseline",
+      "plugins": [
+       "Skyrim.esm",
+       "b.esp",
+       "A.esp",
+       "Z.esp",
+       "a.esp",
+       "Target.esp"
+      ]
+     },
+     {
+      "armId": "c1",
+      "kind": "candidate",
+      "plugins": [
+       "Skyrim.esm",
+       "A.esp",
+       "B.esp",
+       "Target.esp",
+       "New.esp",
+       "Z.esp"
+      ]
+     },
+     {
+      "armId": "c2",
+      "kind": "candidate",
+      "plugins": [
+       "z.esp",
+       "target.esp",
+       "skyrim.esm"
+      ]
+     },
+     {
+      "armId": "s1",
+      "kind": "supplied-combination",
+      "plugins": [
+       "Skyrim.esm"
+      ],
+      "supplied": {
+       "declaredFiles": [
+        "mods/P/patch.esp",
+        "TARGET.esp",
+        "mods\\Q\\Other Patch.esp"
+       ]
+      }
+     },
+     {
+      "armId": "s2",
+      "kind": "supplied-combination",
+      "supplied": null
+     },
+     {
+      "armId": "s3",
+      "kind": "candidate",
+      "plugins": null
+     }
+    ]
+   }
+  },
+  "target": [
+   {
+    "plan": "targets and a baseline",
+    "arm": "b",
+    "want": []
+   },
+   {
+    "plan": "targets and a baseline",
+    "arm": "c1",
+    "want": [
+     [
+      "A.esp",
+      "B.esp"
+     ],
+     [
+      "A.esp",
+      "Z.esp"
+     ],
+     [
+      "Target.esp",
+      "Z.esp"
+     ]
+    ]
+   },
+   {
+    "plan": "targets and a baseline",
+    "arm": "c2",
+    "want": [
+     [
+      "skyrim.esm",
+      "z.esp"
+     ],
+     [
+      "skyrim.esm",
+      "target.esp"
+     ]
+    ]
+   },
+   {
+    "plan": "targets and a baseline",
+    "arm": "s1",
+    "want": [
+     [
+      "patch.esp",
+      "Target.esp"
+     ],
+     [
+      "alpha.esp",
+      "patch.esp"
+     ],
+     [
+      "alpha.esp",
+      "TARGET.esp"
+     ],
+     [
+      "Other Patch.esp",
+      "Target.esp"
+     ],
+     [
+      "alpha.esp",
+      "Other Patch.esp"
+     ]
+    ]
+   },
+   {
+    "plan": "targets and a baseline",
+    "arm": "s2",
+    "want": []
+   },
+   {
+    "plan": "targets and a baseline",
+    "arm": "s3",
+    "want": []
+   },
+   {
+    "plan": "no baseline",
+    "arm": "c1",
+    "want": []
+   },
+   {
+    "plan": "no baseline",
+    "arm": "c2",
+    "want": []
+   },
+   {
+    "plan": "no baseline",
+    "arm": "s1",
+    "want": [
+     [
+      "patch.esp",
+      "Target.esp"
+     ],
+     [
+      "Other Patch.esp",
+      "Target.esp"
+     ]
+    ]
+   },
+   {
+    "plan": "no baseline",
+    "arm": "s2",
+    "want": []
+   },
+   {
+    "plan": "no baseline",
+    "arm": "s3",
+    "want": []
+   },
+   {
+    "plan": "no targets",
+    "arm": "b",
+    "want": []
+   },
+   {
+    "plan": "no targets",
+    "arm": "c1",
+    "want": [
+     [
+      "A.esp",
+      "B.esp"
+     ],
+     [
+      "A.esp",
+      "Z.esp"
+     ],
+     [
+      "Target.esp",
+      "Z.esp"
+     ]
+    ]
+   },
+   {
+    "plan": "no targets",
+    "arm": "c2",
+    "want": [
+     [
+      "skyrim.esm",
+      "z.esp"
+     ],
+     [
+      "skyrim.esm",
+      "target.esp"
+     ]
+    ]
+   },
+   {
+    "plan": "no targets",
+    "arm": "s1",
+    "want": []
+   },
+   {
+    "plan": "no targets",
+    "arm": "s2",
+    "want": []
+   },
+   {
+    "plan": "no targets",
+    "arm": "s3",
+    "want": []
+   }
+  ],
+  "review": [
+   [
+    "Other.esp",
+    "Target.esp"
+   ],
+   [
+    "TARGET.ESP",
+    "third.esp"
+   ]
+  ],
+  "all": [
+   [
+    "Other.esp",
+    "Target.esp"
+   ],
+   [
+    "TARGET.ESP",
+    "third.esp"
+   ],
+   [
+    "A.esp",
+    "B.esp"
+   ],
+   [
+    "Patch.esp",
+    "Target.esp"
+   ]
+  ],
+  "relevant": [
+   "a.esp",
+   "b.esp",
+   "other.esp",
+   "patch.esp",
+   "target.esp",
+   "third.esp"
+  ]
+ },
+ "pairsTree": [
+  {
+   "path": "decisions/01-accepted.json",
+   "bytes": "eyJjaGVja0lkIjogImUucmVnZW4iLCAiYXJtSWQiOiAiYmFzZWxpbmUiLCAiZGVjaWRlZEJ5IjogIlJldmlld2VyIiwgImRlY2lkZWRVdGMiOiAiMjAyNi0wMS0wM1QwMDowMDowMFoiLCAiZGVjaXNpb24iOiAiY29tcGxldGVkLW5vLWZpbmRpbmciLCAibm90ZSI6ICJyZWdlbmVyYXRlZCIsICJldmlkZW5jZSI6IFsiZGVjaXNpb25zL2V2aWRlbmNlL3JlZ2VuLW5vdGUudHh0Il19"
+  },
+  {
+   "path": "decisions/02-no-check.json",
+   "bytes": "eyJjaGVja0lkIjogIm5vLnN1Y2giLCAiYXJtSWQiOiAiYmFzZWxpbmUiLCAiZGVjaWRlZEJ5IjogIlJldmlld2VyIiwgImRlY2lkZWRVdGMiOiAiMjAyNi0wMS0wM1QwMDowMDowMFoiLCAiZGVjaXNpb24iOiAiY29tcGxldGVkLW5vLWZpbmRpbmciLCAibm90ZSI6ICJyZWdlbmVyYXRlZCIsICJldmlkZW5jZSI6IFsiZGVjaXNpb25zL2V2aWRlbmNlL3JlZ2VuLW5vdGUudHh0Il19"
+  },
+  {
+   "path": "decisions/03-not-allowed.json",
+   "bytes": "eyJjaGVja0lkIjogImcuZGVwcyIsICJhcm1JZCI6ICJiYXNlbGluZSIsICJkZWNpZGVkQnkiOiAiUmV2aWV3ZXIiLCAiZGVjaWRlZFV0YyI6ICIyMDI2LTAxLTAzVDAwOjAwOjAwWiIsICJkZWNpc2lvbiI6ICJjb21wbGV0ZWQtbm8tZmluZGluZyIsICJub3RlIjogInJlZ2VuZXJhdGVkIiwgImV2aWRlbmNlIjogWyJkZWNpc2lvbnMvZXZpZGVuY2UvcmVnZW4tbm90ZS50eHQiXX0="
+  },
+  {
+   "path": "decisions/04-bad-word.json",
+   "bytes": "eyJjaGVja0lkIjogImUucmVnZW4iLCAiYXJtSWQiOiAiYmFzZWxpbmUiLCAiZGVjaWRlZEJ5IjogIlJldmlld2VyIiwgImRlY2lkZWRVdGMiOiAiMjAyNi0wMS0wM1QwMDowMDowMFoiLCAiZGVjaXNpb24iOiAiZmluZSIsICJub3RlIjogInJlZ2VuZXJhdGVkIiwgImV2aWRlbmNlIjogWyJkZWNpc2lvbnMvZXZpZGVuY2UvcmVnZW4tbm90ZS50eHQiXX0="
+  },
+  {
+   "path": "decisions/05-no-author.json",
+   "bytes": "eyJjaGVja0lkIjogImUucmVnZW4iLCAiYXJtSWQiOiAiYmFzZWxpbmUiLCAiZGVjaWRlZEJ5IjogIiIsICJkZWNpZGVkVXRjIjogIjIwMjYtMDEtMDNUMDA6MDA6MDBaIiwgImRlY2lzaW9uIjogImNvbXBsZXRlZC1uby1maW5kaW5nIiwgIm5vdGUiOiAicmVnZW5lcmF0ZWQiLCAiZXZpZGVuY2UiOiBbImRlY2lzaW9ucy9ldmlkZW5jZS9yZWdlbi1ub3RlLnR4dCJdfQ=="
+  },
+  {
+   "path": "decisions/06-no-evidence.json",
+   "bytes": "eyJjaGVja0lkIjogImUucmVnZW4iLCAiYXJtSWQiOiAiY2FuZGlkYXRlLTAxIiwgImRlY2lkZWRCeSI6ICJSZXZpZXdlciIsICJkZWNpZGVkVXRjIjogIjIwMjYtMDEtMDNUMDA6MDA6MDBaIiwgImRlY2lzaW9uIjogImNvbXBsZXRlZC1uby1maW5kaW5nIiwgIm5vdGUiOiAicmVnZW5lcmF0ZWQiLCAiZXZpZGVuY2UiOiBbImdvbmUudHh0IiwgImFsc28tZ29uZS50eHQiXX0="
+  },
+  {
+   "path": "decisions/07-mcp-only.json",
+   "bytes": "eyJjaGVja0lkIjogInIuY29udGVzdGVkIiwgImFybUlkIjogImJhc2VsaW5lIiwgImRlY2lkZWRCeSI6ICJSZXZpZXdlciIsICJkZWNpZGVkVXRjIjogIjIwMjYtMDEtMDNUMDA6MDA6MDBaIiwgImRlY2lzaW9uIjogImNvbXBsZXRlZC1uby1maW5kaW5nIiwgIm5vdGUiOiAicmVnZW5lcmF0ZWQiLCAiZXZpZGVuY2UiOiBbImRlY2lzaW9ucy9ldmlkZW5jZS9yZWdlbi1ub3RlLnR4dCJdfQ=="
+  },
+  {
+   "path": "decisions/08-null-id.json",
+   "bytes": "eyJjaGVja0lkIjogbnVsbCwgImFybUlkIjogImJhc2VsaW5lIiwgImRlY2lkZWRCeSI6ICJSZXZpZXdlciIsICJkZWNpZGVkVXRjIjogIjIwMjYtMDEtMDNUMDA6MDA6MDBaIiwgImRlY2lzaW9uIjogImNvbXBsZXRlZC1uby1maW5kaW5nIiwgIm5vdGUiOiAicmVnZW5lcmF0ZWQiLCAiZXZpZGVuY2UiOiBbImRlY2lzaW9ucy9ldmlkZW5jZS9yZWdlbi1ub3RlLnR4dCJdfQ=="
+  },
+  {
+   "path": "decisions/09-no-evidence-key.json",
+   "bytes": "eyJjaGVja0lkIjogImUucmVnZW4iLCAiYXJtSWQiOiAiY2FuZGlkYXRlLTAxIiwgImRlY2lkZWRCeSI6ICJSZXZpZXdlciIsICJkZWNpZGVkVXRjIjogIjIwMjYtMDEtMDNUMDA6MDA6MDBaIiwgImRlY2lzaW9uIjogIm5vdC1hcHBsaWNhYmxlIiwgIm5vdGUiOiAicmVnZW5lcmF0ZWQifQ=="
+  },
+  {
+   "path": "decisions/evidence/regen-note.txt",
+   "bytes": "TE9EIHJlZ2VuZXJhdGVkIG9uIDIwMjYtMDEtMDMK"
+  },
+  {
+   "path": "imports/r.contested__baseline/result.json",
+   "bytes": "eyJzY2hlbWFWZXJzaW9uIjogMSwgImFybSI6ICJiYXNlbGluZSJ9"
+  },
+  {
+   "path": "imports/r.contested__candidate-01/result.json",
+   "bytes": "eyJzY2hlbWFWZXJzaW9uIjogMSwgImFybSI6ICJjYW5kaWRhdGUtMDEifQ=="
+  },
+  {
+   "path": "journal.jsonl",
+   "bytes": {
+    "z": "eNrNmE1v4zYQhu8F+h8MnbJAbQy/ydx67L2n3kbD4UaNLKmSnN120f9e2kBSN03XCZcNDOggWxTFh+98cb40OO9/is1t0+LCfTdw80NDeFi4uR0OfZ9/3DHdn0b0uz0uK89LHhJ5xa5/HJPmcf94P/Dn9Udau3F4/GfCeX28n5m4m9bTfN5KK50MBBatZ8zTzofh9IgfsM/329PHl63Ij/IUjQRptyDy9TPA7fHSvxwfjfkZjfup55Vj8+f33315wiIcYhdx5fzS+6FJjClSMpEUQNuaEjR3Ce2yYh934wPPPU5FWMcPNf/kImsheOnQBGMZQgGXgDqSVWfLMlnWVnpplPNJl7Cpq2CbOb+98DM+JSFmlzPRJZfQ2RI+exV8sUvpGZxHYY3L/qa1Ck5RCVyo4XA0DivSWsso0SQbhAoWvfMhlYgmZS3RKrP5mK3QQAouJwC0bQmbuQq2lx3OAwTALB8LnURQJXz+KvhecDjTWstSRNSGQCdfAKfEJbjlME19x/F9EwE6F8An702KORG4EjR9DWgvm6U11icDIAWwNrokzyl3DXgvWKW1nlglJ30Q0XMqYNNQIw1EnmrVkhCze1mhgY7KcYk56mp1SU0u20qLrVSJpGAuCf/673pk5rziNws17WK30NEKf69V+bMOOnKSLkELJpZQhTpqTTuMDx1xJTIjCUixBI2RdQsFZEZ+u29Nu98O2HepIzytuhKcszaSIQwkkjOyBM7Ukm2cI8+VwERwgTBZwbnQilikmq+h2nOoZr3jzeOLmztcNsO4OQ3aHBd2OKm7GdOmW/OYYyQvVFaFqIhCLsFcBPn2LoPI19MGDOO6xWNqI2x7fusuzKcyjJfjBtaRl7X2SkWvYxukSKmErlIPpT6cjSlpJzxDJPLsS+AqdFF4N/NHPo80DW6mXFll+4xMXeRls951y2Y8zVIopMlHWEw5wLYCIFEB61lnZY9DDpJvL1tWnmfsagVVYEZJWcQWFTtXot9ZR+UwHIvKcS40z/dRkYUhL0CH6CGwKiG2X1XxtYVaXSVREebzQj6xgyenYglXuKzkKyLouttz7LASF1kHxmkTWtMq9iV6nbVX2n6ke443w7jN5jSsuUjJJ6DTej+8FXTZLWtW+XnCJM57t2zSeBjiMWEun7qV7ortFVSQWifjg8w5MokSfvMfyfHmaXkfSkz43xvwLULn/EhtPmRoBTIXRK4EtEIZdNgdhvth/FTLLzUBO3IteGuUS6EA63IX5nV61UZLRJyUlxKVAmVKTPNyF+ayYsNuqBVsWk4AEFoXrSVT0IAX542Xr1WiLyvW8Odu3Q7j8AfPY/M/QbLMIYVaS8xBA5ZY5FkHZuZfmbJqN+dLP4WTvwCHFPGW"
+   }
+  },
+  {
+   "path": "ledger.json",
+   "bytes": {
+    "z": "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"
+   }
+  },
+  {
+   "path": "outputs/g.deps/baseline.json",
+   "bytes": "ewogInJvd3MiOiBbCiAgMSwKICAyLAogIDMKIF0KfQ=="
+  },
+  {
+   "path": "outputs/g.deps/candidate-01.json",
+   "bytes": "ewogInJvd3MiOiBbCiAgMSwKICAyLAogIDMKIF0KfQ=="
+  },
+  {
+   "path": "outputs/l.masters/baseline.json",
+   "bytes": "ewogImNvbXBsZXRlIjogdHJ1ZSwKICJhcm0iOiAiYmFzZWxpbmUiCn0="
+  },
+  {
+   "path": "outputs/l.masters/candidate-01.json",
+   "bytes": "ewogImNvbXBsZXRlIjogdHJ1ZSwKICJhcm0iOiAiY2FuZGlkYXRlLTAxIgp9"
+  },
+  {
+   "path": "outputs/p.advice/report-1234.json",
+   "bytes": "ewogInJ1bGVzIjogWwogIHsKICAgInIiOiAxCiAgfSwKICB7CiAgICJyIjogMgogIH0KIF0sCiAiY2xhc2hlcyI6IFsKICB7CiAgICJuYW1lZE1vZElkIjogNzcsCiAgICJuYW1lZE1vZE5hbWUiOiAiT3RoZXIgTW9kIiwKICAgInBhZ2VNb2RJZCI6IDEyMzQsCiAgICJwYWdlIjogImRlc2NyaXB0aW9uIiwKICAgInJlYWREYXRlIjogIjIwMjYtMTAtMDEiLAogICAibGluZSI6ICJjb25mbGljdHMgd2l0aCBPdGhlciBNb2QiLAogICAic3ltcHRvbSI6IG51bGwsCiAgICJleHRyYSI6ICJkcm9wcGVkIgogIH0sCiAgIm5vdCBhIGNsYXNoIiwKICB7CiAgICJuYW1lZE1vZElkIjogNzgKICB9CiBdCn0="
+  },
+  {
+   "path": "outputs/p.discovery/baseline.json",
+   "bytes": "ewogInNjaGVtYSI6IDEsCiAiaGl0cyI6IFsKICB7CiAgICJmaWxlIjogIkEtQiBwYXRjaC5lc3AiLAogICAibWFzdGVycyI6IFsKICAgICJhLkVTUCIsCiAgICAiQi5lc3AiCiAgIF0KICB9LAogIHsKICAgImZpbGUiOiAiVW5yZWxhdGVkLmVzcCIsCiAgICJtYXN0ZXJzIjogWwogICAgIlNreXJpbS5lc20iCiAgIF0KICB9LAogIHsKICAgImZpbGUiOiAiRm9tb2Qgb3B0aW9uIiwKICAgImRldGFpbCI6IHsKICAgICJjb25kaXRpb25zIjogWwogICAgICJ0YXJnZXQuZXNwIgogICAgXQogICB9CiAgfSwKICB7CiAgICJmaWxlIjogIlBhaXIgaGl0IiwKICAgImRldGFpbCI6IHsKICAgICJwYWlyIjogWwogICAgICJQQVRDSC5lc3AiLAogICAgICJPdGhlci5lc3AiCiAgICBdCiAgIH0KICB9LAogIHsKICAgImZpbGUiOiAiIiwKICAgIm1hc3RlcnMiOiBbCiAgICAiVGFyZ2V0LmVzcCIKICAgXQogIH0sCiAgIm5vdCBhIGhpdCIsCiAgewogICAiZmlsZSI6ICJPdGhlci1vbmx5LmVzcCIsCiAgICJtYXN0ZXJzIjogWwogICAgIk90aGVyLmVzcCIKICAgXQogIH0KIF0KfQ=="
+  },
+  {
+   "path": "outputs/s.state/baseline.states.json",
+   "bytes": "eyJzdGF0ZXMiOiBbXSwgIm5vdEV4cGxvcmVkIjogW3sic3dpdGNoIjogIjAwMDE6QS5lc3AiLCAid2h5IjogIm5vIGZsaXAifV19"
+  },
+  {
+   "path": "outputs/s.state/candidate-01.json",
+   "bytes": "ewogIlByb2JlIjogInN0YXRlcHJvYmUiCn0="
+  },
+  {
+   "path": "outputs/s.state/candidate-01.states.json",
+   "bytes": "eyJzdGF0ZXMiOiBbInMxIl0sICJub3RFeHBsb3JlZCI6IFt7InN3aXRjaCI6ICIwMDAyOkIuZXNwIiwgIndoeSI6ICJidWRnZXQiLCAiYXJtSWQiOiAib3ZlcnJpZGRlbiJ9XX0="
+  },
+  {
+   "path": "outputs/u.unknown/baseline.json",
+   "bytes": "ewogInJvd3MiOiBbXQp9"
+  },
+  {
+   "path": "outputs/u.unknown/candidate-01.json",
+   "bytes": "ewogInJvd3MiOiBbXQp9"
+  },
+  {
+   "path": "plan.json",
+   "text": {
+    "z": "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"
+   }
+  },
+  {
+   "path": "premises/registry.json",
+   "bytes": "eyJyZWdpc3RyeVZlcnNpb24iOiA3fQ=="
+  },
+  {
+   "path": "premises/scope.json",
+   "bytes": "eyJjb21wbGV0ZSI6IHRydWV9"
+  },
+  {
+   "path": "receipts/e.regen__baseline.json",
+   "bytes": {
+    "z": "eNqlUrtu4zAQ7APkHwzW8UFy4OCQ9qoAqfIqLkixWa5lxhQpkEsjQeB/vyWph6+55gTBMmd3Zh/D78uLlYq4px5eKETjnbpdba4yGgjJDHynBVG0/Qkt7PCa3tum2aEqKYMFV+P5X1OftsZEEw8j+UegjlzFIfQVfYdI1jgapSCwoC5ZW9M0DExBoG85rtTBuMLqwSWwSrDTKNcdH/cw0Dk5pLEtOoKVw7o0E9ftXIscP4xJMyuy9ED6mTFTN83mZt208j41zW15f1c6Of2PrO2U9Wn4l9e5r6YAPvGQOMr59a0A1nfn5dG7mHrS88gIThsNTDLfZnuTy+F/PqU1WUDwXYA+TqVKcQ7e2mXjS1opvMSvxujkyAB4gI5mXJuO4rmXRT8bUGZ7rYiMD8nhfqKJk4g0MDgkVaG38jnl39Pstxiad1Ivat1TJRZxDonqiIE+CHPasvCVMlp8N/x1b3ozOjELB4rJ8ixKn4RpLDNduiqiiUXZh/MJ1U6WYVwX/wLRHynk1SwdRJar1/G+qBLEFKTvGpJcbXBaXO7r8uL0B5mhBA4="
+   }
+  },
+  {
+   "path": "receipts/e.regen__candidate-01.json",
+   "bytes": {
+    "z": "eNqlUj1PAzEM3ZH4D1Vmiq6FItqVCYmJr4Gqg5WYa2guOSVOVVT1v+Mk91EWFk6nXvNsPz8/53h5MRFBbrGBd/RBOytWk/lVQj1K1C09KkYE4mwh72fV7VLdV0u8ETmlNWBLPP2ryjMrMeaUu6742mONtuDgm4JKsEorIJz2JS144oiNxpRUBS2hZ+jIx4nYaZsrG7ARjGDs1FHW+5cttHhe7GMnDfdg+DDNgsJ07IWWnrukoSoQa0D1RjKVzqv5Havj97WqVvn9KOVo1R9Ziz7roOnBqaSryoCL1EYKfF5vMmBcfd5eOhtig2oYeTCJ55sv7rJv/3yyNDbAu9pDE/pWuTl5Z8zo+JiWG4/xqy7ab6QFuYMaB1zpGsP5LjN/WkCebV0QHh+ildu+jDcpJbYEVqIo0CZ/Tun3NOybF5o8KZe1+FQKMzn5iGVEj18oU9po+ERoxXvX9P2kG91tYiD2GKKhgRQPKGPXpr90hUQhMbPz5xOKTzZD2zr8AqXbo0/WjAoC8dWraZtZEUL0rLuEOFdp2RuXdF1enH4ArqUESg=="
+   }
+  },
+  {
+   "path": "receipts/g.contact__baseline__arm.json",
+   "bytes": {
+    "z": "eNq9VE1vnDAQvUfKf1hxDomBhV32GqlSqqitmqSHRDkYewAnYJBttomi/e8df8BuD+2lUhHaxfPl996M/XF+too0a6GnP0BpMchot0ovrFUBAzGaG46WiOZ1USZZWdDtZlvWReRCxo5K77dfxD+J92FN9uqdzSUbpKHMeA9VvbdXVEMnJIRiVBm3lepDHKejAYW2D1yuolchXdqgOEL9CTDGoxoqn76K4A2sN2zlPeg4hD2b/V1LRxsip67zDKeAHva0w0XsMOs4WQCBNN9D0JKlDQIF/mCYTU1JWsQkwfeekJ17H306SP6XqHyOehPmeuAWF3GGYTLjZDSunywtR91iMa0t5GhfCbmPrdJXp2SvZjkvXzS28cIn6pameWFTt4Rv86zIC74mVVpwnhaU8ZrxssrYOsMOV3Ver9Ms2ZByk7FyA/k2T1JKKkTPsrli9W7AwkvXWbD0RvRwyjRJ4qS8J+kuWe/S7NG2YXXAn2fHsBuaUz2Rg5564EufGZVccGrgbsHO/vEJI4I6NYr2et4K5e+FOZmxY4wbaivr7reBughR8yyOlL3S5mjnogFtTuhZoxsrR/DJW1ADOknWzmk4n4zBaKhkbmbxeXZ/h6CwxaCGrvsT0hP//0Y499afMzxItnX+HvHt9ImuuFET+E4oeAFmw9ygP3uj4HjehHm/FdgV71gKK9BTZ5aieNjZFLZB9v3Ygd3C1+H4zcxgtYpqlEHIJnjCytb2w4u5e1BWn5n6rO63YZy6mQluX+tFws8TbxyfhMymB/lijbTq4NihVSSHuAfdzneqsw2mdW0k3nA4yhhk0Abvncaf9x6ontTCDLFywdw1ef31y6fbm+v7O3fJnZ8dfgE/+o/t"
+   }
+  },
+  {
+   "path": "receipts/g.contact__candidate-01__arm.json",
+   "bytes": {
+    "z": "eNq9VEtr3DAQvgfyHxaf40R+y3sNLQRCW5q0h4Qc5NHYq8QvbHmbEPa/dyR5ve6hpVCoMLvWvPR9M5/1fn628UbYYSO+4zCqrvW2m/DCWAcEVL2+kWTxuBRZmrAyz1gqRFp4NqSvRev85o25FTgf1YQX56wuoWu1AO08YmicHUQrlRQa/WNSLwZtPBQyx0rRaxzI9k7bjfeiWpvaDZLg/kDs/X7oCrTRGw9f0RZ2xzkPOQ7zudX+bid6E9JOde1YTjMD3IuaNr7FPfonQNjqr3PQkjVqAorymwaTGrIwJQr03DO2tc+DS8dW/iEqOUa9Kn3dSYOLWUM36X7SI+0fDS1L3WDRO1PI0r5S7d433b5ak71at9Qva9VfPo800wtXYdyJMEntPAuRJRBwBhFCWsSAPC/CgGUBE4IXEcsyLjiPOfAoS2XEuZQYpEkR5wmwkh8rFm8aDc44mw2NVg2uGQeBH+T3LNwG8TaMHsw4Ngf6ebJM665a95W4jFODcpn3wudugQ7/uGapUL+qQTTj8SgaQ6P0SmunGCtw097tL8K6mKOOmuwFvIjqZJeqwlGv6BmjlZcl+Ogs1AMxtbA7ppFOAbDXogWrXVpP9u8wd9hgGLq6/h3Slf9/I7Szde0txIgfqKFf/kK0JrZWLa60uuSf5s6Z5EmUJqmMWRGmUoapAFmCzIsI4kgkZVEmZRxGQcbyLII8w4QnQShYQTqE6HQR0JduNOUuO6czx8iy1sOEDsOAzwgmzH6JT86oJF0ISr/dKkLnHEvhAcep1ktRuo1gmo+hsTR9jeYIV0fSO+jODNEraT6qrWbPvDO1A2eBbo+DGdwJxqjpYqpsb5fheRQlFdgb9Przp4+3N9f3d5b2+dnhJy3goXc="
+   }
+  },
+  {
+   "path": "receipts/g.contact__candidate-01__diff.json",
+   "bytes": {
+    "z": "eNq9Vclu3DgQvQfIPzR0tmJKrYXqW5DYgIEgGNieOSTwgSKL3bS1gaIcB4H/fYqLFsfwXAKM0OhuVRWrXm2Pv96/20UjP0HL/gE9qr6LDrv0zEo1cFCDuRIoifK6KCBNBMtyTjJJI2cyNKzzevuP+CfxOvTJH7zy+IH3nWHceA3TrZdz1gklmIF4PjQwbaxGKCmDsWCDAY3CX/i6ix5U5872WiDeHwBDPOi+Bme9i+AJnGcfz2tQ8RwCHx9vTmywJt3UND7NKaQAj6zBl9gBH+MVEXTmOhgtp0aDSEH8bbg9mpK0wBzwc0vIwX2++ePQif+wymerJ2U+9cLiIk7QT2aYzIjv321aLnWLxZysI5f2ueoeY1vu86Y/jue2YvE27Xhb3Vg2avhgnnwH0NV4YmleWGdFkRIpBGdptS84l1LwCkhZkQp4mWYUqjzhpCSJBFpQCSQTglGo66qieUbp7LH+acACzssgaI1qYZt6ksRJdUvSQ5Id0v0325fdM37duZQxi22BMZVxakEsjV/SuVmg8z98wsxguY6ateMcygZvse/M9MvcrWY28AmaAfQBMWJduVmmdbcZ0IHxB3aERS7UEUazSdEFsrPmkvzuJVgHNnX8NB/DoeUcBsM67gYZnzv383w2Q+2M7psG3oC60f/fCF1/fYlVtx3nFWdYd2SEBcUbQ74d7fPXo30/InPNLtbhpjUrc55QwvfAizrjQKs6TUiZEMZovSdlSRmlGeV0XxZiT6kQkBR5nVXIc0hz21r/jlrDI1IQ/CHy4OWtDESWlXtRZ8Wep7h0XCJSmZe4rEClyPKkolLyLMmkkAmXqQRRVVWNuqSUVVpHay/uFiJEprMgPNv79fJNdI02egLfNg33wK2Za91d6KVAQlTm5xfVKt/T1bGGcWrM4hTZmE8hjFuqBmwI70fgf+5XLOr6WOJUqu4YlOHNuk+8hPdYJzuuK5LRIDcffdHtDoKlasWa4APtBW6n1X6+ury8uL74env18ct6H7g75AKLMb2sBW/YOCqp+CyOri/++nh1fbMSRg3rNL+6bXYBn+OFhVTegrMs8tSZcbPEGgamtOtIerbIZmxOnszyqWuBjZO3Jq/Wj2tgZuXSrSC4iDr48RkkOHwkyJgxWtXTS8PXoUKQrjfu7n3AOdphsjVWr12L7bZiKbHsG+Eo67dtCRW+7+u5qS8vtadggBckzpOLp1nYG6zONIK41H0bSMwGf//u+V/kdW88"
+   }
+  },
+  {
+   "path": "receipts/g.contact__candidate-01__reverse.json",
+   "bytes": {
+    "z": "eNq9VMtunDAU3UfKP4xYhwTMY4bZVl206iJq0i4aZWHsa8YZMBY2aaJo/r3XNjBk0apSpSI0A/d97jn47fJiExl2gI5+h8HIXkX7Dbly1gEYSG0/cbREuySpElpWKaS5SKss8iG6pSr43VMSrjT4sCY7BmdzzXplKbPBQ4cu2BlVXHJqIZ6TNB2s8wzwjNPAFM+ptjCg/Q1fN9FRKp/eDxyDfgLoWA99HaI3EbyALx5aBg86TlPv5vnuQLULUWPbBqTjhAKeaYsvsZ/dxOehQNmvU9CSZSwOC/ybZS6VJKREGHjfJ8ne3z9COij+h6hijnqR9kPP3VyJN/Sj1aM1+P7gYHnobhZ7cIU87BupnmO38Zs12Jv1WmPRSn09rfP6ySC/V6GSOVBSlK4Wz/Ntxuu8zBiBumaC7TJRbEmVwU7wvEirnRAsR+K5SJkgAnhVVTX60q2oSD1XrF8tuHlzMhk6KztYI0/TOK3uE7JP8z3JfjhaNif8efSI275Z7xcxmbEDvvC+4LpbRmf/eE2Swb01A+3M3Arp6KRdae4c48Xu1rx/J7CrKWrWpqbsSJuzncsGjF3Bc0YvMw/wIVhwB3RU7DCnoV4ZA22pYl7DeD36v9O0YTfD0Lft7yZd+f/3hJ7bsN6aGviIC739C/G62FaqtVaX/DPvu4TviqwsSp4nNSk5JyVlXDBe1RnLM1qIWhQiJ1m6TaptxqotFLsiJTSpUYcsOx8I+MU7TYWDL+gsIPKo7TBCmGGAJ2AuzH+Rj8EoOR4M0r5+kThdcCyFBzBja5eieCqxcWqDtHS6Bdci1OH4zGzvSIxUHwukSKpmck5vZj4ZXDp+zo67mZaF+V6P7QwGJxBmofdp5I2HlMyWUXkbrVs4iwfJOUqtfWSUTYye1pqbe92+6/WyNPo8N0rPOpjWZSwepE3QQAfUjMOyAQTEJZvl55Z4eXH6BQRkzw4="
+   }
+  },
+  {
+   "path": "receipts/g.deps__baseline.json",
+   "bytes": {
+    "z": "eNq9VDtv2zAQ3gPkPxia44SUZcn22qlFh6JJOyTwQJMnmbFECXwYCQL/9x5JvTykS4EKgi1+9+B9H+/4cXuzSAw/QsN+gzayVclukd55VAMH2dmvApGEiKzc5DQjPF/nGyiS4NLVTEW7/yLxodGGOfkpGqt7AZ2JMNNNBA/MQC0V9JmYtogqV9fRTbDOgkboA5eL5CRV3Ee3B1i+GqzzLhjgDTyOGwRTj2owrrZD9BTOmWV1WzlIPH7Bn0tfVXV+PLIO5jVo15ODM6txsQyUzJKOJYOyP3unMcpYpALil+U+NCVpviQU3ydCduF9juGgxF+81oPXm7RfWuHrIgFone2cNbh+8RR6fh2zR5+otz5ExR8Gje8nwbDAI0vXufemmzQXjIi0BC62Kd1QUUJRiFWZ5cV2VR4yKMlWQFYKkmckL2hO1pyie0ZpQfmQ8fBuwVe0oj3QWNnAnBulS7p9IumOZrt09Tyqvw+c8ETmCvJWGdeAGA+fMyWkYBYex9L5Pz59n2DPVJo1ZuoUaKSdNd7kM3bf7rrX5s3J+IlVEy5kBWbe1h4MTRTIvUQE+TOn+HEIw27kHDrLFI9tuljsw9+lVxf1sbqt68+qnNn/d4XXU4Vj448tXirxKGNgSG61g2FaX4F7t9DW+whKgdMl7ft3iScSDWPi6/H2dwB3/TbIvulq8FvEPAK/uW319fhHW4mySFWZuQCY4AzaizTwHyT+0XauHuj4G8ePsOISzKjnNyeqQG416dHzMRaviyqOaQPMOD2WiPsJyYdj8Cxvby5/AM6ahVI="
+   }
+  },
+  {
+   "path": "receipts/g.deps__candidate-01.json",
+   "bytes": {
+    "z": "eNq9VMlu2zAQvQfIPxg6xwlJy1Lsa08FemrSHhL4QJEjmbE2cDESBP73DkltPqSXAhUESXyz8M3wjT5vb1aJEUdo+G/QRnVtsl+xO49qEKB6+10ikpCsYBkv2KYUjAIUSXDpa95Gu/8i8aLRhjnFKRqrewm9iTDXTQQFb6WS3MJ6jOi5tmhpXV1HV8l7CxqhT1yukpNq4166K2D9ZpDrXTDAO3gcNwmmAdVgXG3H6DlccMvrrnKQePyCj8vArDo/HXkPSw7aDQXCmde4WIeyzHqmDK39OThNUcZiKSB/WeFDGWEZFon3MyH7cL/EcGjlX7y2o9e7st866XmRAHTO9s4aXL/6Eob6em6PPtFgfYhdf1j2+X5uGpI8crbNfAR9ZJnkRLIShNwx+khlCXkuN2Wa5btNWaRQkp2EtJQkS0mW04xsBUX3lNKcijFj8WHBs9rQAWisamBZH6VrunsmbE/TPdu8TCdwCHXhqSy7KLrWuAbkJICplKeJuvjHa9AK6qbSvDGzWqBRdiG+2WdS4P5ab0uBcnHi1YxLVYFZStuDQUihuNeIYP3cteI4hqEihYDe8lZEqa5Wh/C6DN3F/ljd1fVXLBf2/83werJwdPyxxZ9LPMoYGJJb7WCc2DcQ3i1I+xBBJXHClP34ofBEomFKfD3i/j8g3LAN2pzB/DGJBIuZO309/9FWYk9UW/nU24iI7gzat2dmYSwOehUHrAFunJ5yo69UYmye53Z7c/kDbTx0Xw=="
+   }
+  },
+  {
+   "path": "receipts/g.overlap__baseline__arm.json",
+   "bytes": {
+    "z": "eNq9VF1vmzAUfa/U/xDxXBpDAil5jTSpU7VNa7uHVn0w9gWcgkG2yVpV+e+7/oBkD9vLpCGU4HM/fM+51/64vFhEmjXQ0R+gtOhltF2kVxZVwEAM5pYjErE8J8VNuqFZkeVAisi5DC2V3m6/iH8Sb8Oc7NUb6+v+AKqlg7dQ1Xm8pBpaISEko8pYFM3Bj9PBgELsA5eL6FVIF9YrjqX+BBjiQfWlD19E8AbO6rfyFjQcw5714b6hg3WRY9t6hmOoHg60xUXsatZxMhcE0nwPTnOUNlgo8EfDbGhK0jwmCb4PhGzd++TDQfK/eGWT15swu57buogD+tEMo9G4fra0HHVbi2lsIkd7KeQhtkovz8kuJzmv9xrbeOUDdUPTLHcthHydZlW1osChqAjn7CZL84qmLLspSEk21YbTJC9hBetkzau8ZFmR8DTPYcOhmjKW7wZseel6FZDOiA7OmSZJnBQPJN0m6226erJtWBzx58UxbPv6XE/WSz12wOc+Myq54NTA/an2f3zCiKBOtaKdnrZC+Tthzmbs5OOG2sq6/W2groLXNIsDZa+0PuFc1KDNGT0LurFyBJ89ghrQUbJmCsP5ZAwGQyVzM4vPi/s7BoVRI6P6tv1TpWf2/13h1Ft/zvAg2db5e8S30we65EaN4DuhYA/MurlBf/Gg4HjehHm/E9gVb5gTK9Bja+akeNjZGLZB9t3Qgt3C5+H4zUxvtYoqlEHIOljCyub2w4ux2F6rz0R9UvdbP4ztxAS3r/Qs4eeR145PQiboUe4tSMsWTh1aRLKPO9DNdKc6rDeNayPxwPEkY5BBG7x3an/eO6B6VDMzrJUL5q7J3dcvn+5udw/37pK7vDj+AsaWkX0="
+   }
+  },
+  {
+   "path": "receipts/g.overlap__candidate-01__arm.json",
+   "bytes": {
+    "z": "eNq9VE1vnDAQvUfKf1hxDgkYbGCvUStFitqqSXtIlIOxx6wTvgRmmyja/96xzbL00KpSpVpoF8+X5715+P38bBOMYgcN/w7DqLs22G7IhbUOIED35kaiJShLyiBlJCc0yXKVBi6kr3nr/fYt8iv2PqwpXryzuuz2MNS89x4+NN4ueCu15AbCY1LPB2M9GDLHSt4bGND2jttN8KJbl9oNEtv9AdCH/dCV4KI3AbyC8/rjvAcdh/ncan+3470Naae69iinGQHseY2b0PU9hqeGoDVf56AlazTYKMhvRthUEhGGEPC5j6Ktex58OrTyD1H0GPWqzXUnbV+RM3ST6Scz4v7RwnLQbS9mZws52Fe63YeW7as12Ks1paGqdX/5POJML3yFcccJZY56xSMgqoCCpSImWUKZYkVWqjSipcizjNI0o0kMXOUZA8iJoDEkRcFTEqmEHiuWbwZsn2k2GxqjG1gjjuMwLu4jso3TLUke7Dg2B/x5ckjrrlrzKrp2nBqQy7wXPHen1v9xzVJBvqqBN+PxKBxDo81Ka6cYJ3BL7/YXYV3MUUdN9ly88Opkl7qC0azgWaOTlwP46C3IAZ9asTumoU6FgN7wVjjt4npyf4eZYeTIDF1d/67Tlf9/d+hm6+kt+QgfkNAvfyFaG1vrFlZaXfJXcweWEqpUwkFCoSIpRU4JUxylmRdRGWUqkzxmJSSQxqlUrBS0iCVhDDIJ6nQR4JduNeUvO68zj8ihNsMEvocBnkHYMPclPnmjlnghaPN2q7E771gKDzBOtVmK4m0kpvkYHEvT12CP8HUkvgvT2SEGCuej22r2zDtbO/YWYemygzu1MRq8mCrH7TK8AKOkFu4Gvf786ePtzfX9nYN9fnb4CXWPotU="
+   }
+  },
+  {
+   "path": "receipts/g.overlap__candidate-01__diff.json",
+   "bytes": {
+    "z": "eNq9Vclu3DgQvQfIPzR0tmKJWtjqW5DYgIEgGNieOSTwgSKL3bS1gaIcB4H/fYqLFsfwXAKM0OhuVRWrXr1a+Ov9u1008hO07B/Qo+q76LAjZ1aqgYMazJVASbRnaVnQQvA8zyqa8ciZDA3rvN7+S/yTeh365A9eefzQP4Ju2OA1TLdezlknlGAG4vnQwLSxGqGkDMaCDQY0Cn/h6y56UJ0722uBeH8ADPGg+xqc9S6CJ3BaH89rUPEcAh8fb05ssCbd1DQ+zSmkAI+swZfYAR/jFRF05joYLadGg0hB/G24PUoSUmIO+LlNkoP7fPPHoRP/YVXMVk/KfOqFxZU4QT+ZYTIjvn+3abnULRZzso5c2ueqe4wt3edNfxzPLWPxNu14y24sGzV8ME/G04QuTowUpUu75PuK8D2Re05JISmT+4oX+xxYkcusrAUj+EMTmXOalKLmjJKszCjNZS0ImT3WPw1YwAUNgtaoFrapp2mcVrcJOaT5gWTfbF12z/h151LGLLYE874bpxbEUvglnZsFOv/DJ/QM0nXUrB3nUDZ4i3Vnpl/6bjWzgU/QDKAPiBF55Wbp1t2mQQfGH9gRFrlQRxjNJkUXyPaaS/K7lyAPbOr4aT6GTcs5DIZ13DUyPnfu5/lshtoZ3TcNvAF1o/+/Ebr6eopVt23nFWcYd9wIC4o3mnzb2uevW/t+xM01u1ibm0uWAJEVVGXOU0KzopRlRWuZJ0XN95QWRU6LLAVseloC7AkvUsiqiuUkkVkRbbn+HbUGxDTCHyIPXt7KgBGaV4msKiJw5IDlJU/KilMpJU04lFUGeU1FxVNeFUWZA5RlnSUpJXlNcGNHay3ulkWIm86C8Nvej5cvoiu00RP4smm4B27NXOnuQi0FLkRlfn5RrfI1XR1rGKfGLE5xG/MphHFD1YAN4f0I/M/9iEUSW1J1x6AJb9Z36iXckmh7dYUxGlzMR8+4HUCwe1qxJvhAe4GjabWfry4vL64vvt5effyyXgbuArlAJqaXRPCGjaOSis/i6Prir49X1zfrtqhhbeVXV80u4HNLYdkob8FZpnjqzLiZYA0DU9qVg5wtshmbk6ezfOpaYOPkrZNXs8c1MLMu0q0guIg6+PEZJDh8SZAxY7Sqp5eGr0OFIF1v3MX7gE20w2RrZK9dyXYjsVAs+0a4ffXbqASG7/t6LurLG+0pGODtiM3k4mkWhgbZmUYQl7pvwwazwd+/e/4XbHNsIw=="
+   }
+  },
+  {
+   "path": "receipts/g.overlap__candidate-01__reverse.json",
+   "bytes": {
+    "z": "eNq9VE1vnDAQvUfKf1hxDgl4wYS9Vj206iFq0h4a5WDsgXUWjIXNNlG0/71jG1hyaFWpUhHahfl+8x5+u7zYRIbvoWPfYTCyV9FuQ66cdQAOUttPAi3RliTilpJcFHVRs4JGPkS3TAW/e0rClQYf1uSH4Gyu+yMMLdPBw4Yu2DlTQgpmIZ6TNBus8wyACQameMG0hQHtb/i6iQ5S+fR+EBj0E0DHeuirEL2J4AW8N7QMHnScpt7N8X7PtAtRY9sGpOOEAo6sxZfYz27i81Cg7NcpaMkyFocF8c1yl0oSQhEG3g9JsvP3j5AOSvwhKp+jXqT90As3V+IN/Wj1aA2+PzpYHrqbxe5dIQ/7Rqpj7DZ+swZ7s15rXLdSX0/rvH42yO9VqGT2jOTU1WKkyMqkLksitkUBLKM8oSUv6rouEg603EJWFaLkKS/znGYAlFbbJC1IVpG8yOeK1asFN29GJkNnZQdr5Gkap+VDQnZptiPbH46WzQl/njzitm/W++W9MmMHYuF9wXW/jM7/8Zokg3trBtaZuRXS0Um70tw5xovdrXn3TmBXU9SsTc34gTVnu5ANGLuC54xeZh7gY7DgDtio+H5OQ244B22Z4l7DeD35v9O0YdyRHfq2/d2kK///ntBzG9ZbMQMfcaF3fyFeF9tKtdbqkr/iHWhG8rreMhBQ1okQ/DYntGaE57dlUiV4TAmW0gpQu2kmalrxvEwFoRQKAfX5QMAv3mkqHHxBZwGRR22HEcIMAzwDd2H+i3wKRinwYJD29YvE6YJjKTyAGVu7FMVTiY9TG6Sl0y24FqGOwGdue0dipPq4Roqkaibn9Gbmk8Gl48YcdzMtC/O9HtsZDE5Qm4Xe51E0HlIyW0blbaxq4SweJOcgtYZw6E+Mntaam3vdvev1sjT6PDdKzzqY1mUsHqRN0EAHzIzDsgEEJCSf5eeWeHlx+gUEoc+Z"
+   }
+  },
+  {
+   "path": "receipts/g.overlap__supplied-01__arm.json",
+   "bytes": {
+    "z": "eNq9VDtv2zAQ3gPkPxiarVhPS/baqUCnJu2QwANFniTGEkWQlJsg8H/vkZRkZWiXAiUEW7z3992dPu7vNoGmLfTkJyjNBxEcN8nWShVQ4NJ8ZSgJSFEcorIuy7xmRVkXgTORHRFeb98if2Kvw5j07JXNw3AB1RHpNUT1Xq5HKTsOLJx9JFHGZVP9ZMqINKBQ9oHXTXDmwnkOimG1vwBkKNVQgbPeBPAGTuuzeQ0qrlPa5vLYEmlNxNh1HuQ4AYAL6fASurJ1eCsIhPk+GS1e2mChwH4Yal2TKNkjBHyeoujonmfvDoL9xSqfrd64+TIwW1fkBMNo5Gg03l8sLAfd1mJax5qFvePiEiLZyW4NdkeJYJwRA2GUhDO9D68a27r1UXRLknxv49RVleTY1qoCRtMy2qcsi6ucFiSHMqvz/aGsM5JTso/LiLI6zUkW0zSuS1pAnB7miNW7AVtrVkyC3vAe1qjjOIwPT1FyjLNjkj7blmyu+HNyaLuhWXNLB6HHHtjS8wXT41I6/cczjQty1ijS6zkVtqLnZjVvNxs345bi46fh2k5W81xKQs+kuckZb0CbFTwrdCPmAL54CXJARkHb2Q1nlVKQhgjq5hfPyf1dJ4aRI6OGrvtTpSv9/65w7q3fOVwq2zr/WfHt9I4uuFEj+E4oeAVqzdzQn7yQM9w9bt6/ceyKVyyBFeixM0tQXHw6TmkQfS87sCl8HIbv1AyWq0AMYY1McNFMyumm5+Wz7thhS9GtEm3wM9D49euB6FEtwdGWcToTaOu7v7v+BnUneMQ="
+   }
+  },
+  {
+   "path": "receipts/g.overlap__supplied-01__diff.json",
+   "bytes": {
+    "z": "eNq9VU1v3DgMvRfofxj4HDf+9ji3xWayCBB0gaS7hxY5yBI9o8SWDUlOsyjy30t9WHZbpJcWaxgzNknpPZF89Je3b3aRoicYyL8gFR9FdLHLzoxVAgU+6WuGlqiq9hTyrs72Tcr20EU2ZOqJcH7zlLgrdT7ckz465/Hd+ASyJ5PzEDk4u5qnqefA4mXNRKQ2DsY7j0AYmTRINH7B1130yIVdOkqGdD8DTPEkxxZs9C6CZ7BeB+c86HjxuMenuxOZTIiY+96dcvYngCfS40tseat4ZQRC3/qgsEppZArsH03N0izJKjwD3h+S5MLeH91yEOwnUeUS9cz1nyMzvBJrGGc9zVrh+6d7a+jH4xaejkLNA7CQFkoE44xowPNlZWXg6C9ePqOYw6Mkg1qgDPiAWSF6DFVZwwzwCfoJ5AVy7HpOdajlblO+idBHcoRgZ/wISm+OaIFMJewhPzkL5oHMgp6WZVhSSmHSRFBbZrzu7d/L2UJVaDn2PbxCdeP/vxmaX0cz4mIptnUFnl4MKJfAYiL6ZJVjOv+ci6cYBZedb/v9PPRCnGTxIrF3DwqlvWyjQpd0bZuVdd20LTCa75MqZ0XalrQmJeyLrqyafVeQkpIq3SeUdXlJipTmabenNaR5E23z/T1zCchLwW9g73d67RQkq4sm6ZomY3ldAykqmlQNrbuuqxMKVZND0dasoSltyrIqAKqqzZO0zgpz/DJaa3IfxgXOA0PEjUQnM1dMW3AtZ3Dlk/AA1IStesWaMhwbXP93wwfuhRw2lqDmXodNcWbR2cNYcfVgINw+DJ+pk1rUYWtycfQe/6aWeW3WYpJMz640lMbxdXRZH4CoWYadMZahPI3n8vrq6nB7eP/h+o+b+Pbw1+3h7u767/fr5LTT9oAJmb/NB+2JUrzjdDFHfvXhbh0fLay9/cNk3nmidkqEEfMKtyjIehZabSQtYSJc2rpkZ8G2sLP2dLHPIiTiYlf8IEYqgeh1sm4NuYcX8PkSOrD8PFxEtJa8nfUW61uoZAMiRm2/U4/YTTs8bIv5G9Z0W32EJHdjz+wA+043PsMPY7t8MuNtduNnH4AfE+wqiyeJVw9mZ1bAruQ4+JFmwN++efkKHjI2xg=="
+   }
+  },
+  {
+   "path": "receipts/g.overlap__supplied-01__reverse.json",
+   "bytes": {
+    "z": "eNq9VD1v2zAQ3QPkPxiaLZui9VF57VSgU5N2SJCBJs8yY4kiSMpNEPi/90hKsjq0S4EKgi3evTvee3fkx/3dKrH8BB37AcbKXiX7FV17qwEOUrsvAi1JWZSfjgUhNCOQF3meBIhumYp+/0Xik0Uf5uTn6Gw2/QVMy3T0MNNFux20biWIdIrRzDjvMIB4CyNcMO3AoP0Dl6vkLFWI7o1A0E8AnWrTHyJ6lcAbBG/cMXrQcR23bi4PJ6Y9RA1tG4kOIwm4sBYXaSjdpreiQLlvI2iOsg6LBfHdcR9KCS2RBr6PhOzD+xTDQYm/oIoJ9Sbd5174ukgw9IPTg7O4fva0AnVfizsF5TztrVSXFAWn2yXZLWdKSMEcpISmk8SbUdLNq8UWr2M2e2K0KH0+Rqu8Jse6pmJXVcDykpOy5tXxeKwIh7LeQX6oRM0zXhdFmQOU5WFHsormB1pUxZTx8O7A15zT0dA52cGSfZalWf1I6D7L93T35FuzuuLPS2Dd9s1SY94rO3Qg5t7P3B7m0vk/PuPYoHaNYZ2dtsKWdNIt5u6GCfPupd7/NmTrETXNp2b8zJqbXcgGrFvQ88YwaoHgc7SgBmxQ/DSFYW84B+2Y4mGO8XkJf9dRYdTImb5t/1Tpwv+/K5x6G88eHi7funjFxHbGwJDcmQFiJwy8AvewMPwv0SgFnkHp3r9K7Ep0zIkN2KF1c1K8APgwboPsO92C3yLmEfjNXe+1SlSfHlEJqZrROa7sdAh9OHbYS3SrxDq8Dpp4DDtgdjBzcsQKyScBfX33d9dfIx98GQ=="
+   }
+  },
+  {
+   "path": "receipts/g.terrain__baseline.json",
+   "bytes": {
+    "z": "eNqlUj1vGzEM3QPkPxia4+J8RZIia6cCnfo1NMjAUPRZtU4SJMpIEfi/l5Luw1my9HDwWY+Pj+SjXq+vNirhgUb4RTEZ79TDpr8paCQkE/iLFkR1RNCj3u+f4SPd339SlRIsuBYv/7r27FpMNPHYgsMHphjBuBaBODb8GRJZ42gSg8iCumxto2kIkifQqxw36mhczcou5RB8ZNJKAudJczh9P0CgS4WYp+7oBFYO29pT2u6WguT420RashJD0f7JWFL7rr/bdjt5f3TdQ31/t3Ry+h3W7cx6MfzZ69JXVwGfOWROcn58qoD1w2V59DLfSHqZG8Fpo4FJ5utv70o5/M+ntiYGRD9EGNNcqhbn6K1dbV9ptfAav5mi81oC4BEGWnBtBkqXC636ZQF1tseGyPiQHR7mNNkkIgUGh6Qa9FQ/5/J7XvYtCy2etPvafGqJVZxjpjZipD+EhbYavlFGy94N//1qRjNtYhGOlLLlRZReCPNU5s3Na0qaWOR9vBxT7cUR44b0BkR/olj8WdtILPdv4EORHglSjouucLXB2b3S3PXV+R/csAnJ"
+   }
+  },
+  {
+   "path": "receipts/g.terrain__candidate-01.json",
+   "bytes": {
+    "z": "eNqlUk1PIzEMvVfiP1Q509V0ECziymklTuzCAdSDlZhptjNJ5DgVCPW/r5PMR7nshdGo07xnP9vP+bxYrVXUexzgGSla79Tdur3MKKFGG/iXEUTBlYZ229waaG71zyujSkjowVU+/2vqs62caOpDJbsfjERgXWWAhoprcMYaYNxMSQGIhXGp72uogSC5An3Kca0O1pXM5GIKwROjUUKcRt3u+HsPAc8VKI0d4hF6OWxKX3GzFETHj2PQnBUZsvYT65zaNu2NtCjvn6a5K+9LTUdn/hN1PUW9W773JvfVFMAnDomjnF93Beh9d15ee5lvQDPPPTsl87XXN8W8bz6lNTGAfEcwxKlUKc7k+36xfQkrhRf+cmSntQTQB+hwxo3tMJ4vtOjnBZTZXisi40Nyej+lySa1xsDgNKoK7crnlH9P875lodmTemerTzWxiDMlrCMS/kWdwxbD18oa2bvljwc72HETszBhTD3PoviOOo1lvty8qmSQRd7T+ZjqTRyxrotfQO2PSNmfpY3Icv863mfpASEmmnUl1lg9uZebu1id/gEeUwoR"
+   }
+  },
+  {
+   "path": "receipts/l.masters__baseline.json",
+   "bytes": {
+    "z": "eNq9VD1v2zAQ3QPkPxia44SSJVny2qlFh6JJOiTwQJEXmTZFCfwIEgT+7z2SkiwEaJcCFQRbfPfBu3eP/Li+WiWGHaCjv0Ab0atkt8puPKqBgRjsV45IUpVZmW2zmpGSlhXQJLgMkqpo918kPmm0YU52ikZ521FjMX20UN1FvKEGpFAwJqPaIqqclNGN0wGDEPrA5So5CRWiDOsHGHTfxLhVAm/wCUf4PG7Vvt4f6ADLxNqNRcMrlbhYh1LNOp3rAGV/jk5zlLFYH/BHy3xoRrJyTVJ8HwjZhfcphoPif/EqJq83Yb/03NdFAtA7OzhrcP3smwot+1rswScarXczk3cTd7dHgzO7ie7mQLOi9AEl4w3wfFs0Ja0JqYuyouU23aRVU5ebqt7khBfboqoIbygQkpPNS875pmqKpk5pPWVs3i34ovJ0BDorOli2l6brtH4g2S7Nd9nmyXO/OuPPPrQl+3ZJIuuVcR3weaiMKi44tXA/l87+8RlVgUpoNe3MtBVy3gm7ENTFJwjYC2f3WVsL2Q2UnWh7wblowSwF68GgpNDec0SQAeoUO0xhKEnGYLBUsSBTfPbh7zzyiwxZ3Uv5pzoX9v9d4TTZeLTw7PjBxRsjDjMGhuRWO4hz0HAE5t2CtvcRFByPmLDv3wXOJBrmxBqMk3ZOiqebuXEb7L4bJPgtYh6O38z2nqtE9esXZEKodjSOKzOdMR/+CtpTNHU/EfyjH5ycmsHLzLVCmZnIb463oat8Qh7V0WO0kT7Xx/lC0NigsXiJtPHwdkCN03PNWAIXbJqLb/v66vwbmTqBAQ=="
+   }
+  },
+  {
+   "path": "receipts/l.masters__candidate-01.json",
+   "bytes": {
+    "z": "eNq9VMlu2zAQvQfIPxg6x4kkS/Jy7alFD0WT9JDAB4ocybQpiuBiJAj87x2SkiwEaC8FKgi2+GbhmzdDftzeLBJDD9CRX6AN72WyW+R3HtVAgSv7lSGS5IQ1jDYlo6s0resyCS5KEBnt/iuNTxZtmJOeolHcd8RYTB8tRHcRp0QyzoiF5RikiLZokU6I6MqIwkCEPnC5SE5chkhDewVK9zWEuEUCb/AJR/gybNeeHw9EwTyxdgNxOBOBi2Wga5ZXHiDtz8FpijIW+QF7tjRokuYVMsf3KU134X2J4SDZX7zK0euN2y8987zSAPTOKmcNrl99UaFkz8UefKLB+jCp+TDX7/5osHd3McQcSF5WcfeKbjd1VW62JMvW5SptVhvG1lCwlGXrnNB1npIcStbAqiiylNFtVVRl0ZR1SQiMGet3C55YUQ5AZ3kH8xKzbJltn9J8lxW7fPXi9V9c8GcfShN9OxeS9tK4DtjU2KmUx4k6/cdnmAychlaTzoxboe4dt7OhuvqEQfbDs/s8X7PRU4SeSHvFGW/BzIfWg2GaQnmvEUEFiJP0MIbhWFIKyhJJw6jisw9/l0FfVMjqXog/8ZzZ/zfDsbPxeOH58Y2LN0dsZgwMya12EPug4QjUu4X53keQMzxm3L5/59iTaJgSazBO2CkpnnDqhm2w+k4J8FvEPAy/qe29Vonslw0qwWU7GIeVGc+ZDz+D9hKN1Y8C/+iVE2MxeKm5lkszCfnNsTZUVYzIszx6jNTC5/q4XAUaCjQWL5I2HuAOiHF64owUGKdjX3zZtzeX33QOhF4="
+   }
+  },
+  {
+   "path": "receipts/n.na__baseline.json",
+   "bytes": {
+    "z": "eNq9U02P2yAQva+0/yHiHFdOpHjVXHuq1FO/Dl3tYQKzDhsMCIZoq1X+ewdwiHtoL5WKLNu8+XozD97u71YiyiNO8B1D1M6K/Wq7zmhAidrTR8WIOOBz3/fvDw9qGOTuYRDFxRuw1Z7/+ro21cY55aka7TsLFYQwzfkgotEW5zwQiFGbjKluCjxhYOiNtytx0rZWCe6A3UtklutiwFfMuEJfTILBy1xoPH85gsdl2pBmtngGw5uucIzdprFAS59npxYVidmh+kYyh2777dD1G36+9v2+PD9qOFr1F6/d1etV0wenMq++AC6RTxR5//hUAOPGZXnpbEwTqjYMCVZpBYTc33Y35HLyH9c8TZ7hGGCK11LMdtK0EOLm09TYt9mvZ48mFsgTjDdc6RHjUuYMFgVKc48V4f4hWXm8hrGUUqInsLLIy+upfC7VIc+HgjPmTywX9v/NML8v7Ujymcuy1StWpayBJTmFhFWFgC8os9vtTKyEVnw0Nf38pFmRamiJA8ZkqCXlOyHTXEZYRx14b7SEg5k75etCXMGFZafimYei7Rh/A6U7Y8gjujGJxLdkpGPOPiHEFJh/NbGv0vI6wMzv/u7yC92ONmk="
+   }
+  },
+  {
+   "path": "receipts/n.na__candidate-01.json",
+   "bytes": {
+    "z": "eNq9Uz1v2zAQ3QPkPxiaWsAqFKUxYK+ZCnRq2g4NPFyOF5kxRQr8MNIG/u89khKlDs0SIIQgie8eeY/3ji+XF6vK4YF6+EnWSaOr3apdR9QSkhz8F8FIRe31tsWHDRJtPzewrRJlUKBzPP41eVzlGO+JxxzUnzRkEGyfIQQtpABP9cQfwHqO6KBUpgoYPFmGXni6qo5S50zWPFD95FjpOgXomSIuaEihisHzmKw73R1goOW2NoyK6QSKJ3XS6epZBWn/bSSVVc6zOhI/PMalbdNuWDc/35tml55feTlp8QrrZmI9S39rRNTVJMAEPwTveH6/T4Ay3TI9Gu1CT6IUo5SPz9febFJF3zjGanINOwu9m1Kx2l76hREzp7ixK7Vfj4xiFuARuhkXsiO3tDmCyYF0uPuM8PkhaDxMy9hKRBo8aEz28tinzzkTYn28NUr9T+Ui/t4K4/tcWpJ7LtqWr1m2Mi9Mmz+CcpRtsPREGHmuJJ3OhRBc6vjYRrU2+g9ZM+snD1JN4dV1NcvY562l4A6X/vdXycbmniv6LLmgfNHGVwvDqHaUROLDMu/HsW04LQeNXRaueuQaS925f0A0J7Kx4lOzx9vFl67zh5ilJ3DBcjlyiLlC4uRH1Hl5cf4Lip9LqA=="
+   }
+  },
+  {
+   "path": "receipts/p.advice__candidate-01.json",
+   "bytes": {
+    "z": "eNq9VDtv2zAQ3gPkPxie44TUy5bXTgU6NWmHBB5o8iwz1gvk0UgQ+L/3SEqy2qJdClQQbPGe3919x4/bm8XSyiM04jsYq7t2uV0kd15qQILu8bMiyTJPJJMpJCwTCrI9WwaTvhZt1PsvFh8edRRTngblvVBnLSEqhGmiWIpWaSUQVqNPLwySpnV1HU2V6BEMiT7ouFiedBs8Y7jedPsYc7GEN/hVQfLLkLA6Px5FD/PQxg3I4SxqOqwCXru6IoEWvw5Gk5dFQgjqG0rvmrCkIOz0PjG2De9zdIdW/cUqH63eNH7qlMfFgqBz2Du0dH7xVYWiPRY8+kCD9mFs54OBvjO44kma3b9aGt1ddLBHkeSFd1ln6rDPyjyBgquUy7xk+aZY0xR5nsuCHTZpqYqiLGXG18m+4OuD4qw4qBKSVG74GHH/juBhpelmkDSoG5hXyPmKl08s2fJsm6TPvv2LC/3sQmV1V837KLvWugbUNNmJC48TdvmPz8AMIkNlRGPHVNT2RuOMVVebwFXPne1vBJuRrxfyJKqrXOkK7Jy2XhjYFOp7iRJqgXCtPI5uREtJGVC0MlCVnl34uwwNphah6er6T0Bn+v+NMIw2dpdQHHTljMB4dQwttp0zEuKSo6DhO1jZVvT22OE20oX5rR9JEheVNtFzYBZpgBBgonEQkxp4BenNwqbsolArWliN7180jTcqpsAGrKtxCkqXhXRDGqqg6WvwKWIcRd8SO/MT+EF3oAbrtrLjHem9z2B8r69ALNLVUcWVbUBYZ6bYZKu0HCfh4d3eXH4ArvOB8A=="
+   }
+  },
+  {
+   "path": "receipts/p.discovery__baseline.json",
+   "bytes": {
+    "z": "eNq9VMlu2zAQvQfIPxg6x4lELY587alFT03aQwIfaHIsMZYogYsRI/C/d0hqc9H2UqCCYItvFs4bvuHH7c0q0qyGlv4ApUUno+2K3DlUAQPRm88ckYhAVmYcDmRziPdxziPv0jdUBrv7isOTBBvmZMfBeM+FZt0J1DnYqGqDZU81NELCkI4qg6i0TRPcOO0NKIQ+cLmKjkKGfNSwulfdPsStIniH3+IKtG3MGD8nmMtx+AV/LkNd1emppj0sq1B24Agn2uBi7ZnpdTIVDdJ8G5ymKG2QDPDvhvn2xaRYxwm+z3G89e9LCAfJ/+KVj17vwnzquKsr9kBnTW+NxvWrozDwwwbULtFgfVg0/mFs9f2bxkO+CwG6piQvPDlWMkKLnKQF3cPjhieHOIuzgpOYphtGANIDpMWelVmapKxMs5wUZf7IURgEpTFm3J8NuLLybDMgrREtLBkmyTopn2OyTbItSV+mM9h5Zk1XLfvIOqltC3wSAaOSC04NPE21s398BrWgcipFWz3rBVphFgKcfbzanNC2v2ruSqbsSKsZ56ICvRS4A72YPL3XgGAHqJWsHsNQlYxBb6hkEAVo5/8uQ3+xQ0Z1TfOnOhf2/13h9XTh+LiDC3dMOMwQ6JMbZWGc2jdgzs3LexdAwXHKhDl/FXgmwTAlvh5zdxswO2yD7Nu+AbdFyMPxm5lOeRs1FOVmx+vigG0RsnLZi4D42XEdGsmP/f1ieeXLLmamQ6Xa4IVQhUFsgWqrps0xGRdsbLCr//bm8hO03n/n"
+   }
+  },
+  {
+   "path": "receipts/p.order__baseline.json",
+   "bytes": {
+    "z": "eNqlUstu2zAQvAfIPwg8x4Ws1Cnia08Beurr0CCHzXIjM6ZIgVwaKQL/e5ekHu6llwqCZc7uzOyD79dXjYp4oAF+UojGO7VvupuMBkIyIz9oQdTu9l7fIt5/fNl+0m0HqqSMFlyN539tfbY1Jpp4nIIffNAUKg5hqOgzRLLG0SQFgQV1ydqapmFk4eybdzk26mhcYYmOOZFWAp4nvf707QAjXbJDmuqiE1g5bEo1cbNdzMjx1ylpYUWWIkj/YMzUru3uNu1W3u9tuy/vr0onp/+RtZuz3gx/9jrX1RbAJx4TRzk/PhXA+v7SHr2LaSC99IzgtNHAJP11u7tsh//5lNJkAMH3AYY4WxVzDt7adeRrWjFe4zdTdF7JCHiEnhZcm57i5TKLfl5A6e2xItI+JIeHmSabRKSRwSGpCj2Vzzn/npd9y0LzTOpNrXOqxCLOIVFtMdArYU5bB94oo2Xvhn9/MYOZNrEIB4rJ8iJKb4RpslHO8wbG0RqEZzt1KleRxcGHy07ViwzFuD7+BaI/UcgjWiuJLFew50NWHwhiClJ/DUmuNjgPMNd3fXX+AwDNBxQ="
+   }
+  },
+  {
+   "path": "receipts/p.order__candidate-01.json",
+   "bytes": {
+    "z": "eNqlUstu2zAQvBfoPwg8x4WkWHLsa4EAAXrq69Aghw25lllTpMCHkSLwv3f5kORTLxUEW9zdmd2d4fvHDxVz/IQj/ETrpNHsULV3MWqRo5z8k6AIa/a7PYdj32B93AuoWSqZFOicj191fpqcI05+LslPxgq0OQ52zFEOWkgBHjczZALrKaODUrlUwOQJd6je6Vixs9QJSVzygoJR8Fo4h8u3E0x4i7ahzIYXUHTYpIncZm2G2n8tRQvKeRoCxQ/PI7St257Go/d7XR/S+yvDUYt/VHVz1Zv0n42Ic9UpYIKfgnd0fn5JAWWG2/bcaBdGFMvOi0q0X9v1Sbj/fNJoJIA1g4XRza1Sc2+NUqvka1lqvObvSna2ZAJ+hgGXuJADulszE380IO32nCO0PgTNTzOMnOQcJw+aI8uhl/R3jb/XxW8yNGqSb2vWKQMTubcB84oWfyOPZavgFZOCfJf+zxc5yuLEQmzRBeUXUnxDHkob2n6cFMYWmUfQN/cmasW02RxJCamHkiwnNxsf4Re0UaJ1EufpCg7+FBlGBBfsQk61QvJZwGW+cvMfrRlnFdkDNH236wTfbu/3u/vZ3u6177FtBGw7Xm+PD1FPWvT6Fx7VF3k="
+   }
+  },
+  {
+   "path": "receipts/p.qualification__baseline.json",
+   "bytes": {
+    "z": "eNqlU0tr3DAQvhf6H4zO2WAbdkNzSwuFlh5K0vbQkMNEGtvqypKrxzYh7H/v6GF7w0IvNWbXmuc33zd6efumYo4POMIPtE4aza6r9iJaLXKUk/8kyMK2V7ud4FsO73jTXW1blkImBTr741ednyb7qCbfF+fl7wBKdpKDjx2SH+yYvY/gUEmNpSRYT1YdlMphAiaPlkwvdKzYXuqUJdDKAwpGxmOp1x/uBpjwNNuGgg8PoOiwSajcplmaofa3JWjJcp5AoPjueUxt63a3qRt6v9X1dXp/5nTU4h9R2znqSfoPRkRcdTKY4KfgHZ3vH5JBmf60PTfahRHFMjMHLaQAjzRfu93Fdvw/nwSNCLCmtzC6uVVq7q1RaqV8DUuNV/9F8c6STMD30ONiF7JHdypmqh8FSLPdZwuND0HzYU4jJTnHyYPmyLLpIf0d4+9x0ZsEjZzkjc085cRU3NuAeUSLv5DHsJXwiklBukv//EWOsiixFLbogvJLUXxCHkobmn6cFMYWuY6gb+6NTT7wQEqGQgDriBap+1i9yRZuDmgjQ/PwM79fzRQULE1mud1C5ecg+jRXs1JRRnGedrj3Q8wcEVywCzrqJiSfFVgGnK/O2Xq5M2CdVBEtu9m8rybwfLhENy2oyq1OpTpQDs/AaePvECyJvirOoJqMUZU2j0Y8V7RQnewT6teJt6jo1mp/upshHdsMgP0ZniM4DSM6KlfRte3Rs9d7Uqb9aM1YdD7+BZGAXoA="
+   }
+  },
+  {
+   "path": "receipts/r.contested__baseline.json",
+   "bytes": {
+    "z": "eNqlVM9vmzAUvlfq/xBxbloMhECuO23aYVq7HVpFlWM/iFuwLdtEjar873u2gaAddlmEEvx+f5+/l8/bm1Vi2RF6+huMFUomu1V2560GGAjtvnK0JFAUVZ7zquCHOiNNk4QQ3VEZ/f4tjR8SfViTvUenuWdKOrAOePRR00fPgVrohISxHDUOrXLouhjGqXZg0PSJx1XyLmTI6pleK9mdE7RexoLt6fFINSzTzTAOByfa4WEdRrJrMncD6X6OQXOWdTgF8F+O+dQszcp1SvB5StNdeJ5jOkj+j6jNFPUh3BfF/VxpMKjB6cFZPL94TAGYn8UdfSHRa2WcfVgw9vo6kfRgwA6du3+zeEt3MdEeabYpfWqVkpwysoFt3tRlRitOm6zcVoSxpsjIZkuqLW0qkhdZWR/yhtUESpJS0kBZFTWZKh7O2BcL5vVo6J3oYQmUkDWpn9JsR4pdlj/7W1hd8GsfAHaqXdKJOOzQA58vkVHJBacOHufR2X9+4uiJNqo1tLdTq9DcGdV1Vw1dw0Ljq/9u9E4a05S90xZmOxctXscCWajvBRWwvUQLwqeDZMcpDZXJGGhHJYMkmvbh5zKRFvWLAvWcxPWLPMXEUNyZASJEA2/AfFgQ0D4aBUcdC3f+LnoRlbWfC0fJzEXhA9gwtkH0ve5gWkqEiO/MKc9VItW6QSaEbEfneLKTkH36CYynaEI/EfxD6aGbwPi/EWW4nYn8NvA2oKqvRIxArMONbOMm9EDtYObZsBUXbOJ/hhf3ZaEuZUQrQt8GoY/3gJrTzhf7e12zxVL7mrc3lz92uWK5"
+   }
+  },
+  {
+   "path": "receipts/r.contested__candidate-01.json",
+   "bytes": {
+    "z": "eNqlVEtvm0AQvlfqf7A4mwSwTbBvVaRKrXqomrSVElnRenfAm8Au2keUKPJ/7+wuC9SHXIKwgZn9Zuab19vnT4tE0yN05A8ozaVIdoti6aQKKPDefGMoSUpW1+urvIKMUVpBlfgjfUtE0Lu3LFx50KFN+hSU6oJKYUAbYEFHVBc0lAjGGTGQRlhPlEGNsG0bjjLSG1AoesPPRfLEhUd2tE+laF8TlJ4Go83zzZH0MIcrOwQIz6TFj9SHpdPJGwjzazg0orTBKID9NtRBi6woMT68b7Ns5++7AAfB3jm1iadeuLmWzMWVeYG0prdG4/e94+SJuVjM0RniXS+V0ZezrD08zBN1qUDb1lw8aqzWMoD1kRSb0sGzstiWq6tVtoaCwYGVBWyqvKq3h6KECoqa0rqiVU4LSq5W9WHFyGFTVmWZl+UhY3m0eHhF32hwvRoEneEdzMnmeZpvb7Nil693xerOVWJxwr+9J9nKZp5S5KJtB2ws5MjoZgydfvAKoSe9ko0inY6uvHOjZNtOfTQd844n/XLQxj7rCX0iDYxyxhssyYyZt++aynO7DxKkT6ygxwjD7qQUekMEhSSI9v5xikkLPYxN6nISxjDkKQC9caMsBIoKHoG6Y76J9kHIGfYyN68/eMen7pr4trbhzm7yEkI4Lf/T41Bex5qcz2Zat7yfN5xT98YqYF8awoXPyByRpQeioeUCAmoiux/JhjYeicILUDtQx4p0fQtxYWDa8Z0a6eqXCJnWWB0umkE5fOk4YA7+DMqV7TwJP2Vv25hgt+KkYnrk9N2yxmd6O4s3WNQGN0UTJrQDoh31wT26YpzGnhjphTmedbxUfCiAAqtHeEzk+R4p4h7J75JYdQf7qmSHu5rX3NvO57q/3ByDC3zq1C09G9ieW5iG450lvpit6ljPqAjVm4aXffAa1wf+Tv8AkXzWlA=="
+   }
+  },
+  {
+   "path": "receipts/rt.media__baseline.json",
+   "bytes": {
+    "z": "eNqlUk1P4zAQvSPxHyqfdiWC0kLKx3VPK+0J2D2AOLj2kJo6dmSPKxDqf9+xJx/lwoUoauo3M29m3vPH6clCRLWFTv6DEI134naxOstoAAWmx9+aEKHWV3VzddncbJrNBVxfiJLSW+k4nv/V/Cw5Rpxqx8GA5x1oIzkgQ8fwRkawxsHAJQMS6pK1nKZljxAI+qDjQuyMK1XMRNBhYGv391vZw3FtSMNYsJeWDlUZJlbLqRU4vBuSpqqINALov6hy6aperat6Se9DXd+W95HLwekvspox683gL6/zXHUBfMI+YaTz03MBrG+P2yvvYqLtpo2VdNpoiUD7rZp1seGbTxmNBAi+DbKLY6vSHIO3dhZ8TiuN5/jZEB0N6aXayRYmXJsW4rGVhT8bUHZ7YoTWl8mp7VhGTioFPUqnQDD0XD6H/HuY/CZDsyZ8UVknLizkGBLwigFeQeW0WfCFMJp8N/j+x3RmcGIiDhCTxYkU3kCloY3YWJ+n/+F8xRQvBnRVbuLPQVINSP18ON5bvJBExrXxE6j8HkIWbJ4rIl3IFrd8v2VMgbbhEOVqo0Y587SnJ4f//KQLGw=="
+   }
+  },
+  {
+   "path": "receipts/s.state__baseline.json",
+   "bytes": {
+    "z": "eNq9Uz1v2zAQ3QPkPwicWiAqZCUOGq+dAmRq0g4NMtDHs8SaIgXy6KYI/N97JGVZHdqlQAlBEt99v0e+XV5UIkCPg/yKPmhnxaZqrxLqEVCPdK8YEc31XXtzs1t/vGuvAXYrkV1GI22xp7+mrMnGOWFfjOFDIElYcOmHgm5lQKPtBI/SE6M2GlPclBwJPUNvvK3EXttSyLst1jhoynGVwFfMNVKFbBQMH6dS3eGxlyMuE/s4tYwHaXhT50ZDvZr7QEufJ6c5itN7QvWFIIW2TXtbNyt+nppmk59vJRyt+ovX+uT1qumTU6mvJgMu0hgp8P75JQPGdcvy4GyIA6qZDpBWacUj83zt+jaVg39cE5/MYeflEE6luFsmeyHF2WfWY7Ng/2rymQWTsJfdGVe6w7CUOoFZgzzec0GYARkt9KcwFhMAR5IWssC8XvLnWBwSQ+SdMX/qc2H/3x2m93E+lHzqknDlphUxS2BOTj5i0cHjd4Tkdj4VldCKD6emnw+aNSmGObHHEA3NSfleQJzKCOuoluNoNMitwXfWVeGHJujfT6IrJC7m/HJosWN+tO3CbyC4A/rE1rmpQHxlOupToQFliJ5HKSb2VRpOXKZWLy+OvwCVPT0F"
+   }
+  },
+  {
+   "path": "receipts/s.state__candidate-01.json",
+   "bytes": {
+    "z": "eNq9VLtu2zAU3QPkHwTNdkI9bMdeO7XoUDRxhwQeKPJapi1RAh9ugsD/3ktSopUhXQpUEGzp3Oc591LvtzdJqtkBWvoLlBadTDdJPnOoAgaiN185ImnJK1YBVGVB8tWarVLv0jdUBrt7IuHKgg1zslMw6jttqIGAU9UGlFHJBUd8Pob0VBm0SNs0wZXT3oBC6B1fk/QkZCimugrm0Arj45IUXsHXcVW8MUX4MpSrz48H2sM0sbJD23CmDb7MfbN6fu0DpPk5OMUoTK8M8K1hLjQn+RI7x/uJkI2/n0M4SP4Xr8Xo9SrMl467vogHOmt6azS+vzhSnrLrxRxcosF6P2h5P1Xv7qhxbrMQoA80Xyw9OQ7rBxwiVHxfFozxsgK+rvaQEYBsRdYrwqocFoxkQLJV+bAsSInj3fOiKHJSjhmrNwOurXw5AK0RLUwJZtk8Wz+RfJOVm7x4duonF/zZeWJNV09lZJ3UtgUexxqpPMbW2T9ew17gLtSKtnoshZrg0kxW6uoT92oz2aLZ4BMXj7ITra84FzXo6co60O+Sp/cSEFSAWskOYxguJWPQGyqZX1S8dv7vMuiLChnVNc1nfU7s/7vDcbLhcOHpcYMLX40wzBDokxtlIcxBwRGYc/PbvQug4HjIhHn7LnAmwRATK9C2MTEpnm9mhzLIvu0bcCVCHo7PzHRqSjLdox5C1voDyLozKKfOSHzU9kfX22bkET4jiep+6yjjN8trzykfka08OoxWDVyH5Kbk2IizAxcBvFyVG5hrg9+XOpzrFqi2KpLBBrlgHwYWCW6le1KtkFFeJ9jtzeUPMhyUSg=="
+   }
+  },
+  {
+   "path": "receipts/u.unknown__baseline.json",
+   "bytes": {
+    "z": "eNq9VD1v2zAQ3QPkPxiao4SkZcny2qlApybtkCADRZ5kxhIlkJSbIPB/75GUZC3tUqCEYIvvPvju8U6ftzebxIojdPwnGKt6nRw27M6jBgSowX2ViCSZIFCIoiL7fLct6jIJLkPLdbT7NxIXjTbMKU7RON6P+qT7XzpauOkiXnELrdIwJePGIarHto1ukg8ODEKfuN0kJ6XjUaavIH2zfUy3SeAdPC5hCKYEwct0UHN+PPIB1mnNOFGGM29xkwaiNqULC9Du++S0RFmH7ED+cMKHMsLylFB8ngg5hOc5hoOWf/HazV7vyn3ppedFAtCPbhidxf2LLykU7Lm4o080WR8WHR9m5e6vMiDHI2e73AfUNSszmu/Jrih3e1bkkokyqxmQmkme8TrLq31N0I0IoAAFq0pebymvKWR1vp8zVh8OPCm6m4DOqQ7W5VGa0vKJsAPNDmz77LXfXPDnNZTV9s1aRNFrO3YglysVXEsluYPHhbr4xzX1BHZCY3hn56NQ8065VTtdfZaeOiwddDd5LC3HxYk3V1yqBuy6WT0Y+igU9xIRrJ+PWhznMGxIIWBwXIvQpLhew99lUhf1caZv2z+xXNn/N8P5XuNg4eT4a4tfi3iVMTAkd2aEeAsG3kB4t9DZrxFUEgdMuY9vCm8kGpbEBuzYuiUpTrYYp2Ow+m5owR8R80h8F673WiW6T2tUQulmMk47O0+YDz+D8RJdmViHs97EGeuA29EsydFXKjEL6Pnd3lx+A8F4axA="
+   }
+  },
+  {
+   "path": "receipts/u.unknown__candidate-01.json",
+   "bytes": {
+    "z": "eNq9VMlu2zAQvQfIPxg6R4lELV6uOQXoqUl7SOADTY5kxhIlcHETBP73DhfJurSXAhUE23yz8M2bGX/d3qwSzY7Q05+gtBhksluRO4cqYCBG88QRSRrGoCk2hNCiyIoqT7zL2FEZ7O5XFp5ow5zsFIz23sqTHH7JYKGqDzijkgtODaRT0EiVQYu0XRdcOR0NKIS+8LhKTkKG69RwgPRdDyHlKoEPcDiH0ZsSBC/xsvb8fKQjLNMqG2nDmXZ4SD1ZnV5ZgDTfo9McpQ2yA/7DMBdKMlIjb3xfsmzn39cQDpL/xauavD6EeRy445V5YLBmtEbj+c2V5At2XMzRJYrWh1nLh6V691cpkOeRkqr2XWvItszrTVatt9WGrGtO2LZsCGQN4bSkTVkfNk2GbhmDHGBNDlvaFDltciibejNlPHwacMTyKgK9ET0sS8zzNN++ZGSXlztSvDr9Vxf82PvSuqFdCskGqW0PfG7rXMrzTJ394xPnAqehVbTX01Woey/MYqSuPvNc7eYpuose89hRdqLtFeeiBb0cWAf6WfLFvQUE66dWsuMUhkOJ2zQaKpkfVHz2/usS1UV9jBq67k8sF/b/zXDqa1gu3B7XtvCvEVoZAn1yoyyELih4B+bc/HTvAyg4Lpkwn98EdiQY5sQKtO3MnBS3m9l4DVbfjx24K0Iejr+ZGZxWiRzSBpUQso3GeNLTlrnwMygn0ZWJNrjvbdizHqi2ak6OvlywSUDH7/bm8hspb2z7"
+   }
+  },
+  {
+   "path": "sweep/inv-0001/contactprobe/baseline.json",
+   "bytes": "ewogIlByb2JlIjogImNvbnRhY3Rwcm9iZSIsCiAiQ29uZmxpY3RzIjogWwogIHsKICAgIkEiOiAiVGFyZ2V0LmVzcCIsCiAgICJCIjogIk90aGVyLmVzcCIKICB9LAogIHsKICAgIkEiOiAidGhpcmQuZXNwIiwKICAgIkIiOiAiVEFSR0VULkVTUCIKICB9LAogIHsKICAgIkEiOiAiVGFyZ2V0LmVzcCIsCiAgICJCIjogInRhcmdldC5lc3AiCiAgfSwKICB7CiAgICJBIjogIlguZXNwIiwKICAgIkIiOiAiWS5lc3AiCiAgfQogXQp9"
+  },
+  {
+   "path": "sweep/inv-0001/contactprobe/candidate-01-flip.json",
+   "bytes": "eyJQcm9iZSI6ICJjb250YWN0cHJvYmUiLCAibGF1bmNoIjogImludi0wMDAxIn0="
+  },
+  {
+   "path": "sweep/inv-0001/contactprobe/candidate-01-flip.reverse.json",
+   "bytes": "eyJQcm9iZSI6ICJjb250YWN0cHJvYmUiLCAicmV2ZXJzZSI6IHRydWV9"
+  },
+  {
+   "path": "sweep/inv-0001/jobs.jsonl",
+   "text": {
+    "z": "eNrNkLFqw0AQRHt9hbjaF05tCG7yAYYQSJFNcdKtwtrW7nFa2QHhf/edHQeHFAm4STnD7OzwZrOW1tzXJlDfW9lh2voYk7RoO8+Bgle0rrH9lqJZ1GZDHC7xomXSTgYsVvJcHPwgfZRQLFfkQPqSSBU5O5omzCZxnHTMejY+DeX44Wm1egZYAox7xAhAvLPOuQbgehTAj1V361FOjxPm4Ig3tn22fLW2/lxJ7ywJgzkcqvkbs05Yfaf/i9n1qNuZ/db2B2bV3CbZIFevzVsGeEHCUmeWNeVMdQRUF9fO"
+   }
+  },
+  {
+   "path": "sweep/inv-0001/logs/diff-contactprobe-candidate-01-flip.txt",
+   "bytes": "JCBjb25mbGljdGRpZmYKKGV4aXQgMCwgMC4xcykKCkRJRkZFUkVOVElBTCBjb250YWN0cHJvYmUK"
+  },
+  {
+   "path": "sweep/inv-0001/logs/diff-overlapprobe-candidate-01-flip.txt",
+   "bytes": "JCBjb25mbGljdGRpZmYKKGV4aXQgMCwgMC4xcykKCkRJRkZFUkVOVElBTCBvdmVybGFwcHJvYmUK"
+  },
+  {
+   "path": "sweep/inv-0001/overlapprobe/baseline.json",
+   "bytes": "ewogIlByb2JlIjogIm92ZXJsYXBwcm9iZSIsCiAiQ29uZmxpY3RzIjogWwogIHsKICAgIkEiOiAiVGFyZ2V0LmVzcCIsCiAgICJCIjogIk90aGVyLmVzcCIKICB9LAogIHsKICAgIkEiOiAidGhpcmQuZXNwIiwKICAgIkIiOiAiVEFSR0VULkVTUCIKICB9LAogIHsKICAgIkEiOiAiVGFyZ2V0LmVzcCIsCiAgICJCIjogInRhcmdldC5lc3AiCiAgfSwKICB7CiAgICJBIjogIlguZXNwIiwKICAgIkIiOiAiWS5lc3AiCiAgfQogXQp9"
+  },
+  {
+   "path": "sweep/inv-0001/overlapprobe/candidate-01-flip.json",
+   "bytes": "eyJQcm9iZSI6ICJvdmVybGFwcHJvYmUiLCAibGF1bmNoIjogImludi0wMDAxIn0="
+  },
+  {
+   "path": "sweep/inv-0001/overlapprobe/candidate-01-flip.reverse.json",
+   "bytes": "eyJQcm9iZSI6ICJvdmVybGFwcHJvYmUiLCAicmV2ZXJzZSI6IHRydWV9"
+  },
+  {
+   "path": "sweep/inv-0001/summary.json",
+   "bytes": "eyJjYW5kaWRhdGVzIjogeyJjYW5kaWRhdGUtMDEtZmxpcCI6IHsiY2xhc3NpZmljYXRpb24iOiAiUkVQQUlSUyIsICJyb3dzIjogW3sicHJvYmUiOiAib3ZlcmxhcHByb2JlIiwgImRpZmYiOiB7InZlcmRpY3QiOiAiRElGRkVSRU5USUFMIiwgImNvdW50cyI6IHsicmVwYWlyZWQiOiAyLCAicmVjbGFzc2lmaWVkIjogMSwgInVubWVhc3VyZWQiOiAwfX0sICJjcmVhdGVkIjogeyJjcmVhdGVkIjogMSwgIm5ld0RlZmVjdCI6IDAsICJhdHRyaWJ1dGVkIjogMSwgInVubWVhc3VyZWQiOiAwfX0sIHsicHJvYmUiOiAiY29udGFjdHByb2JlIiwgImRpZmYiOiB7InZlcmRpY3QiOiAiRElGRkVSRU5USUFMIiwgImNvdW50cyI6IHsicmVwYWlyZWQiOiAyLCAicmVjbGFzc2lmaWVkIjogMSwgInVubWVhc3VyZWQiOiAwfX0sICJjcmVhdGVkIjogeyJjcmVhdGVkIjogMSwgIm5ld0RlZmVjdCI6IDAsICJhdHRyaWJ1dGVkIjogMSwgInVubWVhc3VyZWQiOiAwfX1dfX19"
+  },
+  {
+   "path": "sweep/inv-0002/jobs.jsonl",
+   "text": "{\"job\": \"diff-overlapprobe-candidate-02-supplied\", \"kind\": \"diff\", \"outcome\": \"ran\", \"exitCode\": 0, \"emitWritten\": true, \"inputs\": {\"arm\": \"<ROOT\\\\>\\\\sweep\\\\inv-0002\\\\overlapprobe\\\\candidate-02-supplied.json\", \"reverse\": \"<ROOT\\\\>\\\\sweep\\\\inv-0002\\\\overlapprobe\\\\candidate-02-supplied.reverse.json\", \"base\": \"ignored\"}}\n\n{broken\n[1]\n{\"kind\": \"no job id\"}\n"
+  },
+  {
+   "path": "sweep/inv-0002/overlapprobe/candidate-02-supplied.json",
+   "bytes": "eyJQcm9iZSI6ICJvdmVybGFwcHJvYmUiLCAibGF1bmNoIjogImludi0wMDAyIn0="
+  },
+  {
+   "path": "sweep/inv-0002/overlapprobe/candidate-02-supplied.reverse.json",
+   "bytes": "eyJQcm9iZSI6ICJvdmVybGFwcHJvYmUiLCAicmV2ZXJzZSI6IHRydWV9"
+  },
+  {
+   "path": "sweep/inv-0002/summary.json",
+   "bytes": "eyJjYW5kaWRhdGVzIjogeyJjYW5kaWRhdGUtMDItc3VwcGxpZWQiOiB7ImNsYXNzaWZpY2F0aW9uIjogIlJFR1JFU1NFUyIsICJyb3dzIjogW3sicHJvYmUiOiAib3ZlcmxhcHByb2JlIiwgImRpZmYiOiB7InZlcmRpY3QiOiAiRElGRkVSRU5USUFMIiwgImNvdW50cyI6IHsicmVwYWlyZWQiOiAyLCAicmVjbGFzc2lmaWVkIjogMSwgInVubWVhc3VyZWQiOiAwfX0sICJjcmVhdGVkIjogeyJjcmVhdGVkIjogMywgIm5ld0RlZmVjdCI6IDIsICJhdHRyaWJ1dGVkIjogMSwgInVubWVhc3VyZWQiOiA0fX1dfX19"
+  },
+  {
+   "path": "plan.sha256",
+   "planSha": true
+  }
+ ],
+ "generic": [
+  {
+   "name": "patchfind: the baseline gets every pair of the plan",
+   "tree": [
+    {
+     "path": "candidates/candidate-00-baseline.json",
+     "text": "{\"Plugins\": [\"Skyrim.esm\", \"A.esp\", \"B.esp\", \"Target.esp\"]}",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "candidates/candidate-01-flip.json",
+     "text": "{\"Plugins\": [\"Skyrim.esm\", \"B.esp\", \"A.esp\", \"Target.esp\"]}",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "journal.jsonl",
+     "text": ""
+    },
+    {
+     "path": "ledger.json",
+     "text": "{\r\n \"schemaVersion\": 2,\r\n \"planId\": \"plan00000001\",\r\n \"registrySha256\": \"45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38\",\r\n \"runIds\": [\r\n  {\r\n   \"runId\": \"evalrun-checks-1\",\r\n   \"parentRunId\": null,\r\n   \"command\": \"run\",\r\n   \"startedUtc\": \"2026-01-01T00:00:01Z\"\r\n  }\r\n ],\r\n \"entries\": {}\r\n}"
+    },
+    {
+     "path": "plan.json",
+     "text": {
+      "z": "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"
+     }
+    },
+    {
+     "path": "plan.sha256",
+     "planSha": true
+    },
+    {
+     "path": "plugins/A.esp",
+     "text": "plugin A.esp",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "plugins/B.esp",
+     "text": "plugin B.esp",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "plugins/Skyrim.esm",
+     "text": "plugin Skyrim.esm",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "plugins/Target.esp",
+     "text": "plugin Target.esp",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "premises/registry.json",
+     "text": "{\"registryVersion\": 7}"
+    },
+    {
+     "path": "premises/scope.json",
+     "text": "{\"complete\": true}"
+    }
+   ],
+   "check": "p.installed",
+   "arm": "baseline",
+   "want": {
+    "launch": {
+     "argv": [
+      "python",
+      "fake/patchfind.py",
+      "--pair",
+      "A.esp",
+      "B.esp",
+      "--json",
+      "<ROOT\\>\\outputs\\p.installed\\baseline.json"
+     ],
+     "outputs": [
+      "<ROOT\\>\\outputs\\p.installed\\baseline.json"
+     ],
+     "states": []
+    }
+   },
+   "written": {}
+  },
+  {
+   "name": "patchfind: a candidate gets its own pairs",
+   "tree": [
+    {
+     "path": "candidates/candidate-00-baseline.json",
+     "text": "{\"Plugins\": [\"Skyrim.esm\", \"A.esp\", \"B.esp\", \"Target.esp\"]}",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "candidates/candidate-01-flip.json",
+     "text": "{\"Plugins\": [\"Skyrim.esm\", \"B.esp\", \"A.esp\", \"Target.esp\"]}",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "journal.jsonl",
+     "text": ""
+    },
+    {
+     "path": "ledger.json",
+     "text": "{\r\n \"schemaVersion\": 2,\r\n \"planId\": \"plan00000001\",\r\n \"registrySha256\": \"45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38\",\r\n \"runIds\": [\r\n  {\r\n   \"runId\": \"evalrun-checks-1\",\r\n   \"parentRunId\": null,\r\n   \"command\": \"run\",\r\n   \"startedUtc\": \"2026-01-01T00:00:01Z\"\r\n  }\r\n ],\r\n \"entries\": {}\r\n}"
+    },
+    {
+     "path": "plan.json",
+     "text": {
+      "z": "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"
+     }
+    },
+    {
+     "path": "plan.sha256",
+     "planSha": true
+    },
+    {
+     "path": "plugins/A.esp",
+     "text": "plugin A.esp",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "plugins/B.esp",
+     "text": "plugin B.esp",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "plugins/Skyrim.esm",
+     "text": "plugin Skyrim.esm",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "plugins/Target.esp",
+     "text": "plugin Target.esp",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "premises/registry.json",
+     "text": "{\"registryVersion\": 7}"
+    },
+    {
+     "path": "premises/scope.json",
+     "text": "{\"complete\": true}"
+    }
+   ],
+   "check": "p.installed",
+   "arm": "candidate-01",
+   "want": {
+    "launch": {
+     "argv": [
+      "python",
+      "fake/patchfind.py",
+      "--pair",
+      "A.esp",
+      "B.esp",
+      "--json",
+      "<ROOT\\>\\outputs\\p.installed\\candidate-01.json"
+     ],
+     "outputs": [
+      "<ROOT\\>\\outputs\\p.installed\\candidate-01.json"
+     ],
+     "states": []
+    }
+   },
+   "written": {}
+  },
+  {
+   "name": "patchfind: a bare pair placeholder",
+   "tree": [
+    {
+     "path": "candidates/candidate-00-baseline.json",
+     "text": "{\"Plugins\": [\"Skyrim.esm\", \"A.esp\", \"B.esp\", \"Target.esp\"]}",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "candidates/candidate-01-flip.json",
+     "text": "{\"Plugins\": [\"Skyrim.esm\", \"B.esp\", \"A.esp\", \"Target.esp\"]}",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "journal.jsonl",
+     "text": ""
+    },
+    {
+     "path": "ledger.json",
+     "text": "{\r\n \"schemaVersion\": 2,\r\n \"planId\": \"plan00000001\",\r\n \"registrySha256\": \"45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38\",\r\n \"runIds\": [\r\n  {\r\n   \"runId\": \"evalrun-checks-1\",\r\n   \"parentRunId\": null,\r\n   \"command\": \"run\",\r\n   \"startedUtc\": \"2026-01-01T00:00:01Z\"\r\n  }\r\n ],\r\n \"entries\": {}\r\n}"
+    },
+    {
+     "path": "plan.json",
+     "text": {
+      "z": "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"
+     }
+    },
+    {
+     "path": "plan.sha256",
+     "planSha": true
+    },
+    {
+     "path": "plugins/A.esp",
+     "text": "plugin A.esp",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "plugins/B.esp",
+     "text": "plugin B.esp",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "plugins/Skyrim.esm",
+     "text": "plugin Skyrim.esm",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "plugins/Target.esp",
+     "text": "plugin Target.esp",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "premises/registry.json",
+     "text": "{\"registryVersion\": 7}"
+    },
+    {
+     "path": "premises/scope.json",
+     "text": "{\"complete\": true}"
+    }
+   ],
+   "check": "p.bare-pair",
+   "arm": "baseline",
+   "want": {
+    "launch": {
+     "argv": [
+      "python",
+      "fake/patchfind.py",
+      "--pair",
+      "A.esp",
+      "B.esp",
+      "--json",
+      "<ROOT\\>\\outputs\\p.bare-pair\\baseline.json",
+      "--instance",
+      "I:/instance",
+      "--profile",
+      "Default",
+      "--game",
+      "G:/game"
+     ],
+     "outputs": [
+      "<ROOT\\>\\outputs\\p.bare-pair\\baseline.json"
+     ],
+     "states": []
+    }
+   },
+   "written": {}
+  },
+  {
+   "name": "patchfind: no pair anywhere",
+   "tree": [
+    {
+     "path": "candidates/candidate-00-baseline.json",
+     "text": "{\"Plugins\": [\"Skyrim.esm\", \"A.esp\", \"B.esp\", \"Target.esp\"]}",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "candidates/candidate-01-flip.json",
+     "text": "{\"Plugins\": [\"Skyrim.esm\", \"B.esp\", \"A.esp\", \"Target.esp\"]}",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "journal.jsonl",
+     "text": ""
+    },
+    {
+     "path": "ledger.json",
+     "text": "{\r\n \"schemaVersion\": 2,\r\n \"planId\": \"plan00000001\",\r\n \"registrySha256\": \"45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38\",\r\n \"runIds\": [\r\n  {\r\n   \"runId\": \"evalrun-checks-1\",\r\n   \"parentRunId\": null,\r\n   \"command\": \"run\",\r\n   \"startedUtc\": \"2026-01-01T00:00:01Z\"\r\n  }\r\n ],\r\n \"entries\": {}\r\n}"
+    },
+    {
+     "path": "plan.json",
+     "text": {
+      "z": "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"
+     }
+    },
+    {
+     "path": "plan.sha256",
+     "planSha": true
+    },
+    {
+     "path": "plugins/A.esp",
+     "text": "plugin A.esp",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "plugins/B.esp",
+     "text": "plugin B.esp",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "plugins/Skyrim.esm",
+     "text": "plugin Skyrim.esm",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "plugins/Target.esp",
+     "text": "plugin Target.esp",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "premises/registry.json",
+     "text": "{\"registryVersion\": 7}"
+    },
+    {
+     "path": "premises/scope.json",
+     "text": "{\"complete\": true}"
+    }
+   ],
+   "check": "p.installed",
+   "arm": "baseline",
+   "want": {
+    "account": {
+     "status": "blocked(no-pair-source)",
+     "cause": null,
+     "note": "the candidate manifest records no move involving a target plugin, so there is no plugin pair for this check to verify"
+    }
+   },
+   "written": {}
+  },
+  {
+   "name": "patchfind: a review arm with no clash to take a pair from",
+   "tree": [
+    {
+     "path": "candidates/candidate-00-baseline.json",
+     "text": "{\"Plugins\": [\"Skyrim.esm\", \"A.esp\", \"B.esp\", \"Target.esp\"]}",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "candidates/candidate-01-flip.json",
+     "text": "{\"Plugins\": [\"Skyrim.esm\", \"B.esp\", \"A.esp\", \"Target.esp\"]}",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "journal.jsonl",
+     "text": ""
+    },
+    {
+     "path": "ledger.json",
+     "text": "{\r\n \"schemaVersion\": 2,\r\n \"planId\": \"plan00000001\",\r\n \"registrySha256\": \"45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38\",\r\n \"runIds\": [\r\n  {\r\n   \"runId\": \"evalrun-checks-1\",\r\n   \"parentRunId\": null,\r\n   \"command\": \"run\",\r\n   \"startedUtc\": \"2026-01-01T00:00:01Z\"\r\n  }\r\n ],\r\n \"entries\": {}\r\n}"
+    },
+    {
+     "path": "plan.json",
+     "text": {
+      "z": "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"
+     }
+    },
+    {
+     "path": "plan.sha256",
+     "planSha": true
+    },
+    {
+     "path": "plugins/A.esp",
+     "text": "plugin A.esp",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "plugins/B.esp",
+     "text": "plugin B.esp",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "plugins/Skyrim.esm",
+     "text": "plugin Skyrim.esm",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "plugins/Target.esp",
+     "text": "plugin Target.esp",
+     "mtime": 1767225600.0
+    },
+    {
+     "path": "premises/registry.json",
+     "text": "{\"registryVersion\": 7}"
+    },
+    {
+     "path": "premises/scope.json",
+     "text": "{\"complete\": true}"
+    }
+   ],
+   "check": "p.installed",
+   "arm": "candidate-01",
+   "want": {
+    "account": {
+     "status": "blocked(no-pair-source)",
+     "cause": null,
+     "note": "no geometry check ran on the review arm, so there is no clash to take a plugin pair from; select overlap, contact or navmesh ownership with patch discovery."
+    }
+   },
+   "written": {}
+  }
+ ],
+ "qualification": {
+  "name": "candidate qualification over supplied files and discovery hits",
+  "tree": [
+   {
+    "path": "candidates/candidates.json",
+    "text": "{\"Candidates\": [{\"File\": \"sub/candidate-01-flip.json\"}, {\"File\": \"\"}, {}]}"
+   },
+   {
+    "path": "journal.jsonl",
+    "text": {
+     "z": "eNq91E1rhDAQBuB7oX8i526ZTMyHe+ux9556G5OxlUYjmi2Fpf+9WWF7KixIKOQwOuPIw4ueBS3jcxBH0dHKcZhYPAhPp5XFcTrFWC7e2X9sE/FxpDXzspaRwJmGeJ3plzRe64m/8pPPQ5qud2Za8rVe2PMw522fM2jQYuvBkHFMZe1ymrYWf1Is9WF7+XqQpVVWCAQ0B5DlvAAcL6d5vbRS6fk0zpEzB/F9f3f+ZXmawhAoc3no/2hIoQ++18ErgK7Te2j2Fu12YuFxTilWMrEEwBKU7yU10PodJgl14qrqUsFZr1rVYGNAebfHpWpk1acxhUoosIpMiyBBWt+EZg/K1AqrJsz2pHX5uqwxnZGg9sDaGmlNaevXMHUaG83SdKid1U7uMCHWML3VM7Utu8DYWwZnnN7zc0f9t+kHyKYThA=="
+    }
+   },
+   {
+    "path": "ledger.json",
+    "text": {
+     "z": "eNrtmMuOmzAUhveV+g5R1klqG2xMdl12V/W2aDUaGfuQMOUmMNVUo7x7j4HcUGYyVUPURSKCsH18/Nvny6+Ip7dvJtNaryFT36CqkyKfLids5nrLVOUfDDbbJ9J96LQdq2CV1Lb6/XmtGBcuxudUhh7lYCgNmS99z9eGUCoC44sYDOOEhZFWXAdeQCFmkhAeG+6FETfak33eBpesMd8PbE2e3K3vdGvAL5ViY45y9c963mnBgFJVkNtPfVjepGk/oIssU3k7F+dtw2urKgvmq9VugBEm5oTi9YWQpbvo96kL3ODtrlWFyasEnKxW0TRdZKq2eFz395GqIU1y2I7hmk5cp3cXt11ZVVk3spu234E9lo4ibeOWdJsoU0DB22CtmhqOoyvQkJS2Sy4FEyxgoSZCCQlqO89gEm2LysXkxTxOcpPkq4NRlaTHaXN4tO+17ag46Mc6JEb1/d2+cXNaQ+lkLie2amDWd1fwAG2Ktqx3be9mJ7tuUnuQ40WJWIhH0E2/7MG5DHK2R/FR2XVb965ZvztRtMVDXeyoOEtZU+KWX8DG67GZDRnRiKA7LsDgv+TkaOoYrDBlYqNj9xMkJIr4jZUBK4cVuCwv4ogXsyiLIj1jKF3Qdd0EKCEMfUTHVPkk1KcI0cqqtFg18N8CMlT4b3wMi3VZMMKTYJx1kWfgGN1CPCMD7YWez3xBPC1vgOwBGc09KBtAEhdZYc7aRxt1Xf8ggadEyAglNNC+8W94ODwG5bosG/w0G69wkNN8jG4hQaw4x38igRCRoMS7MXLAyHgeIgec5EUOZy3EBV3XQSLOfA5URIzLgEt6o8PRcVysi4LB6ACM1WvAWF0djDAEaYDFARApJFc3MBwYqxHB8PevRvC7+QNv7w2U"
+    }
+   },
+   {
+    "path": "outputs/d.fomod/baseline.json",
+    "text": "{\"schemaVersion\": 2, \"hits\": []}"
+   },
+   {
+    "path": "outputs/d.fomod/candidate-01.json",
+    "text": "changed after the receipt, again"
+   },
+   {
+    "path": "outputs/d.pool/baseline.json",
+    "text": {
+     "z": "eNql0k2P0zAQBuC/Evm8oDhx7JhbQpMTQitguaA9+GOMLdK4ig0cKv47k7YgNdpVEevTeOTYj97MkSTjYa8+w5JCnMmbgt4VxIecsPxyJC5MgBW5V9n4V91rSAeCB76F2a7tQ4zTuk9eVQ1fO4yJsapLOfS8G6UcduOw6zltq7ptx74aqODjOO7Guun6gbWd4LSjfSnl20GUrKnW2/YqZfSsAvJJLV8hn959/HVX/J/IrSLQXDkpwTqw+iJyugIUOeesqxulgbUKRYpqFBl4UpTPouHj/Ub0DxZ44dpYHnFrIasw4e5IDiosJ+JfSX8J7sr5DpTdUl3cR3ttdS9c5Bpn4mxDxhk7p/ik7GH2Knmwt4NMPi55bX2/fPIBVDrNLwlzChYKVcyAQdlCLcaHH9voLhld/8H38XzNn/dvnR+mBD89LHAbLGrBaxxBxigF7bgRQuO4AW2EKSsjLacVF5K1OIwWm1TWVDfM4UA60+pyy3mYF5hUPmW137Cep5NoLRa/AVZqNIY="
+    }
+   },
+   {
+    "path": "outputs/d.pool/candidate-01.json",
+    "text": {
+     "z": "eNql0k2P0zAQBuC/Evm8oDhx7JhbQpMTQitguaA9+GOMLdK4ig0cKv47k7YgNdpVEevTeOTYj97MkSTjYa8+w5JCnMmbgt4VxIecsPxyJC5MgBW5V9n4V91rSAeCB76F2a7tQ4zTuk9eVQ1fO4yJsapLOfS8G6UcduOw6zltq7ptx74aqODjOO7Guun6gbWd4LSjfSnl20GUrKnW2/YqZfSsAvJJLV8hn959/HVX/J/IrSLQXDkpwTqw+iJyugIUOeesqxulgbUKRYpqFBl4UpTPouHj/Ub0DxZ44dpYHnFrIasw4e5IDiosJ+JfSX8J7sr5DpTdUl3cR3ttdS9c5Bpn4mxDxhk7p/ik7GH2Knmwt4NMPi55bX2/fPIBVDrNLwlzChYKVcyAQdlCLcaHH9voLhld/8H38XzNn/dvnR+mBD89LHAbLGrBaxxBxigF7bgRQuO4AW2EKSsjLacVF5K1OIwWm1TWVDfM4UA60+pyy3mYF5hUPmW137Cep5NoLRa/AVZqNIY="
+    }
+   },
+   {
+    "path": "plan.json",
+    "text": {
+     "z": "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"
+    }
+   },
+   {
+    "path": "plan.sha256",
+    "planSha": true
+   },
+   {
+    "path": "plugins/A.esp",
+    "text": "plugin A.esp",
+    "mtime": 1767225600.0
+   },
+   {
+    "path": "plugins/B.esp",
+    "text": "plugin B.esp",
+    "mtime": 1767225600.0
+   },
+   {
+    "path": "plugins/Skyrim.esm",
+    "text": "plugin Skyrim.esm",
+    "mtime": 1767225600.0
+   },
+   {
+    "path": "plugins/Target.esp",
+    "text": "plugin Target.esp",
+    "mtime": 1767225600.0
+   },
+   {
+    "path": "premises/registry.json",
+    "text": "{\"registryVersion\": 7}"
+   },
+   {
+    "path": "premises/scope.json",
+    "text": "{\"complete\": true}"
+   },
+   {
+    "path": "prepared/candidate-00-baseline.json",
+    "text": "{\"Plugins\": [\"Skyrim.esm\", \"A.esp\", \"B.esp\", \"Target.esp\"]}",
+    "mtime": 1767225600.0
+   },
+   {
+    "path": "prepared/candidate-01-flip.json",
+    "text": "{\"Plugins\": [\"Skyrim.esm\", \"B.esp\", \"A.esp\", \"Target.esp\"]}",
+    "mtime": 1767225600.0
+   },
+   {
+    "path": "prepared/candidates.json",
+    "text": "{\"Candidates\": [{\"File\": \"candidate-01-flip.json\"}]}",
+    "mtime": 1767225600.0
+   },
+   {
+    "path": "receipts/d.fomod__baseline.json",
+    "text": {
+     "z": "eNqtVE1v2zAMvRfofwh8TlpbtmMkGHbZacBO67bDih4YiXbU2LIhyUGLIv991IcdXzoM6AwjsR4p8umR1NvtzSox/Igd/EJtZK+S/YqtHaqRoxzsV0FIklY5bHcszdKs4oUoEu8ytKCC3X2l4cmCjWLyUzCKu7rvehFw0F1AD2CwlQpjKNCWUDW2bXATMFjUBL3RcpWcpAqJdH/AzbMhomtvwBd0uM/gjQnBl5iqOT8cYcBlYD1GyniGlhYbT9RsspkHKvs9Os27jCV+KH5a7raylG03aUbvjzTd+/d32I5K/MWrnLxepP3SC8cr9UA/2mG0htaP7lD+yI6LPbpA0XofdbyflLu7ykAMj8DKra+VwLIuDoWotnVeQyGyssgzVnLOeCoyQIJQZDteZgB5zvOKVXW+YznbVrsdF1PEw6tFRylnEeis7DAe7pNffHZiry708+TP0fbNUjXeKzN2KOYqclBCCrD4MLPlH3xiG1DpGw2dmVKRyJ20iw66+sxttF80zTr6zH0G/ATNFReyQbPsUAf61vHHewwIKQCj4sdpG/Ug5zhYUNz3JT1P/u8SJSWFrO7b9j2eC/s/M6R51jS4Zv9/pP3YOaf+CBNJI+fKH66Z0BJhow9u9YihmhqfkTs3PxJPAZSCJlPa12+SKhsMc2CNZmztHJQuBT7GNKRhN7ToUoQ4gr657bW3gQVq2jHKmNQkrlSNWRaaApxRO6mvXIyla6IJ49khmFHP4clXSD61imN4e3P5A4hwhFE="
+    }
+   },
+   {
+    "path": "receipts/d.fomod__candidate-01.json",
+    "text": {
+     "z": "eNqtVMlu2zAQvQfIPxg624lELV5Q9NJTgZ6atocGPlDkSGYsUQKXIEHgf+9wkaxLigKpINjizHDm8c0bvt3erBLNTtDTX6C0GGRyWJG1sypgIEbzlaMl2Ta0LClvtlVVV1maJz5k7KgMfveVhicLPszJzsHJ75qhH3iwU9UHK6OSC04NbKYtI1UGPdJ2XQjldDSg0PSGy1VyFjIUU0MNmyeNYNfeAS/g7L6KdyZovsRy7fPDiY6wTKxshA3PtMPFxoPVmysOkOZ7DJp3aYP4gP80zG0lKakQOb4/0vTg399hO0j+l6hyinoR5svAHa7UGwZrRms0rh/dofyRHRZzcomi9z5yeb9k7+5KBaI8UVJWvna2L0tS5EVG85yROt/tsmLHWZPWhBRZXtZQlLvtHlu7rzKaFdmWVmVVlATqJiPVlLF+NeBgkTIaeiN6iAf85BefHeGrC/4c/Vm6oV0yxwapbQ987uSM/mFGyz74RClg+1tFez2VQqJ7YRYqusbMUjoshLOOMbPWKDvT9mrnogW9VKkzevn44z0GCzJArWSnaRvqkDEYDZXMaxOfo/+7REqRIaOGrnsP58L/zwhxrhUOsD78H2o/ds5JH2Eqcexc+8N1EyQRNvrkRlkI3VTwBMyF+bE4BqPgOJ3CvH4T2NngmBMr0LYzc1K8GJiNZZDDfuzAlQh5OH4zM6hwGRmKorWRxqRBcoVs9bLRmOAZlKP6ikUbvCraMKI9UG3VnB5juWCTVBzC25vLH4XFhOQ="
+    }
+   },
+   {
+    "path": "receipts/d.gone__baseline.json",
+    "text": {
+     "z": "eNqtVE1v2zAMvQ/Yfwh8TlrHQLI0150G9NRuO6zIQZFYW40sGRIVtCjy30eJ/sphw4BOMBLrkSKfHkm/f/60KIJsoBU/wQftbLFfVMuEepCgO/ymCCnu7mCnoHr+AuVuu9uIIrt0Rli2p7eS15ptFFOe2KhuameBYeFbBo8igNED3AmPhNpoDLsp0SF4gt5puyhO2nIe746wegnEc5kN8AoZd85kW0Hopc9Unx8b0cE8ro89YTgLQ5tVphlW65EGWHzoncZTAYkeqB8o09GqrLarck3P97Lc5+cXHwer/uK1GbxeNX51KvEqM+AidhED7Z/SnfKNExdsUqDeessq3g663UwiEMFGVJvtjDJhxzeEcA21qFtgfglN4IV+DpmFcfX8ztLZEFtQYwmksEorgfA4JCvkB1dfQypc7UUbhlQkUatxVv7JZ+yB/VTxZe8y9oiQJ1FPuNI1BLxSom/PfLsnRkgAEa1shmPUQFJCh8LK3FS0Dvnv0otJAqF3xvyJ5sz+zwxpFD3NXNj/H2U/ds+hPXicaF5S9fkLwR3BB3Nw9BG4mB5eQCa33M8HBrWisdL4dq+psGwYA3sI0eAYlAZaxj4Nadh2BlIKjqPoXaLz2SZQUM/GXsbimcTVtr5qeQpwBp+knrgEpBmvebZaECH6MTz5Ki1xGg+6/uU3P19zUQ=="
+    }
+   },
+   {
+    "path": "receipts/d.none__baseline.json",
+    "text": {
+     "z": "eNqtVE2L2zAQvS/sfwg6b4pj6nTxtadCT/06dNnDRJq11ciSkUZhy5L/3pFkO95CSyEVJrHePL0ZzYdfbm82IsgeB/iGPmhnRbup7xLqUaIe6YNiRBya+m2Du/2hbu7fNfc7kSmjAVvs6a0qa7KxpjwWo3pjncUCgx8mRQho9AyP4IlRG40pNAUjoWfohbcbcdS2+AGS/VPa3GUcn/E1zOh5ctSdPvcw4lrWxylePIHhzTZHGba7JQq09GkiLacCcXSovpJMR+uq3m+rHT9fqqrNz/dyHK36C6uZWc+a3juV4qoy4CKNkQLvHx4zYFy3di+dDXFAtSRDglVaASHfr272yZ28ck3pHL3rPAxhdsXRDppWhbhwctq9O2D7W01eVUseocMFV7rDkOosnpxR6Fu4ci3KuY45RQ8F4SxCtLKfGdwQUuJIYCWKAj3mv3MhpCyTd8b86a4r+79fM0jPIxTa/1Oe6+6Zfs/LeHD/pxYqA1/aqhzM4uQjlo7w+ANlol36cyO04jHR9POj5u4ohkXYY4iGFlEeUBknN5zDYTSYXBQdxe+SnM82IODGj1MaRWoobbuwmoQkcEKfUn2JJRDPbEd90hgQQvSLPHOVlvN3JUV4e3P+BUOya5w="
+    }
+   },
+   {
+    "path": "receipts/d.pool__baseline.json",
+    "text": {
+     "z": "eNqtVdtqGzEQfQ/kH4yf41ja+5pSaPNU6FOTltLgB600Wm+yNyRtSAj5946kvRiKm4IrjHd1ZjRzNDqafb28WK01P0DDfoDSVdeud6vgyqIKOFS9+SIQWQMlJGBJxiVlEcn52rn0NWu93b4RP6i3YUz+6I3iuu+62sNMNR4smIa6amGMxJRBtB3q2rsJ1htQCL3idLV+rFqfR3UFbB408rxyBngGh2MCZ1sj+jZmKp9uD6yH47hqGAnDE6txsnE09YbONKA130aneZU2SA/Ed8Pt0oAEyYZQ/N0RsnO/X345tOIvXvHk9VyZm05YXsQB3WD6wWic39s9uR1bLuZgA43Wra/idqrb9VIEJHhgQZxY75CkWQxUkjwqkjCVeQE0J6kgEBGWQxYEiMcAEqKUBjHNKONxFBdZEEZBIoMpYvFiwDKihEYj1JiqgXF3H9zko6326g3/9m4jdVcel413rR4aEPMpctaKSjADtzNffuYYZYBnXyrW6CkVVrmpzJGCFp9ZRrtFNFejyywzxh9ZueCiKkEfC9SCTjpud/cewQKwoeWHaRlqkHPoDWu50yWOvXu8jRXFAhnV1fUpmkf2f2aIt1nhtdW7/1PZ8/bp5OFPCPciq3JQzPgmM6m8Hsqq1Uvw1ylmyxp3tZtO6O3P7adr0P2ScVF8FKUyCEkORcJknoOQIIqEoqCzTBYB0DSRUgoZxqyAKGNpQhktSJ5zSEkUByPj8Uz+zH+HjQTMqexpmCYhpo4iSqGQCU/TAtMAjVNOAp6LhAZJmkcZkhAI0jykRRxJJCJ5VpD3sn8+lbjtzIqtDkwfToVYfPMzx3sk8Uqz7c0ppvTMMWV3j/3UcXyTxy5uG8qRpEYtOr0aNYBXn4IH4NbNKW3vwUpgs6/My9cKe4U3zIEV6KE2c1D8zPBhTINSbvoabAofR+A7N51yNiwFtsFhvJlrife1akt93DswwBMoe3sXLtrgl6f0Hb8Bpgc1h0dfUfGp+1iGlxdvvwEo2QjE"
+    }
+   },
+   {
+    "path": "receipts/d.pool__candidate-01.json",
+    "text": {
+     "z": "eNqtVD1v2zAQ3QPkPxia7YSSJVs2ii6dCnRq2g4NPNDkWWYsUQJ5DBIE/u89kvpaUhRIBcEW333w8d0d325vFokVZ2j4LzBWtTrZL7KlRw0IUB1+lYQka1luxXq3zrN8w9aiTIJLV3Md7f6LxSeNNsopLtEo77q2rSPMTRNBwbVUkiOshoiOGySLdnUdXSXvEAxBb7RcJBel416mPcLqyRLXZTDACwScNgm2hNBrv1v1/HDmHczzGteThmde02IVqNrVRAM0fu+dxiiLRA/kTxQ+NGPZhojT+4OxfXh/x3DQ8i9exeD1ovBLKz0vFoDWYefQ0vrRnymc2HPBs0/UW++jkvdz7e4mIYjkmWfFJhSMbcsC0hPb5cfNenvaHSHdsa1kkDO+gzLLCC8ATpBv06xIy5SLIi+OZUY13pyyIePxFcGzSlma91CDqoH+hJ/C4rNXfHGln0M4TN1Wc+lEq61rQI6VHPk/jHzFB5++Faj+leGNHbYipRuFsy6afMZW2k+Ns+xdxlbj4sKrCZeqAjtvUg+G9gmne4wICcCdFuchjPpQCOiQaxF6k55D+Lv2ipJAaNq6fo/mzP7PDGmqDY2v3f8fZT92zqE94lTS2Pnqx8smdkQMDMnROIjFNPAEwruFsThEUEmaToWv3xQVNhrGxAasq3FMSveCcP02pGHT1eC3iHkkfQtsTbyLkFPPul7G5ETiKl3ZeaEpwTMYL/XExSJdFVUc0Qa4dWZMT75SiaFVPMPbm+sfBAyD7Q=="
+    }
+   },
+   {
+    "path": "receipts/l.masters__baseline.json",
+    "text": {
+     "z": "eNqtUz1v4zAM3Qv0Pxiak4NjoG4v600FOt3X0KIDK7GOLrJkSFTQQ5H/XurDdqZbroZgW4/kI/30/H591YggDzjCb/RBOyv2TbdJqEeJeqJ7xYi467u+u+2+yraH/g5B5JTJgC3x9NaWa1dizCmPJWi+jBCI6UsE/FjwFwhotMVKBp4YtdGYkqZg4iKG3nnbiKO2uUqh1ydUgsFz5RtOPw4w4WW1j3UyPIHhzTbPE7a7pRla+l6TlqpAPASqXyRTadd2/bbd8frZtvu8Hks5WvWPrJs5603TN6fSXG0GXKQpUuD903MGjBsu20tnQxxRLd8swSqtgJC/r7vpUzv5n1cejQXwbvAwhrlVbk7eGbNKvqblxmt8U6PzkUwgjzDggis9YEiHydby7KGw/5ypm2qrrNBTQVhEiFYe5gz2g5Q4EViJokDP+XFO9/PiGrZFUrY4vqhdCjM5+YhFKI9/UKa09dgaoRW7R9PfBz3qep4LsccQDS2k+IYy1jas4TgZTC0Kj+J3SS4pLqzbvrKe2g41WHfhwiGJ4YQ+ab0OE4i9PNAhkYwIIfqFn3OVlvNvlUa8vjp/AEN6Iso="
+    }
+   },
+   {
+    "path": "receipts/l.masters__candidate-01.json",
+    "text": {
+     "z": "eNqtUz1v4zAM3QvkPxiam4MvRTpkvemATr27Di06qBTj6CJLgkQFLYr891IftjN1aQ3Dth7JR+rp+X111YkIBxzlA4aonRW7bnOd0YCA2tNvxYjYSLVXsN8quOn7l5etKCneSFvj+auv188aY0441qD5McpITF8jMowVB2mVVpJwPRV5GYgjNhlTU5X0XMjQOy87cdS2VCoM+oRKMHhunMPpz0F6vKwOqU2HJ2l4sS4zxfXSDC3dt6S5KhIPgeofQdl4v7nl8fj+2/e7cj/WcrTqk6ztlPWq6ZdTea6+AC6RTxR5/fRcAOOGy/bgbEwjqnnPs0q8v832tgj3xauMxgIENwQ5xqlVaU7BGbNIvqSVxkv8ukWnI/ESjnLAGVd6wJgPk+0V2Edx9z1Td81aRaGnirCIMlk4TBnsBwD0JC2gqNBzeZ3z8zy7hm2Rla2ur2rXwkJOIWEVKuB/hJy2HFsntGL3aHq706Nu5zkTB4zJ0EyKrwiptWENR28wt6g8ir+BXFZcWLfes57aDi3YVvHCIZnhhCFrvQwTib080CGTjChjCjM/5yoN02+VR1xdnT8A59kkvA=="
+    }
+   }
+  ],
+  "relevance": {
+   "d.fomod": {
+    "baseline": {
+     "computed": true,
+     "relevant": [],
+     "notRelevant": {
+      "count": 0,
+      "why": "its masters, FOMOD conditions and pair name no plan target and no plugin of a plan pair (its own masters only: a hit that masters just a dependent of a target is counted here)"
+     }
+    },
+    "candidate-01": {
+     "computed": false,
+     "why": "receipt 7fa55adf766b6103's hit list cannot be read as it recorded it"
+    }
+   },
+   "d.pool": {
+    "candidate-01": {
+     "computed": true,
+     "relevant": [
+      "Patch-A.esp",
+      "Patch-A.esp",
+      "A.esp",
+      "Lead.esp",
+      "Unhashed.esp",
+      "NoReason.esp"
+     ],
+     "notRelevant": {
+      "count": 1,
+      "why": "its masters, FOMOD conditions and pair name no plan target and no plugin of a plan pair (its own masters only: a hit that masters just a dependent of a target is counted here)"
+     }
+    },
+    "baseline": {
+     "computed": true,
+     "relevant": [
+      "Patch-A.esp",
+      "Patch-A.esp",
+      "A.esp",
+      "Lead.esp",
+      "Unhashed.esp",
+      "NoReason.esp"
+     ],
+     "notRelevant": {
+      "count": 1,
+      "why": "its masters, FOMOD conditions and pair name no plan target and no plugin of a plan pair (its own masters only: a hit that masters just a dependent of a target is counted here)"
+     }
+    }
+   },
+   "d.gone": {
+    "baseline": {
+     "computed": false,
+     "why": "receipt 99e8de2f7e08685a's hit list cannot be read as it recorded it"
+    }
+   },
+   "d.none": {
+    "baseline": {
+     "computed": false,
+     "why": "receipt b5245e16b2587581's hit list cannot be read as it recorded it"
+    }
+   }
+  },
+  "relevanceNoTargets": {
+   "d.fomod": {
+    "baseline": {
+     "computed": false,
+     "why": "the plan names no target and no pair, so no hit can be judged relevant to it (the rule reads the plan's targets and pairs)"
+    },
+    "candidate-01": {
+     "computed": false,
+     "why": "the plan names no target and no pair, so no hit can be judged relevant to it (the rule reads the plan's targets and pairs)"
+    }
+   },
+   "d.pool": {
+    "candidate-01": {
+     "computed": false,
+     "why": "the plan names no target and no pair, so no hit can be judged relevant to it (the rule reads the plan's targets and pairs)"
+    },
+    "baseline": {
+     "computed": false,
+     "why": "the plan names no target and no pair, so no hit can be judged relevant to it (the rule reads the plan's targets and pairs)"
+    }
+   },
+   "d.gone": {
+    "baseline": {
+     "computed": false,
+     "why": "the plan names no target and no pair, so no hit can be judged relevant to it (the rule reads the plan's targets and pairs)"
+    }
+   },
+   "d.none": {
+    "baseline": {
+     "computed": false,
+     "why": "the plan names no target and no pair, so no hit can be judged relevant to it (the rule reads the plan's targets and pairs)"
+    }
+   }
+  },
+  "arms": {
+   "baseline": {
+    "app": [
+     {
+      "file": "A.esp",
+      "armId": "candidate-01",
+      "sha256": "447f2309eb6af99edfedb6182388fb2e176fffdf35abe48a761a1b099ce70452",
+      "qualification": "qualified",
+      "why": "its sha256 447f2309eb6a\u2026 (from this arm's request) equals a plugin an accepted receipt consumed on baseline"
+     },
+     {
+      "file": "Target.esp",
+      "armId": "candidate-01",
+      "sha256": "73763eb64411ebf6c77bbe4e157c02c9d612679486ffd1571931b54f48afc8b0",
+      "qualification": "qualified",
+      "why": "its sha256 73763eb64411\u2026 (from this arm's request) equals a plugin an accepted receipt consumed on baseline"
+     },
+     {
+      "file": "Other.esp",
+      "armId": "candidate-01",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "qualification": "unqualified",
+      "why": "its sha256 000000000000\u2026 (from this arm's request) matches no plugin any accepted receipt consumed: a downloadable hit stays a lead until its payload is measured"
+     },
+     {
+      "file": "Named.esp",
+      "armId": "candidate-01",
+      "sha256": null,
+      "qualification": "unqualified",
+      "why": "this arm's request records no content hash (sha256) for Named.esp (the payload was not unpacked), so its bytes cannot be compared with any evaluated arm's: a downloadable hit stays a lead until its payload is measured"
+     },
+     {
+      "file": "C.esp",
+      "armId": "candidate-01",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "qualification": "unqualified",
+      "why": "its sha256 222222222222\u2026 (from this arm's request) matches no plugin any accepted receipt consumed; an accepted receipt consumed a different C.esp (sha256 111111111111\u2026): a downloadable hit stays a lead until its payload is measured"
+     },
+     {
+      "file": "candidate-01-flip.json",
+      "armId": null,
+      "qualification": "catalogued",
+      "why": "a candidate-order file, not a supplied patch payload"
+     }
+    ],
+    "recorded": {
+     "candidates": [
+      {
+       "file": "A.esp",
+       "armId": "candidate-01",
+       "sha256": "447f2309eb6af99edfedb6182388fb2e176fffdf35abe48a761a1b099ce70452",
+       "qualification": "qualified",
+       "why": "its sha256 447f2309eb6a\u2026 (from this arm's request) equals a plugin an accepted receipt consumed on baseline"
+      },
+      {
+       "file": "Target.esp",
+       "armId": "candidate-01",
+       "sha256": "73763eb64411ebf6c77bbe4e157c02c9d612679486ffd1571931b54f48afc8b0",
+       "qualification": "qualified",
+       "why": "its sha256 73763eb64411\u2026 (from this arm's request) equals a plugin an accepted receipt consumed on baseline"
+      },
+      {
+       "file": "Other.esp",
+       "armId": "candidate-01",
+       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+       "qualification": "unqualified",
+       "why": "its sha256 000000000000\u2026 (from this arm's request) matches no plugin any accepted receipt consumed: a downloadable hit stays a lead until its payload is measured"
+      },
+      {
+       "file": "Named.esp",
+       "armId": "candidate-01",
+       "sha256": null,
+       "qualification": "unqualified",
+       "why": "this arm's request records no content hash (sha256) for Named.esp (the payload was not unpacked), so its bytes cannot be compared with any evaluated arm's: a downloadable hit stays a lead until its payload is measured"
+      },
+      {
+       "file": "C.esp",
+       "armId": "candidate-01",
+       "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+       "qualification": "unqualified",
+       "why": "its sha256 222222222222\u2026 (from this arm's request) matches no plugin any accepted receipt consumed; an accepted receipt consumed a different C.esp (sha256 111111111111\u2026): a downloadable hit stays a lead until its payload is measured"
+      },
+      {
+       "file": "candidate-01-flip.json",
+       "armId": null,
+       "qualification": "catalogued",
+       "why": "a candidate-order file, not a supplied patch payload"
+      },
+      {
+       "file": "Patch-A.esp",
+       "armId": null,
+       "source": "poolprobe:pool",
+       "foundOn": [
+        "baseline",
+        "candidate-01"
+       ],
+       "sha256": "447f2309eb6af99edfedb6182388fb2e176fffdf35abe48a761a1b099ce70452",
+       "qualification": "qualified",
+       "why": "its sha256 447f2309eb6a\u2026 (from poolprobe's hit list) equals a plugin an accepted receipt consumed on baseline"
+      },
+      {
+       "file": "A.esp",
+       "armId": null,
+       "source": "poolprobe:pool",
+       "foundOn": [
+        "baseline",
+        "candidate-01"
+       ],
+       "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+       "qualification": "unqualified",
+       "why": "its sha256 eeeeeeeeeeee\u2026 (from poolprobe's hit list) matches no plugin any accepted receipt consumed; an accepted receipt consumed a different A.esp (sha256 447f2309eb6a\u2026): a downloadable hit stays a lead until its payload is measured"
+      },
+      {
+       "file": "Lead.esp",
+       "armId": null,
+       "source": "poolprobe:fomod",
+       "foundOn": [
+        "baseline",
+        "candidate-01"
+       ],
+       "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+       "qualification": "unqualified",
+       "why": "its sha256 ffffffffffff\u2026 (from poolprobe's hit list) matches no plugin any accepted receipt consumed: a downloadable hit stays a lead until its payload is measured"
+      },
+      {
+       "file": "Unhashed.esp",
+       "armId": null,
+       "source": "poolprobe:pool",
+       "foundOn": [
+        "baseline",
+        "candidate-01"
+       ],
+       "sha256": null,
+       "qualification": "unqualified",
+       "why": "the poolprobe hit records no content hash (inside a nested archive), so its bytes cannot be compared with any evaluated arm's: a downloadable hit stays a lead until its payload is measured"
+      },
+      {
+       "file": "NoReason.esp",
+       "armId": null,
+       "source": "poolprobe:None",
+       "foundOn": [
+        "baseline",
+        "candidate-01"
+       ],
+       "sha256": null,
+       "qualification": "unqualified",
+       "why": "the poolprobe hit records no content hash (no reason given), so its bytes cannot be compared with any evaluated arm's: a downloadable hit stays a lead until its payload is measured"
+      }
+     ],
+     "notRelevant": {
+      "poolprobe": {
+       "count": 2,
+       "why": "its masters, FOMOD conditions and pair name no plan target and no plugin of a plan pair (its own masters only: a hit that masters just a dependent of a target is counted here)"
+      }
+     },
+     "notSearched": [
+      "d.patch (patchfind): no accepted receipt (plan status unsupported), so the patches it would find are not stated",
+      "d.unstated (patchfind): no accepted receipt (plan status unknown), so the patches it would find are not stated"
+     ],
+     "inconclusive": [
+      "receipt 073a69201017c4d4 (fomodprobe): outputs/d.fomod/baseline.json is not a schema-1 hit list",
+      "receipt 7fa55adf766b6103 (fomodprobe): outputs/d.fomod/candidate-01.json has changed since the receipt recorded its sha256",
+      "receipt 99e8de2f7e08685a (poolprobe) names outputs/d.gone/baseline.json, which is missing",
+      "receipt b5245e16b2587581 (patchfind) records no output file, so its hits cannot be read (a text-only receipt from before the --json hit list)"
+     ]
+    }
+   },
+   "candidate-01": {
+    "app": [
+     {
+      "file": "A.esp",
+      "armId": "candidate-01",
+      "sha256": "447f2309eb6af99edfedb6182388fb2e176fffdf35abe48a761a1b099ce70452",
+      "qualification": "qualified",
+      "why": "its sha256 447f2309eb6a\u2026 (from this arm's request) equals a plugin an accepted receipt consumed on baseline"
+     },
+     {
+      "file": "Target.esp",
+      "armId": "candidate-01",
+      "sha256": "73763eb64411ebf6c77bbe4e157c02c9d612679486ffd1571931b54f48afc8b0",
+      "qualification": "qualified",
+      "why": "its sha256 73763eb64411\u2026 (from this arm's request) equals a plugin an accepted receipt consumed on baseline"
+     },
+     {
+      "file": "Other.esp",
+      "armId": "candidate-01",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "qualification": "unqualified",
+      "why": "its sha256 000000000000\u2026 (from this arm's request) matches no plugin any accepted receipt consumed: a downloadable hit stays a lead until its payload is measured"
+     },
+     {
+      "file": "Named.esp",
+      "armId": "candidate-01",
+      "sha256": null,
+      "qualification": "unqualified",
+      "why": "this arm's request records no content hash (sha256) for Named.esp (the payload was not unpacked), so its bytes cannot be compared with any evaluated arm's: a downloadable hit stays a lead until its payload is measured"
+     },
+     {
+      "file": "C.esp",
+      "armId": "candidate-01",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "qualification": "unqualified",
+      "why": "its sha256 222222222222\u2026 (from this arm's request) matches no plugin any accepted receipt consumed; an accepted receipt consumed a different C.esp (sha256 111111111111\u2026): a downloadable hit stays a lead until its payload is measured"
+     },
+     {
+      "file": "candidate-01-flip.json",
+      "armId": null,
+      "qualification": "catalogued",
+      "why": "a candidate-order file, not a supplied patch payload"
+     }
+    ],
+    "recorded": {
+     "candidates": [
+      {
+       "file": "A.esp",
+       "armId": "candidate-01",
+       "sha256": "447f2309eb6af99edfedb6182388fb2e176fffdf35abe48a761a1b099ce70452",
+       "qualification": "qualified",
+       "why": "its sha256 447f2309eb6a\u2026 (from this arm's request) equals a plugin an accepted receipt consumed on baseline"
+      },
+      {
+       "file": "Target.esp",
+       "armId": "candidate-01",
+       "sha256": "73763eb64411ebf6c77bbe4e157c02c9d612679486ffd1571931b54f48afc8b0",
+       "qualification": "qualified",
+       "why": "its sha256 73763eb64411\u2026 (from this arm's request) equals a plugin an accepted receipt consumed on baseline"
+      },
+      {
+       "file": "Other.esp",
+       "armId": "candidate-01",
+       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+       "qualification": "unqualified",
+       "why": "its sha256 000000000000\u2026 (from this arm's request) matches no plugin any accepted receipt consumed: a downloadable hit stays a lead until its payload is measured"
+      },
+      {
+       "file": "Named.esp",
+       "armId": "candidate-01",
+       "sha256": null,
+       "qualification": "unqualified",
+       "why": "this arm's request records no content hash (sha256) for Named.esp (the payload was not unpacked), so its bytes cannot be compared with any evaluated arm's: a downloadable hit stays a lead until its payload is measured"
+      },
+      {
+       "file": "C.esp",
+       "armId": "candidate-01",
+       "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+       "qualification": "unqualified",
+       "why": "its sha256 222222222222\u2026 (from this arm's request) matches no plugin any accepted receipt consumed; an accepted receipt consumed a different C.esp (sha256 111111111111\u2026): a downloadable hit stays a lead until its payload is measured"
+      },
+      {
+       "file": "candidate-01-flip.json",
+       "armId": null,
+       "qualification": "catalogued",
+       "why": "a candidate-order file, not a supplied patch payload"
+      },
+      {
+       "file": "Patch-A.esp",
+       "armId": null,
+       "source": "poolprobe:pool",
+       "foundOn": [
+        "baseline",
+        "candidate-01"
+       ],
+       "sha256": "447f2309eb6af99edfedb6182388fb2e176fffdf35abe48a761a1b099ce70452",
+       "qualification": "qualified",
+       "why": "its sha256 447f2309eb6a\u2026 (from poolprobe's hit list) equals a plugin an accepted receipt consumed on baseline"
+      },
+      {
+       "file": "A.esp",
+       "armId": null,
+       "source": "poolprobe:pool",
+       "foundOn": [
+        "baseline",
+        "candidate-01"
+       ],
+       "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+       "qualification": "unqualified",
+       "why": "its sha256 eeeeeeeeeeee\u2026 (from poolprobe's hit list) matches no plugin any accepted receipt consumed; an accepted receipt consumed a different A.esp (sha256 447f2309eb6a\u2026): a downloadable hit stays a lead until its payload is measured"
+      },
+      {
+       "file": "Lead.esp",
+       "armId": null,
+       "source": "poolprobe:fomod",
+       "foundOn": [
+        "baseline",
+        "candidate-01"
+       ],
+       "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+       "qualification": "unqualified",
+       "why": "its sha256 ffffffffffff\u2026 (from poolprobe's hit list) matches no plugin any accepted receipt consumed: a downloadable hit stays a lead until its payload is measured"
+      },
+      {
+       "file": "Unhashed.esp",
+       "armId": null,
+       "source": "poolprobe:pool",
+       "foundOn": [
+        "baseline",
+        "candidate-01"
+       ],
+       "sha256": null,
+       "qualification": "unqualified",
+       "why": "the poolprobe hit records no content hash (inside a nested archive), so its bytes cannot be compared with any evaluated arm's: a downloadable hit stays a lead until its payload is measured"
+      },
+      {
+       "file": "NoReason.esp",
+       "armId": null,
+       "source": "poolprobe:None",
+       "foundOn": [
+        "baseline",
+        "candidate-01"
+       ],
+       "sha256": null,
+       "qualification": "unqualified",
+       "why": "the poolprobe hit records no content hash (no reason given), so its bytes cannot be compared with any evaluated arm's: a downloadable hit stays a lead until its payload is measured"
+      }
+     ],
+     "notRelevant": {
+      "poolprobe": {
+       "count": 2,
+       "why": "its masters, FOMOD conditions and pair name no plan target and no plugin of a plan pair (its own masters only: a hit that masters just a dependent of a target is counted here)"
+      }
+     },
+     "notSearched": [
+      "d.patch (patchfind): no accepted receipt (plan status unsupported), so the patches it would find are not stated",
+      "d.unstated (patchfind): no accepted receipt (plan status unknown), so the patches it would find are not stated"
+     ],
+     "inconclusive": [
+      "receipt 073a69201017c4d4 (fomodprobe): outputs/d.fomod/baseline.json is not a schema-1 hit list",
+      "receipt 7fa55adf766b6103 (fomodprobe): outputs/d.fomod/candidate-01.json has changed since the receipt recorded its sha256",
+      "receipt 99e8de2f7e08685a (poolprobe) names outputs/d.gone/baseline.json, which is missing",
+      "receipt b5245e16b2587581 (patchfind) records no output file, so its hits cannot be read (a text-only receipt from before the --json hit list)"
+     ]
+    }
+   }
+  }
+ },
+ "roles": [
+  {
+   "receipt": {
+    "adapter": {
+     "kind": "patchfind",
+     "exe": "conflictdiff"
+    }
+   },
+   "want": [
+    [
+     "emitter",
+     "helper:conflictdiff"
+    ],
+    [
+     "controller",
+     "controller"
+    ]
+   ]
+  }
+ ]
+}

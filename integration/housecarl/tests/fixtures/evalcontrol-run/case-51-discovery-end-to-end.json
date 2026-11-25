@@ -1,0 +1,53 @@
+{
+ "about": "Case 51 (moved from SkyWright's test_evalrun.py with its subject, 9D-2): the discovery probe's --json hit list the scenario's arms.patchfind entry gives the module's fake (fixtures/fakeprobes/discovery_fake.py), moved from SkyWright's make_fixtures.py arms['patchprobe'] with the probe word renamed patchfind.",
+ "patchfindArm": {
+  "*": {
+   "behaviour": "ok",
+   "json": {
+    "schemaVersion": 1,
+    "probe": "patchfind",
+    "mode": "pair",
+    "complete": true,
+    "sourcesSearched": [
+     {
+      "kind": "instance",
+      "path": "fixture://other-list",
+      "name": "OtherList"
+     }
+    ],
+    "sourcesNotSearched": [],
+    "counts": {
+     "judged": 4,
+     "unjudgeable": 0,
+     "hits": 1,
+     "masterPairs": 1
+    },
+    "hits": [
+     {
+      "file": "CommunityPatch.esp",
+      "kind": "other-list",
+      "where": {
+       "instance": "OtherList",
+       "mod": "Community Patch"
+      },
+      "sha256": "f00d000000000000000000000000000000000000000000000000000000000000",
+      "bytes": 1024,
+      "hashSource": "file",
+      "masters": [
+       "FixtureBase.esp",
+       "FixtureTarget.esp"
+      ],
+      "detail": {
+       "pair": [
+        "FixtureBase.esp",
+        "FixtureTarget.esp"
+       ],
+       "state": "OtherListPresent"
+      }
+     }
+    ],
+    "unjudgeableItems": []
+   }
+  }
+ }
+}

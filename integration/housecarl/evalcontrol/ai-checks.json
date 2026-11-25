@@ -320,6 +320,123 @@
         "limits": "Run OFFLINE by default here: the stored catalogue copy is read and no network request is made, so the advice is as fresh as its recorded read date and the receipt carries that date. Cached source age is not the date the report was assembled. Per-file requirements are not exposed by the source; the stated order is advice, not a measurement."
       },
       "manualDecisionAllowed": false
+    },
+    {
+      "id": "patch.discovery-installed",
+      "family": "patch",
+      "title": "Patches already installed in this instance that cover the target's contested pairs",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "masters": true
+        },
+        "note": "A patch is a plugin mastering both sides of a pair; with no masters there is no pair to patch."
+      },
+      "prerequisites": [],
+      "appPrerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "patchfind",
+        "exe": "patchfind",
+        "args": [
+          "--pair",
+          "{pair}"
+        ],
+        "reverse": false,
+        "output": "json",
+        "result": {
+          "kind": "discovery",
+          "findings": "counts.hits",
+          "judged": "counts.judged",
+          "unjudgeable": "counts.unjudgeable"
+        },
+        "commonFlags": false
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": "FOMOD / POOL / PATCH COVERAGE",
+        "limits": "patchfind writes its hit list with --json (schema 1, patchfind/DiscoveryHits.cs): every plugin that masters an asked pair, with the sha256 of its file, and each download matched only by name with no hash and the reason. patch.candidate-qualification reads it. It runs per ARM because A-10(g) derives its --pair arguments from the arm itself -- the plugin pairs whose relative order flips between the baseline and that candidate -- so a baseline-only run would leave patch.candidate-qualification, which runs on every arm, blocked for want of an input on every candidate. patchfind itself reads the machine's installed plugins and takes no --order; only the pairs it is asked about change per arm. It searches the configured roots only; roots not configured are sources not searched and are listed as such. A hit is a candidate, never a verified repair."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "patch.discovery-fomod",
+      "family": "patch",
+      "title": "Installer options that fit this order and were not taken",
+      "required": false,
+      "applicability": {
+        "trigger": {
+          "always": true
+        },
+        "note": "Any installed mod may have a FOMOD with an unchosen compatibility option; nothing in the target's footprint predicts it."
+      },
+      "prerequisites": [],
+      "inputs": {
+        "arms": "baseline",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "patchfind",
+        "exe": "fomodprobe",
+        "args": [],
+        "reverse": false,
+        "output": "json",
+        "result": {
+          "kind": "discovery",
+          "findings": "counts.hits",
+          "judged": "counts.judged",
+          "unjudgeable": "counts.unjudgeable"
+        },
+        "commonFlags": false
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": "FOMOD / POOL / PATCH COVERAGE",
+        "limits": "fomodprobe has no --order: it reads the instance's own installers, so it runs on the baseline profile only. With --json it writes its hit list (schema 1): one hit per plugin an unselected option delivers, with the sha256 of that archive entry, its condition plugins and its tier. Optional, because an unchosen installer option is a lead, not a defect in the evaluated order. Requires the download pool and 7z paths from the harness config; absent, it refuses."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "patch.discovery-pool",
+      "family": "patch",
+      "title": "Downloads in the local pool that were never installed anywhere and whose masters are present",
+      "required": false,
+      "applicability": {
+        "trigger": {
+          "always": true
+        },
+        "note": "The pool is a property of the machine, not of the target; it is searched or it is not."
+      },
+      "prerequisites": [],
+      "inputs": {
+        "arms": "baseline",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "patchfind",
+        "exe": "poolprobe",
+        "args": [],
+        "reverse": false,
+        "output": "json",
+        "result": {
+          "kind": "discovery",
+          "findings": "counts.hits",
+          "judged": "counts.judged",
+          "unjudgeable": "counts.unjudgeable"
+        },
+        "commonFlags": false
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": "FOMOD / POOL / PATCH COVERAGE",
+        "limits": "poolprobe has no --order: baseline profile only. With --json it writes its hit list (schema 1): each patch-shaped plugin in a never-installed archive, one hit per archive version, with the sha256 of the extracted bytes. A downloadable hit remains UNQUALIFIED until its actual payload has been evaluated in an arm (patch.candidate-qualification)."
+      },
+      "manualDecisionAllowed": false
     }
   ]
 }

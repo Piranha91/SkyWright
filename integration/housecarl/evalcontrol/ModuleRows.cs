@@ -11,7 +11,7 @@ public static class ModuleRows
 {
     /// <summary>The adapter kinds of the list whose check launches its probe as a child, added to runcontrol's own
     /// wherever runcontrol binds and checks a program's identity.</summary>
-    public static readonly IReadOnlySet<string> LaunchKinds = new HashSet<string>(StringComparer.Ordinal) { "adviceprobe" };
+    public static readonly IReadOnlySet<string> LaunchKinds = new HashSet<string>(StringComparer.Ordinal) { "adviceprobe", "patchfind" };
 
     /// <summary>The module's build folder (integration\housecarl\bin\&lt;Configuration&gt;\), where its probes are, from the
     /// metadata its build wrote (Directory.Build.props owns the layout).</summary>
@@ -22,7 +22,35 @@ public static class ModuleRows
     }
 
     public static readonly IReadOnlyDictionary<string, GenericRows.Placeholder> Placeholders =
-        new Dictionary<string, GenericRows.Placeholder>(StringComparer.Ordinal) { ["{nexusId}"] = NexusIdPlaceholder };
+        new Dictionary<string, GenericRows.Placeholder>(StringComparer.Ordinal) { ["{nexusId}"] = NexusIdPlaceholder, ["{pair}"] = PairPlaceholder };
+
+    public const string PairSourceNone = "no geometry check ran on the review arm, so there is no clash to take a plugin pair from; select "
+                                         + "overlap, contact or navmesh ownership with patch discovery.";
+
+    /// <summary>patch.discovery-installed's --pair list (moved from runcontrol's GenericRows with the row): the reference
+    /// arm runs once with the plan-wide set, another arm with the moves it makes; the pairs the review arm's clashes
+    /// name are read where the app scan measured them (ModuleDiscovery.AppSource).</summary>
+    static (string status, string why)? PairPlaceholder(Executor ex, PyDict plan, PyDict check, PyDict arm, List<string> args)
+    {
+        var (folder, output) = ModuleDiscovery.AppSource(ex.Run, plan);
+        // the reference arm runs once with the plan-wide set; another arm runs with the moves that arm makes
+        object? review = plan.Get("reviewArm");
+        bool reference = Ev.Eq(arm["armId"], review) || (!PyValue.Truthy(review) && Ev.Eq(arm["kind"], "baseline"));
+        var pairs = reference ? ModuleDiscovery.AllPlanPairs(folder, plan, output) : ModuleDiscovery.TargetPairs(plan, arm);
+        if (pairs.Count == 0 && !reference) pairs = ModuleDiscovery.AllPlanPairs(folder, plan, output);
+        if (pairs.Count == 0)
+            return ("blocked(no-pair-source)",
+                PyValue.Truthy(review) ? PairSourceNone
+                    : "the candidate manifest records no move involving a target plugin, so there is no plugin pair for this check to verify");
+        string flag = "--pair";
+        if (args.Count > 0 && args[^1].StartsWith("--", StringComparison.Ordinal))
+        {
+            flag = args[^1];
+            args.RemoveAt(args.Count - 1);
+        }
+        foreach (var (a, b) in pairs) args.AddRange([flag, a, b]);
+        return null;
+    }
 
     public static readonly IReadOnlyList<GenericRows.Placeholder> ArgvRules = [AdviceArgv];
 

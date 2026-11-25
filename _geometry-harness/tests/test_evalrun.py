@@ -51,8 +51,8 @@ DIFF_EXE = buildlayout.program_under(REAL_HARNESS, "conflictdiff")
 DIFF_SOURCE: str | None = None                # set by use_conflictdiff(): where this run's conflictdiff came from
 
 PROBES = ["navownprobe", "overlapprobe", "contactprobe", "bosprobe", "switchprobe", "stateprobe",
-          "scopeprobe", "patchprobe", "driftprobe", "seamprobe", "waterprobe",
-          "blockprobe", "depprobe", "fomodprobe", "poolprobe"]
+          "scopeprobe", "driftprobe", "seamprobe", "waterprobe",
+          "blockprobe", "depprobe"]
 
 FAILURES: list[str] = []
 DISAGREEMENTS: list[str] = []
@@ -612,14 +612,12 @@ def case_10(tmp):
     # Its media half (D8: supplied pictures checked against the accepted receipts' configurations) is the houseCARL
     # integration module's own suite, over its evalcontrol (the app's runcontrol has no media rule).
     # This case's registry trim omits patch.candidate-qualification, so it qualifies nothing: case 47 covers
-    # qualification. What the case does show, exactly: no qualification check planned and no candidate rows.
-    disp = load(run / "disposition.json") or {}
+    # qualification. What the case does show, exactly: no qualification check planned. (Its "discovery.candidates is
+    # empty" half reads the discovery block, which the module's overlay writes since the discovery rows left: 9D-2.)
     plan = load(run / "plan.json") or {}
     check(len(plan.get("checks") or []) > 0, f"{case}: plan.json was read and lists its checks")
     expect([c["checkId"] for c in plan.get("checks") or [] if c["checkId"] == "patch.candidate-qualification"], [],
            f"{case}: the trim plans no candidate-qualification derivation")
-    expect(field(disp, "discovery", default={}).get("candidates"), [],
-           f"{case}: discovery.candidates is empty (no qualification ran)")
 
 
 def case_11(tmp):
@@ -1687,8 +1685,10 @@ def case_19(tmp):
     it by name, keeps it out of completedNullChecks and keeps the evaluation incomplete on it."""
     case = "case-19-derived-prerequisites"
     reg = "fixture-check-registry-derived.json"
+    # candidate-qualification's prerequisite is patch.order-evaluation (its discovery prerequisite,
+    # patch.discovery-installed, left with the discovery rows for the houseCARL integration module: 9D-2)
     qual, order = "patch.candidate-qualification", "patch.order-evaluation"
-    disc, mao = "patch.discovery-installed", "loadability.masters-and-order"
+    mao = "loadability.masters-and-order"
     _, _, _, scen = case_paths(case)
 
     def run_case(tag, extra):
@@ -1720,34 +1720,36 @@ def case_19(tmp):
                f"{case}/{tag}: {cid} [{aid}] is listed missing", "D7")
         expect(field(disp, "complete"), False, f"{case}/{tag}: evaluation.complete", "D7")
 
-    # the discovery prerequisite unsettled: candidate-qualification blocks on every arm
-    led, disp, base, cand = run_case("discovery-excluded",
-                                     ["--exclude", f"{disc}=fixture: the prerequisite is deliberately unsettled"])
+    # the qualification's prerequisite unsettled (excluded): candidate-qualification blocks on every arm
+    led, disp, base, cand = run_case("order-excluded",
+                                     ["--exclude", f"{order}=fixture: the prerequisite is deliberately unsettled"])
     for aid in (base, cand):
-        blocked_on(led, disp, qual, aid, disc, "discovery-excluded")
-    # ... while order-evaluation, whose own prerequisite IS settled there, still derives as before
-    expect(execution_of(led.get(f"{order}__{cand}")), "completed",
-           f"{case}/discovery-excluded: {order} [{cand}] still derives", "§4.6")
-    expect(execution_of(led.get(f"{order}__{base}")), "not-applicable",
-           f"{case}/discovery-excluded: {order} [{base}] stays not-applicable", "§4.6")
+        blocked_on(led, disp, qual, aid, order, "order-excluded")
 
-    # every prerequisite settled: candidate-qualification derives and is a completed null, as before
+    # every prerequisite settled: order-evaluation derives on the candidate and is not-applicable on the baseline
+    # (an answer, not an absence: Prerequisites.Satisfied), and candidate-qualification derives and is a completed
+    # null, as before
     led, disp, base, cand = run_case("settled", [])
+    expect(execution_of(led.get(f"{order}__{cand}")), "completed",
+           f"{case}/settled: {order} [{cand}] completed (the prerequisite really is settled)", "§4.6")
+    expect(execution_of(led.get(f"{order}__{base}")), "not-applicable",
+           f"{case}/settled: {order} [{base}] not-applicable (the prerequisite is settled by its answer)", "§4.6")
     for aid in (base, cand):
-        expect(execution_of(led.get(f"{disc}__{aid}")), "completed",
-               f"{case}/settled: {disc} [{aid}] completed (the prerequisite really is settled)", "§4.5")
         expect(execution_of(led.get(f"{qual}__{aid}")), "completed", f"{case}/settled: {qual} [{aid}] status",
                "§4.6")
         check((qual, aid) in nulls(disp), f"{case}/settled: {qual} [{aid}] is a completed null check (D7)")
 
     # the order check's own prerequisite unsettled: order-evaluation blocks on the candidate arm; the baseline
-    # keeps its answer (the reference is not measured against itself), and qualification blocks on discovery
+    # keeps its answer (the reference is not measured against itself), and qualification blocks on order-evaluation
+    # on the candidate arm (the chain), while the baseline's qualification, over a settled answer, derives
     led, disp, base, cand = run_case("masters-excluded",
                                      ["--exclude", f"{mao}=fixture: the prerequisite is deliberately unsettled"])
     blocked_on(led, disp, order, cand, mao, "masters-excluded")
     expect(execution_of(led.get(f"{order}__{base}")), "not-applicable",
            f"{case}/masters-excluded: {order} [{base}] stays not-applicable", "§4.6")
-    blocked_on(led, disp, qual, cand, disc, "masters-excluded")
+    blocked_on(led, disp, qual, cand, order, "masters-excluded")
+    expect(execution_of(led.get(f"{qual}__{base}")), "completed",
+           f"{case}/masters-excluded: {qual} [{base}] derives over the baseline's settled answer", "§4.6")
 
 
 # ------------------------------------------- defect iv: the budget is a deadline on the running tree (20)
@@ -3068,28 +3070,8 @@ CASES["case-81"] = case_81
 CASES["case-82"] = case_82
 
 
-def case_51(tmp):
-    """The held red arm of task 2026-10-14-discovery-hits-get-no-qualification-row, end to end: case 10's fixture
-    on the trim that includes patch.discovery-installed and the derivation. The fake patchprobe writes the --json hit
-    list; the catalogue hit CommunityPatch.esp (masters the fixture target, bytes f00d..., in no arm) is exactly one
-    row, unqualified, its why naming its hash."""
-    case = "case-51-discovery-end-to-end"
-    run = tmp / case
-    expect(do_plan(run, "case-10-discovery-media", registry="fixture-check-registry-derived.json").returncode, 0,
-           f"{case}: plan exit")
-    _, _, _, scen = case_paths("case-10-discovery-media")
-    expect(evalrun(["run", "--run", run], scen).returncode, 0, f"{case}: run exit")
-    expect(evalrun(["finalize", "--run", run], scen).returncode, 0, f"{case}: finalize exit")
-    disp = load(run / "disposition.json") or {}
-    rows = [r for r in (field(disp, "discovery", default={}).get("candidates") or [])
-            if r.get("file") == "CommunityPatch.esp"]
-    expect([r.get("qualification") for r in rows], ["unqualified"],
-           f"{case}: CommunityPatch.esp is one row, unqualified", "D7")
-    check(bool(rows) and ("f00d" + "0" * 8) in (rows[0].get("why") or ""),
-          f"{case}: its why names the hash compared ({(rows[0].get('why') if rows else None)!r})")
-
-
-CASES["case-51"] = case_51
+# case 51 (discovery end to end) left with the discovery probes for the houseCARL integration module (9D-2): its
+# test_evalcontrol_run.py runs it by the same name.
 
 
 def _build_probe(tmp: Path, probe: str):
