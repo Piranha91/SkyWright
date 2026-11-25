@@ -1,4 +1,6 @@
-namespace RunControl;
+using RunControl;
+
+namespace EvalControl;
 
 /// <summary>Which switches the runtime state-switch check is about, on one arm (switchflip_scope.py). A switch is in
 /// the population when a script drives it and it touches a target, by plugin or by cell. The answer is

@@ -35,51 +35,10 @@ public static class ScenePreflight
     static string? Instance(PyDict opts) =>
         Py.Truthy(opts.Get("instance")) ? PyText.Str(opts["instance"]) : Environment.GetEnvironmentVariable("HOUSECARL_MO2_INSTANCE") is { Length: > 0 } e ? e : null;
 
-    /// <summary>The live driver's profile rule for an arm: the profile must enable every mod folder the arm's view
-    /// needs, in the arm's order, strongest first. One sentence, or null when the profile holds it.</summary>
-    public static string? ProfilePriorityRefusal(string instance, string profile, string armId, List<string> mods)
-    {
-        if (mods.Count == 0) return null;
-        string pdir = PyPath.Join(instance, "profiles", profile);
-        string path = PyPath.Join(pdir, "modlist.txt");
-        if (!File.Exists(path))
-            return $"arm {armId}: profile '{profile}' has no readable modlist.txt at {path}, so the asset priority the game would use is unknown";
-        var comp = Mo2LoadOrder.ReadComposition(pdir);
-        var place = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (string m in comp.ModsByPriority) place.TryAdd(PyText.Lower(m), place.Count);
-        var enabled = comp.EnabledMods.Select(PyText.Lower).ToHashSet(StringComparer.Ordinal);
-        int last = -1;
-        string? lastName = null;
-        foreach (string name in mods)
-        {
-            string low = PyText.Lower(name);
-            if (!place.TryGetValue(low, out int at) || !enabled.Contains(low))
-                return $"arm {armId}: profile '{profile}' does not enable mod folder '{name}' that the arm's "
-                       + "asset view needs; enable it in that profile (or launch a profile that does), then run again";
-            if (at < last)
-                return $"arm {armId}: profile '{profile}' orders '{name}' above '{lastName}', but the arm's "
-                       + "candidate states the opposite asset priority and the game follows the profile; give a profile "
-                       + "the candidate's Mods order (strongest first) and launch that";
-            (last, lastName) = (at, name);
-        }
-        return null;
-    }
-
-    // What the opted-in live switch check's profile rule says of the arm once the mesh-gap remedy is followed.
-    static string LiveSentence(PyDict arm, PyDict opts, List<object?>? add)
-    {
-        if (add == null)
-            return "; the opted-in live switch check then launches this arm only on a profile that enables every Mods "
-                   + "folder in that order, strongest first, so check the launch profile too";
-        var mods = Py.ListOrEmpty(arm.Get("mods")).Concat(add).Select(PyText.Str).ToList();
-        string? why = ProfilePriorityRefusal(PyText.Str(Instance(opts)), PyText.Str(opts.Get("profile")), PyText.Str(arm["armId"]), mods);
-        return why != null ? $"; the opted-in live switch check would then refuse this arm: {why}" : "";
-    }
-
     /// <summary>Records each arm's verdict on it as `scenePreflight` and returns (refusals, notes): one line per arm
     /// the probe refused, and lines for the plan's output. A mesh-gap refusal gates only an arm in sceneArms (a planned
     /// check runs overlapprobe there); every other refusal gates every arm.</summary>
-    public static (List<string> refusals, List<string> notes) Run(List<PyDict> arms, PyDict opts, string harness, HashSet<string> sceneArms, bool live)
+    public static (List<string> refusals, List<string> notes) Run(List<PyDict> arms, PyDict opts, string harness, HashSet<string> sceneArms)
     {
         var refusals = new List<string>();
         var notes = new List<string>();
@@ -154,9 +113,8 @@ public static class ScenePreflight
                 }
                 else
                 {
-                    string p50 = live && code == MeshGapCode ? LiveSentence(arm, opts, verdict.Get("addFolders") as List<object?>) : "";
                     refusals.Add($"{where}: overlapprobe's scene preflight refused it: {PyText.Str(verdict.Get("reason"))}. "
-                                 + $"To fix: {PyText.Str(verdict.Get("remedy"))}{p50}.");
+                                 + $"To fix: {PyText.Str(verdict.Get("remedy"))}.");
                 }
             }
         }

@@ -4,14 +4,20 @@
 // runcontrol's own rules for plans, receipts, ledgers, dispositions and bundles (it is used as a library), plus the
 // rules only these rows need, which live here.
 //
-//   evalcontrol plan     --app EVAL --app-bundle BUNDLE --out AI [--opt-in CHECK]...
+//   evalcontrol plan     --app EVAL --app-bundle BUNDLE --out AI [--opt-in CHECK]... [--list FILE]
 //                        freeze the overlay's plan: ai-checks.json's rows over the app plan's arms, bound to the app plan
-//                        and the app bundle's manifest
+//                        and the app bundle's manifest; --list plans another list of the same schema, validated the
+//                        same way, in place of the shipped one (a trim of it, for a suite)
 //   evalcontrol evaluate --run AI [--rebuild-ledger]
 //                        account every row of the overlay plan (what an earlier call settled is re-checked and reused);
 //                        --rebuild-ledger first rebuilds the ledger from the journal and the receipts
 //   evalcontrol import   --run AI --file DOC
-//                        bind a record reader's evidence (houseCARL's record tools) to one arm the overlay left open
+//                        bind a record reader's evidence (houseCARL's record tools), or a live game driver's export
+//                        (switchflip.py export), to one arm the overlay left open
+//   evalcontrol switchflip-outcome
+//                        read one JSON request on standard input ({"classify": {events, flipStart, windowSeconds?}},
+//                        {"armReading": [...]} or {"rules": true}); print the switch-flip reading rule's answer, for
+//                        the live switch check's driver (no run-log record: it is asked once a second)
 //   evalcontrol finalize --run AI      the overlay's disposition and STATUS.md
 //   evalcontrol bundle   --run AI --out DIR [--media FILE] [--registry FILE] [--scope FILE] [--search FILE]
 //                        the overlay's evidence bundle; --media adds supplied pictures and clips, each checked against
@@ -43,9 +49,11 @@ public static class Program
         Console.OutputEncoding = new System.Text.UTF8Encoding(false);
         ChildLaunch.LogLabel = "evalcontrol";
         if (args.Length == 1 && args[0] == "--self-test") return SelfTest.Run();
+        // a pure answer the live driver asks once a second: before the run-log record, whose opening costs seconds
+        if (args.Length == 1 && args[0] == "switchflip-outcome") return RuleQueries.Answer(args[0], SwitchFlipOutcome.Answer);
         if (args.Length == 0)
         {
-            Console.Error.WriteLine("REFUSED: evalcontrol needs a command: plan, evaluate, import, finalize, bundle, verify or --self-test (see Program.cs).");
+            Console.Error.WriteLine("REFUSED: evalcontrol needs a command: plan, evaluate, import, finalize, bundle, verify, switchflip-outcome or --self-test (see Program.cs).");
             return Exit.Refused;
         }
         using var record = RunLog.BeginProcess("evalcontrol", args);
@@ -55,14 +63,14 @@ public static class Program
             var a = Args.Parse(args);
             return args[0] switch
             {
-                "plan" => OverlayPlan.Run(a.Need("--app"), a.Need("--app-bundle"), a.Need("--out"), a.Many("--opt-in")),
+                "plan" => OverlayPlan.Run(a.Need("--app"), a.Need("--app-bundle"), a.Need("--out"), a.Many("--opt-in"), a.One("--list")),
                 "evaluate" => OverlayEvaluate.Run(a.Need("--run"), a.Has("--rebuild-ledger")),
                 "import" => RecordImport.Run(a.Need("--run"), a.Need("--file")),
                 "finalize" => Finalizer.Run(a.Need("--run"), OverlayFinalize.Amend),
                 "bundle" => OverlayBundle.Run(a.Need("--run"), a.Need("--out"), a.One("--media"), a.One("--registry"), a.One("--scope"), a.One("--search")),
                 "verify" => OverlayVerify.Run(a.Positional ?? throw new Refusal("verify needs the overlay bundle's folder: evalcontrol verify DIR [--app BUNDLE] [--out FILE]."),
                     a.One("--app"), a.One("--out")),
-                _ => throw new Refusal($"evalcontrol has no command '{args[0]}'; the commands are plan, evaluate, import, finalize, bundle, verify and --self-test."),
+                _ => throw new Refusal($"evalcontrol has no command '{args[0]}'; the commands are plan, evaluate, import, finalize, bundle, verify, switchflip-outcome and --self-test."),
             };
         }
         catch (Refusal r)
@@ -83,7 +91,7 @@ public sealed class Args
 
     static readonly Dictionary<string, string[]> Takes = new(StringComparer.Ordinal)
     {
-        ["plan"] = ["--app", "--app-bundle", "--out", "--opt-in"],
+        ["plan"] = ["--app", "--app-bundle", "--out", "--opt-in", "--list"],
         ["evaluate"] = ["--run", "--rebuild-ledger"],
         ["import"] = ["--run", "--file"],
         ["finalize"] = ["--run"],
@@ -99,7 +107,7 @@ public sealed class Args
         {
             string flag = args[i], f = flag;
             // every option evalcontrol has (the tool index reads them from this line)
-            bool known = flag is "--app" or "--app-bundle" or "--out" or "--opt-in" or "--run" or "--media" or "--registry" or "--scope" or "--search" or "--file" or "--rebuild-ledger";
+            bool known = flag is "--app" or "--app-bundle" or "--out" or "--opt-in" or "--run" or "--media" or "--registry" or "--scope" or "--search" or "--file" or "--rebuild-ledger" or "--list";
             if (f.StartsWith("--", StringComparison.Ordinal) && !known) throw new Refusal($"evalcontrol has no option {f}.");
             if (!f.StartsWith("--", StringComparison.Ordinal))
             {

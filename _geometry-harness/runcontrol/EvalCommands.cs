@@ -11,7 +11,7 @@ public sealed class EvalArgs
 }
 
 /// <summary>The command lines of evalrun.py's commands as runcontrol takes them: `run --run RUN`, `resume --run RUN`,
-/// `status --run RUN`, `import-results --run RUN --file DOC`, `finalize --run RUN`, `bundle --run RUN [--out DIR] …`, `verify-bundle DIR [--out FILE]` and `population`. `run` and `status`
+/// `status --run RUN`, `finalize --run RUN`, `bundle --run RUN [--out DIR] …`, `verify-bundle DIR [--out FILE]` and `population`. `run` and `status`
 /// are also pipeline commands; the flag `--run` says which is meant. Exit 0 done, 2 a refused command line or input
 /// (an input of a shape the rules cannot read included), 3 a refused result.</summary>
 public static class EvalCommands
@@ -25,6 +25,11 @@ public static class EvalCommands
         "run" or "status" => NamesRun(args),
         _ => false,
     };
+
+    /// <summary>import-results, refused: an import binds evidence to an AI-side evaluation's row, and no row of
+    /// SkyWright's registry waits for one.</summary>
+    public const string ImportGone = "import-results is not SkyWright's: evidence an AI-side evaluation imports is bound by the "
+        + "houseCARL integration module, to its own evaluation over a finished app scan.";
 
     /// <summary>What a Python traceback is here: an input of a shape the rules cannot read.</summary>
     public static bool IsShapeError(Exception ex) => ex is PyError or KeyNotFoundException or InvalidCastException or FormatException
@@ -55,7 +60,6 @@ public static class EvalCommands
                 string text = Value();
                 a.BudgetMinutes = PlanArgs.PyFloat(text) ?? throw new Refusal($"{command}: --budget-minutes {PyText.Repr(text)} is not a number.");
             }
-            else if (flag == "--file" && command == "import-results") a.File = Value();
             else if (flag == "--rebuild-ledger" && command == "resume" && joined == null) a.RebuildLedger = true;
             else if (flag == "--out" && has("verify-bundle", "population")) a.Out = Value();
             else if (flag == "--plugin" && command == "population") a.Plugins.Add(Value());
@@ -116,6 +120,7 @@ public static class EvalCommands
         string command = args[0];
         try
         {
+            if (command == "import-results") throw new Refusal(ImportGone);
             if (command == "bundle") return RunBundle(args);
             var a = Parse(command, args);
             if (command == "verify-bundle")
@@ -125,7 +130,6 @@ public static class EvalCommands
             return command switch
             {
                 "finalize" => Finalizer.Run(a.Run),
-                "import-results" => ImportResults.Run(a.Run, a.File ?? throw new Refusal("import-results needs --file, the import document to bind.")),
                 "status" => EvalStatus.Run(a.Run),
                 "resume" => EvaluateRun.Run(a, resuming: true),
                 _ => EvaluateRun.Run(a, resuming: false),

@@ -227,6 +227,16 @@ class Ctl:
         r2 = self.ev(["finalize", "--run", run], scen)
         return r1, r2
 
+    def overlay(self, run, scen, opt_in=()):
+        """The app scan run, finalized and bundled, and the module's AI-side overlay planned over its bundle with
+        --opt-in for each id: (the overlay plan's exit and output, the overlay's run folder)."""
+        import evalpipeline as EP
+        self.run_all(run, scen)
+        self.ev(["bundle", "--run", run, "--out", run / "app-bundle", "--no-names"], scen)
+        argv = EP.evalcontrol_argv(None, "plan", "--app", run, "--app-bundle", run / "app-bundle", "--out", run / "ai",
+                                   *[x for o in opt_in for x in ("--opt-in", o)])
+        return subprocess.run(argv, capture_output=True, text=True, timeout=600), run / "ai"
+
 
 def ledger_status(run, cid, arm):
     e = load(run / "ledger.json")["entries"]
@@ -375,17 +385,17 @@ def d5(ctl: Ctl):
     deep = settings_file(ctl.tmp / "d5-deep.json",
                          {"evaluation": {"depth": "deep", "liveSwitchCheck": "always"}, "liveSwitchCheck": paths})
     run = ctl.tmp / "d5-deep"
-    # the module folds the live choice into the lab run's measuring entry; its plan stage opts the plan in
+    # the module opts the lab run's overlay in to the live choice (its row is the module's, not the app plan's)
     sys.path.insert(0, str(HARNESS))
     import evalpipeline as EP
     import evalsettings as ESET
-    folded, _ = EP.measuring_entry({"schema": 1, "id": "m", "evaluation": {}}, ESET.load(str(deep)))
-    opt = [x for o in (folded.get("evaluation") or {}).get("optIn") or [] for x in ("--opt-in", o)]
-    p = ctl.plan(run, scen, ["--depth", "deep", *opt], registry="fixture-check-registry-live.json")
-    if p.returncode:
-        check(False, f"D5: Deep with the live check always plans ({(p.stdout + p.stderr)[-300:]!r})")
+    opt = EP.overlay_opt_in({"schema": 1, "id": "m", "evaluation": {}}, ESET.load(str(deep)))
+    p = ctl.plan(run, scen, ["--depth", "deep"])
+    o, ai = ctl.overlay(run, scen, opt) if p.returncode == 0 else (p, None)
+    if p.returncode or o.returncode:
+        check(False, f"D5: Deep with the live check always plans ({(p.stdout + p.stderr + o.stdout + o.stderr)[-300:]!r})")
     else:
-        row = next((c for c in load(run / "plan.json")["checks"] if c["checkId"] == LIVE), None)
+        row = next((c for c in load(ai / "plan.json")["checks"] if c["checkId"] == LIVE), None)
         check(row is not None and row["required"] is True
               and {a["status"] for a in row["arms"]} <= {"live-import", "not-applicable"},
               "D5: Deep with the live check always plans it opted in and required")

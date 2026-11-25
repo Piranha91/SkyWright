@@ -1,13 +1,11 @@
-using HousecarlCore.Progress;
+using RunControl;
 
-namespace RunControl;
+namespace EvalControl;
 
-/// <summary>`runcontrol import-results --run RUN --file DOC` (evalrun.py's cmd_import_results): binds a live game
-/// driver's export to the opted-in live check of one arm (live-import, LiveImport) and writes a normal receipt for it.
-/// A record check's evidence is not imported here: those checks left SkyWright's registry for the houseCARL
-/// integration module, which imports their evidence itself. Open is the part every import shares: the document read
-/// and bound to this run's plan, check and arm, under the controller's own identity.
-/// Exit 0, or 2 with one REFUSED line that joins every reason.</summary>
+/// <summary>What every `evalcontrol import` shares (moved from runcontrol's import-results with the live check, the
+/// last import SkyWright's registry had; evalrun.py's cmd_import_results): Open reads the document and binds it to its
+/// run's plan, check and arm, under the controller's own identity; StoreFile puts an evidence file beside the run. The
+/// command itself is RecordImport's, which hands a live row to LiveImport.</summary>
 public static class ImportResults
 {
     /// <summary>Test seam: the controller's measured identity, in place of reading this program's own files.</summary>
@@ -36,24 +34,6 @@ public static class ImportResults
         }
         File.Copy(src, dst);
         return "copy";
-    }
-
-    /// <summary>The command: the run-log record evalrun.py's writes, around the import.</summary>
-    public static int Run(string runFolder, string file)
-    {
-        EvalStore.SetRunStore(PyPath.Str(runFolder));
-        using var record = RunLog.Begin("evalrun-import-results", new RunOptions { StageSource = StageSource.Counted });
-        record.Stage("validate-and-import", total: 1, unit: "results");
-        int rc;
-        try { rc = Import(runFolder, file, record.RunId, n => record.Feature("outputs", n, "files"), path => { record.Artifact(path); record.Advance(); }); }
-        catch (Exception ex)
-        {
-            record.Fail($"{ex.GetType().Name}: {ex.Message}");   // as Python's Run records an exception
-            throw;
-        }
-        if (rc == Exit.Refused) record.Refuse("import validation refused; the diagnostic above names the cause", Exit.Refused);
-        else if (rc != Exit.Ok) record.Fail("import failed", rc);
-        return rc;
     }
 
     /// <summary>An import document read and bound to its run: the plan, the ledger, the document and its bytes, the
@@ -115,16 +95,5 @@ public static class ImportResults
         var arm = Ev.Items(plan.Get("arms")).Select(PyValue.Dict).FirstOrDefault(x => Ev.Eq(x.Get("armId"), aid));
         if (check == null) { Refuse($"wrong-check: plan {Ev.Str(plan["planId"])} has no check {PyText.Repr(cid)}"); return null; }
         return new Opened(run, src, plan, ledger, doc, manifestBytes, programs, check, arm);
-    }
-
-    /// <summary>The import itself, under the run-log record `runId`; `outputs` and `imported` report to it.</summary>
-    public static int Import(string runFolder, string file, string? runId, Action<int>? outputs = null, Action<string>? imported = null)
-    {
-        if (Open(runFolder, file) is not { } o) return Exit.Refused;
-        var adapter = Ev.OrEmpty(o.Check.Get("adapter"));
-        if (adapter.Get("kind") is "live-import")   // a live game driver's receipts: their own validator re-reads every launch
-            return LiveImport.Import(o.Run, o.Src, o.Plan, o.Ledger, o.Check, o.Arm, o.Doc, o.ManifestBytes, o.Programs, runId, outputs, imported);
-        return Refuse($"wrong-check: {Ev.Str(o.Doc.Get("checkId"))} is {PyText.Repr(adapter.Get("kind"))}, not live-import; SkyWright imports "
-                      + "only a live game driver's export, and a record check's evidence is imported by the houseCARL integration module.");
     }
 }

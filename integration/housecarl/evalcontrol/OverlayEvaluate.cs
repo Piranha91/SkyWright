@@ -49,12 +49,13 @@ public static class OverlayEvaluate
                     if (EvaluateRun.AlreadyDone(ledger, check["checkId"], arm["armId"], null)) EvaluateRun.MarkReused(ledger, check["checkId"], arm["armId"], null);
                     else if (EvaluateRun.AccountPlanStatus(ex, check, arm, st)) { }
                     // an import no longer credited (its evidence changed, its reuse refused) keeps its cause, by runcontrol's rule
-                    else if (Ev.Eq(st, "mcp-only") && EvaluateRun.AccountUncreditedImport(ex, check, arm)) { }
+                    else if (st is "mcp-only" or "live-import" && EvaluateRun.AccountUncreditedImport(ex, check, arm)) { }
                     else if (kind == "media") ex.Account(check, arm, "blocked(no-identified-media)", null, NoMedia);
                     else if (Ev.Eq(st, "mcp-only"))
                         // open until `evalcontrol import` binds a record reader's evidence to it
                         ex.Account(check, arm, "mcp-only", null,
                             PyValue.Truthy(check.Get("unsupportedReason")) ? (string)check["unsupportedReason"]! : "the list records no command-line adapter for this check");
+                    else if (Ev.Eq(st, "live-import")) AccountLive(ex, run, plan, ledger, check, arm);
                     else throw new Refusal($"{Ev.Str(check["checkId"])}: adapter kind {PyText.Repr(kind)} is not one evalcontrol evaluates.");
                     parent.Advance();
                 }
@@ -62,6 +63,22 @@ public static class OverlayEvaluate
         }
         EvalStatus.Print(plan, ledger);
         return Exit.Ok;
+    }
+
+    /// <summary>An opted-in live row (moved from runcontrol's evaluate with the check): not applicable when the arm's
+    /// accepted census in the app scan answers it (nothing a script drives touches a target), else open until the live
+    /// driver's export is imported.</summary>
+    static void AccountLive(Executor ex, string run, PyDict plan, Ledger ledger, PyDict check, PyDict arm)
+    {
+        var scopeRead = Ev.Eq(check["checkId"], LiveScope.CheckId) ? LiveScope.Read(run, plan, ledger, arm["armId"]) : null;
+        if (PyValue.Truthy(scopeRead) && Ev.Eq(scopeRead!["status"], "not-applicable"))
+            ex.Account(check, arm, "not-applicable", null, SwitchFlipScope.Sentence(scopeRead),
+                extra: new PyDict { ["switchScope"] = LiveScope.Record(scopeRead) });
+        else
+            ex.Account(check, arm, "live-import", null,
+                "opted in and waiting for a live receipt: run the live switch check for this arm, then "
+                + "`evalcontrol import --file` its export; the controller itself never launches the game"
+                + (PyValue.Truthy(scopeRead) ? $" ({SwitchFlipScope.Sentence(scopeRead!)})" : ""));
     }
 }
 
@@ -79,6 +96,7 @@ public static class OverlayFinalize
             if (Ev.OrEmpty(c["adapter"]).Get("kind") is "media" or "mcp-only") families.Add(Ev.Str(c["family"]));
         un["familiesUnsupportedOrManual"] = PyOrder.SortedByCodePoint(families).Cast<object?>().ToList();
         un["mediaUnassessed"] = MediaSentence;
+        un["runtimeObservations"] = LiveScope.RuntimeObservations(receipts);
         disposition[OverlayPlan.Key] = plan[OverlayPlan.Key];
     }
 }

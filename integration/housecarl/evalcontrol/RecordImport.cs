@@ -124,7 +124,7 @@ public static class RecordImport
         string manifestSha = Hashing.Sha256Bytes(manifestBytes);
         object? cid = doc.Get("checkId"), aid = doc.Get("armId");
         var adapter = Ev.OrEmpty(check.Get("adapter"));
-        // a live game driver's receipts are runcontrol's still (their own validator re-reads every launch)
+        // a live game driver's receipts: their own validator re-reads every launch
         if (adapter.Get("kind") is "live-import")
             return LiveImport.Import(run, src, plan, ledger, check, arm, doc, manifestBytes, programs, runId, outputs, imported);
         if (adapter.Get("kind") is not "mcp-only")

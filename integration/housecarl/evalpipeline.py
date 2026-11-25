@@ -575,31 +575,38 @@ def capture_records(ctx, res: dict, sdir: Path, run: Path | None = None) -> tupl
     return {"imports": len(results), "refused": len(bad) + len(refusals)}, [sdir / "records.json", cap, sdir / "checkpoints"]
 
 
-#: the live check's registry row, opted in by the settings' liveSwitchCheck always
+#: the live check's row (this module's ai-checks.json), opted in by the settings' liveSwitchCheck always
 LIVE_CHECK = "runtime.state-switch-flip"
 MEASURING_ENTRY = "measuring-entry.json"
 SETTINGS_RECORD = "evaluation-settings.json"
 
 
 def measuring_entry(entry: dict, settings) -> tuple[dict, list[str]]:
-    """The entry runcontrol measures a lab run from: the entry as written, with the two measuring choices of the user's
-    evaluation settings folded in, each only when it differs from runcontrol's default and the entry does not state it
-    itself (evaluation.reverseComparison false; the live check opted in by liveSwitchCheck always). Every other key,
-    model, report, video and narration settings among them, stays out: they change what is presented, not what is
-    measured. Returns (the entry, the sentences to print)."""
+    """The entry runcontrol measures a lab run from: the entry as written, with the measuring choice of the user's
+    evaluation settings folded in only when it differs from runcontrol's default and the entry does not state it itself
+    (evaluation.reverseComparison false), and without the live check in evaluation.optIn: that row is this module's,
+    so the overlay opts it in (overlay_opt_in), never runcontrol's plan. Every other key, model, report, video and
+    narration settings among them, stays out: they change what is presented, not what is measured. Returns (the
+    entry, the sentences to print)."""
     out = json.loads(json.dumps(entry))
     said = []
     ev = out.get("evaluation") or {}
     if settings.value("evaluation.reverseComparison") is False and "reverseComparison" not in ev:
         out.setdefault("evaluation", {})["reverseComparison"] = False
-    live = settings.value("evaluation.liveSwitchCheck")
     opted = list(ev.get("optIn") or [])
-    if live == "always" and LIVE_CHECK not in opted:
-        out.setdefault("evaluation", {})["optIn"] = opted + [LIVE_CHECK]
-    elif live == "ask" and LIVE_CHECK not in opted:
+    if LIVE_CHECK in opted:
+        out["evaluation"]["optIn"] = [c for c in opted if c != LIVE_CHECK]
+    if settings.value("evaluation.liveSwitchCheck") == "ask" and LIVE_CHECK not in opted:
         said.append(f"The live switch check is set to ask each evaluation and was not opted in (put {LIVE_CHECK} in the "
-                    f"entry's evaluation.optIn, or plan with `--opt-in {LIVE_CHECK}`, to opt in).")
+                    f"entry's evaluation.optIn, or plan the overlay with `evalcontrol plan --opt-in {LIVE_CHECK}`, to opt in).")
     return out, said
+
+
+def overlay_opt_in(entry: dict, settings) -> list[str]:
+    """The AI-side checks a lab run's overlay opts in: the live check when the entry's evaluation.optIn names it or
+    the settings' liveSwitchCheck is always."""
+    opted = list((entry.get("evaluation") or {}).get("optIn") or [])
+    return [LIVE_CHECK] if LIVE_CHECK in opted or settings.value("evaluation.liveSwitchCheck") == "always" else []
 
 
 def settings_record(settings) -> dict:
@@ -655,16 +662,20 @@ def ai_bundle_dir(ctx) -> Path:
 
 def measure_overlay(ctx) -> None:
     """The AI-side rows of a lab run, after the app's bundle: evalcontrol plans them over the app plan (once per app
-    bundle: an overlay bound to an earlier app bundle is planned again), evaluates, the record capture reads and
+    bundle and opt-in set: an overlay bound to an earlier app bundle, or opted in otherwise, is planned again; the
+    live check is opted in as overlay_opt_in says), evaluates, the record capture reads and
     imports the record rows it left open, and evalcontrol finalizes, bundles beside the app bundle and verifies the pair.
     Raises Refusal with evalcontrol's sentence when a step stops."""
     run, app = ai_dir(ctx), bundle_dir(ctx)
+    opt_in = list(getattr(ctx, "overlay_opt_in", None) or [])
     plan = read_json(run / "plan.json") if (run / "plan.json").is_file() else None
-    if plan is not None and (plan.get("overlay") or {}).get("appManifestSha256") != sha256_file(app / "manifest.json"):
+    if plan is not None and ((plan.get("overlay") or {}).get("appManifestSha256") != sha256_file(app / "manifest.json")
+                             or sorted((plan.get("explicitDecisions") or {}).get("optIn") or []) != sorted(opt_in)):
         shutil.rmtree(run)
         plan = None
     steps = [] if plan is not None else [("overlay-plan", evalcontrol_argv(ctx.machine, "plan", "--app", ctx.out / "evaluation",
-                                                                           "--app-bundle", app, "--out", run))]
+                                                                           "--app-bundle", app, "--out", run,
+                                                                           *[x for c in opt_in for x in ("--opt-in", c)]))]
     if ai_bundle_dir(ctx).exists():
         shutil.rmtree(ai_bundle_dir(ctx))
     steps += [("overlay-evaluate", evalcontrol_argv(ctx.machine, "evaluate", "--run", run)),
@@ -1571,6 +1582,7 @@ def measure_lab(ctx, through: str):
     write_json(ctx.out / SETTINGS_RECORD, settings_record(settings))
     write_json(ctx.out / MEASURING_ENTRY, folded)
     mctx = Context(ctx.out / MEASURING_ENTRY, ctx.machine_path, ctx.out)
+    mctx.overlay_opt_in = overlay_opt_in(read_json(ctx.entry_path), settings)
     measure(mctx, through)
     return mctx
 

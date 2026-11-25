@@ -2,13 +2,13 @@
 
     python tests/test_switchflip_rule_unavailable.py
 
-switchflip.py asks runcontrol (`switchflip-outcome`, `identity`) through switchflip_outcome.py. A controller that is
+switchflip.py asks evalcontrol (`switchflip-outcome`) and runcontrol (`identity`) through switchflip_outcome.py. A controller that is
 missing, locked by a rebuild or refusing must never skip a launch's cleanup (receipt, teardown, profile restore) or
 leave the block's lock held. No game is started here.
 
     C2243  every call into the rule (O.classify, O.arm_reading, O.window_s, O.owner_identity, window_min) in switchflip.py
            sits in the body of a `try` that catches RuntimeError, or in a function whose own body does
-    C2244  with HOUSECARL_RUNCONTROL naming no file, the client raises RuntimeError with one sentence naming the cause
+    C2244  with HOUSECARL_EVALCONTROL naming no file, the client raises RuntimeError with one sentence naming the cause
     C2245  with the same, validate_plan reports that sentence as a plan problem, before any lock is taken
 
 Exit 0: every case passed; 1: a case failed.
@@ -83,7 +83,7 @@ check("C2243 every rule call on a launch or block path is guarded", calls >= 5 a
       f"{calls} rule calls; unguarded at lines {bare}")
 
 # C2244, C2245
-os.environ["HOUSECARL_RUNCONTROL"] = str(HARNESS / "no-such-runcontrol.exe")
+os.environ["HOUSECARL_EVALCONTROL"] = str(HARNESS / "no-such-evalcontrol.exe")
 import switchflip_outcome as O  # noqa: E402
 try:
     O.classify([], 0.0)
@@ -91,7 +91,7 @@ try:
 except RuntimeError as ex:
     msg = str(ex)
     check("C2244 the client refuses in one sentence naming the missing controller",
-          "\n" not in msg and "no-such-runcontrol.exe" in msg, msg)
+          "\n" not in msg and "no-such-evalcontrol.exe" in msg, msg)
 
 import switchflip  # noqa: E402
 switchflip.window_min.cache_clear()
@@ -100,7 +100,7 @@ doc = {"schemaVersion": 1, "binding": None, "arms": [{"id": "a", "profile": "p"}
 try:
     probs = switchflip.validate_plan(doc)
     check("C2245 validate_plan names the unreachable rule as a plan problem",
-          any("no-such-runcontrol.exe" in p for p in probs), f"problems: {probs}")
+          any("no-such-evalcontrol.exe" in p for p in probs), f"problems: {probs}")
 except Exception as ex:  # noqa: BLE001 -- a crash is a failure
     check("C2245 validate_plan names the unreachable rule as a plan problem", False, f"raised {type(ex).__name__}: {ex}")
 

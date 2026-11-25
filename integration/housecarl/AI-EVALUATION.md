@@ -8,9 +8,8 @@ record rows derived from those reads, and supplied media. Paths are relative to 
 that produces them is run by `integration/housecarl/evalpipeline.py` and driven by the `world-edit-compatibility`
 skill (`integration/housecarl/claude-plugin/skills/`).
 
-**Where the checks are today.** The record import (§1) and the media rule are applied by this module's
-`evalcontrol` (`import`, `bundle --media`) on the AI-side overlay; the live receipts' rule is still applied by
-`runcontrol import-results` in this version; the sections say which command applies each.
+**Where the checks are today.** The record import (§1), the live receipts' rule (§2) and the media rule are applied
+by this module's `evalcontrol` (`import`, `bundle --media`) on the AI-side overlay.
 
 ## 1. Importing an existing MCP result
 
@@ -154,7 +153,7 @@ the tool's actual request, response and measured configuration rather than calle
 
 ## 2. Live receipts (`live-import`)
 
-A `live-import` row completes only through `import-results`, which hands it to its live importer (`_geometry-harness/runcontrol/LiveImport.cs` in this version). The
+A `live-import` row of the overlay completes only through `evalcontrol import`, which hands it to its live importer (`integration/housecarl/evalcontrol/LiveImport.cs`). The
 import document (schema 1) carries `planId`, `checkId`, `armId`, `capturedUtc`, `tool`, `state`, `configuration` and
 `result {detector, findings, coverage}`, and `outputs` with roles `flip-plan` (exactly one), `launch-receipt`, `events`
 and `crash-log`, each hash-checked. The importer refuses unless every launch receipt names this plan, check and arm
@@ -163,19 +162,19 @@ the import's configuration fingerprint; and has its events among the outputs. It
 events** (`switchflip_outcome.classify`) and refuses a stored classification that differs, then re-reads the arm per
 condition (`arm_reading`): an unsettled condition is refused, and the import's stated detector must equal the re-read
 one. The configuration is checked by the same identity rules as an emit (§4.2) against the arm's frozen request, and
-the prerequisite gate of §4.8 applies. On acceptance the evidence is copied under `RUN/imports/<key>/`, the receipt's
+the prerequisite gate of §4.8 applies, its app prerequisite (`state.switch-census`) read from the app scan's bundle. On acceptance the evidence is copied under `RUN/imports/<key>/`, the receipt's
 adapter is `{kind: live-import}`, its `imported.origin` is `fresh` with `bindingRecordedAtLaunch: true`, and finalize's
 `unassessed.runtimeObservations` names the checks with accepted live receipts instead of saying none was supplied.
 
-**Not applicable from the arm's own census (`runtime.state-switch-flip`).** At `run`/`resume`, once the arm's
-`state.switch-census` is accepted, the controller reads its census output against the plan's scope with
-the switch-scope rule (`_geometry-harness/runcontrol/SwitchFlipScope.cs` in this version; `integration/housecarl/switchflip_scope.py` asks it). The census covers the whole order, so the check is about the switches that a
+**Not applicable from the arm's own census (`runtime.state-switch-flip`).** At `evalcontrol evaluate`, once the
+arm's `state.switch-census` is accepted in the app scan, the overlay reads its census output (from the app bundle)
+against the plan's scope with the switch-scope rule (`integration/housecarl/evalcontrol/SwitchFlipScope.cs`; `integration/housecarl/switchflip_scope.py` asks it). The census covers the whole order, so the check is about the switches that a
 script drives (`trigger.status` `Triggered` or `BoundUnread`) and that touch a target: by plugin (owner, or a member's
 placer or attacher, is a target) or by cell (the switch's or a member's `cellKey` is in a target's
 `footprint.placed.cells`). When none does, and nothing leaves that unknown (no trigger map, unreadable plugins, an
 incomplete scope, no targets, or a driven switch whose target cells are not listed), the row is accounted
 `not-applicable` with the counts; the receipt's `switchScope` records the census path and sha256 it read. Finalize
-counts it as answered. Otherwise the row stays `live-import`, its sentence naming what keeps it open. `import-results`
+counts it as answered. Otherwise the row stays `live-import`, its sentence naming what keeps it open. `evalcontrol import`
 refuses a live import for an arm the same rule reads as not applicable: an import never overrides that answer.
 
 

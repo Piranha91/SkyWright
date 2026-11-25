@@ -348,9 +348,9 @@ that reference has a parent.
 geometry of a flipped enable marker. It cannot show what the engine does while it switches a set on.
 A quest script that enables a garrison loads actors, objects and scripts in one go, and two mods that
 each work alone can, together, make that moment fail: a script stall, a freeze or a crash, with no
-record that looks wrong. The check `runtime.state-switch-flip` runs it: `runcontrol plan --opt-in
-runtime.state-switch-flip` (or a saved `liveSwitchCheck: always` under Deep), then `SW/integration/housecarl/switchflip.py batch` on a scratch game instance,
-then `switchflip.py export`, and `runcontrol import-results` imports that export, re-reading every launch
+record that looks wrong. The check `runtime.state-switch-flip` runs it: `evalcontrol plan --opt-in
+runtime.state-switch-flip` (the AI-side overlay over a finished app scan) (or a saved `liveSwitchCheck: always` under Deep), then `SW/integration/housecarl/switchflip.py batch` on a scratch game instance,
+then `switchflip.py export`, and `evalcontrol import` imports that export, re-reading every launch
 it records; until then the check stays waiting for its live receipt. It is opt-in because it launches the game;
 an evaluation that did not opt in lists it as not opted in, and that list is part of the verdict.
 An opted-in arm whose census has no switch that a script drives and that touches a target (by plugin or

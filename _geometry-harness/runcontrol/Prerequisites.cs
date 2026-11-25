@@ -130,29 +130,4 @@ public static class Prerequisites
         return null;
     }
 
-    /// <summary>The live switch check's reading of one arm: its accepted state.switch-census output against the
-    /// plan's scope. Null when there is no accepted census output or either document cannot be read.</summary>
-    public static PyDict? LiveSwitchScope(string run, PyDict plan, Ledger ledger, object? armId)
-    {
-        var e = ledger.Entry("state.switch-census", armId, null);
-        object? r = PyJson.LoadEvalFile(PyPath.Join(run, "receipts", $"state.switch-census__{Ev.Str(armId)}.json"));
-        if (!(PyValue.Truthy(e) && EvalStore.IsTerminalOk(e!.Get("status")) && PyValue.Truthy(r)
-              && PyValue.Truthy(Ev.OrEmpty(Ev.G(r, "validation")).Get("accepted")))) return null;
-        var outs = Ev.Items(Ev.G(r, "outputs")).ToList();
-        if (outs.Count == 0 || !PyValue.Truthy(Ev.G(outs[0], "path"))) return null;
-        string cpath = PyPath.Join(run, Ev.Str(Ev.G(outs[0], "path")));
-        object? census = PyJson.LoadEvalFile(cpath);
-        object? scopePath = Ev.OrEmpty(plan.Get("scope")).Get("path");
-        object? scope = PyValue.Truthy(scopePath) ? PyJson.LoadEvalFile(PyPath.Str(Ev.Str(scopePath))) : null;
-        if (census is not PyDict c || scope is not PyDict s) return null;
-        var res = SwitchFlipScope.Population(c, s);
-        res["census"] = new PyDict { ["path"] = Ev.G(outs[0], "path"), ["sha256"] = Hashing.Sha256FileOrNull(cpath) };
-        return res;
-    }
-
-    /// <summary>What a not-applicable receipt records: the census it read, the counts and the rule.</summary>
-    public static PyDict LiveSwitchScopeRecord(PyDict res) => new()
-    {
-        ["census"] = res["census"], ["counts"] = res["counts"], ["status"] = res["status"], ["rule"] = "switchflip_scope.population",
-    };
 }

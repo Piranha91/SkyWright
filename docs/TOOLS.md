@@ -24,7 +24,6 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Do adjacent cells disagree at their landscape height or texture boundary?](#tool-seamprobe) — `seamprobe`
 - [Do contactprobe's anchor, surface, volume and motion outputs name the solid rule their results depend on, and say none when no solid rule applied?](#tool-_geometry-harness-tests-test_contact_solid_rule.py) — `_geometry-harness/tests/test_contact_solid_rule.py`
 - [Do motionprobe sweep and lightprobe outputs name the solid rule their results depend on, and say none when no solid rule applied?](#tool-_geometry-harness-tests-test_solid_rule_named.py) — `_geometry-harness/tests/test_solid_rule_named.py`
-- [Do opt-in live checks leave defaults unchanged and refuse bad live imports?](#tool-_geometry-harness-tests-test_evallive.py) — `_geometry-harness/tests/test_evallive.py`
 - [Do overlapprobe, contactprobe (default pass and --empty-space) and stateprobe with --population keep exactly the whole-order rows of the plan's population, in both arms?](#tool-_geometry-harness-tests-test_population_scope.py) — `_geometry-harness/tests/test_population_scope.py`
 - [Do patchprobe, poolprobe and fomodprobe list every discovered patch with the sha256 of its bytes?](#tool-_geometry-harness-tests-test_discovery_probes.py) — `_geometry-harness/tests/test_discovery_probes.py`
 - [Do placed obstacles cut walkable routes in this plugin or cell?](#tool-blockprobe) — `blockprobe`
@@ -111,6 +110,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does stateprobe name the primitive table it was given, judge a collision-marker box measured solid as a route obstacle, and read placed actors a state brings in from their placement without ever writing a row for one?](#tool-_geometry-harness-tests-test_state_marker_box_and_actors.py) — `_geometry-harness/tests/test_state_marker_box_and_actors.py`
 - [Does stateprobe write one row per pair of references in a state, whichever contact pass found it, and keep the deeper reading?](#tool-_geometry-harness-tests-test_state_row_identity.py) — `_geometry-harness/tests/test_state_row_identity.py`
 - [Does subject qualification refuse wrong identities, invisible features and invalid evidence?](#tool-integration-housecarl-tests-test_subject_gate.py) — `integration/housecarl/tests/test_subject_gate.py`
+- [Does the AI-side overlay's opt-in live check leave defaults unchanged, and does evalcontrol import refuse bad live imports?](#tool-integration-housecarl-tests-test_evallive.py) — `integration/housecarl/tests/test_evallive.py`
 - [Does the GPU occlusion query count the same pixels as the CPU depth compare on this machine?](#tool-viewprobe.occlusion-query-selftest) — `viewprobe.occlusion-query-selftest`
 - [Does the actual overlap probe enforce the imported scene-scope contract?](#tool-_geometry-harness-tests-test_scene_scope_import.py) — `_geometry-harness/tests/test_scene_scope_import.py`
 - [Does the actual planner verify and export the camera justified by its queries?](#tool-_geometry-harness-viewprobe-tools-test_shotplan_plan.py) — `_geometry-harness/viewprobe/tools/test_shotplan_plan.py`
@@ -281,6 +281,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [How does an MCP client (Claude Code, Codex) read and drive the conflict review window: open a conflict, stage a move, write it and read the re-check?](#tool-workbench) — `workbench`
 - [How does every candidate patch change the detected conflict set?](#tool-differential-sweep) — `differential-sweep`
 - [How does the capture stage hold the machine slot once across all its rounds?](#tool-evalpipeline.capture-rounds) — `evalpipeline.capture-rounds`
+- [How does the live driver ask the switch-flip reading rule, and how is its export imported?](#tool-evalcontrol) — `evalcontrol`
 - [How does the view look with the objects standing in front of a clash hidden?](#tool-viewprobe.hide) — `viewprobe.hide`
 - [How far is an object from the nearest winning navmesh triangle (reach <Cell> <subjects.json> --json OUT)?](#tool-floorgapprobe) — `floorgapprobe`
 - [How far is the nearest actor-solid surface from a standing body's column at a point (clear <Cell> <file>)?](#tool-floorgapprobe) — `floorgapprobe`
@@ -981,21 +982,6 @@ Inputs: CfFixture.esp from viewprobe --write-capture-fixture (cells CfFxLit, CfF
 Outputs: Assertion results per case (C1720-C1727); NOT RUN without game data.
 
 Source: [_geometry-harness/tests/test_effects_path_rule.py](../_geometry-harness/tests/test_effects_path_rule.py) — `Known answers on a real render: a shape is solid by its own data, not by its folder`
-
-
-<a id="tool-_geometry-harness-tests-test_evallive.py"></a>
-
-### _geometry-harness/tests/test_evallive.py
-
-**Do opt-in live checks leave defaults unchanged and refuse bad live imports?**
-
-Qualify the opt-in plan behaviour and the live import binding through the real controller.
-
-Inputs: Controlled fixtures for test_evallive.
-
-Outputs: Assertion results or generated fixture data for: Do opt-in live checks leave defaults unchanged and refuse bad live imports?
-
-Source: [_geometry-harness/tests/test_evallive.py](../_geometry-harness/tests/test_evallive.py) — `Known answers for the opt-in live-import lane`
 
 
 <a id="tool-_geometry-harness-tests-test_evalrun.py"></a>
@@ -2553,6 +2539,8 @@ Source: [_geometry-harness/evalbase.py](../_geometry-harness/evalbase.py) — `e
 
 **How do I import a record reader's evidence for a record check the overlay left open?**
 
+**How does the live driver ask the switch-flip reading rule, and how is its export imported?**
+
 Run or check the rows only an AI-driven evaluation serves (ai-checks.json), after runcontrol has bundled the app scan; evalpipeline.py does this for a lab entry.
 
 Inputs: An app scan's evaluation folder and its bundle (plan --app, --app-bundle); the overlay's run folder (--run) for evaluate, import, finalize and bundle; an import document (--file) for import; a media list (--media) for bundle; an overlay bundle folder for verify. Nothing for --self-test.
@@ -2566,9 +2554,10 @@ Modifiers (do not select a separate mode):
 
 - `--app` — plan: the app scan's evaluation folder (its plan.json); verify: the app bundle, when it is not the one the overlay names
 - `--app-bundle` — plan: the app scan's bundle the overlay binds to
-- `--file` — import: the import document (schema 1) to bind to one arm the overlay left open
+- `--file` — import: the import document (schema 1) to bind to one arm the overlay left open: a record reader's evidence or a live game driver's export (switchflip.py export)
+- `--list` — plan: a list of the same schema in place of the shipped ai-checks.json, validated the same way (a suite's trim)
 - `--media` — bundle: the supplied pictures and clips (media item schema 2), each checked against the configurations the app scan's accepted receipts measured
-- `--opt-in` — plan: plan an opt-in check of the list (repeatable)
+- `--opt-in` — plan: plan an opt-in check of the list (repeatable; the live switch check is the list's one)
 - `--out` — plan: the new overlay run folder; bundle: the overlay bundle folder; verify: the verify.json to write
 - `--rebuild-ledger` — evaluate: rebuild the ledger from the journal and the receipts first (runcontrol's rule)
 - `--registry` — bundle: the list file the overlay plan froze, when it has moved
@@ -3525,6 +3514,21 @@ Inputs: test_evalrun.py's generated fixtures and fake probes; the module's oracl
 Outputs: Assertion results or generated fixture data for: Do the AI-side checks run end to end over the controller suite's fixtures, by evalcontrol over a finished app run?
 
 Source: [integration/housecarl/tests/test_evalcontrol_run.py](../integration/housecarl/tests/test_evalcontrol_run.py) — `The AI-side evaluation's checks run end to end over SkyWright's controller suite`
+
+
+<a id="tool-integration-housecarl-tests-test_evallive.py"></a>
+
+### integration/housecarl/tests/test_evallive.py
+
+**Does the AI-side overlay's opt-in live check leave defaults unchanged, and does evalcontrol import refuse bad live imports?**
+
+Qualify the overlay's opt-in plan behaviour and the live import binding through SkyWright's controller and evalcontrol.
+
+Inputs: The evalrun fixtures (SkyWright's fixture registry, no AI-side row), the app run bundled, and the AI-side overlay over it.
+
+Outputs: Assertion results for: Does the AI-side overlay's opt-in live check leave defaults unchanged, and does evalcontrol import refuse bad live imports?
+
+Source: [integration/housecarl/tests/test_evallive.py](../integration/housecarl/tests/test_evallive.py) — `Known answers for the opt-in live-import lane`
 
 
 <a id="tool-integration-housecarl-tests-test_evalpipeline.py"></a>

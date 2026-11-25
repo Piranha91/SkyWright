@@ -170,19 +170,6 @@ public static class EvaluateRun
                 }
                 if (AccountPlanStatus(ex, check, arm, st)) { }
                 else if (Import(st) && AccountUncreditedImport(ex, check, arm)) { }
-                else if (Ev.Eq(st, "live-import"))
-                {
-                    var scopeRead = cid == RunControl.Plan.LiveCheckId ? Prerequisites.LiveSwitchScope(ex.Run, plan, ledger, aid) : null;
-                    if (PyValue.Truthy(scopeRead) && Ev.Eq(scopeRead!["status"], "not-applicable"))
-                        // the arm's own accepted census answers it: nothing a script drives touches a target
-                        ex.Account(check, arm, "not-applicable", null, SwitchFlipScope.Sentence(scopeRead),
-                            extra: new PyDict { ["switchScope"] = Prerequisites.LiveSwitchScopeRecord(scopeRead) });
-                    else
-                        ex.Account(check, arm, "live-import", null,
-                            "opted in and waiting for a live receipt: run the live switch check for this arm, then "
-                            + "`import-results --file` its export; the controller itself never launches the game"
-                            + (PyValue.Truthy(scopeRead) ? $" ({SwitchFlipScope.Sentence(scopeRead!)})" : ""));
-                }
                 else if (st is "unsupported" or "mcp-only")
                     ex.Account(check, arm, (string)st, null,
                         PyValue.Truthy(check.Get("unsupportedReason")) ? (string)check["unsupportedReason"]! : "the registry records no CLI adapter for this check");

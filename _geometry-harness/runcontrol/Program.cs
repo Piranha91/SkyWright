@@ -6,11 +6,11 @@ using RunControl;
 // RUNCONTROL: the evaluation run controller, the one owner of census to bundle.
 //
 // The pipeline driver and its stages census, prepare, scope, plan, evaluate, records, scenes and bundle, and the
-// commands plan, run, resume, status, import-results, finalize, bundle, verify-bundle, population and the order sweep,
+// commands plan, run, resume, status, finalize, bundle, verify-bundle, population and the order sweep,
 // over the foundations (the JSON bytes, hashes, orderings and text forms its files are read in, the program identity
 // rule, the stage ledger). The names in brackets below are the Python commands each replaced. SkyWright's registry has
 // no record check: those only houseCARL's record tools read are the houseCARL integration module's, planned over a
-// finished app scan and imported there. This program's import-results imports a live game driver's export (LiveImport).
+// finished app scan and imported there; so is the live switch check, whose launches a live game driver reports.
 // A plan is bound to the controller build that froze it.
 // The stages from report-plan on belong to the AI-driven evaluation, which continues a run folder this program took
 // through the bundle.
@@ -26,9 +26,6 @@ using RunControl;
 //        runcontrol fingerprint          read a JSON list of configurations on standard input (plugins, providers, overlays,
 //                                        population, state, schemaVersion); print the list of their fingerprints as JSON.
 //                                        For a caller that must not hold its own copy of the rule.
-//        runcontrol switchflip-outcome   read one JSON request on standard input ({"classify": {events, flipStart, windowSeconds?}},
-//                                        {"armReading": [...]} or {"rules": true}); print the switch-flip reading rule's answer.
-//                                        For the live switch check's driver.
 //        runcontrol finalize --run RUN   derive disposition.json and STATUS.md from the ledger and receipts (evalrun finalize)
 //        runcontrol bundle --run RUN [--out DIR] [--reader-cmd CMD] [--reader-env K=V]... [--mod-name PLUGIN=NAME]... [--no-names]
 //                          [--registry FILE] [--scope FILE] [--search FILE]   assemble one evidence bundle (evalrun bundle)
@@ -36,14 +33,13 @@ using RunControl;
 //        runcontrol run    --run RUN [--budget-minutes N]   run the plan's checks (evalrun run); `run --entry` is the pipeline's
 //        runcontrol resume --run RUN [--budget-minutes N] [--rebuild-ledger]   re-check what is kept, redo the rest (evalrun resume)
 //        runcontrol status --run RUN     print the ledger as a table (evalrun status); `status --out` is the pipeline's
-//        runcontrol import-results --run RUN --file DOC   bind a live game driver's export to the opted-in live check of one arm (evalrun import-results)
 //        runcontrol population --plugin PATH... [--mod NAME...] [--instance DIR] [--target NAME...] --out FILE   (evalrun population)
 //
 // EXIT CODES: 0 done, 2 refused (one sentence on standard error), 3 a result that awaits judgement.
 
 if (args.Length >= 1 && args[0] == "ordersweep") return OrderSweep.Run(args[1..]);   // before the lines below: the sweep keeps the console code page its probes inherit, and its run-log records are ordersweep.py's
 ConsoleText.WriteUtf8();   // this program's own two streams; the console's code page is left as it is, because the probes inherit it
-if (RuleQueries.Handles(args)) return RuleQueries.Run(args);   // pure answers asked many times a run (one each second by switchflip): no run-log record, whose opening costs seconds
+if (RuleQueries.Handles(args)) return RuleQueries.Run(args);   // pure answers a caller may ask many times a run: no run-log record, whose opening costs seconds
 if (EvalCommands.Handles(args)) return EvalCommands.Run(args);   // evalrun's commands: before the process run below, so their run-log records are evalrun.py's
 string command = args.Length >= 1 ? args[0] : "";
 bool pipeline = command is "run" or "arms" or "status";

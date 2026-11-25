@@ -7,6 +7,9 @@ namespace RunControl;
 /// what it calls), and the refusal disposition written when it cannot be derived.</summary>
 public static class Disposition
 {
+    /// <summary>What an app scan says about the engine at play time: it observes none (it never launches the game).</summary>
+    public const string NoRuntimeObservations = "no runtime observation was supplied to this run: nothing here says what the engine did at play time";
+
     /// <summary>What a disposition was derived from: the ledger's hash, one hash over the sorted (ledger key,
     /// receipt file hash) pairs, and the journal's count of non-blank lines.</summary>
     public static PyDict DerivedFrom(string root, PyDict? receipts = null)
@@ -76,21 +79,6 @@ public static class Disposition
 
     static double AsDouble(object? v) => v is double d ? d : (double)PyValue.Int(v);
 
-    /// <summary>What this run says about the engine at play time: nothing, unless an accepted live receipt is bound to it.</summary>
-    public static string RuntimeObservationsSentence(PyDict receipts)
-    {
-        var live = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (_, rRaw) in receipts)
-        {
-            var r = PyValue.Dict(rRaw);
-            if (Ev.Eq(Ev.OrEmpty(r.Get("adapter")).Get("kind"), "live-import") && PyValue.Truthy(Ev.OrEmpty(r.Get("validation")).Get("accepted")))
-                live.Add((string)r.Get("checkId")!);
-        }
-        if (live.Count == 0)
-            return "no runtime observation was supplied to this run: nothing here says what the engine did at play time";
-        return "accepted live receipts for " + string.Join(", ", PyOrder.SortedByCodePoint(live))
-            + " say what the engine did in the conditions their flip plans list, and nothing about any other condition";
-    }
 
     static readonly Regex Bracket = new(@"\(.*\)$", RegexOptions.CultureInvariant);
 
@@ -332,7 +320,7 @@ public static class Disposition
             ["unjudgeablePopulations"] = unjudgeable,
             ["familiesUnsupportedOrManual"] = PyOrder.SortedByCodePoint(families).Cast<object?>().ToList(),
             ["scopeUnmeasured"] = Ev.G(plan["scope"], "unmeasured", new List<object?>()),
-            ["runtimeObservations"] = RuntimeObservationsSentence(receipts),
+            ["runtimeObservations"] = NoRuntimeObservations,
             ["notOptedIn"] = PyValue.Iter(plan["checks"]).Select(PyValue.Dict).Where(c => Ev.Eq(c.Get("status"), EvalStore.NotOptedIn))
                 .Select(c => c["checkId"]).ToList(),
         };

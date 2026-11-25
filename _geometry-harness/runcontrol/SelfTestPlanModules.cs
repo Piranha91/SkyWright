@@ -123,7 +123,6 @@ public static class SelfTestPlanModules
         RegistryCases(D(ka["registry"]));
         PatternCases(L(ka["patterns"]).Select(D).ToList());
         StateCases(D(ka["states"]));
-        PopulationCases(L(ka["populations"]).Select(D).ToList());
         MetaCases(L(ka["metaIni"]).Select(D).ToList());
         LiveCases(skip);
     }
@@ -366,25 +365,6 @@ public static class SelfTestPlanModules
             foreach (string code in new[] { "no-key", "chain-cycle", "chain-unresolved", "label-unknown", "label-ambiguous", "member-not-explorable",
                          "disabled-singletons", "player-parent", "unplaced-parent", "unreadable-plugins", "no-trigger-map", "combinations", "\"kind\": \"joint\",\n   \"switches\"", "\"covered\": [\n  {" })
                 if (!all.Contains(code)) return $"no census reaches {code}";
-            return null;
-        });
-    }
-
-    // ---- the live check's population
-
-    static void PopulationCases(List<PyDict> cases)
-    {
-        Case($"switch scope: the population and its sentence on {cases.Count} census and scope pairs", () => Rows(cases, row =>
-        {
-            var result = SwitchFlipScope.Population(D(PyJson.Loads(S(row["census"]))), D(PyJson.Loads(S(row["scope"]))));
-            return Same("population", PyJson.Canonical(result), S(row["population"])) ?? Same("sentence", SwitchFlipScope.Sentence(result), S(row["sentence"]));
-        }));
-        Case("switch scope: the cases reach every cause and both ways of touching", () =>
-        {
-            string all = string.Concat(cases.Select(r => S(r["population"])));
-            foreach (string code in new[] { "no-trigger-map", "unreadable-plugins", "scope-incomplete", "no-targets", "cells-unknown", "\"by\":\"plugin\"", "\"by\":\"cell\"",
-                         "\"status\":\"not-applicable\"", "\"status\":\"open\"" })
-                if (!all.Contains(code)) return $"no case reaches {code}";
             return null;
         });
     }

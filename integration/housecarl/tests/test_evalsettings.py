@@ -43,14 +43,14 @@ import evalsettings as ESET  # noqa: E402
 ENTRY = {"schema": 1, "id": "m", "evaluation": {}}
 
 
-def folded_flags(file: Path) -> tuple[list, dict, dict]:
+def folded_flags(file: Path) -> tuple[list, dict, dict, list]:
     """(the plan flags a lab run's plan stage passes for the measuring entry the module folds from this settings file,
-    the measuring entry, the settings record)."""
+    the measuring entry, the settings record, the checks the overlay opts in)."""
     s = ESET.load(str(file))
     entry, _ = EP.measuring_entry(json.loads(json.dumps(ENTRY)), s)
     ev = entry.get("evaluation") or {}
     flags = (["--no-reverse"] if ev.get("reverseComparison") is False else []) + [x for o in ev.get("optIn") or [] for x in ("--opt-in", o)]
-    return flags, entry, EP.settings_record(s)
+    return flags, entry, EP.settings_record(s), EP.overlay_opt_in(json.loads(json.dumps(ENTRY)), s)
 
 FAILURES, PASSED = [], []
 
@@ -128,15 +128,15 @@ def t2(root):
              f"liveSwitchCheck.gameExe={b.dir / 'game.exe'}"]
     r = b.es("set", "evaluation.liveSwitchCheck=always", "evaluation.reverseComparison=false", *paths)
     check(r.returncode == 0 and b.file.exists(), f"2: set writes the choices ({(r.stdout + r.stderr)[-300:]!r})")
-    flags, entry, record = folded_flags(b.file)
+    flags, entry, record, opt = folded_flags(b.file)
     run = b.dir / "plan-with-file"
-    p = ctl.plan(run, scen, flags, registry="fixture-check-registry-live.json",
-                 env_extra={"HOUSECARL_EVAL_SETTINGS": str(b.dir / "none" / NAME)})
-    if p.returncode:
-        check(False, f"2: the plan from the folded measuring entry ({(p.stdout + p.stderr)[-300:]!r})")
+    p = ctl.plan(run, scen, flags, env_extra={"HOUSECARL_EVAL_SETTINGS": str(b.dir / "none" / NAME)})
+    o, ai = ctl.overlay(run, scen, opt) if p.returncode == 0 else (p, None)
+    if p.returncode or o.returncode:
+        check(False, f"2: the plan from the folded measuring entry ({(p.stdout + p.stderr + o.stdout + o.stderr)[-300:]!r})")
     else:
         pl = load(run / "plan.json")
-        row = next((c for c in pl["checks"] if c["checkId"] == LIVE), None)
+        row = next((c for c in load(ai / "plan.json")["checks"] if c["checkId"] == LIVE), None)
         check(row is not None and row["required"] is True
               and {a["status"] for a in row["arms"]} <= {"live-import", "not-applicable"},
               "2: liveSwitchCheck always opts a lab run into the live check without --opt-in")
@@ -145,11 +145,11 @@ def t2(root):
     check(record.get("sha256") == sha(b.file) and record.get("schemaVersion") == 1,
           "2: the run's settings record carries the file's hash and schema")
     absent = b.dir / "plan-no-file"
-    flags0, entry0, _ = folded_flags(b.dir / "none" / NAME)
-    p0 = ctl.plan(absent, scen, flags0, registry="fixture-check-registry-live.json",
-                  env_extra={"HOUSECARL_EVAL_SETTINGS": str(b.file)})
-    if p0.returncode == 0:
-        row0 = next((c for c in load(absent / "plan.json")["checks"] if c["checkId"] == LIVE), None)
+    flags0, entry0, _, opt0 = folded_flags(b.dir / "none" / NAME)
+    p0 = ctl.plan(absent, scen, flags0, env_extra={"HOUSECARL_EVAL_SETTINGS": str(b.file)})
+    o0, ai0 = ctl.overlay(absent, scen, opt0) if p0.returncode == 0 else (p0, None)
+    if p0.returncode == 0 and o0.returncode == 0:
+        row0 = next((c for c in load(ai0 / "plan.json")["checks"] if c["checkId"] == LIVE), None)
         check(row0 is not None and {a["status"] for a in row0["arms"]} == {"not-opted-in"} and entry0 == ENTRY,
               "2 (red arm): with the file absent nothing is folded, and the plan shows the live check not opted in "
               "(even with the settings variable naming the file, which the plan does not read)")

@@ -10,7 +10,6 @@ public static class Plan
     public const int SchemaVersion = 2;
     /// <summary>What a plan's arms[].requested.providers means: the providers that arm's own view reads.</summary>
     public const string RequestProviders = "arm-view";
-    public const string LiveCheckId = "runtime.state-switch-flip";
     public const string NotOptedIn = "not-opted-in";
 
     /// <summary>The placeholders the controller fills in a check's adapter.args.</summary>
@@ -18,7 +17,7 @@ public static class Plan
     { "order", "emit", "json", "base", "out", "run", "arm", "target", "nexusId", "switchMap", "pair" };
 
     static readonly Regex PlaceholderForm = new(@"\{([A-Za-z0-9_]+)\}", RegexOptions.CultureInvariant);
-    static readonly string[] NeverRunKinds = ["unsupported", "mcp-only", "manual", "live-import"];
+    static readonly string[] NeverRunKinds = ["unsupported", "mcp-only", "manual"];
 
     /// <summary>An input path as the plan stores it: absolute against the current folder, links and mapped drives kept.</summary>
     public static string GivenPath(string p) => PyPath.NormPath(Path.GetFullPath(p));
@@ -409,7 +408,7 @@ public static class Plan
         var sceneArms = checks.Where(c => Py.D(c["adapter"]).Get("exe") as string == ScenePreflight.Probe)
             .SelectMany(c => Py.L(c["arms"]).Select(Py.D)).Where(x => x["status"] as string == "planned").Select(x => Py.S(x["armId"]))
             .ToHashSet(StringComparer.Ordinal);
-        var (preflightRefusals, preflightNotes) = ScenePreflight.Run(arms, options, harness, sceneArms, opted.Contains(LiveCheckId));
+        var (preflightRefusals, preflightNotes) = ScenePreflight.Run(arms, options, harness, sceneArms);
         if (preflightRefusals.Count > 0)
             throw new Refusal("overlapprobe's scene preflight, the check every scene capture runs, refused this plan; "
                               + "nothing was planned:\n   - " + string.Join("\n   - ", preflightRefusals));

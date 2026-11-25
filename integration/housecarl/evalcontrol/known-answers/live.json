@@ -1,0 +1,124 @@
+{
+ "about": "The live switch check's known answers, moved from runcontrol's plan-modules.json with the check (fifth implementer, step 3 of the boundary): populations unchanged; the two list variants with their row index in the shipped ai-checks.json.",
+ "populations": [
+  {
+   "name": "nothing drives a switch",
+   "census": "{\"summary\":{\"triggers\":{\"triggered\":1}},\"switches\":[{\"edid\":\"a\",\"key\":\"1:A.esp\",\"owner\":\"A.esp\",\"trigger\":{\"status\":\"Unknown\"}},{\"edid\":\"b\",\"key\":\"2:A.esp\",\"owner\":\"A.esp\",\"trigger\":null},{\"edid\":\"c\",\"key\":\"3:A.esp\",\"owner\":\"A.esp\"},\"not a switch\"]}",
+   "scope": "{\"complete\":true,\"targets\":[{\"footprint\":{\"placed\":{\"cells\":[{\"cell\":\"c1\"}]}},\"name\":\"A.esp\"}]}",
+   "population": "{\"causes\":[],\"counts\":{\"boundUnread\":0,\"population\":0,\"scriptDriven\":0,\"switches\":3,\"triggered\":0,\"undecided\":0},\"population\":[],\"status\":\"not-applicable\"}",
+   "sentence": "the census on this arm lists 3 switch(es); none that a quest or script drives touches a target by plugin or by cell (0 triggered and 0 bound-but-unread elsewhere), so there is nothing to flip"
+  },
+  {
+   "name": "driven switches that touch no target",
+   "census": "{\"summary\":{\"triggers\":{\"triggered\":1}},\"switches\":[{\"cellKey\":\"c9\",\"edid\":\"a\",\"key\":\"1:B.esp\",\"owner\":\"B.esp\",\"trigger\":{\"status\":\"Triggered\"}},{\"edid\":\"b\",\"key\":\"2:B.esp\",\"owner\":\"B.esp\",\"trigger\":{\"status\":\"BoundUnread\"}}]}",
+   "scope": "{\"complete\":true,\"targets\":[{\"footprint\":{\"placed\":{\"cells\":[{\"cell\":\"c1\"}]}},\"name\":\"A.esp\"}]}",
+   "population": "{\"causes\":[],\"counts\":{\"boundUnread\":1,\"population\":0,\"scriptDriven\":2,\"switches\":2,\"triggered\":1,\"undecided\":0},\"population\":[],\"status\":\"not-applicable\"}",
+   "sentence": "the census on this arm lists 2 switch(es); none that a quest or script drives touches a target by plugin or by cell (1 triggered and 1 bound-but-unread elsewhere), so there is nothing to flip"
+  },
+  {
+   "name": "touched by owner, placer, attacher and cell",
+   "census": "{\"summary\":{\"triggers\":{\"triggered\":1}},\"switches\":[{\"edid\":\"byOwner\",\"key\":\"1:a.ESP\",\"owner\":\"a.ESP\",\"trigger\":{\"status\":\"Triggered\"}},{\"edid\":\"byPlacer\",\"key\":\"2:B.esp\",\"onSet\":[{\"placer\":\"X.esp\"},{\"attacher\":null,\"placer\":\"A.esp\"},\"x\"],\"owner\":\"B.esp\",\"trigger\":{\"status\":\"BoundUnread\"}},{\"edid\":\"byAttacher\",\"key\":\"3:B.esp\",\"offSet\":[{\"attacher\":\"CAF\u00c9.esp\"}],\"owner\":null,\"trigger\":{\"status\":\"Triggered\"}},{\"cellKey\":\"c2\",\"edid\":\"byCell\",\"key\":\"4:B.esp\",\"owner\":\"B.esp\",\"trigger\":{\"status\":\"Triggered\"}},{\"cellKey\":\"c9\",\"edid\":\"byMemberCell\",\"key\":\"5:B.esp\",\"offSet\":[{\"cellKey\":\"c1\"}],\"onSet\":[{\"cellKey\":\"c8\"}],\"owner\":\"B.esp\",\"trigger\":{\"status\":\"BoundUnread\"}},{\"cellKey\":\"c9\",\"edid\":\"untouched\",\"key\":\"6:B.esp\",\"onSet\":null,\"owner\":\"B.esp\",\"trigger\":{\"status\":\"Triggered\"}},{\"edid\":\"notDriven\",\"key\":\"7:A.esp\",\"owner\":\"A.esp\",\"trigger\":{\"status\":\"Unknown\"}}]}",
+   "scope": "{\"complete\":true,\"targets\":[{\"footprint\":{\"placed\":{\"cells\":[{\"cell\":\"c1\"},{\"cell\":\"c2\"}]}},\"name\":\"A.esp\"},{\"footprint\":{\"placed\":{\"cells\":[]}},\"name\":\"caf\u00e9.esp\"},{\"name\":\"\"},\"x\",{\"footprint\":{}}]}",
+   "population": "{\"causes\":[],\"counts\":{\"boundUnread\":2,\"population\":5,\"scriptDriven\":6,\"switches\":7,\"triggered\":4,\"undecided\":0},\"population\":[{\"by\":\"plugin\",\"edid\":\"byOwner\",\"key\":\"1:a.ESP\",\"trigger\":\"Triggered\"},{\"by\":\"plugin\",\"edid\":\"byPlacer\",\"key\":\"2:B.esp\",\"trigger\":\"BoundUnread\"},{\"by\":\"plugin\",\"edid\":\"byAttacher\",\"key\":\"3:B.esp\",\"trigger\":\"Triggered\"},{\"by\":\"cell\",\"edid\":\"byCell\",\"key\":\"4:B.esp\",\"trigger\":\"Triggered\"},{\"by\":\"cell\",\"edid\":\"byMemberCell\",\"key\":\"5:B.esp\",\"trigger\":\"BoundUnread\"}],\"status\":\"open\"}",
+   "sentence": "5 script-driven switch(es) touch a target on this arm (4 triggered, 2 bound-but-unread in the whole census)"
+  },
+  {
+   "name": "a target whose cells are not listed",
+   "census": "{\"summary\":{\"triggers\":{\"triggered\":1}},\"switches\":[{\"edid\":\"byOwner\",\"key\":\"1:A.esp\",\"owner\":\"A.esp\",\"trigger\":{\"status\":\"Triggered\"}},{\"cellKey\":\"c1\",\"edid\":\"elsewhere\",\"key\":\"2:B.esp\",\"owner\":\"B.esp\",\"trigger\":{\"status\":\"Triggered\"}},{\"edid\":\"elsewhere2\",\"key\":\"3:B.esp\",\"owner\":\"B.esp\",\"trigger\":{\"status\":\"BoundUnread\"}}]}",
+   "scope": "{\"complete\":true,\"targets\":[{\"footprint\":{\"placed\":{\"cells\":null}},\"name\":\"A.esp\"},{\"name\":\"C.esp\"},{\"footprint\":{\"placed\":{\"cells\":[{\"cell\":\"c5\"}]}},\"name\":\"D.esp\"}]}",
+   "population": "{\"causes\":[{\"code\":\"cells-unknown\",\"detail\":\"2 script-driven switch(es) touch no target plugin, and the scope lists no placed cells for A.esp, C.esp, so whether they lie in a target's cells is unknown\"}],\"counts\":{\"boundUnread\":1,\"population\":1,\"scriptDriven\":3,\"switches\":3,\"triggered\":2,\"undecided\":2},\"population\":[{\"by\":\"plugin\",\"edid\":\"byOwner\",\"key\":\"1:A.esp\",\"trigger\":\"Triggered\"}],\"status\":\"open\"}",
+   "sentence": "1 script-driven switch(es) touch a target on this arm (2 triggered, 1 bound-but-unread in the whole census)"
+  },
+  {
+   "name": "cells not listed, nothing touched",
+   "census": "{\"summary\":{\"triggers\":{\"triggered\":1}},\"switches\":[{\"edid\":\"elsewhere\",\"key\":\"2:B.esp\",\"owner\":\"B.esp\",\"trigger\":{\"status\":\"Triggered\"}}]}",
+   "scope": "{\"complete\":true,\"targets\":[{\"footprint\":null,\"name\":\"A.esp\"}]}",
+   "population": "{\"causes\":[{\"code\":\"cells-unknown\",\"detail\":\"1 script-driven switch(es) touch no target plugin, and the scope lists no placed cells for A.esp, so whether they lie in a target's cells is unknown\"}],\"counts\":{\"boundUnread\":0,\"population\":0,\"scriptDriven\":1,\"switches\":1,\"triggered\":1,\"undecided\":1},\"population\":[],\"status\":\"open\"}",
+   "sentence": "1 script-driven switch(es) touch no target plugin, and the scope lists no placed cells for A.esp, so whether they lie in a target's cells is unknown"
+  },
+  {
+   "name": "no trigger map",
+   "census": "{\"summary\":{\"triggers\":null},\"switches\":[]}",
+   "scope": "{\"complete\":true,\"targets\":[{\"footprint\":{\"placed\":{\"cells\":[]}},\"name\":\"A.esp\"}]}",
+   "population": "{\"causes\":[{\"code\":\"no-trigger-map\",\"detail\":\"the census ran without the trigger map, so which switches a script drives is unknown\"}],\"counts\":{\"boundUnread\":0,\"population\":0,\"scriptDriven\":0,\"switches\":0,\"triggered\":0,\"undecided\":0},\"population\":[],\"status\":\"open\"}",
+   "sentence": "the census ran without the trigger map, so which switches a script drives is unknown"
+  },
+  {
+   "name": "no summary at all",
+   "census": "{}",
+   "scope": "{\"complete\":true,\"targets\":[{\"footprint\":{\"placed\":{\"cells\":[]}},\"name\":\"A.esp\"}]}",
+   "population": "{\"causes\":[{\"code\":\"no-trigger-map\",\"detail\":\"the census ran without the trigger map, so which switches a script drives is unknown\"}],\"counts\":{\"boundUnread\":0,\"population\":0,\"scriptDriven\":0,\"switches\":0,\"triggered\":0,\"undecided\":0},\"population\":[],\"status\":\"open\"}",
+   "sentence": "the census ran without the trigger map, so which switches a script drives is unknown"
+  },
+  {
+   "name": "unreadable plugins, more than five",
+   "census": "{\"summary\":{\"triggers\":{\"triggered\":1}},\"unreadable\":[\"a.esp\",\"b.esp\",3,\"d.esp\",\"e.esp\",\"f.esp\",\"g.esp\"]}",
+   "scope": "{\"complete\":true,\"targets\":[{\"footprint\":{\"placed\":{\"cells\":[]}},\"name\":\"A.esp\"}]}",
+   "population": "{\"causes\":[{\"code\":\"unreadable-plugins\",\"detail\":\"the census could not read 7 plugin(s) (a.esp, b.esp, 3, d.esp, e.esp), so their switches are absent, not zero\"}],\"counts\":{\"boundUnread\":0,\"population\":0,\"scriptDriven\":0,\"switches\":0,\"triggered\":0,\"undecided\":0},\"population\":[],\"status\":\"open\"}",
+   "sentence": "the census could not read 7 plugin(s) (a.esp, b.esp, 3, d.esp, e.esp), so their switches are absent, not zero"
+  },
+  {
+   "name": "scope not complete and no targets",
+   "census": "{\"summary\":{\"triggers\":{\"triggered\":1}},\"switches\":[{\"edid\":\"a\",\"key\":\"1:A.esp\",\"owner\":\"A.esp\",\"trigger\":{\"status\":\"Triggered\"}}]}",
+   "scope": "{\"complete\":\"yes\"}",
+   "population": "{\"causes\":[{\"code\":\"scope-incomplete\",\"detail\":\"the scope is not complete, so the targets are not known\"},{\"code\":\"no-targets\",\"detail\":\"the scope names no target plugin\"}],\"counts\":{\"boundUnread\":0,\"population\":0,\"scriptDriven\":1,\"switches\":1,\"triggered\":1,\"undecided\":0},\"population\":[],\"status\":\"open\"}",
+   "sentence": "the scope is not complete, so the targets are not known; the scope names no target plugin"
+  },
+  {
+   "name": "every cause at once",
+   "census": "{\"switches\":[{\"edid\":\"a\",\"key\":\"1:B.esp\",\"owner\":\"B.esp\",\"trigger\":{\"status\":\"Triggered\"}}],\"unreadable\":[\"a.esp\"]}",
+   "scope": "{\"complete\":false,\"targets\":[{\"name\":\"A.esp\"}]}",
+   "population": "{\"causes\":[{\"code\":\"no-trigger-map\",\"detail\":\"the census ran without the trigger map, so which switches a script drives is unknown\"},{\"code\":\"unreadable-plugins\",\"detail\":\"the census could not read 1 plugin(s) (a.esp), so their switches are absent, not zero\"},{\"code\":\"scope-incomplete\",\"detail\":\"the scope is not complete, so the targets are not known\"},{\"code\":\"cells-unknown\",\"detail\":\"1 script-driven switch(es) touch no target plugin, and the scope lists no placed cells for A.esp, so whether they lie in a target's cells is unknown\"}],\"counts\":{\"boundUnread\":0,\"population\":0,\"scriptDriven\":1,\"switches\":1,\"triggered\":1,\"undecided\":1},\"population\":[],\"status\":\"open\"}",
+   "sentence": "the census ran without the trigger map, so which switches a script drives is unknown; the census could not read 1 plugin(s) (a.esp), so their switches are absent, not zero; the scope is not complete, so the targets are not known; 1 script-driven switch(es) touch no target plugin, and the scope lists no placed cells for A.esp, so whether they lie in a target's cells is unknown"
+  },
+  {
+   "name": "open with a population and a cause",
+   "census": "{\"summary\":{\"triggers\":{\"triggered\":1}},\"switches\":[{\"edid\":\"a\",\"key\":\"1:A.esp\",\"owner\":\"A.esp\",\"trigger\":{\"status\":\"Triggered\"}}],\"unreadable\":[\"a.esp\"]}",
+   "scope": "{\"complete\":true,\"targets\":[{\"footprint\":{\"placed\":{\"cells\":[]}},\"name\":\"A.esp\"}]}",
+   "population": "{\"causes\":[{\"code\":\"unreadable-plugins\",\"detail\":\"the census could not read 1 plugin(s) (a.esp), so their switches are absent, not zero\"}],\"counts\":{\"boundUnread\":0,\"population\":1,\"scriptDriven\":1,\"switches\":1,\"triggered\":1,\"undecided\":0},\"population\":[{\"by\":\"plugin\",\"edid\":\"a\",\"key\":\"1:A.esp\",\"trigger\":\"Triggered\"}],\"status\":\"open\"}",
+   "sentence": "1 script-driven switch(es) touch a target on this arm (1 triggered, 0 bound-but-unread in the whole census)"
+  },
+  {
+   "name": "nothing at all",
+   "census": "{\"summary\":{\"triggers\":{\"triggered\":1}}}",
+   "scope": "{\"complete\":true,\"targets\":[{\"footprint\":{\"placed\":{\"cells\":[{\"cell\":\"c1\"}]}},\"name\":\"A.esp\"}]}",
+   "population": "{\"causes\":[],\"counts\":{\"boundUnread\":0,\"population\":0,\"scriptDriven\":0,\"switches\":0,\"triggered\":0,\"undecided\":0},\"population\":[],\"status\":\"not-applicable\"}",
+   "sentence": "the census on this arm lists 0 switch(es); none that a quest or script drives touches a target by plugin or by cell (0 triggered and 0 bound-but-unread elsewhere), so there is nothing to flip"
+  }
+ ],
+ "variants": [
+  {
+   "name": "an opt-in check that is required",
+   "ops": [
+    [
+     [
+      "checks",
+      6,
+      "required"
+     ],
+     "set",
+     true
+    ]
+   ],
+   "problems": [
+    "runtime.state-switch-flip: an opt-in check cannot be required by default (required must be false; opting in makes it required for that run)"
+   ]
+  },
+  {
+   "name": "a live check without optIn",
+   "ops": [
+    [
+     [
+      "checks",
+      6,
+      "optIn"
+     ],
+     "del"
+    ]
+   ],
+   "problems": [
+    "runtime.state-switch-flip: adapter kind live-import needs optIn: true (the controller never launches the game)"
+   ]
+  }
+ ]
+}

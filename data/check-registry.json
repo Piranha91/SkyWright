@@ -1058,39 +1058,6 @@
       "manualDecisionAllowed": false
     },
     {
-      "id": "runtime.state-switch-flip",
-      "family": "runtime",
-      "title": "Flipping the switches a mod's scripts flip, in the game, completes without a crash or a script stall",
-      "required": false,
-      "optIn": true,
-      "applicability": {
-        "trigger": {
-          "placed": true
-        },
-        "note": "A runtime switch flip needs enable markers driven by a quest or script; the switch census decides which groups exist on each arm, and the evaluator writes the flip plan from the census and the bound scripts' source. Opt-in: the controller never launches the game, so this check is planned only when the caller passes --opt-in, and an evaluation without it lists it as not opted in."
-      },
-      "prerequisites": [
-        "state.switch-census"
-      ],
-      "inputs": {
-        "arms": "all",
-        "states": "baseline"
-      },
-      "adapter": {
-        "kind": "live-import",
-        "exe": null,
-        "args": [],
-        "reverse": false,
-        "output": null
-      },
-      "evidence": {
-        "strength": "engine-observation",
-        "claim": null,
-        "limits": "A run of the game under the evaluated order, in the conditions the flip plan lists (the cell loaded or not, immediate or settled). It needs a scratch game instance and is never inferable from records. A completion is 'no failure under those conditions' and never 'safe'. A finding needs at least two measured failures on the arm; one failure beside one completion is unsettled. Contention on the machine confounds timing-sensitive failures, so every launch records its idle measurement. The verdict is about the order; which record causes a failure is a separate isolation question. No claim-ledger row exists yet."
-      },
-      "manualDecisionAllowed": false
-    },
-    {
       "id": "runtime.crash-performance-appearance",
       "family": "runtime",
       "title": "Crashes, stutter, appearance and gameplay under the evaluated configuration",

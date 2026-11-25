@@ -1,6 +1,8 @@
-namespace RunControl;
+using RunControl;
 
-/// <summary>`import-results` for a `live-import` check: a live game driver's receipts (evallive.py's import_live, ported
+namespace EvalControl;
+
+/// <summary>`evalcontrol import` for a `live-import` check (moved from runcontrol with the check): a live game driver's receipts (evallive.py's import_live, ported
 /// as the one owner of the rule; the first such check is `runtime.state-switch-flip`, fed by switchflip.py).
 ///
 /// What it refuses to trust. A live receipt says what the game did, so every claim in it is re-derived here:
@@ -127,7 +129,7 @@ public static class LiveImport
                           + $"waiting for a live receipt{hint}");
         }
         // the arm's own accepted census may already answer the check: nothing a script drives touches a target
-        var scopeRead = Ev.Eq(cid, Plan.LiveCheckId) ? Prerequisites.LiveSwitchScope(run, plan, ledger, aid) : null;
+        var scopeRead = Ev.Eq(cid, LiveScope.CheckId) ? LiveScope.Read(run, plan, ledger, aid) : null;
         if (PyValue.Truthy(scopeRead) && Ev.Eq(scopeRead!["status"], "not-applicable"))
             return Refuse($"wrong-check: {S(cid)} is not applicable on arm {S(aid)}: {SwitchFlipScope.Sentence(scopeRead)}. "
                           + "An import completes a check the run left open; it never overrides the census's answer");
@@ -264,6 +266,9 @@ public static class LiveImport
 
         if (Prerequisites.Satisfied(ledger, check, aid) is { } pre)
             errors.Add($"blocked-prerequisite: {Prerequisites.BlockDetail(ledger, pre, aid)}. Settle {pre} on this arm, then import again");
+        // ...and the app scan's, for an overlay row: its appPrerequisites (the switch census) are app checks
+        else if (RecordImport.AppGate(run, plan, check, aid) is { } appBlock)
+            errors.Add(appBlock);
         if (errors.Count > 0) return Refuse("import-results refused: " + string.Join("; ", errors));
 
         // ---- copy the evidence beside the run, then write the receipt

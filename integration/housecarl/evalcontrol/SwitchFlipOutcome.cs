@@ -1,9 +1,10 @@
 using System.Numerics;
+using RunControl;
 
-namespace RunControl;
+namespace EvalControl;
 
 /// <summary>The reading rule for the runtime state-switch check (`runtime.state-switch-flip`), its one owner. The live
-/// driver (through `runcontrol switchflip-outcome`) and the live import (LiveImport) both call it, so a
+/// driver (through `evalcontrol switchflip-outcome`) and the live import (LiveImport) both call it, so a
 /// receipt's stored classification can always be re-derived from its recorded events and is never trusted on its own.
 ///
 /// One launch's events after the flip starts:
@@ -129,7 +130,7 @@ public static class SwitchFlipOutcome
         return Reading("unsettled", $"{fails.Count} failure(s) and {comps.Count} completion(s) measured: run another replicate");
     }
 
-    /// <summary>`runcontrol switchflip-outcome`: one JSON request on standard input, one JSON answer on standard output,
+    /// <summary>`evalcontrol switchflip-outcome`: one JSON request on standard input, one JSON answer on standard output,
     /// for the live driver, which must not hold its own copy of the rule:
     ///   {"classify": {"events": [...], "flipStart": T, "windowSeconds"?: W}}  -> a Classify result
     ///   {"armReading": [classification, ...]}                                -> an ArmReading result

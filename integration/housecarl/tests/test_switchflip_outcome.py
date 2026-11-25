@@ -1,5 +1,5 @@
-"""Known answers for the runtime state-switch reading rule (its owner runcontrol/SwitchFlipOutcome.cs, asked through
-switchflip_outcome.py, the live driver's client; HOUSECARL_RUNCONTROL, else this checkout's build).
+"""Known answers for the runtime state-switch reading rule (its owner evalcontrol/SwitchFlipOutcome.cs, asked through
+switchflip_outcome.py, the live driver's client; HOUSECARL_EVALCONTROL, else the module's build).
 
 Dependency-free: `python _geometry-harness/tests/test_switchflip_outcome.py`.
 Each test names the wrong answer it rejects, so a sabotage sweep can point at the assertion that went red.

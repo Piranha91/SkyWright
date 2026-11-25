@@ -6,7 +6,7 @@ using RunControl;
 namespace EvalControl;
 
 /// <summary>`evalcontrol --self-test`: the known answers of the rules that moved here from runcontrol (the media rule,
-/// the record import), each under the name it had there (known-answers/*.json, moved unchanged; the Python controller recorded them). The helpers are the
+/// the record import, the live switch check), each under the name it had there (known-answers/*.json, moved unchanged; the Python controller recorded them). The helpers are the
 /// test harness's, not a rule. Prints one GREEN, RED or SKIP line per case and a total; exit 0 when nothing is red.</summary>
 public static partial class SelfTest
 {
@@ -29,6 +29,7 @@ public static partial class SelfTest
         foreach (var c in L(D(media["commands"])["cases"]).Select(D)) MediaCommandCase(c, D(media["commands"]));
         ImportCases(Load("import.json"));
         RecordsVerifyCases(Load("records-verify.json"));
+        LiveCases(Load("live.json"));
         Console.WriteLine($"{_green} green, {_red} red, 0 skipped");
         return _red == 0 ? 0 : 1;
     }

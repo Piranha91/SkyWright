@@ -31,7 +31,7 @@ noted. Each launch is a `scripts/runlog.py` Runner child with a
 deadline, and runs: profile snapshot, launch outside this shell's job object, readiness, strict game-capture
 recording, one arrival (a new game and `coc`), the calls (send and return times, a readback before and after each
 call), the observation window (heartbeat, process liveness), crash-log capture, teardown, MO2 close, profile
-restore proof. The classification is the built-in controller's reading rule (runcontrol switchflip-outcome, asked
+restore proof. The classification is the module's reading rule (evalcontrol switchflip-outcome, asked
 through switchflip_outcome.py), written beside the events it was read from; the receipt names that build's digest.
 
 Exit codes: 0 block finished; 2 usage or a refused input; 3 refused by the idle gate or the lock; 4 a launch failed
@@ -60,7 +60,7 @@ import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is: its t
 REPO = SW.CHECKOUT
 DBHARNESS_DIR = REPO / "external" / "houseCARL" / ".claude" / "skills" / "devbench-in-game-testing" / "scripts"
 
-import switchflip_outcome as O  # noqa: E402  (asks the rule's owner, runcontrol switchflip-outcome)
+import switchflip_outcome as O  # noqa: E402  (asks the rule's owner, evalcontrol switchflip-outcome)
 import machineidle  # noqa: E402
 
 PLAN_SCHEMA = 1
@@ -798,7 +798,7 @@ def cmd_launch(a) -> int:
 # --------------------------------------------------------------------------------------------- export --
 
 def cmd_export(a) -> int:
-    """Assemble one arm's live import document from a block's launch folders, for `runcontrol import-results --file`."""
+    """Assemble one arm's live import document from a block's launch folders, for `evalcontrol import --file`."""
     block = Path(a.block)
     doc = json.loads((block / "flipplan.json").read_text(encoding="utf-8"))
     if not doc.get("binding"):
@@ -887,7 +887,7 @@ def main(argv=None) -> int:
             p.add_argument("--plan-sha", required=True)
             p.add_argument("--idle-json", required=True)
             p.set_defaults(fn=cmd_launch)
-    p = sub.add_parser("export", help="assemble one arm's live import document (for runcontrol import-results --file)")
+    p = sub.add_parser("export", help="assemble one arm's live import document (for evalcontrol import --file)")
     p.add_argument("--block", required=True)
     p.add_argument("--arm", required=True)
     p.add_argument("--out", required=True)

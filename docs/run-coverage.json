@@ -217,11 +217,12 @@
       "path": "integration/housecarl/evalcontrol/evalcontrol.csproj",
       "adapter": "csharp",
       "stageSource": "counted",
-      "note": "The AI-side evaluation's checks, as an overlay on a finished app scan: ai-checks.json's rows planned over the app plan's arms into RUN/ai, evaluated, finalized, bundled beside the app bundle and verified with it, all by runcontrol's own rules (runcontrol.dll from the app build is used as a library; evalcontrol holds no copy of a runcontrol rule), plus the rules only these rows need (the supplied-media rule; the record import, `import`, moved from runcontrol's import-results with the record checks, its app prerequisites read from the bound app bundle's ledger; the checks of a record import's receipt and of the record-rows and order-variant rows derived from it, at verify). verify is the one owner of aiEvaluation.complete (both bundles verify and both evaluations are complete). Its run-log ops are evalcontrol-<command>; children it starts through runcontrol's launcher record under evalcontrol-<op>, never runcontrol-<op>. Its known answers are known-answers/*.json and its own cases (--self-test, run by the module's tests).",
+      "note": "The AI-side evaluation's checks, as an overlay on a finished app scan: ai-checks.json's rows planned over the app plan's arms into RUN/ai, evaluated, finalized, bundled beside the app bundle and verified with it, all by runcontrol's own rules (runcontrol.dll from the app build is used as a library; evalcontrol holds no copy of a runcontrol rule), plus the rules only these rows need (the supplied-media rule; the record import, `import`, moved from runcontrol's import-results with the record checks, its app prerequisites read from the bound app bundle's ledger; the checks of a record import's receipt and of the record-rows and order-variant rows derived from it, at verify; the live switch check: its live import (LiveImport, the switch-flip reading rule SwitchFlipOutcome and the switch scope SwitchFlipScope, moved from runcontrol with the check), its not-applicable reading from the app scan's census in the bound app bundle at evaluate, and `switchflip-outcome`, the reading rule's answer for the live driver, which opens no run-log record). verify is the one owner of aiEvaluation.complete (both bundles verify and both evaluations are complete). Its run-log ops are evalcontrol-<command>; children it starts through runcontrol's launcher record under evalcontrol-<op>, never runcontrol-<op>. Its known answers are known-answers/*.json and its own cases (--self-test, run by the module's tests).",
       "answers": [
         "How do I plan, measure, bundle and verify the AI-side checks of an evaluation over a finished app scan?",
         "Is an AI-side evaluation complete, and does its overlay bundle still bind to the app bundle it was made over?",
-        "How do I import a record reader's evidence for a record check the overlay left open?"
+        "How do I import a record reader's evidence for a record check the overlay left open?",
+        "How does the live driver ask the switch-flip reading rule, and how is its export imported?"
       ],
       "useWhen": "Run or check the rows only an AI-driven evaluation serves (ai-checks.json), after runcontrol has bundled the app scan; evalpipeline.py does this for a lab entry.",
       "evidence": [
@@ -245,14 +246,15 @@
         "--app": "plan: the app scan's evaluation folder (its plan.json); verify: the app bundle, when it is not the one the overlay names",
         "--app-bundle": "plan: the app scan's bundle the overlay binds to",
         "--out": "plan: the new overlay run folder; bundle: the overlay bundle folder; verify: the verify.json to write",
-        "--opt-in": "plan: plan an opt-in check of the list (repeatable)",
+        "--opt-in": "plan: plan an opt-in check of the list (repeatable; the live switch check is the list's one)",
         "--run": "evaluate, import, finalize, bundle: the overlay run folder",
         "--media": "bundle: the supplied pictures and clips (media item schema 2), each checked against the configurations the app scan's accepted receipts measured",
         "--registry": "bundle: the list file the overlay plan froze, when it has moved",
         "--scope": "bundle: the scope file the overlay plan froze, when it has moved",
         "--search": "bundle: the candidate search the overlay plan froze, when it has moved",
-        "--file": "import: the import document (schema 1) to bind to one arm the overlay left open",
-        "--rebuild-ledger": "evaluate: rebuild the ledger from the journal and the receipts first (runcontrol's rule)"
+        "--file": "import: the import document (schema 1) to bind to one arm the overlay left open: a record reader's evidence or a live game driver's export (switchflip.py export)",
+        "--rebuild-ledger": "evaluate: rebuild the ledger from the journal and the receipts first (runcontrol's rule)",
+        "--list": "plan: a list of the same schema in place of the shipped ai-checks.json, validated the same way (a suite's trim)"
       }
     },
     {
@@ -5723,7 +5725,7 @@
       "path": "integration/housecarl/switchflip_outcome.py",
       "adapter": "none",
       "stageSource": "unknown",
-      "exempt": "Imported client with no command line of its own: switchflip.py owns the run-log lifecycle, and the calls this module makes into `runcontrol switchflip-outcome` run inside that run. tests/test_switchflip_outcome.py exercises it offline and is a test under the discovery rule.",
+      "exempt": "Imported client with no command line of its own: switchflip.py owns the run-log lifecycle, and the calls this module makes into `evalcontrol switchflip-outcome` (and runcontrol identity for the build's digest) run inside that run. tests/test_switchflip_outcome.py exercises it offline and is a test under the discovery rule.",
       "answers": [
         "How is one live switch-flip launch classified, and when does an arm's reading settle?"
       ],
@@ -6973,7 +6975,7 @@
       "path": "_geometry-harness/runcontrol/runcontrol.csproj",
       "adapter": "csharp",
       "stageSource": "counted",
-      "note": "The evaluation run controller, the one owner of census to bundle: the pipeline driver (run, arms, status) with the stages census, prepare, scope, plan, evaluate, records, scenes and bundle, and the commands plan, run, resume, status, import-results, finalize, bundle, verify-bundle, population and ordersweep, over the foundations (the JSON bytes, hashes, orderings and text forms its files are read in, the program identity rule, the stage ledger). run and status are the pipeline's with --entry or --out and evalrun's with --run. run and resume measure every check: a probe launched on its own (scopeprobe, probe-emit, probe-json, probe-target, adviceprobe, patchprobe), the swept checks through one ordersweep child whose job records are split into arm, reverse and diff receipts, and the derived checks (order evaluation, candidate qualification) from other receipts; every row that is not measured is accounted. The bundle stage starts finalize, bundle and verify-bundle one after the other. --through report-plan or later is refused: those stages are evalpipeline.py's, which continues a run folder this program took through bundle. For a lab entry the records stage starts the record capture, which stays the Python tool evalrecords.py (python from the machine file's key python, else python.exe on PATH; without one the stage refuses in one sentence), then this program's own import-results for each import document the capture wrote; an in-place entry's records stage starts nothing. import-results binds a record reader's evidence to one arm the plan left open: its origin (fresh, by the capture token in every MCP initialize request, or a declared reuse), its identity against the arm's frozen request and the prerequisite gate are checked before anything is copied; a live game driver's export is refused in one sentence: it is not available until evallive.py is ported. A plan is bound to the controller build that froze it (tool-changed, naming the controller). A run file of a shape the rules cannot read is refused in one sentence, exit 2. The profile, each plugin's copy in every layer, each header, what unfits a delta for a population and the configuration fingerprint are the probes' own (Mo2LoadOrder, HarnessOrderCli, PluginHeader, PopulationRules, ConfigurationIdentity). The pipeline's run records under the run-log op evalpipeline, which the workbench reads; plan under evalrun-plan, run and resume under evalrun-checks with one evalrun-check child per probe and one for the sweep, import-results under evalrun-import-results, finalize under evalrun-finalize, bundle under evalrun-bundle. Its known answers are recorded in known-answers/*.json (first from the Python controller, now retired) and in its own cases; a behaviour change gets a new known answer from what the game does.",
+      "note": "The evaluation run controller, the one owner of census to bundle: the pipeline driver (run, arms, status) with the stages census, prepare, scope, plan, evaluate, records, scenes and bundle, and the commands plan, run, resume, status, finalize, bundle, verify-bundle, population and ordersweep, over the foundations (the JSON bytes, hashes, orderings and text forms its files are read in, the program identity rule, the stage ledger). run and status are the pipeline's with --entry or --out and evalrun's with --run. run and resume measure every check: a probe launched on its own (scopeprobe, probe-emit, probe-json, probe-target, adviceprobe, patchprobe), the swept checks through one ordersweep child whose job records are split into arm, reverse and diff receipts, and the derived checks (order evaluation, candidate qualification) from other receipts; every row that is not measured is accounted. The bundle stage starts finalize, bundle and verify-bundle one after the other. --through report-plan or later is refused: those stages are evalpipeline.py's, which continues a run folder this program took through bundle. For a lab entry the records stage starts the record capture, which stays the Python tool evalrecords.py (python from the machine file's key python, else python.exe on PATH; without one the stage refuses in one sentence), then this program's own import-results for each import document the capture wrote; an in-place entry's records stage starts nothing. import-results binds a record reader's evidence to one arm the plan left open: its origin (fresh, by the capture token in every MCP initialize request, or a declared reuse), its identity against the arm's frozen request and the prerequisite gate are checked before anything is copied; a live game driver's export is refused in one sentence: it is not available until evallive.py is ported. A plan is bound to the controller build that froze it (tool-changed, naming the controller). A run file of a shape the rules cannot read is refused in one sentence, exit 2. The profile, each plugin's copy in every layer, each header, what unfits a delta for a population and the configuration fingerprint are the probes' own (Mo2LoadOrder, HarnessOrderCli, PluginHeader, PopulationRules, ConfigurationIdentity). The pipeline's run records under the run-log op evalpipeline, which the workbench reads; plan under evalrun-plan, run and resume under evalrun-checks with one evalrun-check child per probe and one for the sweep, import-results under evalrun-import-results, finalize under evalrun-finalize, bundle under evalrun-bundle. Its known answers are recorded in known-answers/*.json (first from the Python controller, now retired) and in its own cases; a behaviour change gets a new known answer from what the game does. import-results and switchflip-outcome are refused in one sentence each: an import binds evidence to an AI-side evaluation's row, and the switch-flip reading rule is the live switch check's, both the houseCARL integration module's.",
       "answers": [
         "Does the run controller still write the JSON bytes, hashes, orderings and stage ledger its known answers record?",
         "What is the package identity digest of a probe's or the controller's build folder, without starting Python?",
@@ -9240,24 +9242,24 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_evallive.py",
-      "path": "_geometry-harness/tests/test_evallive.py",
+      "id": "integration/housecarl/tests/test_evallive.py",
+      "path": "integration/housecarl/tests/test_evallive.py",
       "kind": "script",
       "answers": [
-        "Do opt-in live checks leave defaults unchanged and refuse bad live imports?"
+        "Does the AI-side overlay's opt-in live check leave defaults unchanged, and does evalcontrol import refuse bad live imports?"
       ],
-      "useWhen": "Qualify the opt-in plan behaviour and the live import binding through the real controller.",
+      "useWhen": "Qualify the overlay's opt-in plan behaviour and the live import binding through SkyWright's controller and evalcontrol.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_evallive.py",
+          "path": "integration/housecarl/tests/test_evallive.py",
           "anchor": "Known answers for the opt-in live-import lane"
         }
       ],
       "inputs": [
-        "Controlled fixtures for test_evallive."
+        "The evalrun fixtures (SkyWright's fixture registry, no AI-side row), the app run bundled, and the AI-side overlay over it."
       ],
       "outputs": [
-        "Assertion results or generated fixture data for: Do opt-in live checks leave defaults unchanged and refuse bad live imports?"
+        "Assertion results for: Does the AI-side overlay's opt-in live check leave defaults unchanged, and does evalcontrol import refuse bad live imports?"
       ]
     },
     {

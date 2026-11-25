@@ -3,8 +3,8 @@
 
     python integration/housecarl/tests/test_measuring_entry.py
 
-    M1  reverseComparison off and the live check always reach the measuring entry (evaluation.reverseComparison false,
-        runtime.state-switch-flip in evaluation.optIn); every other key of the entry, its id, its relative paths and its
+    M1  reverseComparison off reaches the measuring entry (evaluation.reverseComparison false) and the live check
+        always reaches the overlay's opt-ins (overlay_opt_in), never the entry runcontrol plans from; every other key of the entry, its id, its relative paths and its
         presentation keys, is unchanged. Wrong answer: a fold that rewrites, reorders into new values or drops a key.
     M2  default settings leave the measuring entry equal to the entry, so a run folder measured before is reused.
     M3  a model setting changes the run's settings record and not the measuring entry. Wrong answer: the model choice
@@ -56,7 +56,7 @@ def missing(*names):
 
 
 def main() -> int:
-    why = missing("measuring_entry", "settings_record")
+    why = missing("measuring_entry", "settings_record", "overlay_opt_in")
     if why:
         for n in ("M1", "M2", "M3", "M4", "M5"):
             check(n, False, why)
@@ -66,10 +66,11 @@ def main() -> int:
                                                                        "liveSwitchCheck": {"instance": "X:/i", "shortcut": "X:/s.lnk", "gameExe": "X:/g.exe"}}))
     want = copy.deepcopy(ENTRY)
     want["evaluation"]["reverseComparison"] = False
-    want["evaluation"]["optIn"] = [LIVE]
     others_same = all(folded.get(k) == ENTRY.get(k) for k in ENTRY if k != "evaluation") and set(folded) == set(ENTRY)
     ev_same = all(folded["evaluation"].get(k) == ENTRY["evaluation"].get(k) for k in ENTRY["evaluation"] if k != "optIn")
-    check("M1", folded == want and others_same and ev_same and list(folded) == list(ENTRY),
+    ai = EP.overlay_opt_in(copy.deepcopy(ENTRY), settings({"evaluation": {"liveSwitchCheck": "always"},
+                                                        "liveSwitchCheck": {"instance": "X:/i", "shortcut": "X:/s.lnk", "gameExe": "X:/g.exe"}}))
+    check("M1", folded == want and others_same and ev_same and list(folded) == list(ENTRY) and ai == [LIVE],
           f"folded {json.dumps(folded)[:300]}")
     plain, _ = EP.measuring_entry(copy.deepcopy(ENTRY), settings(None))
     plain2, _ = EP.measuring_entry(copy.deepcopy(ENTRY), settings({"evaluation": {"reverseComparison": True, "liveSwitchCheck": "off"}}))

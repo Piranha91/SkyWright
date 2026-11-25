@@ -12,19 +12,21 @@ public static class AiList
     public static string Shipped => Path.Combine(AppContext.BaseDirectory, FileName);
 
     /// <summary>The adapter kinds an AI-side row may have. media: supplied pictures and clips, assessed at bundle;
-    /// mcp-only: a check only houseCARL's record tools read, left open by the plan for `evalcontrol import`.</summary>
+    /// mcp-only: a check only houseCARL's record tools read, left open by the plan for `evalcontrol import`;
+    /// live-import: a check a live game driver measures (the live switch check), planned only when opted in, open
+    /// until `evalcontrol import` binds the driver's export.</summary>
     public static readonly Registry.Vocabulary Vocabulary = new(
-        AdapterKinds: new HashSet<string>(StringComparer.Ordinal) { "media", "mcp-only" },
+        AdapterKinds: new HashSet<string>(StringComparer.Ordinal) { "media", "mcp-only", "live-import" },
         KindsNeedingReason: new HashSet<string>(StringComparer.Ordinal) { "mcp-only" },
         ResultKinds: new HashSet<string>(StringComparer.Ordinal),
-        KindsWithoutOutput: new HashSet<string>(StringComparer.Ordinal) { "media", "mcp-only" },
-        KindsRequiringOptIn: new HashSet<string>(StringComparer.Ordinal),
+        KindsWithoutOutput: new HashSet<string>(StringComparer.Ordinal) { "media", "mcp-only", "live-import" },
+        KindsRequiringOptIn: new HashSet<string>(StringComparer.Ordinal) { "live-import" },
         KindsWithChild: new HashSet<string>(StringComparer.Ordinal),
-        EvidenceStrengths: new HashSet<string>(StringComparer.Ordinal) { "supplied-media", "record-fact" });
+        EvidenceStrengths: new HashSet<string>(StringComparer.Ordinal) { "supplied-media", "record-fact", "engine-observation" });
 
-    /// <summary>The kinds the overlay plan records by their own name and never runs: an mcp-only row waits for an
-    /// import. (A media row is planned and accounted at evaluate, then assessed by bundle --media.)</summary>
-    public static readonly string[] NeverRunKinds = ["mcp-only"];
+    /// <summary>The kinds the overlay plan records by their own name and never runs: an mcp-only or live-import row
+    /// waits for an import. (A media row is planned and accounted at evaluate, then assessed by bundle --media.)</summary>
+    public static readonly string[] NeverRunKinds = ["mcp-only", "live-import"];
 
     /// <summary>Every problem with the list: runcontrol's validator with this vocabulary, and each appPrerequisites
     /// entry naming a check of the app plan.</summary>
