@@ -178,7 +178,37 @@ def plan_oracles(tmp):
         ER.assert_plan(plan, {"plan": {"checks": {"runtime.supplied-observations": oracle}}}, case)
 
 
-CASES = {"case-10": case_10, "C1933": c1933, "plan-oracles": plan_oracles}
+RECORD_IDS = ("loadability.dangling-references", "records.cell-attributes")
+RECORD_EXTRAS = {"case-02-select-three-probes": ["--select", "navownprobe,overlapprobe,contactprobe"],
+                 "case-04-blocked-and-budget": ["--max-candidates", "1", "--exclude",
+                                                "geometry.placement-contact=not-relevant-to-this-review"]}
+
+
+def record_oracles(tmp):
+    """The oracles the app suite held for its trim's two record rows (fixtures/evalrun/expected, before 9B; rules 1-3 of
+    work/rerecord_evalrun_oracles_9b.py took them out), under the same labels, on the overlay over each case's app run:
+    plan (cases 01, 02, 04: applicability yes, status mcp-only; the overlay takes no --select, and an mcp-only row is
+    planned mcp-only under the app's --select as before), ledger (case 01's baseline: execution mcp-only) and missing
+    (every case whose oracle listed them: required and never completable without an import). Each case's app run is
+    test_evalrun's full_run with that case's plan arguments (cases 08 and 10 included: their own flows after the plan
+    do not touch the overlay's rows)."""
+    plan_oracle = {"applicability": "yes", "status": "mcp-only"}
+    for case in ("case-01-geometry-and-quest", "case-02-select-three-probes", "case-03-null-and-extraction",
+                 "case-04-blocked-and-budget", "case-05-rejections", "case-06-attribution", "case-07-combined-regression",
+                 "case-08-interrupt-resume", "case-10-discovery-media"):
+        run = tmp / f"records-{case}"
+        ER.full_run(run, case, plan_extra=RECORD_EXTRAS.get(case))
+        ai = overlay(run)
+        if case in ("case-01-geometry-and-quest", "case-02-select-three-probes", "case-04-blocked-and-budget"):
+            ER.assert_plan(load(ai / "plan.json") or {}, {"plan": {"checks": {i: plan_oracle for i in RECORD_IDS}}}, case)
+        if case == "case-01-geometry-and-quest":
+            ER.assert_ledger(load(ai / "ledger.json") or {},
+                             {"ledger": {f"{i}__baseline": {"execution": "mcp-only", "detector": None, "rejection": None}
+                                         for i in RECORD_IDS}}, case)
+        ER.assert_disposition(load(ai / "disposition.json") or {}, {"disposition": {"missingIncludes": list(RECORD_IDS)}}, case)
+
+
+CASES = {"case-10": case_10, "C1933": c1933, "plan-oracles": plan_oracles, "record-oracles": record_oracles}
 
 
 # ------------------------------------------------------------------ the record checks (9B)
