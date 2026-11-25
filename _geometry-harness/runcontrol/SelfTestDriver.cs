@@ -143,15 +143,15 @@ public static partial class SelfTest
             if (DiskForecast.EvaluatedRecords(res) != 27) return $"evaluated records {DiskForecast.EvaluatedRecords(res)}, expected 10 + 17";
             var p = new StandInPipeline(t.At("run"), res, hook: (name, ctx, sdir) =>
             {
-                if (name == "records") File.WriteAllBytes(PyPath.Join(sdir, "transcript.bin"), new byte[4000]);
-                if (name == "bundle") NativeFile.HardLink(PyPath.Join(sdir, "transcript.bin"), PyPath.Join(ctx.Out, "records", "transcript.bin"));
+                if (name == "scenes") File.WriteAllBytes(PyPath.Join(sdir, "transcript.bin"), new byte[4000]);
+                if (name == "bundle") NativeFile.HardLink(PyPath.Join(sdir, "transcript.bin"), PyPath.Join(ctx.Out, "scenes", "transcript.bin"));
                 return null;
             });
             var (rc, _) = p.Run(Json("{\"evaluation\": {}}"));
             if (rc != Exit.Ok) return $"the run did not finish (exit {rc})";
             var stages = D(new StageLedger(p.Out).Doc["stages"]);
-            string records = PyJson.Dumps(D(stages["records"]).Get("disk")), bundle = PyJson.Dumps(D(D(stages["bundle"])["disk"]).Get("addedBytes"));
-            return Same("records stage disk", records, "{\"addedBytes\": 4002, \"evaluatedRecords\": 27}") ?? Same("the bundle's added bytes", bundle, "2");
+            string scenes = PyJson.Dumps(D(stages["scenes"]).Get("disk")), bundle = PyJson.Dumps(D(D(stages["bundle"])["disk"]).Get("addedBytes"));
+            return Same("scenes stage disk", scenes, "{\"addedBytes\": 4002, \"evaluatedRecords\": 27}") ?? Same("the bundle's added bytes", bundle, "2");
         });
         Case("case 2327 the disk forecast uses measured figures, names them and keeps the floor", () =>
         {

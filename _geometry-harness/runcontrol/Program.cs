@@ -5,7 +5,7 @@ using RunControl;
 
 // RUNCONTROL: the evaluation run controller, the one owner of census to bundle.
 //
-// The pipeline driver and its stages census, prepare, scope, plan, evaluate, records, scenes and bundle, and the
+// The pipeline driver and its stages census, prepare, scope, plan, evaluate, scenes and bundle, and the
 // commands plan, run, resume, status, finalize, bundle, verify-bundle, population and the order sweep,
 // over the foundations (the JSON bytes, hashes, orderings and text forms its files are read in, the program identity
 // rule, the stage ledger). The names in brackets below are the Python commands each replaced. SkyWright's registry has

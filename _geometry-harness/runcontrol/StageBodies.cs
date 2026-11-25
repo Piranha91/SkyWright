@@ -3,14 +3,14 @@ namespace RunControl;
 /// <summary>A stage's work: what it bound, and the outputs its receipt fingerprints.</summary>
 public delegate (PyDict? bound, List<string> outputs) StageBody(RunContext ctx, PyDict res, string stageDir);
 
-/// <summary>The stage bodies this controller has: census, prepare, scope and plan here, evaluate, records and scenes in
+/// <summary>The stage bodies this controller has: census, prepare, scope and plan here, evaluate and scenes in
 /// StageEvaluate, bundle in StageBundle.</summary>
 public static class StageBodies
 {
     public static Dictionary<string, StageBody> Built() => new(StringComparer.Ordinal)
     {
         ["census"] = Census, ["prepare"] = Prepare, ["scope"] = Scope, ["plan"] = Plan,
-        ["evaluate"] = StageEvaluate.Evaluate, ["records"] = StageRecords.Records, ["scenes"] = StageEvaluate.Scenes,
+        ["evaluate"] = StageEvaluate.Evaluate, ["scenes"] = StageEvaluate.Scenes,
         ["bundle"] = StageBundle.Bundle,
     };
 

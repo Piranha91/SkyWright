@@ -5,7 +5,7 @@ controller made.
     python integration/housecarl/evalpipeline.py status --out RUN
     runcontrol run --entry ENTRY.json --out RUN [--machine MACHINE.json] --through bundle      (an in-place entry's census to bundle)
 
-What this is for. Census to bundle (census, prepare, scope, plan, evaluate, records, scenes, bundle) are run by the
+What this is for. Census to bundle (census, prepare, scope, plan, evaluate, scenes, bundle) are run by the
 built-in controller, runcontrol (_geometry-harness/runcontrol), which derives the arms and their order from the entry and
 writes RUN/stages.json, RUN/arms.json and RUN/prepare/preparation.json. For a lab entry this driver starts runcontrol
 itself through the bundle, then the AI-side overlay over it (evalcontrol plan and evaluate), the record capture (the
@@ -59,7 +59,7 @@ import buildlayout  # noqa: E402  where the build put runcontrol and viewprobe
 from evalbase import (Refusal, sha256_file, fwd, _header_fields, plugin_header, plugin_records,  # noqa: E402,F401
                       RUNCONTROL_ENV, runcontrol_exe, verify_bundle_argv)
 
-STAGES = ("census", "prepare", "scope", "plan", "evaluate", "records", "scenes", "bundle", "precedent",
+STAGES = ("census", "prepare", "scope", "plan", "evaluate", "scenes", "bundle", "precedent",
           "report-plan", "capture", "image-observations", "report", "reel", "deliver")
 NON_BLOCKING = frozenset({"precedent"})
 #: entry fields that change only what is presented (names, patch search, report shape); measuring stages ignore them

@@ -747,16 +747,16 @@ def case_2326_a_stage_receipt_records_the_bytes_it_added_with_each_file_once():
         assert EP.evaluated_records(res) == 27, f"evaluated records {EP.evaluated_records(res)}, expected 10 + 17"
 
         def write(name, ctx, sdir):
-            if name == "records":
+            if name == "scenes":
                 (sdir / "transcript.bin").write_bytes(b"z" * 4000)
             if name == "bundle":
-                os.link(ctx.out / "records" / "transcript.bin", sdir / "transcript.bin")
+                os.link(ctx.out / "scenes" / "transcript.bin", sdir / "transcript.bin")
             return None
         out, got = _run_pipeline(t, {}, [], [{"evaluation": {}}], refuse_when=write, res=res)
         stages = EP.StageLedger(out).doc["stages"]
     assert got[0][0] == EP.EXIT_OK, f"the run did not finish: {got}"
-    rec, bun = stages["records"].get("disk") or {}, stages["bundle"].get("disk") or {}
-    assert rec == {"addedBytes": 4002, "evaluatedRecords": 27}, f"records stage disk {rec}, expected 4000 + its 2-byte receipt"
+    rec, bun = stages["scenes"].get("disk") or {}, stages["bundle"].get("disk") or {}
+    assert rec == {"addedBytes": 4002, "evaluatedRecords": 27}, f"scenes stage disk {rec}, expected 4000 + its 2-byte receipt"
     assert bun.get("addedBytes") == 2, f"the bundle's linked transcript was counted again: {bun}"
 
 
@@ -847,7 +847,7 @@ def case_2324_a_run_through_report_plan_needs_every_partner_pair_searched_before
                                                      ("PBm.esp", "S.esp"): TOOLS2})}
         assert EP.patch_search_refusal(ctx, res, "deliver") is None, "a covered entry (any case) must pass"
         ctx.entry = {}
-        assert EP.patch_search_refusal(ctx, res, "records") is None, "a run that stops before report-plan is not checked"
+        assert EP.patch_search_refusal(ctx, res, "scenes") is None, "a run that stops before report-plan is not checked"
         calls = []
         out, got = _run_pipeline(t, {}, calls, [{"evaluation": {}}], res=res)
         status = json.loads((out / "status.json").read_text(encoding="utf-8"))
@@ -970,7 +970,7 @@ def case_2332_a_controller_run_folder_is_continued_reusing_census_to_bundle_and_
             EP.STAGE_BODIES.update(saved)
             os.environ.pop("HOUSECARL_RUNLOG_DIR", None)
     assert rc == EP.EXIT_OK, (rc, text)
-    for name in ("census", "prepare", "scope", "plan", "evaluate", "records", "bundle"):
+    for name in ("census", "prepare", "scope", "plan", "evaluate", "bundle"):
         assert f"{name}: reused (inputs and outputs unchanged)" in text, f"{name} was not reused: {text}"
     assert "scenes: refused, not blocking: overlap scene acquisition is not built in this version." in text, text
     assert ran == [("precedent", ["S.esp", "Sc.esp"])], ran

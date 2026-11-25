@@ -2,7 +2,7 @@ using HousecarlCore.Progress;
 
 namespace RunControl;
 
-// The evaluate, records and scenes stages, the evaluation's own child stood in for: which command the stage starts,
+// The evaluate and scenes stages, the evaluation's own child stood in for: which command the stage starts,
 // how long it holds the machine slot, when it starts it again, and what it leaves for the next run.
 public static partial class SelfTest
 {
@@ -149,12 +149,10 @@ public static partial class SelfTest
             var (jobs, first) = EvaluateStages(t, entry, (job, n) => { StandInLedger(run, "completed", "stopped(deadline)", "skipped-budget", "skipped-user"); return Done(job); });
             const string open = "evaluate: refused, not blocking: evaluation stopped at its budget of 90 min with 2 rows open (1 stopped, 1 not started); "
                                 + "run again to resume them (each run gets a fresh budget), or raise the entry's budgetMinutes.";
-            if (!first.StartsWith("exit 0") || !first.Contains(open) || !first.Contains("records: accepted in ") || !first.Contains(ScenesLine)) return "the first run: " + first;
+            if (!first.StartsWith("exit 0") || !first.Contains(open) || !first.Contains(ScenesLine)) return "the first run: " + first;
             var status = D(PyJson.ReadPipelineFile(t.At("run/status.json")));
             string? why = Same("status", $"{status["status"]} {status["through"]} {L(status["refusals"]).Count}", "incomplete scenes 2")
-                          ?? Same("the first run's command", string.Join(" ", jobs[0].Argv.Skip(1)), $"run --run {PyOrder.Fwd(run)}")
-                          ?? Same("records.json", File.ReadAllText(t.At("run/records/records.json")).Replace("\r\n", "\n"),
-                                  "{\n  \"note\": \"a manual run offers no model-driven record check; mcp-only rows stay open and the bundle says they were not assessed\"\n}\n");
+                          ?? Same("the first run's command", string.Join(" ", jobs[0].Argv.Skip(1)), $"run --run {PyOrder.Fwd(run)}");
             if (why != null) return why;
             // the next run: evaluate is not reused, and its child is `resume`; a budget the entry changed is this run's limit
             var raised = new PyDict(entry) { ["evaluation"] = Json("{\"select\": [\"geometry.object-overlap\"], \"depth\": \"standard\", \"budgetMinutes\": 120}") };
@@ -167,10 +165,10 @@ public static partial class SelfTest
             var (jobs3, third) = EvaluateStages(t, raised, (job, n) => { StandInLedger(run, "completed", "completed", "completed", "skipped-user"); return Done(job); });
             if (jobs3.Count != 1 || !third.Contains("evaluate: accepted in ")) return "the third run: " + third;
             var (jobs4, fourth) = EvaluateStages(t, raised, (job, n) => Done(job));
-            return jobs4.Count == 0 && fourth.Contains("evaluate: reused (inputs and outputs unchanged)") && fourth.Contains("records: reused (inputs and outputs unchanged)")
+            return jobs4.Count == 0 && fourth.Contains("evaluate: reused (inputs and outputs unchanged)")
                 ? null : "a finished evaluation was not reused: " + fourth;
         });
-        Case("stages: evaluate, records and scenes run over an entry carrying every presentation key, and read none", () =>
+        Case("stages: evaluate and scenes run over an entry carrying every presentation key, and read none", () =>
         {
             using var t = new Temp();
             var (inst, game) = World(t, ShadowMods, ShadowEnabled, ShadowPlugins);
@@ -182,15 +180,15 @@ public static partial class SelfTest
             entry["captureSize"] = L(PyJson.Loads("[1920, 1080]"));
             string run = t.At("run/evaluation");
             var (jobs, first) = EvaluateStages(t, entry, (job, n) => { StandInLedger(run, "completed", "skipped-user"); return Done(job); });
-            if (jobs.Count != 1 || !first.Contains("evaluate: accepted in ") || !first.Contains("records: accepted in ") || !first.Contains(ScenesLine)) return first;
+            if (jobs.Count != 1 || !first.Contains("evaluate: accepted in ") || !first.Contains(ScenesLine)) return first;
             var ctx = new RunContext(entry, new PyDict(), t.At("run"));
-            string? why = Rows(new[] { "evaluate", "records", "scenes" }, s => Refuses(() => ctx.Entry.Presentation(s, "modNames"), s));
+            string? why = Rows(new[] { "evaluate", "scenes" }, s => Refuses(() => ctx.Entry.Presentation(s, "modNames"), s));
             if (why != null) return why;
             // other presentation values: neither stage is bound to them, so neither runs again
             var renamed = new PyDict(entry) { ["modNames"] = Json("{\"Sel.esp\": \"Renamed\"}"), ["report"] = Json("{\"mode\": \"short\"}") };
             renamed.Pop("captureSize");
             var (again, second) = EvaluateStages(t, renamed, (job, n) => Done(job));
-            return again.Count == 0 && second.Contains("evaluate: reused (inputs and outputs unchanged)") && second.Contains("records: reused (inputs and outputs unchanged)")
+            return again.Count == 0 && second.Contains("evaluate: reused (inputs and outputs unchanged)")
                 ? null : "a presentation change ran a stage again: " + second;
         });
         Case("stages: bundle runs over an entry carrying every presentation key, reads modNames only, and is bound to it", () =>

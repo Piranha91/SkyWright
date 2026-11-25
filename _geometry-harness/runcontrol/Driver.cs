@@ -14,7 +14,7 @@ public sealed class Driver
     /// on belong to the AI-driven evaluation, which starts this controller for the first ones.</summary>
     public static readonly string[] Stages =
     [
-        "census", "prepare", "scope", "plan", "evaluate", "records", "scenes", "bundle", "precedent",
+        "census", "prepare", "scope", "plan", "evaluate", "scenes", "bundle", "precedent",
         "report-plan", "capture", "image-observations", "report", "reel", "deliver",
     ];
 

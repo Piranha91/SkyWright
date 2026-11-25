@@ -3961,7 +3961,7 @@ Source: [integration/housecarl/tests/test_record_2_0_unjudged.py](../integration
 
 **Does a lab run's record capture read the open arms, take the machine slot, import only rows that were open, and refuse in one sentence?**
 
-Qualify a change to the lab record capture between runcontrol's evaluate and records stages, or to how the module measures a lab entry.
+Qualify a change to the lab record capture (on the AI-side overlay, after runcontrol's bundle), or to how the module measures a lab entry.
 
 Inputs: Controlled fixtures for test_record_capture.
 

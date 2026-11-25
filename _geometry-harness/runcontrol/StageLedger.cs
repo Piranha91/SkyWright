@@ -3,14 +3,14 @@ namespace RunControl;
 /// <summary>The stages this controller runs, and the entry keys that only change what is presented.</summary>
 public static class Stages
 {
-    public static readonly string[] Ported = ["census", "prepare", "scope", "plan", "evaluate", "records", "scenes", "bundle"];
+    public static readonly string[] Ported = ["census", "prepare", "scope", "plan", "evaluate", "scenes", "bundle"];
     public static readonly HashSet<string> NonBlocking = ["precedent"];
     public static readonly HashSet<string> PresentationKeys = ["modNames", "nexusNames", "patchSearch", "report", "captureSize"];
 
     /// <summary>stage -> the presentation keys its code reads. A stage's entry hash binds exactly these.</summary>
     public static readonly Dictionary<string, string[]> PresentationReads = new()
     {
-        ["census"] = [], ["prepare"] = [], ["scope"] = [], ["plan"] = [], ["evaluate"] = [], ["records"] = [],
+        ["census"] = [], ["prepare"] = [], ["scope"] = [], ["plan"] = [], ["evaluate"] = [],
         ["scenes"] = [], ["bundle"] = ["modNames"],
     };
 
