@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the module's fol
 import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is: its tools and run log on sys.path
 sys.path.append(str(SW.HARNESS / "tests"))  # SkyWright's own suites and fixtures the module's suites reuse
 ROOT = SW.CHECKOUT
-_path = os.environ.get("RECORDROWS_PATH") or str(SW.HARNESS / "recordrows.py")
+_path = os.environ.get("RECORDROWS_PATH") or str(SW.MODULE / "recordrows.py")
 RR, LOAD_ERROR = None, None
 try:
     _spec = importlib.util.spec_from_file_location("recordrows_under_test", _path)

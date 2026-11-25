@@ -387,12 +387,13 @@ def c1798_variant_file_says_what_its_values_are_against():
     """O3 / D7: the order-variant file itself (linked from the evidence index) says its values are differences from
     the measured order's winner, so its "(the winning value)" is not read as the reversed order's winner."""
     import bundleenrich
+    import recordenrich
     import test_reader_rules as RR
     with tempfile.TemporaryDirectory() as td:
         RR.rows_bundle(Path(td), [BASE], recorded={})
         root = Path(td) / "bundle"
         (root / "plan.json").write_text(json.dumps({"targets": [{"name": "P.esp"}, {"name": "W.esp"}]}), encoding="utf-8")
-        bundleenrich.enrich_order_variant(root)
+        recordenrich.enrich_order_variant(root)
         doc = json.loads((root / "enrichment" / "order-variant" / f"{RECORDS}__baseline.json").read_text(encoding="utf-8"))
     said = str((doc.get("order") or {}).get("values") or "")
     ok = "measured order" in said and "(the winning value)" in said

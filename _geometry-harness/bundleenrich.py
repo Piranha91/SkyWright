@@ -1,15 +1,16 @@
 """bundleenrich - evidence derived after measurement, added to an evaluation bundle (bundle standard §8, enrichment).
 
-Reached through `evalrun enrich --bundle DIR --kind record-rows|names`. An enrichment derives; it never measures:
+Reached through `evalrun enrich --bundle DIR --kind names|order-geometry`. An enrichment derives; it never measures:
 
-  record-rows  one rows file per credited record import (registry family `records`), derived by recordrows.py from that
-               import's own request and response transcripts inside the bundle; every file and every row cites the
-               bytes it came from.
   names        in-game names for the places and objects the bundle's rows name, and each evaluated mod's and patch's
                ordinary name. Places and objects are read with houseCARL's `housecarl_records` from the plugin files the
                plan records, each hashed first and refused by name if its bytes differ; the reads' request and response
                travel with the names. A mod's name is the declared one, else the Nexus catalogue cache's name for the
                scope's Nexus id (offline), else the plugin name; each says which. No network read.
+
+The rows derived from a record import (record-rows, order-variant) are the houseCARL integration module's: its
+recordenrich.py derives them on an AI-side overlay bundle with the generic helpers here (_guard, _row, _commit,
+recorded_plugin_headers, pair_headers, order_choice).
 
 What an enrichment may not do: change the disposition, a receipt, the ledger, a claim or a count. It records the
 disposition's sha256 beside its outputs, and `runcontrol verify-bundle` (EnrichmentVerify.cs) refuses a bundle whose
@@ -120,87 +121,6 @@ def recorded_plugin_headers(d: Path, manifest: dict) -> dict:
     return out
 
 
-def configuration_masters(cfg: dict, recorded: dict | None = None) -> tuple[dict, set]:
-    """Each plugin's masters, closed transitively (evalbase.arm_masters, the rule the record capture shares), and the
-    plugins whose closure meets a master list that cannot be had. A plugin's list is the one the bundle's emits recorded
-    for the same bytes (`recorded`, from recorded_plugin_headers), else the TES4 header of the file the configuration
-    names, read only when the file hashes to the sha256 the configuration recorded. ({plugin lower: masters},
-    {plugin lower})."""
-    import evalbase
-    plugins = [p for p in cfg.get("plugins") or [] if isinstance(p, dict) and p.get("name")]
-    checked, lists = [], {}
-    for p in plugins:
-        path, want = p.get("path"), str(p.get("sha256") or "").lower()
-        rec = (recorded or {}).get((str(p["name"]).lower(), want)) if want else None
-        if rec is not None:
-            lists[str(p["name"]).casefold()] = rec["masters"]
-            checked.append({"name": p["name"], "path": None})
-            continue
-        ok = bool(path) and Path(path).is_file() and (not want or sha(Path(path)) == want)
-        checked.append({"name": p["name"], "path": path if ok else None})
-    masters_of, unread_of = evalbase.arm_masters({"plugins": [p["name"] for p in checked],
-                                                     "requested": {"plugins": checked}}, recorded=lists)
-    names = [p["name"] for p in checked]
-    return ({n.lower(): set(masters_of(n)) for n in names}, {n.lower() for n in names if unread_of(n)})
-
-
-def enrich_record_rows(d: Path, recorded: dict | None = None) -> dict:
-    import recordrows as RR
-    manifest = _guard(d, "record-rows")
-    scope = RR.load_scope()
-    probs = scope.problems()
-    if probs:
-        raise Refused("the record field scope names fields the schema does not have: " + "; ".join(probs))
-    registry = _load(d / (manifest.get("registry") or "registry/check-registry.json")) or {}
-    family = {c.get("id"): c.get("family") for c in registry.get("checks") or [] if isinstance(c, dict)}
-    outputs, todo = [], []
-    for rp in sorted((d / "receipts").glob("*.json")):
-        rc = _load(rp) or {}
-        if (rc.get("adapter") or {}).get("kind") != "mcp-import" or not (rc.get("validation") or {}).get("accepted"):
-            continue
-        if family.get(rc.get("checkId")) != "records":
-            continue
-        outs = [o.get("path") for o in rc.get("outputs") or []]
-        manifest_out = next((o for o in outs if str(o).endswith("result.json")), None)
-        doc = _load(d / "evidence" / manifest_out) if manifest_out else None
-        if not isinstance(doc, dict):
-            raise Refused(f"the import for {rc.get('checkId')} on {rc.get('armId')} has no readable result.json")
-        roles = [str(x.get("role")) for x in doc.get("outputs") or []]
-        copied = [o for o in outs if o != manifest_out]
-        by_role = dict(zip(roles, copied))
-        if not by_role.get("request") or not by_role.get("response"):
-            raise Refused(f"the import for {rc.get('checkId')} on {rc.get('armId')} lacks its request or response")
-        if by_role.get("rows"):
-            continue                                       # the import already carries its rows
-        req, resp = d / "evidence" / by_role["request"], d / "evidence" / by_role["response"]
-        cfg = ((rc.get("consumed") or {}).get("configuration")) or doc.get("configuration") or {}
-        todo.append((rc, by_role, req, resp, cfg))
-    # persistent cells are named by worldspace reads, which only some captures hold: gathered from all of them first
-    containers = set()
-    for _, _, _, resp, _ in todo:
-        containers |= RR.persistent_cells(resp)
-    recorded = recorded_plugin_headers(d, manifest) if recorded is None else recorded
-    for rc, by_role, req, resp, cfg in todo:
-        masters, unread = configuration_masters(cfg, recorded)
-        emit = RR.derive(req, resp, cfg, scope, rel={req: f"evidence/{by_role['request']}",
-                                                     resp: f"evidence/{by_role['response']}"}, containers=containers,
-                         masters=masters, masters_unread=unread)
-        emit["mastersUnread"] = sorted(unread)
-        # whose master list came from the bundle's own emits (else from the file's header at the recorded bytes)
-        emit["mastersRecorded"] = sorted({str(p.get("name")).lower() for p in cfg.get("plugins") or []
-                                          if isinstance(p, dict) and (str(p.get("name")).lower(),
-                                                                      str(p.get("sha256") or "").lower()) in recorded})
-        rel = f"enrichment/record-rows/{rc['checkId']}__{rc['armId']}.json"
-        _write(d / rel, emit)
-        outputs.append(_row(rel, d, "record-rows", checkId=rc["checkId"], armId=rc["armId"],
-                            derivedFrom=[{"path": x["path"], "sha256": x["sha256"]} for x in emit["derivedFrom"]]))
-    if not outputs:
-        raise Refused("the bundle holds no credited record import whose rows could be derived")
-    _commit(d, manifest, "record-rows", outputs, [HERE / "bundleenrich.py", HERE / "recordrows.py"])
-    return {"kind": "record-rows", "files": len(outputs),
-            "rows": sum(len((_load(d / o["path"]) or {}).get("Conflicts") or []) for o in outputs)}
-
-
 # ------------------------------------------------------------------------------------- the order of the pair
 
 def is_master_file(name: str, head: dict | None) -> bool:
@@ -208,16 +128,18 @@ def is_master_file(name: str, head: dict | None) -> bool:
     return bool((head or {}).get("master")) or str(name).lower().endswith((".esm", ".esl"))
 
 
-def pair_headers(d: Path, manifest: dict, plan: dict, pair: list, recorded: dict | None = None) -> dict:
+def pair_headers(d: Path, manifest: dict, plan: dict, pair: list, recorded: dict | None = None,
+                 extra_sources: list | None = None) -> dict:
     """{plugin lower: {name, sha256, masters, master, light, source}} for the evaluated pair, as the setup with both
     loads them: the master lists and flags the bundle's emits recorded for those bytes, else the file's header read at
-    the recorded bytes, else absent."""
+    the recorded bytes, else absent. `extra_sources`: more plugin lists after the plan's setups (a caller's, such as an
+    AI-side overlay's record imports' configurations)."""
     import evalbase
     recorded = recorded_plugin_headers(d, manifest) if recorded is None else recorded
     want = {}
-    # the plan's setups first, then the record imports' own configurations (the bytes they read)
+    # the plan's setups first, then the caller's (an overlay's record imports: the bytes they read)
     sources = [(a_.get("requested") or {}).get("plugins") or [] for a_ in plan.get("arms") or []]
-    sources += [cfg.get("plugins") or [] for *_, cfg in _record_imports(d, manifest)]
+    sources += list(extra_sources or [])
     for plugins_ in sources:
         for q in plugins_:
             if isinstance(q, dict) and str(q.get("name") or "").lower() in {p.lower() for p in pair}:
@@ -261,102 +183,6 @@ def order_choice(pair: list, heads: dict) -> dict:
         return {"pair": [a, b], "forced": True, "rule": "ESM flag", "loadsFirst": a if fa else b, "missing": []}
     return {"pair": [a, b], "forced": False, "rule": "free (both ESM-flagged)" if fa else "free (both non-master)",
             "loadsFirst": None, "missing": []}
-
-
-def _record_imports(d: Path, manifest: dict) -> list:
-    """(receipt, roles, request, response, configuration) of every credited record import with both transcripts."""
-    registry = _load(d / (manifest.get("registry") or "registry/check-registry.json")) or {}
-    family = {c.get("id"): c.get("family") for c in registry.get("checks") or [] if isinstance(c, dict)}
-    out = []
-    for rp in sorted((d / "receipts").glob("*.json")):
-        rc = _load(rp) or {}
-        if (rc.get("adapter") or {}).get("kind") != "mcp-import" or not (rc.get("validation") or {}).get("accepted"):
-            continue
-        if family.get(rc.get("checkId")) != "records":
-            continue
-        outs = [o.get("path") for o in rc.get("outputs") or []]
-        manifest_out = next((o for o in outs if str(o).endswith("result.json")), None)
-        doc = _load(d / "evidence" / manifest_out) if manifest_out else None
-        if not isinstance(doc, dict):
-            continue
-        roles = [str(x.get("role")) for x in doc.get("outputs") or []]
-        by_role = dict(zip(roles, [o for o in outs if o != manifest_out]))
-        if not by_role.get("request") or not by_role.get("response"):
-            continue
-        cfg = ((rc.get("consumed") or {}).get("configuration")) or doc.get("configuration") or {}
-        out.append((rc, by_role, d / "evidence" / by_role["request"], d / "evidence" / by_role["response"], cfg))
-    return out
-
-
-def enrich_order_variant(d: Path, recorded: dict | None = None) -> dict:
-    """The record lane's rows on each setup holding both evaluated mods, with the two mods' places in the load order
-    swapped (phase 3 of roadmap 4.24): recordrows.derive on that setup's own transcripts with the swapped
-    configuration, which is the engine's rule for which version wins. Refused, writing nothing, when the order is not a
-    choice (a master relation or exactly one master file), when the header facts are missing, or when the swap would
-    load a plugin before one of its masters."""
-    import recordrows as RR
-    manifest = _guard(d, "order-variant")
-    plan = _load(d / (manifest.get("plan") or "plan.json")) or {}
-    pair = [str(t.get("name")) for t in plan.get("targets") or [] if isinstance(t, dict) and t.get("name")]
-    if len(pair) != 2:
-        raise Refused(f"the plan names {len(pair)} evaluated plugin(s), not a pair, so there is no pair's order to reverse")
-    heads = pair_headers(d, manifest, plan, pair, recorded)
-    ch = order_choice(pair, heads)
-    if ch["forced"] is None:
-        raise Refused(f"the order of {pair[0]} and {pair[1]} was not reversed: {ch['missing'][0]}")
-    if ch["forced"]:
-        other = pair[1] if ch["loadsFirst"] == pair[0] else pair[0]
-        why = (f"{ch['loadsFirst']} is flagged as a master file and {other} is not" if ch["rule"] == "ESM flag"
-               else f"{other} lists {ch['loadsFirst']} as a master")
-        raise Refused(f"the order of {pair[0]} and {pair[1]} is not a choice ({why}), so no reversed setup was derived")
-    scope = RR.load_scope()
-    recorded = recorded_plugin_headers(d, manifest) if recorded is None else recorded
-    todo = []
-    for rc, by_role, req, resp, cfg in _record_imports(d, manifest):
-        names = [str(p.get("name")) for p in cfg.get("plugins") or [] if isinstance(p, dict)]
-        low = [n.lower() for n in names]
-        if not all(x.lower() in low for x in pair):
-            continue
-        ps = list(cfg["plugins"])
-        i, j = sorted((low.index(pair[0].lower()), low.index(pair[1].lower())))
-        # the earlier of the two moves to just after the later; every other plugin keeps its place, so the later one
-        # stays after its own masters
-        ps.insert(j, ps.pop(i))
-        order = [str(p.get("name")).lower() for p in ps]
-        # every plugin's masters (recorded, else the file's header at the recorded bytes) still load before it
-        all_heads = {**{k[0]: v for k, v in recorded.items()}, **heads}
-        for k, nm in enumerate(order):
-            h = all_heads.get(nm) or {}
-            late = [m for m in h.get("masters") or [] if str(m).lower() in order and order.index(str(m).lower()) > k]
-            if late:
-                raise Refused(f"reversing {pair[0]} and {pair[1]} would load {ps[k]['name']} before its master "
-                              f"{late[0]}, so no reversed setup was derived")
-        todo.append((rc, by_role, req, resp, {**cfg, "plugins": ps}))
-    if not todo:
-        raise Refused("the bundle holds no credited record import whose setup loads both evaluated plugins")
-    containers = set()
-    for _, _, _, resp, _ in todo:
-        containers |= RR.persistent_cells(resp)
-    outputs, rows = [], 0
-    for rc, by_role, req, resp, cfg in todo:
-        masters, unread = configuration_masters(cfg, recorded)
-        emit = RR.derive(req, resp, cfg, scope, rel={req: f"evidence/{by_role['request']}",
-                                                     resp: f"evidence/{by_role['response']}"}, containers=containers,
-                         masters=masters, masters_unread=unread)
-        emit["configuration"] = {"plugins": cfg["plugins"]}
-        # (item 18 review) the rows' values are differences from the measured order's winner, so "(the winning value)"
-        # here is that winner's value, not the reversed order's
-        emit["order"] = {"pair": pair, "reversedFrom": rc["armId"], "rule": ch["rule"],
-                         "values": "against the measured order's winning version: \"(the winning value)\" is its value"}
-        emit["readForm"] = "text" if RR.parse_transcript(req, resp)["reads"] else "tree"
-        emit["mastersUnread"] = sorted(unread)
-        rel = f"enrichment/order-variant/{rc['checkId']}__{rc['armId']}.json"
-        _write(d / rel, emit)
-        rows += len(emit.get("Conflicts") or [])
-        outputs.append(_row(rel, d, "order-variant", checkId=rc["checkId"], armId=rc["armId"],
-                            derivedFrom=[{"path": x["path"], "sha256": x["sha256"]} for x in emit["derivedFrom"]]))
-    _commit(d, manifest, "order-variant", outputs, [HERE / "bundleenrich.py", HERE / "recordrows.py"])
-    return {"kind": "order-variant", "files": len(outputs), "rows": rows, "rule": ch["rule"]}
 
 
 # ------------------------------------------------------------------------------------------ order geometry

@@ -49,6 +49,7 @@ import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is: its t
 from runlog import Run  # noqa: E402
 import evalsettings  # noqa: E402
 import recordrows  # noqa: E402
+import recordenrich  # noqa: E402
 import refscan  # noqa: E402
 import pluginread  # noqa: E402
 
@@ -1967,7 +1968,7 @@ def load_order_fact(ctx: dict, p_arm: str, patched_arm, pair: list, words: dict)
         import recordrows as RR_
         scope_ = RR_.load_scope()
         carried = set()
-        for rc_, _, req_, resp_, cfg_ in bundleenrich._record_imports(main_b.dir, main_b.manifest):
+        for rc_, _, req_, resp_, cfg_ in recordenrich._record_imports(main_b.dir, main_b.manifest):
             if rc_.get("armId") != patched_arm:
                 continue
             for fk_, c_ in RR_.read_chains(req_, resp_, cfg_.get("plugins") or [], scope_).items():

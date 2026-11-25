@@ -158,8 +158,8 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does the record capture read only what an evaluated plugin touches, reread when an arm's inputs change, and does a stopped sweep or a raised budget keep finished work?](#tool-integration-housecarl-tests-test_records_keep_work.py) — `integration/housecarl/tests/test_records_keep_work.py`
 - [Does the record capture's selection refuse empty and short reads and keep unjudged rows apart?](#tool-integration-housecarl-tests-test_evalrecords.py) — `integration/housecarl/tests/test_evalrecords.py`
 - [Does the record-lane comparator emit a row only for a lost change, within the schema's field scope?](#tool-integration-housecarl-tests-test_recordrows.py) — `integration/housecarl/tests/test_recordrows.py`
-- [Does the record-lane comparator leave a field unjudged, never equal, when a read printed it without its values (an item as its type name, a list as its summary), while a field read with its values or by content hash stays judged?](#tool-_geometry-harness-tests-test_record_unexpanded_leaves.py) — `_geometry-harness/tests/test_record_unexpanded_leaves.py`
-- [Does the record-lane comparator list every field it cannot judge on a houseCARL 2.0 capture (a cut-off, unread, unnamed or depth-mismatched field, a failed read, a tree answer that could not compare a plugin in full or whose plugin list was cut off), with its reason and plugins, and never drop it?](#tool-_geometry-harness-tests-test_record_2_0_unjudged.py) — `_geometry-harness/tests/test_record_2_0_unjudged.py`
+- [Does the record-lane comparator leave a field unjudged, never equal, when a read printed it without its values (an item as its type name, a list as its summary), while a field read with its values or by content hash stays judged?](#tool-integration-housecarl-tests-test_record_unexpanded_leaves.py) — `integration/housecarl/tests/test_record_unexpanded_leaves.py`
+- [Does the record-lane comparator list every field it cannot judge on a houseCARL 2.0 capture (a cut-off, unread, unnamed or depth-mismatched field, a failed read, a tree answer that could not compare a plugin in full or whose plugin list was cut off), with its reason and plugins, and never drop it?](#tool-integration-housecarl-tests-test_record_2_0_unjudged.py) — `integration/housecarl/tests/test_record_2_0_unjudged.py`
 - [Does the reel pipeline enforce media, audio, cache and clip-cut contracts?](#tool-integration-housecarl-tests-test_evalreel.py) — `integration/housecarl/tests/test_evalreel.py`
 - [Does the reel say and show a declared mod name or plugin file name as written (the round 2 subjects' patches, one with an all-capital word), still put an undeclared editor ID into words, and leave a count of 0 out of the unpictured line?](#tool-integration-housecarl-tests-test_reel_names.py) — `integration/housecarl/tests/test_reel_names.py`
 - [Does the render concurrency calculation refuse absent or insufficient memory readings?](#tool-_geometry-harness-viewprobe-tools-test_renderlimit.py) — `_geometry-harness/viewprobe/tools/test_renderlimit.py`
@@ -1404,36 +1404,6 @@ Outputs: Assertion results for: Do overlapprobe, contactprobe (default pass and 
 Source: [_geometry-harness/tests/test_population_scope.py](../_geometry-harness/tests/test_population_scope.py) — `Known answers for the plan's population (P25)`
 
 
-<a id="tool-_geometry-harness-tests-test_record_2_0_unjudged.py"></a>
-
-### _geometry-harness/tests/test_record_2_0_unjudged.py
-
-**Does the record-lane comparator list every field it cannot judge on a houseCARL 2.0 capture (a cut-off, unread, unnamed or depth-mismatched field, a failed read, a tree answer that could not compare a plugin in full or whose plugin list was cut off), with its reason and plugins, and never drop it?**
-
-Qualify changes to recordrows' 2.0 path (read_chains, chains_for_setup, the tree and by-name readers) and how its unjudged list reaches the rows file (C2174-C2178); offline, no game.
-
-Inputs: Hand-written 2.0 housecarl_records by-name and tree answers of one record, and the shipped schema reference and field scope.
-
-Outputs: One PASS or FAIL line per case (C2174-C2178).
-
-Source: [_geometry-harness/tests/test_record_2_0_unjudged.py](../_geometry-harness/tests/test_record_2_0_unjudged.py) — `a field it cannot judge is listed as unjudged with its reason`
-
-
-<a id="tool-_geometry-harness-tests-test_record_unexpanded_leaves.py"></a>
-
-### _geometry-harness/tests/test_record_unexpanded_leaves.py
-
-**Does the record-lane comparator leave a field unjudged, never equal, when a read printed it without its values (an item as its type name, a list as its summary), while a field read with its values or by content hash stays judged?**
-
-Qualify changes to recordrows' unexpanded-field rule, its read preference, the schema's grid and dictionary entries, or partly read fields (C2170, C2172, C2173); offline, no game.
-
-Inputs: Hand-written 1.9.0 text reads and 2.0 by-name and tree answers of one cell's height grid, and the shipped schema reference and field scope.
-
-Outputs: One PASS or FAIL line per case (C2170, C2172, C2173).
-
-Source: [_geometry-harness/tests/test_record_unexpanded_leaves.py](../_geometry-harness/tests/test_record_unexpanded_leaves.py) — `a leaf that carries no value is unjudged with its reason, never equal`
-
-
 <a id="tool-_geometry-harness-tests-test_replay_command.py"></a>
 
 ### _geometry-harness/tests/test_replay_command.py
@@ -2007,7 +1977,7 @@ Source: [_geometry-harness/buildlayout.py](../_geometry-harness/buildlayout.py) 
 
 **Which code adds evidence derived after measurement to an evaluation bundle, and how is it verified?**
 
-Read or change what evalrun enrich writes and what verify-bundle checks about it.
+Read or change what evalrun enrich writes (names, order-geometry) and what verify-bundle checks about it; the record-rows and order-variant halves are the module's recordenrich.
 
 Inputs: A verified bundle; for names, the plan's plugin files and a houseCARL MCP server.
 
@@ -3970,6 +3940,21 @@ Outputs: Assertion results for: Does the reader's document list only clashes bet
 Source: [integration/housecarl/tests/test_readerdoc.py](../integration/housecarl/tests/test_readerdoc.py) — `Tests for readerdoc.py — the reader's document rendered from a presentation plan.`
 
 
+<a id="tool-integration-housecarl-tests-test_record_2_0_unjudged.py"></a>
+
+### integration/housecarl/tests/test_record_2_0_unjudged.py
+
+**Does the record-lane comparator list every field it cannot judge on a houseCARL 2.0 capture (a cut-off, unread, unnamed or depth-mismatched field, a failed read, a tree answer that could not compare a plugin in full or whose plugin list was cut off), with its reason and plugins, and never drop it?**
+
+Qualify changes to recordrows' 2.0 path (read_chains, chains_for_setup, the tree and by-name readers) and how its unjudged list reaches the rows file (C2174-C2178); offline, no game.
+
+Inputs: Hand-written 2.0 housecarl_records by-name and tree answers of one record, and the shipped schema reference and field scope.
+
+Outputs: One PASS or FAIL line per case (C2174-C2178).
+
+Source: [integration/housecarl/tests/test_record_2_0_unjudged.py](../integration/housecarl/tests/test_record_2_0_unjudged.py) — `a field it cannot judge is listed as unjudged with its reason`
+
+
 <a id="tool-integration-housecarl-tests-test_record_capture.py"></a>
 
 ### integration/housecarl/tests/test_record_capture.py
@@ -3983,6 +3968,21 @@ Inputs: Controlled fixtures for test_record_capture.
 Outputs: Assertion results or generated fixture data for: Does a lab run's record capture read the open arms, take the machine slot, import only rows that were open, and refuse in one sentence?
 
 Source: [integration/housecarl/tests/test_record_capture.py](../integration/housecarl/tests/test_record_capture.py) — `Known answers for a lab run's record capture`
+
+
+<a id="tool-integration-housecarl-tests-test_record_unexpanded_leaves.py"></a>
+
+### integration/housecarl/tests/test_record_unexpanded_leaves.py
+
+**Does the record-lane comparator leave a field unjudged, never equal, when a read printed it without its values (an item as its type name, a list as its summary), while a field read with its values or by content hash stays judged?**
+
+Qualify changes to recordrows' unexpanded-field rule, its read preference, the schema's grid and dictionary entries, or partly read fields (C2170, C2172, C2173); offline, no game.
+
+Inputs: Hand-written 1.9.0 text reads and 2.0 by-name and tree answers of one cell's height grid, and the shipped schema reference and field scope.
+
+Outputs: One PASS or FAIL line per case (C2170, C2172, C2173).
+
+Source: [integration/housecarl/tests/test_record_unexpanded_leaves.py](../integration/housecarl/tests/test_record_unexpanded_leaves.py) — `a leaf that carries no value is unjudged with its reason, never equal`
 
 
 <a id="tool-integration-housecarl-tests-test_recordrows.py"></a>
@@ -5417,7 +5417,7 @@ Inputs: A record import's request and response transcripts and the setup's plugi
 
 Outputs: A conflict-file emit of LOST-EDIT rows with coverage, citing the transcripts by sha256.
 
-Source: [_geometry-harness/recordrows.py](../_geometry-harness/recordrows.py) — `recordrows - record-lane rows derived from a record import's own MCP transcripts.`
+Source: [integration/housecarl/recordrows.py](../integration/housecarl/recordrows.py) — `recordrows - record-lane rows derived from a record import's own MCP transcripts.`
 
 
 <a id="tool-reel-plan"></a>

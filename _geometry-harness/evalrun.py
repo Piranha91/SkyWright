@@ -1,6 +1,6 @@
 """evalrun - what stays in Python of the evaluation controller: enriching a bundle.
 
-    python evalrun.py enrich --bundle DIR --kind record-rows|names|order-variant|order-geometry [...]
+    python evalrun.py enrich --bundle DIR --kind names|order-geometry [...]
 
 What this is for. An evaluation is planned, run, finalized and bundled by the built-in controller, runcontrol
 (_geometry-harness/runcontrol; `runcontrol plan|run|resume|finalize|bundle|population`), which owns those
@@ -193,12 +193,14 @@ def cmd_enrich(a) -> int:
             out = st["result"]
         else:
             try:
+                if a.kind in ("record-rows", "order-variant"):
+                    raise bundleenrich.Refused(f"--kind {a.kind} derives rows from a record import, which is the "
+                                               "houseCARL integration module's: it derives them on an AI-side overlay "
+                                               "bundle")
                 if a.kind == "order-geometry" and not a.sweep:
                     raise bundleenrich.Refused("--kind order-geometry needs --sweep, the ordersweep folder over the "
                                                "measured order and its reversal")
-                out = (bundleenrich.enrich_order_variant(d) if a.kind == "order-variant"
-                       else bundleenrich.enrich_order_geometry(d, [Path(x) for x in a.sweep]) if a.kind == "order-geometry"
-                       else bundleenrich.enrich_record_rows(d))
+                out = bundleenrich.enrich_order_geometry(d, [Path(x) for x in a.sweep])
             except bundleenrich.Refused as ex:
                 msg = f"enrich refused: {ex}"
                 print(f"REFUSED: {msg}", file=sys.stderr)

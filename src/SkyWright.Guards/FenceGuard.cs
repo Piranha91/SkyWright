@@ -97,6 +97,7 @@ internal static class FenceGuard
             new("_geometry-harness/runcontrol/known-answers/", "recorded output: runcontrol's expected values name the Python tool that computed them; they are compared, not followed"),
             new("_geometry-harness/tests/fixtures/evalreport/expected/", "recorded output: the report fixtures' expected values, written from the plan before the compiler existed"),
             new("_geometry-harness/tests/fixtures/evalrun/expected/", "recorded output: the controller oracle's expected values"),
+            new("_geometry-harness/tests/fixtures/old-bundles/", "recorded output: bundles made before the AI-side rows left the app, frozen byte for byte (their manifests hash them); their enrichment records name the tools that made them"),
         ],
         Crossings:
         [

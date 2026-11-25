@@ -630,6 +630,7 @@ def rows_bundle(td: Path, p_masters, extra=(), p_file=True, p_changed=False, rec
     change (with M among them, it made none)."""
     import hashlib
     import bundleenrich
+    import recordenrich
     root = td / "bundle"
     (root / "registry").mkdir(parents=True)
     (root / "receipts").mkdir()
@@ -683,7 +684,7 @@ def rows_bundle(td: Path, p_masters, extra=(), p_file=True, p_changed=False, rec
         evidence.append({"kind": "emit", "path": "evidence/sweep/probe/baseline.json", "armId": "baseline"})
     (root / "manifest.json").write_text(json.dumps({"evidence": evidence, "registry": "registry/check-registry.json"}),
                                         encoding="utf-8")
-    bundleenrich.enrich_record_rows(root)
+    recordenrich.enrich_record_rows(root)
     return json.loads((root / "enrichment" / "record-rows" / f"{RECORDS}__baseline.json").read_text(encoding="utf-8"))
 
 
@@ -924,9 +925,10 @@ def case_item18_p3_order_variant_enrichment_derives_reversed_rows():
     """The order-variant enrichment derives the setup's rows with the evaluated pair swapped, from the same
     transcripts: P and W swapped, P wins, so Q's and W's changes are lost to P and M's (equal to P's) is not."""
     import bundleenrich
-    fn = getattr(bundleenrich, "enrich_order_variant", None)
+    import recordenrich
+    fn = getattr(recordenrich, "enrich_order_variant", None)
     if fn is None:
-        return False, "bundleenrich has no enrich_order_variant"
+        return False, "recordenrich has no enrich_order_variant"
     with tempfile.TemporaryDirectory() as td:
         rows_bundle(Path(td), [BASE], recorded={})
         root = Path(td) / "bundle"
@@ -943,12 +945,13 @@ def case_item18_p3_order_variant_keeps_masters_before():
     two slots would load W before its master; the reversed setup moves the earlier one (Q) to just after W instead,
     so every plugin still loads after its masters: [.., P, W, Q], and Q wins."""
     import bundleenrich
+    import recordenrich
     with tempfile.TemporaryDirectory() as td:
         rows_bundle(Path(td), [BASE], recorded={}, override={"W.esp": [BASE, "P.esp"]})
         root = Path(td) / "bundle"
         (root / "plan.json").write_text(json.dumps({"targets": [{"name": "Q.esp"}, {"name": "W.esp"}]}), encoding="utf-8")
         try:
-            bundleenrich.enrich_order_variant(root)
+            recordenrich.enrich_order_variant(root)
         except bundleenrich.Refused as ex:
             return False, f"refused: {ex}"
         doc = json.loads((root / "enrichment" / "order-variant" / f"{RECORDS}__baseline.json").read_text(encoding="utf-8"))
@@ -961,9 +964,10 @@ def case_item18_p3_order_variant_refuses_a_forced_pair():
     """P is flagged as a master file and W is not: the reversed order is not one the game would load, so the
     enrichment refuses in one sentence naming the flag, and writes nothing."""
     import bundleenrich
-    fn = getattr(bundleenrich, "enrich_order_variant", None)
+    import recordenrich
+    fn = getattr(recordenrich, "enrich_order_variant", None)
     if fn is None:
-        return False, "bundleenrich has no enrich_order_variant"
+        return False, "recordenrich has no enrich_order_variant"
     with tempfile.TemporaryDirectory() as td:
         rows_bundle(Path(td), [BASE], recorded={}, flags={"P.esp": {"MasterFlag": True}})
         root = Path(td) / "bundle"

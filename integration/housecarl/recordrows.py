@@ -34,8 +34,10 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REF_DIR = HERE.parent / "external" / "houseCARL" / ".claude" / "skills" / "mutagen-reference" / "references"
-SCOPE_FILE = HERE.parent / "data" / "record-field-scope.json"
+sys.path.insert(0, str(HERE))
+import skywright_paths as SW  # noqa: E402  where SkyWright's checkout is
+REF_DIR = SW.HOUSECARL / ".claude" / "skills" / "mutagen-reference" / "references"
+SCOPE_FILE = SW.DATA / "record-field-scope.json"
 HEAD = re.compile(r"^type=(\S+)\s+formid=(\S+)\s+editorid=(.*)$")
 INDEX = re.compile(r"\[\d+\]")
 LIST_SUMMARY = re.compile(r"^\[list: \d+ item\(s\)\]$")
@@ -1120,7 +1122,7 @@ def main(argv=None) -> int:
     ap.add_argument("--configuration", required=True, help="a JSON file holding {plugins: [{name, path}, ...]} in order")
     ap.add_argument("--out", required=True)
     a = ap.parse_args(argv)
-    sys.path.insert(0, str(HERE.parent / "scripts"))
+    sys.path.insert(0, str(SW.SCRIPTS))
     from runlog import Run  # noqa: E402
     with Run("recordrows", stage_source="counted") as r:
         sc = load_scope()

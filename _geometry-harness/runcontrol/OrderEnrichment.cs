@@ -139,8 +139,8 @@ public static class OrderEnrichment
             todo++;
         }
         if (todo == 0) throw new EnrichRefused("the bundle holds no credited record import whose setup loads both evaluated plugins");
-        throw new EnrichRefused("this controller does not derive record rows from a record import (recordrows.py does), so the reversed "
-            + $"setup of {todo} import(s) was left underived; `evalrun.py enrich --kind order-variant` adds it");
+        throw new EnrichRefused("this controller does not derive record rows from a record import, so the reversed "
+            + $"setup of {todo} import(s) was left underived; the houseCARL integration module derives it on an AI-side overlay bundle");
     }
 
     /// <summary>Writes the manifest's `order` statement and returns it. Never throws for a refusal.</summary>

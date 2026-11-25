@@ -3788,17 +3788,17 @@
       "id": "recordrows",
       "kind": "script",
       "lang": "python",
-      "path": "_geometry-harness/recordrows.py",
+      "path": "integration/housecarl/recordrows.py",
       "adapter": "python",
       "stageSource": "counted",
-      "note": "Roadmap 4.24 phase 1: record-lane rows derived from a record import's own MCP transcripts, with the field scope taken from the generated schema reference and the world-edit-compatibility skill's record-field-scope.json. A pure function of the transcript bytes; evalrun enrich calls it as a module, and its command line opens one Run. tests/test_recordrows.py is its known-answer suite.",
+      "note": "Roadmap 4.24 phase 1: record-lane rows derived from a record import's own MCP transcripts, with the field scope taken from the generated schema reference and SkyWright's data/record-field-scope.json. A pure function of the transcript bytes; the module's recordenrich (record-rows, order-variant) and evalreport call it as a module, and its command line opens one Run. tests/test_recordrows.py is its known-answer suite.",
       "answers": [
         "Which record fields does one mod change that another mod's version throws away, from a record capture?"
       ],
       "useWhen": "Turn a record import's request and response transcripts into lost-edit rows a report can attribute.",
       "evidence": [
         {
-          "path": "_geometry-harness/recordrows.py",
+          "path": "integration/housecarl/recordrows.py",
           "anchor": "recordrows - record-lane rows derived from a record import's own MCP transcripts."
         }
       ],
@@ -3820,7 +3820,7 @@
       "answers": [
         "Which code adds evidence derived after measurement to an evaluation bundle, and how is it verified?"
       ],
-      "useWhen": "Read or change what evalrun enrich writes and what verify-bundle checks about it.",
+      "useWhen": "Read or change what evalrun enrich writes (names, order-geometry) and what verify-bundle checks about it; the record-rows and order-variant halves are the module's recordenrich.",
       "evidence": [
         {
           "path": "_geometry-harness/bundleenrich.py",
@@ -6688,7 +6688,7 @@
       "path": "integration/housecarl/recordenrich.py",
       "adapter": "python",
       "stageSource": "counted",
-      "note": "The record-rows and order-variant enrichments of an AI-side overlay bundle: SkyWright's bundleenrich derives them from the overlay's record imports, given the plugin header facts the bound app bundle's probe emits recorded; evalcontrol verify checks the bundle before anything is written and after. Opens one Run per invocation.",
+      "note": "The record-rows and order-variant enrichments of an AI-side overlay bundle: derived here (moved from SkyWright's bundleenrich, whose generic helpers it calls) with recordrows.py from the overlay's record imports, given the plugin header facts the bound app bundle's probe emits recorded; evalcontrol verify checks the bundle before anything is written and after. Opens one Run per invocation.",
       "answers": [
         "How do I add the rows derived from a record import (record rows, the reversed order's) to an AI-side overlay bundle?"
       ],
@@ -10251,8 +10251,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_record_2_0_unjudged.py",
-      "path": "_geometry-harness/tests/test_record_2_0_unjudged.py",
+      "id": "integration/housecarl/tests/test_record_2_0_unjudged.py",
+      "path": "integration/housecarl/tests/test_record_2_0_unjudged.py",
       "kind": "script",
       "answers": [
         "Does the record-lane comparator list every field it cannot judge on a houseCARL 2.0 capture (a cut-off, unread, unnamed or depth-mismatched field, a failed read, a tree answer that could not compare a plugin in full or whose plugin list was cut off), with its reason and plugins, and never drop it?"
@@ -10260,7 +10260,7 @@
       "useWhen": "Qualify changes to recordrows' 2.0 path (read_chains, chains_for_setup, the tree and by-name readers) and how its unjudged list reaches the rows file (C2174-C2178); offline, no game.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_record_2_0_unjudged.py",
+          "path": "integration/housecarl/tests/test_record_2_0_unjudged.py",
           "anchor": "a field it cannot judge is listed as unjudged with its reason"
         }
       ],
@@ -10272,8 +10272,8 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_record_unexpanded_leaves.py",
-      "path": "_geometry-harness/tests/test_record_unexpanded_leaves.py",
+      "id": "integration/housecarl/tests/test_record_unexpanded_leaves.py",
+      "path": "integration/housecarl/tests/test_record_unexpanded_leaves.py",
       "kind": "script",
       "answers": [
         "Does the record-lane comparator leave a field unjudged, never equal, when a read printed it without its values (an item as its type name, a list as its summary), while a field read with its values or by content hash stays judged?"
@@ -10281,7 +10281,7 @@
       "useWhen": "Qualify changes to recordrows' unexpanded-field rule, its read preference, the schema's grid and dictionary entries, or partly read fields (C2170, C2172, C2173); offline, no game.",
       "evidence": [
         {
-          "path": "_geometry-harness/tests/test_record_unexpanded_leaves.py",
+          "path": "integration/housecarl/tests/test_record_unexpanded_leaves.py",
           "anchor": "a leaf that carries no value is unjudged with its reason, never equal"
         }
       ],

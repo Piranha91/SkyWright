@@ -1409,7 +1409,7 @@ def case_65(tmp):
 
 
 def case_800(tmp):
-    """Item 18 phase 3: `enrich --kind order-variant` is a kind evalrun takes. On case-01's evaluation it either derives
+    """Item 18 phase 3: `enrich --kind order-variant` is a kind the module's recordenrich takes. On case-01's evaluation it either derives
     the reversed order's rows (exit 0, a manifest row of that kind, and the copy still verifies) or refuses in one
     sentence that says why the order cannot be reversed (exit 2); never a usage error."""
     case = "case-800-enrich-order-variant"
