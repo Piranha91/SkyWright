@@ -2,12 +2,14 @@ using System.Globalization;
 using System.Text.Json;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
+using SkyWright.Engine;
 using ViewProbe;
 
 namespace Workbench;
 
-/// <summary>Item 5's server answers from the houseCARL server the workbench binds (its arm's profile): <c>near=</c> for doors,
-/// <c>references=</c> for what names a reference, the door's <c>TeleportDestination</c>, a base's record type, and the
+/// <summary>Item 5's answers for the workbench's write target (its arm's profile): the doors near a reference from
+/// SkyWright's own query (<see cref="DoorsNear"/> over <see cref="ProfileView"/>, the same plugins the houseCARL service
+/// reads); from the houseCARL server the workbench binds, <c>references=</c> for what names a reference, the door's <c>TeleportDestination</c>, a base's record type, and the
 /// commit's placement check (F4) for the reference as drawn.</summary>
 internal sealed class ServerContextSource : IContextSource
 {
@@ -57,13 +59,29 @@ internal sealed class ServerContextSource : IContextSource
 
     public async Task<(IReadOnlyList<string> Doors, int NotListed)> DoorsNearCountedAsync(FormKey key, double within)
     {
-        var root = await Records(new()
+        var (doors, notListed, _) = await DoorsNearReadAsync(key, within).ConfigureAwait(false);
+        return (doors, notListed);
+    }
+
+    ProfileView? _profile;
+
+    /// <summary>The doors near the reference, nearest first, at most <see cref="Cap"/>, from SkyWright's own index of the
+    /// write target's load order; a refusal is thrown as its one sentence.</summary>
+    public async Task<(IReadOnlyList<string> Doors, int NotListed, string? Unread)> DoorsNearReadAsync(FormKey key, double within)
+    {
+        var target = (await _writer.ConfigureAwait(false)).Target;
+        return await Task.Run(() =>
         {
-            ["near"] = new Dictionary<string, object?> { ["of"] = new[] { key.ToString() }, ["within"] = within },
-            ["types"] = new[] { "REFR" }, ["where"] = new[] { "TeleportDestination exists" }, ["limit"] = Cap,
+            ProfileView view;
+            lock (this)
+            {
+                if (_profile?.Target != target) { _profile?.Dispose(); _profile = new ProfileView(target); }
+                view = _profile;
+            }
+            var a = DoorsNear.Of(view.Capture(), key, within, Cap);
+            if (a.Refusal is { } why) throw new InvalidOperationException(why);
+            return ((IReadOnlyList<string>)a.Listed.Select(FormIdToken.Of).ToList(), a.Total - a.Listed.Count, a.Unread);
         }).ConfigureAwait(false);
-        var doors = Rows(root, "matches").Select(m => S(m, "formid")).OfType<string>().ToList();
-        return (doors, Math.Max(0, Total(root, doors.Count) - doors.Count));
     }
 
     static readonly string[] NamingFields = { "EnableParent", "LinkedReferences", "ActivateParents", "TeleportDestination" };

@@ -18,6 +18,12 @@ internal interface IContextSource
     Task<IReadOnlyList<(string Key, string Field)>> NamesAsync(FormKey key);
     /// <summary>The doors near it and how many more the server matched than it listed.</summary>
     async Task<(IReadOnlyList<string> Doors, int NotListed)> DoorsNearCountedAsync(FormKey key, double within) => (await DoorsNearAsync(key, within), 0);
+    /// <summary>The doors near it, how many more matched than were listed, and one sentence when a plugin could not be read.</summary>
+    async Task<(IReadOnlyList<string> Doors, int NotListed, string? Unread)> DoorsNearReadAsync(FormKey key, double within)
+    {
+        var (doors, notListed) = await DoorsNearCountedAsync(key, within);
+        return (doors, notListed, null);
+    }
     /// <summary>What names it and how many more the server matched than it listed.</summary>
     async Task<(IReadOnlyList<(string Key, string Field)> Names, int NotListed)> NamesCountedAsync(FormKey key) => (await NamesAsync(key), 0);
     /// <summary>A door's other side: the far door and its cell, and the doorstep a player coming out through this door arrives at
@@ -82,7 +88,7 @@ internal static class ContextRead
         var doors = new List<DoorFact>();
         try
         {
-            var (near, doorsNotListed) = await src.DoorsNearCountedAsync(fk, DoorRadius).ConfigureAwait(false);
+            var (near, doorsNotListed, unread) = await src.DoorsNearReadAsync(fk, DoorRadius).ConfigureAwait(false);
             foreach (var d in near)
             {
                 if (string.Equals(d, key, StringComparison.OrdinalIgnoreCase)) continue;
@@ -92,7 +98,8 @@ internal static class ContextRead
                 doors.Add(new DoorFact(d, label, far, farCell, arrival));
             }
             sections["doors"] = (doors.Count == 0 ? $"no door within {DoorRadius:0} units"
-                : $"{doors.Count} door(s) within {DoorRadius:0} units; \"touches it\" is the contact read's, not the distance's") + More(doorsNotListed);
+                : $"{doors.Count} door(s) within {DoorRadius:0} units, nearest first; \"touches it\" is the contact read's, not the distance's") + More(doorsNotListed)
+                + (unread is null ? "" : "; " + unread);
         }
         catch (Exception ex) { sections["doors"] = $"the doors within {DoorRadius:0} units could not be read: {Msg(ex)}"; }
 
