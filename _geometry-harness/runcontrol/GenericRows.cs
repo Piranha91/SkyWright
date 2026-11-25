@@ -87,10 +87,20 @@ public static class GenericRows
 
     /// <summary>The command line and outputs of one row, or the row accounted (blocked, not applicable, skipped)
     /// when it cannot be built. `launch` receives what RunChild takes.</summary>
-    public static void Run(Executor ex, PyDict check, PyDict arm) =>
-        Build(ex, check, arm, (argv, outputs, states) => ex.RunChild(check, arm, null, argv, outputs, states: states));
+    public static void Run(Executor ex, PyDict check, PyDict arm) => Run(ex, check, arm, null);
 
-    public static void Build(Executor ex, PyDict check, PyDict arm, Action<List<string>, List<string>, object?> launch)
+    /// <summary>As above, with the caller's own argument placeholders beside the registry's (runcontrol's own
+    /// evaluation passes none).</summary>
+    public static void Run(Executor ex, PyDict check, PyDict arm, IReadOnlyDictionary<string, Placeholder>? placeholders) =>
+        Build(ex, check, arm, (argv, outputs, states) => ex.RunChild(check, arm, null, argv, outputs, states: states), placeholders);
+
+    /// <summary>A caller's argument placeholder: it appends its tokens to <c>args</c> (the arguments so far, whose last
+    /// may be the flag it repeats) and returns null, or returns the status and the sentence the row is accounted
+    /// with when it cannot be filled.</summary>
+    public delegate (string status, string why)? Placeholder(Executor ex, PyDict plan, PyDict check, PyDict arm, List<string> args);
+
+    public static void Build(Executor ex, PyDict check, PyDict arm, Action<List<string>, List<string>, object?> launch,
+        IReadOnlyDictionary<string, Placeholder>? placeholders = null)
     {
         var adapter = PyValue.Dict(check["adapter"]);
         object? kind = adapter.Get("kind");
@@ -135,6 +145,15 @@ public static class GenericRows
         var args = new List<string>();
         foreach (string token in raw)
         {
+            if (placeholders != null && placeholders.TryGetValue(token, out var fill))
+            {
+                if (fill(ex, plan, check, arm, args) is { } unfilled)
+                {
+                    ex.Account(check, arm, unfilled.status, null, unfilled.why);
+                    return;
+                }
+                continue;
+            }
             if (token == "{target}")
             {
                 var names = TargetNames(plan);
