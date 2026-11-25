@@ -13,6 +13,7 @@
     <ProjectReference Include="$(SkyWrightSrc)SkyWright.Engine\SkyWright.Engine.csproj" />
     <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
     <Compile Include="..\_shared\CheckoutLayout.cs" Link="CheckoutLayout.cs" />
+    <Compile Include="..\_shared\HousecarlRulebook.cs" Link="HousecarlRulebook.cs" />
     <Compile Include="..\_shared\NavGrid.cs" Link="NavGrid.cs" />
     <Compile Include="..\_shared\NavEdit.cs" Link="NavEdit.cs" />
     <Compile Include="..\_shared\NavMarker.cs" Link="NavMarker.cs" />

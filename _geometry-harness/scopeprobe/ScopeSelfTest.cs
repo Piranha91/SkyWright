@@ -110,6 +110,58 @@ static class ScopeSelfTest
                 resolved == 0 && unresolved == 1 && exp.Count == 1, $"{resolved} {unresolved} {exp.Count}");
         t.Check("PD2-S4 one unresolved door states the door-destinations extent; none states nothing",
                 ScopeOutcome.DoorExtent(1) is not null && ScopeOutcome.DoorExtent(0) is null, "");
+
+        // SR: houseCARL's rulebook, run through THIS exe as a child over an MO2 instance holding MrMaster.esm and MrA.esp,
+        // in a working folder with no generated\ in it: the child finds the rulebook from its own build or says it cannot.
+        // The test never names the build's rulebook; only SR-2 and SR-3 point WB_CORPUS somewhere broken.
+        var inst = Path.Combine(t.Root, "sr-inst");
+        var game = Path.Combine(t.Root, "sr-game");
+        Directory.CreateDirectory(Path.Combine(inst, "mods", "MrFix"));
+        Directory.CreateDirectory(Path.Combine(inst, "profiles", "P"));
+        Directory.CreateDirectory(Path.Combine(inst, "overwrite"));
+        Directory.CreateDirectory(Path.Combine(game, "Data"));
+        File.Copy(master, Path.Combine(inst, "mods", "MrFix", "MrMaster.esm"));
+        File.Copy(mrA, Path.Combine(inst, "mods", "MrFix", "MrA.esp"));
+        File.WriteAllText(Path.Combine(inst, "profiles", "P", "modlist.txt"), "+MrFix\n");
+        File.WriteAllText(Path.Combine(inst, "profiles", "P", "plugins.txt"), "*MrMaster.esm\n*MrA.esp\n");
+        File.WriteAllText(Path.Combine(inst, "profiles", "P", "loadorder.txt"), "MrMaster.esm\nMrA.esp\n");
+
+        // SR-1: the expected contributors at E00 are worked out by hand from MovedRefFixture's table (the master's own
+        // E00 with its LAND, navmeshes and references; A's E00 copy with navmeshes and references, and A's persistent
+        // M5 standing at (1400,1400) in grid 0,0; A carries no LAND there).
+        var sr1 = ScopeChild.Run(t.Root, "sr1", inst, game, corpus: null);
+        string atE00 = sr1.Doc is { } d1 ? ScopeChild.At(d1, MovedRefFixture.E00.ToString()) : "(no scope.json)";
+        bool sr1Complete = sr1.Doc is { } d1c && d1c.RootElement.GetProperty("locationContributors").GetProperty("complete").GetBoolean();
+        var sr1Missing = sr1.Doc is { } d1m ? d1m.RootElement.GetProperty("locationContributors").GetProperty("missing").EnumerateArray().Select(x => x.GetString()).ToList() : new();
+        t.Check("SR-1 the probe finds its build's rulebook from any working folder: exit 0, contributors complete, E00 as worked by hand",
+                sr1.Exit == 0 && sr1Complete && sr1Missing.Count == 0
+                && atE00 == "MrMaster.esm:CELL,LAND,NAVM,placed-record | MrA.esp:CELL,NAVM,persistent-placed-record,placed-record",
+                $"exit {sr1.Exit}; complete {sr1Complete}; E00 {atE00}; missing {sr1Missing.Count}: {sr1Missing.FirstOrDefault()}");
+
+        // SR-2: a rulebook that is not there. One sentence on stderr, exit 2, nothing on stdout, no scope.json (a stale
+        // one from an earlier run at --json is removed, so it cannot pass for this run's), the run log closed as failed.
+        // Its exact start also keeps it from reading as an order refusal to runcontrol (the game would not load the order).
+        var absentCorpus = Path.GetFullPath(Path.Combine(t.Root, "absent", "corpus.json"));
+        var sr2 = ScopeChild.Run(t.Root, "sr2", inst, game, corpus: absentCorpus, stale: true);
+        string want2 = $"scopeprobe: houseCARL's rulebook {absentCorpus} is missing (named by WB_CORPUS), so it cannot tell which other "
+                     + "plugins change the same places as the mod you are checking; run scripts\\build.ps1 to make it, or set WB_CORPUS to a corpus.json.";
+        t.Check("SR-2 a missing rulebook: exit 2, the one sentence, nothing on stdout, no scope.json (stale one removed), run log failed",
+                sr2.Exit == 2 && sr2.ErrLines.Count == 1 && sr2.ErrLines[0] == want2 && sr2.Out.Trim().Length == 0
+                && !sr2.JsonExists && sr2.RunLogStatus == "Failed",
+                $"exit {sr2.Exit}; json {sr2.JsonExists}; log {sr2.RunLogStatus}; stdout {sr2.Out.Trim().Length} chars; stderr: {string.Join(" / ", sr2.ErrLines)}");
+
+        // SR-3: a rulebook that is there and cannot be read.
+        var junk = Path.GetFullPath(Path.Combine(t.Root, "junk", "corpus.json"));
+        Directory.CreateDirectory(Path.GetDirectoryName(junk)!);
+        File.WriteAllText(junk, "not json");
+        var sr3 = ScopeChild.Run(t.Root, "sr3", inst, game, corpus: junk);
+        string head3 = $"scopeprobe: houseCARL's rulebook {junk} (named by WB_CORPUS) could not be read (";
+        string tail3 = "), so it cannot tell which other plugins change the same places as the mod you are checking; "
+                     + "run scripts\\build.ps1 -Rulebook to make it again, or set WB_CORPUS to a readable corpus.json.";
+        t.Check("SR-3 an unreadable rulebook: exit 2, the one sentence with the reason, nothing on stdout, no scope.json, run log failed",
+                sr3.Exit == 2 && sr3.ErrLines.Count == 1 && sr3.ErrLines[0].StartsWith(head3) && sr3.ErrLines[0].EndsWith(tail3)
+                && sr3.Out.Trim().Length == 0 && !sr3.JsonExists && sr3.RunLogStatus == "Failed",
+                $"exit {sr3.Exit}; json {sr3.JsonExists}; log {sr3.RunLogStatus}; stdout {sr3.Out.Trim().Length} chars; stderr: {string.Join(" / ", sr3.ErrLines)}");
     });
 
     static ConfigPlugin Plugin(string name, string path)
@@ -118,6 +170,69 @@ static class ScopeSelfTest
         var masters = m.ModHeader.MasterReferences.Select(x => x.Master.FileName.String).ToList();
         return new ConfigPlugin(name, path, "self-test", new FileInfo(path).Length, "fixture", false, false, masters);
     }
+}
+
+/// <summary>This probe's own exe run as a child for the SR cases: target MrA.esp over the instance the self-test wrote,
+/// working folder <c>root</c>, WB_CORPUS removed or set to <c>corpus</c>, its own run log folder.</summary>
+static class ScopeChild
+{
+    public sealed record Result(int Exit, string Out, List<string> ErrLines, bool JsonExists, System.Text.Json.JsonDocument? Doc, string? RunLogStatus);
+
+    public static Result Run(string root, string name, string inst, string game, string? corpus, bool stale = false)
+    {
+        var json = Path.Combine(root, name, "scope.json");
+        var runlog = Path.Combine(root, name, "runlog");
+        Directory.CreateDirectory(Path.GetDirectoryName(json)!);
+        if (stale) File.WriteAllText(json, "{\"stale\": \"from an earlier run\"}");
+        var psi = new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!)
+        {
+            WorkingDirectory = root, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
+            StandardOutputEncoding = System.Text.Encoding.UTF8, StandardErrorEncoding = System.Text.Encoding.UTF8,
+        };
+        foreach (var a in new[] { "--instance", inst, "--profile", "P", "--game", game, "--target", "MrA.esp", "--json", json })
+            psi.ArgumentList.Add(a);
+        psi.Environment.Remove("WB_CORPUS");
+        if (corpus is not null) psi.Environment["WB_CORPUS"] = corpus;
+        psi.Environment["HOUSECARL_RUNLOG_DIR"] = runlog;
+        using var p = System.Diagnostics.Process.Start(psi)!;
+        var err = p.StandardError.ReadToEndAsync();
+        string stdout = p.StandardOutput.ReadToEnd();
+        p.WaitForExit();
+        var errLines = err.Result.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Trim().Length > 0).ToList();
+        System.Text.Json.JsonDocument? doc = null;
+        if (File.Exists(json)) { try { doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(json)); } catch (System.Text.Json.JsonException) { } }
+        return new Result(p.ExitCode, stdout, errLines, File.Exists(json), doc, RunLogStatus(runlog));
+    }
+
+    /// <summary>The terminal status the run log recorded for the child's scopeprobe run, or null when it recorded none.</summary>
+    static string? RunLogStatus(string runlog)
+    {
+        var history = Path.Combine(runlog, "history.jsonl");
+        if (!File.Exists(history)) return null;
+        string? status = null;
+        foreach (var line in File.ReadAllLines(history))
+        {
+            try
+            {
+                using var d = System.Text.Json.JsonDocument.Parse(line);
+                if (d.RootElement.TryGetProperty("op", out var op) && op.GetString() == "scopeprobe"
+                    && d.RootElement.TryGetProperty("status", out var s)) status = s.GetString();
+            }
+            catch (System.Text.Json.JsonException) { }
+        }
+        return status;
+    }
+
+    /// <summary>One location's contributors as "plugin:kind,kind | plugin:kind", in the document's order.</summary>
+    public static string At(System.Text.Json.JsonDocument doc, string cell)
+    {
+        foreach (var loc in doc.RootElement.GetProperty("locationContributors").GetProperty("locations").EnumerateArray())
+            if (loc.GetProperty("cell").GetString() == cell)
+                return string.Join(" | ", loc.GetProperty("plugins").EnumerateArray().Select(p =>
+                    p.GetProperty("name").GetString() + ":" + string.Join(",", p.GetProperty("recordKinds").EnumerateArray().Select(k => k.GetString()))));
+        return $"(no location {cell})";
+    }
+
 }
 
 /// <summary>SdDoor.esp: a door base, and an interior cell holding one placed door whose teleport destination is a door

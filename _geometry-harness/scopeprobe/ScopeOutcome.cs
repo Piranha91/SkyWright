@@ -16,6 +16,20 @@ static class ScopeOutcome
         return 2;
     }
 
+    /// <summary>An input the probe itself needs is missing or unreadable (houseCARL's rulebook): the one sentence on stderr,
+    /// nothing on stdout, exit 2, the run log closed as failed, and no scope.json at <paramref name="jsonPath"/> (one left by
+    /// an earlier run is deleted, so it cannot pass for this run's). Deliberately not REFUSED: that marker means the
+    /// configuration itself would not load, and this is about the build.</summary>
+    public static int Fail(string sentence, string? jsonPath, HousecarlCore.Progress.Run run)
+    {
+        // a stale file that cannot be deleted stays, but the exit code still says this run wrote nothing
+        try { if (jsonPath is not null && File.Exists(jsonPath)) File.Delete(jsonPath); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        Console.Error.WriteLine(sentence);
+        run.Fail(sentence, 2);
+        return 2;
+    }
+
     public static bool Complete(int walkFailures, int targetsWalked, int targetsWanted)
         => walkFailures == 0 && targetsWalked == targetsWanted;
 

@@ -133,12 +133,15 @@ internal static class CheckoutLayout
 
     /// <summary>A piece's path for this program: its override when set (no build needed), else the build this program
     /// sits in; throws <see cref="InvalidOperationException"/> with one sentence when there is none.</summary>
-    public static string Resolve(Piece p, string what)
+    public static string Resolve(Piece p, string what) => ResolveWithSource(p, what).Path;
+
+    /// <summary><see cref="Resolve(Piece, string)"/>, with where the path came from: the variable's name, or "build".</summary>
+    public static (string Path, string Source) ResolveWithSource(Piece p, string what)
     {
-        if (Environment.GetEnvironmentVariable(OverrideVariable(p)) is { } v && !string.IsNullOrWhiteSpace(v)) return v;
+        if (Environment.GetEnvironmentVariable(OverrideVariable(p)) is { } v && !string.IsNullOrWhiteSpace(v)) return (v, OverrideVariable(p));
         var layout = Locate(null, out var why)
             ?? throw new InvalidOperationException($"{why}; or set {OverrideVariable(p)} to the {what}.");
-        return layout.PathOf(p);
+        return (layout.PathOf(p), "build");
     }
 
     // ---- the program path rule
