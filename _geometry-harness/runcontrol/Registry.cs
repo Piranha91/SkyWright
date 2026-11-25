@@ -8,16 +8,26 @@ public static class Registry
 {
     public const int SchemaVersion = 1;
 
-    // The closed vocabularies; a value outside one is a validation problem.
-    static readonly HashSet<string> AdapterKinds = ["scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target",
-        "adviceprobe", "patchprobe", "derived", "media", "manual", "mcp-only", "live-import", "unsupported"];
-    static readonly HashSet<string> KindsNeedingReason = ["manual", "mcp-only", "unsupported"];
-    static readonly HashSet<string> ResultKinds = ["detector", "catalogue", "discovery"];
-    static readonly HashSet<string> KindsWithoutOutput = ["derived", "media", "mcp-only", "manual", "unsupported", "live-import"];
-    static readonly HashSet<string> KindsRequiringOptIn = ["live-import"];
-    static readonly HashSet<string> KindsWithChild = ["scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target",
-        "adviceprobe", "patchprobe"];
-    static readonly HashSet<string> EvidenceStrengths = ["record-fact", "calibrated-inference", "engine-observation", "supplied-media"];
+    /// <summary>The closed vocabularies a list of checks is validated against; a value outside one is a validation
+    /// problem. runcontrol's own commands validate only against <see cref="App"/>; another program using this library
+    /// for a list of its own passes that list's vocabulary, and nothing it passes reaches runcontrol's registry.</summary>
+    public sealed record Vocabulary(
+        IReadOnlySet<string> AdapterKinds, IReadOnlySet<string> KindsNeedingReason, IReadOnlySet<string> ResultKinds,
+        IReadOnlySet<string> KindsWithoutOutput, IReadOnlySet<string> KindsRequiringOptIn, IReadOnlySet<string> KindsWithChild,
+        IReadOnlySet<string> EvidenceStrengths);
+
+    /// <summary>The app registry's vocabulary.</summary>
+    public static readonly Vocabulary App = new(
+        AdapterKinds: new HashSet<string>(["scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target",
+            "adviceprobe", "patchprobe", "derived", "media", "manual", "mcp-only", "live-import", "unsupported"]),
+        KindsNeedingReason: new HashSet<string>(["manual", "mcp-only", "unsupported"]),
+        ResultKinds: new HashSet<string>(["detector", "catalogue", "discovery"]),
+        KindsWithoutOutput: new HashSet<string>(["derived", "media", "mcp-only", "manual", "unsupported", "live-import"]),
+        KindsRequiringOptIn: new HashSet<string>(["live-import"]),
+        KindsWithChild: new HashSet<string>(["scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target",
+            "adviceprobe", "patchprobe"]),
+        EvidenceStrengths: new HashSet<string>(["record-fact", "calibrated-inference", "engine-observation", "supplied-media"]));
+
     static readonly HashSet<string> TriggerKeys = ["always", "anyType", "placed", "exterior", "land", "navmesh", "overlays", "nexusId",
         "masters", "placedMeshes", "anyOf", "allOf"];
     static readonly HashSet<string> Extents = ["script-placement", "alias-fill", "bos-swaps", "asset-replacers", "door-destinations",
@@ -53,8 +63,15 @@ public static class Registry
     // ---- validation
 
     /// <summary>Every problem with this registry, as sentences; an empty list means valid.</summary>
-    public static List<string> Validate(PyDict registry)
+    public static List<string> Validate(PyDict registry) => Validate(registry, App);
+
+    /// <summary>Every problem with a list of checks of the registry's shape, against the vocabulary given (see
+    /// <see cref="Vocabulary"/>); an empty list means valid.</summary>
+    public static List<string> Validate(PyDict registry, Vocabulary vocabulary)
     {
+        var (AdapterKinds, KindsNeedingReason, ResultKinds, KindsWithoutOutput, KindsRequiringOptIn, KindsWithChild, EvidenceStrengths) =
+            (vocabulary.AdapterKinds, vocabulary.KindsNeedingReason, vocabulary.ResultKinds, vocabulary.KindsWithoutOutput,
+             vocabulary.KindsRequiringOptIn, vocabulary.KindsWithChild, vocabulary.EvidenceStrengths);
         var problems = new List<string>();
 
         if (!PyValue.Eq(registry.Get("schemaVersion"), (long)SchemaVersion))
@@ -168,7 +185,7 @@ public static class Registry
                     problems.Add($"{cid}: a {output} adapter needs adapter.result "
                                  + "{kind, findings, judged, unjudgeable} saying how its output is read");
                 else
-                    ValidateResult(cid, (string)output!, res, problems);
+                    ValidateResult(cid, (string)output!, res, problems, ResultKinds);
             }
 
             object? applic = check.Get("applicability");
@@ -256,7 +273,7 @@ public static class Registry
     }
 
     // How a json or text output is read: the result kind and the three count specs.
-    static void ValidateResult(string cid, string output, PyDict result, List<string> problems)
+    static void ValidateResult(string cid, string output, PyDict result, List<string> problems, IReadOnlySet<string> ResultKinds)
     {
         if (!PyValue.InSet(result.Get("kind"), ResultKinds)) problems.Add($"{cid}: unknown result kind {PyText.Repr(result.Get("kind"))}");
         foreach (string field in new[] { "findings", "judged", "unjudgeable" })
