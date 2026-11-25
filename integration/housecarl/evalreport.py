@@ -1101,11 +1101,13 @@ class Bundle:
         self.evidence = [e for e in (self.manifest.get("evidence") or []) if isinstance(e, dict)]
         self.by_path = {e["path"]: e for e in self.evidence if e.get("path")}
         self.receipts = {}
+        self.receipt_paths = {}     # receipt id -> its evidence path (an overlay's, relative to this bundle)
         for e in self.evidence:
             if e.get("kind") == "receipt":
                 rc = load_json(d / e["path"])
                 if isinstance(rc, dict) and rc.get("receiptId"):
                     self.receipts[rc["receiptId"]] = rc
+                    self.receipt_paths[rc["receiptId"]] = e["path"]
         self.receipt_by_key = {}
         for rid, rc in self.receipts.items():
             self.receipt_by_key[(rc.get("checkId"), rc.get("armId"), rc.get("part"))] = rc
@@ -1133,6 +1135,8 @@ class Bundle:
                 du[k] = ou[k]
         du["familiesUnsupportedOrManual"] = sorted(set(du.get("familiesUnsupportedOrManual") or []) |
                                                    set(ou.get("familiesUnsupportedOrManual") or []))
+        if isinstance(od.get("importedEvidence"), list):     # the imports an overlay credited are its own
+            disp["importedEvidence"] = list(disp.get("importedEvidence") or []) + od["importedEvidence"]
         self.disposition = disp
         self.plan = dict(self.plan, checks=list(self.plan.get("checks") or []) + list(op.get("checks") or []))
         self.ledger = dict(self.ledger, entries={**(self.ledger.get("entries") or {}), **(ol.get("entries") or {})})
@@ -1502,7 +1506,7 @@ def imported_evidence(b: Bundle) -> dict:
         row = {"checkId": check_id, "armId": arm_id, "receiptId": rid, "origin": origin,
                "capturedUtc": imp.get("capturedUtc") or drow.get("capturedUtc"),
                "tool": imp.get("tool"), "sourceSha256": imp.get("sourceSha256"),
-               "receiptPath": f"receipts/{check_id}__{arm_id}.json"}
+               "receiptPath": (getattr(b, "receipt_paths", None) or {}).get(rid) or f"receipts/{check_id}__{arm_id}.json"}
         if origin == "fresh":
             row["originCheck"] = imp.get("originCheck")
         elif origin == "reused":

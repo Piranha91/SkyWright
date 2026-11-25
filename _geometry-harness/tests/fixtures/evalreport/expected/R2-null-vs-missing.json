@@ -8,7 +8,7 @@
   "completion": {
    "complete": false,
    "claim": "incomplete",
-   "byCauseIncludes": {"mcp-only": 4, "rejected(extraction-failed)": 6, "unknown-applicability": 2, "unsupported": 4, "manual": 2}
+   "byCauseIncludes": {"rejected(extraction-failed)": 6, "unknown-applicability": 2, "unsupported": 4, "manual": 2}
   }
  },
  "nullFinding": {

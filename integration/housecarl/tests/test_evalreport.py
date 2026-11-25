@@ -396,6 +396,8 @@ def assert_common(case: str, bundle: Path, out: Path, pres: dict, common: dict, 
     expect(comp_.get("complete"), ev.get("complete"), f"{case}: scope.completion.complete = disposition's", "D1")
     expect(comp_.get("claim"), ev.get("claim"), f"{case}: scope.completion.claim = disposition's", "D1")
     req = required_missing(disp)
+    if str(bundle) in AI_OF:      # an overlay's missing rows are the evaluation's too (the report joins them)
+        req += required_missing(load(Path(AI_OF[str(bundle)]) / "disposition.json") or {})
     expect(comp_.get("missingRequired"), len(req), f"{case}: scope.completion.missingRequired", "D1/D2")
     by = {}
     for m in req:
@@ -1524,6 +1526,8 @@ def import_origin_view(bundle: Path, drop_disposition_list: bool, strip_receipts
         f"evalreport_import_origin_{drop_disposition_list}_{strip_receipts}", EVALREPORT)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    if str(bundle) in AI_OF:      # joined with its overlay, as the on-disk compile (plan --ai-bundle) reads it
+        module.AI_BUNDLES[str(Path(bundle).resolve())] = Path(AI_OF[str(bundle)]).resolve()
     view = module.Bundle(bundle)
     view.disposition = copy.deepcopy(view.disposition)
     if drop_disposition_list:
@@ -1628,9 +1632,10 @@ def import_origin_control(tmp: Path, index: dict):
     md, html, idx = text(out / "report.md"), text(out / "report.html"), text(out / "evidence-index.md")
     expect(v.returncode, 0, f"{label}: premise - verify exits 0 on the report built from the import fixture", "D5")
 
-    # ---- the premises this bundle was built for, read from the bundle itself
-    disp = load(bundle / "disposition.json") or {}
-    ledger = load(bundle / "ledger.json") or {}
+    # ---- the premises this bundle was built for, read from the overlay bundle that holds the imports
+    ai_bundle = Path(fixture["aiBundle"])
+    disp = load(ai_bundle / "disposition.json") or {}
+    ledger = load(ai_bundle / "ledger.json") or {}
     declared = {r.get("armId"): r.get("origin") for r in disp.get("importedEvidence") or []}
     expect([declared.get(fresh_arm), declared.get(reused_arm), declared.get(legacy_arm), declared.get(blocked_arm)],
            ["fresh", "reused", None, None],

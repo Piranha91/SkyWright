@@ -13,13 +13,15 @@ to match the code**: the driver reports the disagreement with both values and th
 ## 0. The inputs — real bundles from the real controller
 
 Every case bundle is generated at test time by driving `_geometry-harness/evalrun.py` (`plan` / `run` / `finalize`
-/ `bundle`) with `test_evalrun.py`'s fixture engine: the tiny plugins, the trimmed registry (15 checks, of which
-`loadability.dangling-references` and `records.cell-attributes` are `mcp-only`,
-`functional.collective-route-connectivity` `unsupported`, `environment.generated-output-regeneration` `manual`,
+/ `bundle`) with `test_evalrun.py`'s fixture engine: the tiny plugins, the trimmed registry (of whose checks
+`functional.collective-route-connectivity` is `unsupported`, `environment.generated-output-regeneration` `manual`,
 `functional.linked-dependencies` unknown-applicability), the fake probes that write the real conflict-file format,
-the real `conflictdiff.exe` and `ordersweep.py`. Consequences the oracle rests on:
+the real `conflictdiff.exe` and `ordersweep.py`. The record checks (`loadability.dangling-references`,
+`records.cell-attributes`, `mcp-only`) left the app's registry in step 3 of the SkyWright / houseCARL boundary: they
+are the AI-side overlay's (the houseCARL integration module's `evalcontrol`), so only a case with an overlay (R5, R7)
+reports them. Consequences the oracle rests on:
 
-- **No fixture evaluation is ever complete** (the mcp-only / unsupported / manual checks keep `missing` non-empty),
+- **No fixture evaluation is ever complete** (the unsupported / manual checks keep `missing` non-empty),
   so `claim` is `incomplete` on every case and the bundle verifies complete on every undamaged case — the
   acceptance table's first row is the standing state of every fixture.
 - Arm ids are the candidate stems (`baseline`, `candidate-01-reorder`, `candidate-03-combined`, …).

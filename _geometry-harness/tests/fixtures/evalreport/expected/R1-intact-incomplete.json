@@ -1,6 +1,6 @@
 {
  "case": "R1-intact-incomplete",
- "fixtureShape": "test_evalrun case-15 (case-01's scenario): every probe ok, the candidate arm repeats the baseline's rows; the trimmed registry carries mcp-only / unsupported / manual checks, so the evaluation is INCOMPLETE while the bundle verifies COMPLETE.",
+ "fixtureShape": "test_evalrun case-15 (case-01's scenario): every probe ok, the candidate arm repeats the baseline's rows; the trimmed registry carries unsupported / manual checks (its record checks are the AI-side overlay's since step 3 of the boundary), so the evaluation is INCOMPLETE while the bundle verifies COMPLETE.",
  "acceptanceRow": "Intact incomplete evaluation: report and reel preserve missing required checks and scoped comparison results; package integrity is never presented as evaluation completion.",
  "rules": ["D1", "D2", "D3 (2) and (3)", "D4", "D6 closing card"],
  "planExit": 0,
@@ -11,8 +11,8 @@
   "completion": {
    "complete": false,
    "claim": "incomplete",
-   "byCauseIncludes": {"mcp-only": 4, "unsupported": 4, "manual": 2, "unknown-applicability": 2},
-   "missingRequiredAtLeast": 10
+   "byCauseIncludes": {"unsupported": 4, "manual": 2, "unknown-applicability": 2},
+   "missingRequiredAtLeast": 6
   },
   "arms": ["baseline", "candidate-01-reorder"]
  },

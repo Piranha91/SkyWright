@@ -1,5 +1,5 @@
 """Build the evalreport fixtures: schema-2 bundles for cases R1-R7, made by driving the REAL controller (the built-in
-one, runcontrol: plan / run / import-results / finalize / bundle, started as test_evalrun's CONTROLLER) over
+one, runcontrol: plan / run / finalize / bundle, started as test_evalrun's CONTROLLER) over
 `test_evalrun.py`'s fixture engine - the tiny plugins, the trimmed registry, the fake probes that write the real
 conflict-file format, the real conflictdiff.exe.
 
@@ -18,8 +18,8 @@ Cases (EXPECTED.md section 1):
                                   ai_hook to bundle (supplied media is an AI-side overlay's: the houseCARL integration
                                   module's suite passes the hook; without one R5 has no media bundle)
   R6 changed-or-missing-source    two damaged COPIES: of R5's bundles (when the hook made them) and of R1's bundle
-  R7 import-origin                one mcp-only check imported fresh and reused, and one arm blocked by its prerequisite
-                                  (a pre-origin receipt is no longer made: its only writer was the Python controller)
+  R7 import-origin                made by the caller's ai_hook only (imported evidence is an AI-side overlay's: the
+                                  houseCARL integration module's suite passes the hook; without one there is no R7)
 
 Builds conflictdiff from this checkout's source into the output folder (test_evalrun.use_conflictdiff), unless
 HOUSECARL_EVALRUN_TEST_HARNESS names a tree to use as given.
@@ -256,76 +256,6 @@ def run_case(root: Path, case: str, fixture_case: str, media: Path | None = None
             "media": str(media) if media else None}
 
 
-IMPORT_CASE = "R7-import-origin"
-IMPORT_STEMS = {
-    # every arm but the last loads; the last one's masters come after its dependant, so masters-and-order refuses it
-    "candidate-00-baseline": ["Skyrim.esm", "Update.esm", "FixtureBase.esp", "FixtureTarget.esp"],
-    "candidate-01-reorder": ["Skyrim.esm", "Update.esm", "FixtureTarget.esp", "FixtureBase.esp"],
-    "candidate-02-legacy": ["Skyrim.esm", "Update.esm", "FixtureBase.esp", "FixtureTarget.esp"],
-    "candidate-03-missing-master": ["Update.esm", "Skyrim.esm", "FixtureTarget.esp"],
-}
-# the source another evaluation is declared to have captured the reused result for (never this plan)
-IMPORT_REUSED_FROM = {"planId": "0123456789ab", "armId": "candidate-01-earlier", "resultSha256": "ab" * 32}
-
-
-def make_import_origin_case(root: Path) -> dict:
-    """A schema-2 bundle whose mcp-only check (`T.IMPORT_CHECK`, prerequisite masters-and-order) the REAL controller
-    imported, one arm per way a report must describe imported evidence:
-
-      candidate-00-baseline        origin fresh (capture token and time checked)
-      candidate-01-reorder         origin reused, declaring IMPORT_REUSED_FROM as its source, reporting 2 findings
-      candidate-02-legacy          no import: the pre-origin receipt this arm once carried had only the Python
-                                   controller as its writer (step 3, D-A2), so its check stays open here
-      candidate-03-missing-master  its masters-and-order is refused, so an import there is refused and the check
-                                   stays open (the accepted-then-blocked import this arm once carried needed the Python
-                                   controller run in process, D-A2)
-
-    After the resume the credited imports' ledger entries read `reused` (the controller re-using this run's own
-    receipts), which is exactly the status a report must not describe as reused evidence."""
-    case = IMPORT_CASE
-    d, scen = T.import_case_dir(case, IMPORT_STEMS, refuse=("candidate-03-missing-master",))
-    run = root / "runs" / case
-    if run.exists():
-        shutil.rmtree(run)
-    scope_fake = T.GEN / "cases" / case / "scopeprobe_fake.py"
-    scope_fake.write_text(T.SCOPE_FAKE_20, encoding="utf-8")
-    p = T.do_plan(run, case, ["--select", T.MAO, "--probe-cmd", f"scopeprobe=python {scope_fake}"],
-                  registry="fixture-check-registry-derived.json")
-    if p.returncode != 0:
-        raise SystemExit(f"{case}: the controller's plan exited {p.returncode}\n{p.stdout[-2000:]}\n{p.stderr[-2000:]}")
-    plan = load(run / "plan.json")
-    arms = {stem: next(a for a in plan["arms"] if Path(a.get("candidateFile") or "").stem == stem)
-            for stem in IMPORT_STEMS}
-    bad = arms["candidate-03-missing-master"]
-
-    r = T.evalrun(["run", "--run", run], scen)
-    exits = {"plan": p.returncode, "run": r.returncode}
-    work = root / "imports" / case
-    envelopes = {
-        "fresh": (arms["candidate-00-baseline"], {}),
-        "reused": (arms["candidate-01-reorder"], {"origin": "reused", "reused_from": IMPORT_REUSED_FROM}),
-    }
-    for tag, (arm, kw) in envelopes.items():
-        manifest, doc = T.origin_import(work / tag, plan, arm, **kw)
-        if tag == "reused":
-            # the reused import reports findings, so the reader's finding sentence carries the qualification too
-            doc["result"] = {"detector": "finding", "findings": 2,
-                             "coverage": [{"Population": "records", "Judged": 3, "Unjudgeable": {}}]}
-            T.write_doc(manifest, doc)
-        ri = T.evalrun(["import-results", "--run", run, "--file", manifest], scen)
-        exits[f"import-{tag}"] = ri.returncode
-        if ri.returncode != 0:
-            raise SystemExit(f"{case}: the {tag} import exited {ri.returncode}\n{ri.stdout[-2000:]}\n{ri.stderr[-2000:]}")
-    for verb in ("resume", "finalize", "bundle"):
-        r = T.evalrun([verb, "--run", run] + (["--no-names"] if verb == "bundle" else []), scen)
-        exits[verb] = r.returncode
-        if r.returncode != 0:
-            raise SystemExit(f"{case}: the controller's {verb} exited {r.returncode}\n{r.stdout[-2000:]}\n{r.stderr[-2000:]}")
-    return {"run": str(run), "bundle": str(run / "bundle"), "fixtureCase": case, "exits": exits,
-            "arms": {stem: a["armId"] for stem, a in arms.items()}, "importCheck": T.IMPORT_CHECK,
-            "prerequisite": T.MAO, "reusedFrom": IMPORT_REUSED_FROM, "planId": plan["planId"]}
-
-
 def make_r6(root: Path, index: dict) -> dict:
     """Two damaged copies. (a) an accepted media file's bytes altered after bundling (R5's app bundle and the overlay
     bundle bound to it, copied side by side; only when the caller's hook bundled R5's media); (b) a schema-1 manifest."""
@@ -363,8 +293,8 @@ def make_r6(root: Path, index: dict) -> dict:
 
 
 def generate(root: Path, only: str | None = None, ai_hook=None) -> dict:
-    """ai_hook(root, index): the caller's step that adds what an AI-side evaluation adds (R5's media), run after the app
-    bundles; it records each overlay bundle in its case as aiBundle."""
+    """ai_hook(root, index, only): the caller's step that adds what an AI-side evaluation adds (R5's media, R7's
+    imports), run after the app bundles; it records each overlay bundle in its case as aiBundle."""
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
     gen = root / "evalrun-fixtures"
@@ -393,13 +323,10 @@ def generate(root: Path, only: str | None = None, ai_hook=None) -> dict:
         index[case] = run_case(root, case, fixture_case)
         print(f"  {case}: bundle at {index[case]['bundle']}")
     if ai_hook is not None:
-        ai_hook(root, index)
+        ai_hook(root, index, only)
     if not only or only.startswith("R6"):
         index["R6-changed-or-missing-source"] = make_r6(root, index)
         print("  R6-changed-or-missing-source: damaged copies written")
-    if not only or only.startswith("R7"):
-        index[IMPORT_CASE] = make_import_origin_case(root)
-        print(f"  {IMPORT_CASE}: bundle at {index[IMPORT_CASE]['bundle']}")
     index["_fixtureRoot"] = str(gen)
     write_json(root / "index.json", index)
     return index
