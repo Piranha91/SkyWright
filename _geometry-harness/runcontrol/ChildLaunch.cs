@@ -59,7 +59,7 @@ public static class ChildLaunch
         var job = new ChildJob(op, args, Checkout.Root, env);
         bool lockBefore = lockFile != null && File.Exists(lockFile);
         double? deadline = deadlineMinutes is { } minutes ? ChildRunner.Now() + 60 * minutes : null;
-        var res = RunJob("evalpipeline-" + op, PyPath.Str(ledgerDir), deadline, job);
+        var res = RunJob("runcontrol-" + op, PyPath.Str(ledgerDir), deadline, job);
         if (lockFile != null) AddWaited(PyPath.Join(ledgerDir, op + ".txt"));
         if (lockFile != null && !lockBefore && !string.IsNullOrEmpty(res.Stopped) && File.Exists(lockFile)) ReleaseStoppedLock(lockFile, res);
         return res;
@@ -108,7 +108,7 @@ public static class ChildLaunch
         {
             ["step"] = "released",
             ["reason"] = $"outer-stop: the stage's {res.Stopped} stopped the slot command; its process tree was confirmed gone",
-            ["by"] = "evalpipeline", ["heldPid"] = held,
+            ["by"] = "runcontrol", ["heldPid"] = held,
             ["t"] = now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " " + (zone.IsDaylightSavingTime(now) ? zone.DaylightName : zone.StandardName),
             ["lock"] = lockFile,
         };

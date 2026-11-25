@@ -39,7 +39,7 @@ public static class StageEvaluate
             var args = new List<string> { "--run", PyOrder.Fwd(run) };
             if (limit != null) args.AddRange(["--budget-minutes", PyText.Str(limit)]);
             var r = ChildLaunch.Run(ctx, PyPath.Join(sdir, "commands"), $"evaluate-{attempt:00}", ChildLaunch.Controller(verb, args), heavy: true,
-                purpose: $"evalpipeline {ctx.Id} evaluate", deadlineMin: backstop, holdMin: backstop);
+                purpose: $"runcontrol {ctx.Id} evaluate", deadlineMin: backstop, holdMin: backstop);
             var after = LedgerCounts(run);
             history.Add(new PyDict
             {

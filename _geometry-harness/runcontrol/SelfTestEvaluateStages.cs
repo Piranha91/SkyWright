@@ -93,9 +93,9 @@ public static partial class SelfTest
             string After(string flag) => argv[argv.IndexOf(flag) + 1];
             double minutes = (seen[0].deadline!.Value - before) / 60;
             var record = D(PyJson.ReadPipelineFile(t.At("out/evaluate/evaluate.json")));
-            return Same("op and job", $"{seen[0].op} {seen[0].job.Id}", "evalpipeline-evaluate-01 evaluate-01")
+            return Same("op and job", $"{seen[0].op} {seen[0].job.Id}", "runcontrol-evaluate-01 evaluate-01")
                    ?? Same("log folder", seen[0].dir, t.At("out/evaluate/commands"))
-                   ?? Same("hold", After("--max-min"), "40") ?? Same("purpose", After("--purpose"), "evalpipeline m evaluate")
+                   ?? Same("hold", After("--max-min"), "40") ?? Same("purpose", After("--purpose"), "runcontrol m evaluate")
                    ?? Same("lock", After("--lock"), PyOrder.Fwd(t.At("locks/HEAVY-LOCK-m-evaluate-01")))
                    ?? Same("the command", string.Join(" ", argv.Skip(argv.IndexOf("--") + 1)), $"{Environment.ProcessPath} run --run {PyOrder.Fwd(run)}")
                    // the outer deadline sits past the slot's own waits and hold: 60 + 20 + 40 + the margin

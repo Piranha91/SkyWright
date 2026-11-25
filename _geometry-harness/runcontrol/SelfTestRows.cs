@@ -211,7 +211,7 @@ public static partial class SelfTestFinalize
                 (PyDict? bound, List<string> outputs) got = (null, []);
                 ChildLaunch.RunJob = (op, dir, deadline, job) =>
                 {
-                    if (deadline != null || op != "evalpipeline-" + job.Id) deadlines = $"{op} was started with a deadline or under another name";
+                    if (deadline != null || op != "runcontrol-" + job.Id) deadlines = $"{op} was started with a deadline or under another name";
                     started.Add(new PyDict { ["op"] = job.Id, ["dir"] = t.Mask(dir), ["argv"] = t.Mask(job.Argv.Skip(1).Cast<object?>().ToList()), ["more"] = new List<object?>() });
                     if (job.Id == "bundle" && c["log"] != null) t.Write(Path.GetRelativePath(t.Root, PyPath.Join(dir, "bundle.txt")), PyJson.Utf8("$ bundle\n(exit 0, 1.0s)\n\n" + S(c["log"])));
                     object? code = exits[started.Count - 1];

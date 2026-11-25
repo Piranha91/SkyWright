@@ -167,7 +167,7 @@ internal static class ProbeRuns
     /// <summary>The pipeline's place in this store's run, or null when no pipeline record is live.</summary>
     internal static PipelineAt? Pipeline(string store)
     {
-        var p = Active(store, "evalpipeline").FirstOrDefault();
+        var p = Active(store, "runcontrol-run").FirstOrDefault();
         if (p is null) return null;
         string? stage = null; DateTimeOffset? at = null;
         var last = p.Notes.LastOrDefault(n => n.StartsWith("stage ", StringComparison.Ordinal));
@@ -188,7 +188,7 @@ internal static class ProbeRuns
 
     static DateTimeOffset? ChecksStart(IEnumerable<RunRecord> records)
     {
-        var starts = records.Where(r => r.Op.StartsWith("evalpipeline-evaluate", StringComparison.OrdinalIgnoreCase)).Select(r => r.StartedUtc).ToList();
+        var starts = records.Where(r => r.Op.StartsWith("runcontrol-evaluate", StringComparison.OrdinalIgnoreCase)).Select(r => r.StartedUtc).ToList();
         return starts.Count == 0 ? null : starts.Min();
     }
 
@@ -200,7 +200,7 @@ internal static class ProbeRuns
         foreach (var f in historyFiles)
         {
             var all = History(f).ToList();
-            var pipe = all.Where(r => r.Op == "evalpipeline").OrderBy(r => r.StartedUtc).FirstOrDefault();
+            var pipe = all.Where(r => r.Op == "runcontrol-run").OrderBy(r => r.StartedUtc).FirstOrDefault();
             if (pipe is null || ChecksStart(all) is not { } c) continue;
             took.Add((c - pipe.StartedUtc).TotalSeconds);
         }
@@ -251,7 +251,7 @@ internal static class ProbeRuns
         if (runEnded) return new("not run", null, "did not run this time", null);
         // "waiting its turn" only when another probe really is running ahead of it
         var ahead = since is null ? null : Read(Path.Combine(store, "active"))
-            .Where(r => r.EndedUtc is null && r.StartedUtc >= since.Value && !string.Equals(r.Op, op, StringComparison.OrdinalIgnoreCase) && r.Pid > 0 && r.ParentRunId is null && r.Mode != "mcp" && !r.Op.StartsWith("evalrun", StringComparison.OrdinalIgnoreCase) && !r.Op.StartsWith("evalpipeline", StringComparison.OrdinalIgnoreCase))
+            .Where(r => r.EndedUtc is null && r.StartedUtc >= since.Value && !string.Equals(r.Op, op, StringComparison.OrdinalIgnoreCase) && r.Pid > 0 && r.ParentRunId is null && r.Mode != "mcp" && !r.Op.StartsWith("evalrun", StringComparison.OrdinalIgnoreCase) && !r.Op.StartsWith("runcontrol", StringComparison.OrdinalIgnoreCase))
             .OrderBy(r => r.StartedUtc).FirstOrDefault();
         string guess = first is { HasNumber: true } f ? $"; about {Clock(f.Seconds!.Value)} a run once it starts, judged from {Runs(f.Samples)} before" : "";
         if (!pipelined) return new("waiting", null, "waiting its turn" + guess, null);

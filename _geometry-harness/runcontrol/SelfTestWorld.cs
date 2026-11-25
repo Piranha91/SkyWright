@@ -309,7 +309,7 @@ public static partial class SelfTest
             string prof = t.At("lab/profiles/EP-t");
             string? why = Same("plugins.txt", File.ReadAllText(PyPath.Join(prof, "plugins.txt")), "*Base.esm\n*PA.esp\n*PB.esp\n*Lab.esp\n*Subj.esp\n")
                           ?? Same("loadorder.txt", File.ReadAllText(PyPath.Join(prof, "loadorder.txt")), "Base.esm\nPA.esp\nPB.esp\nLab.esp\nSubj.esp\n")
-                          ?? Same("modlist.txt", File.ReadAllText(PyPath.Join(prof, "modlist.txt")), "# evalpipeline base profile; strongest first\n+MS\n+ML\n+MB\n+MA\n")
+                          ?? Same("modlist.txt", File.ReadAllText(PyPath.Join(prof, "modlist.txt")), "# runcontrol base profile; strongest first\n+MS\n+ML\n+MB\n+MA\n")
                           ?? Same("settings.ini", File.ReadAllText(PyPath.Join(prof, "settings.ini")), "[General]\r\nLocalSettings=true\r\n");
             if (why != null) return why;
             StageBodies.Prepare(ctx, res, t.At("out/prepare"));   // the same files again: accepted

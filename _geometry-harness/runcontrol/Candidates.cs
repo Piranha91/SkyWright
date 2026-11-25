@@ -20,7 +20,7 @@ public static class Candidates
             {
                 ["SchemaVersion"] = 1L, ["Name"] = $"{ctx.Id}: {id}", ["BaseProfile"] = ctx.Profile,
                 ["Plugins"] = a["plugins"], ["Mods"] = a["mods"],
-                ["Changes"] = new List<object?> { $"evalpipeline arm {id}" },
+                ["Changes"] = new List<object?> { $"runcontrol arm {id}" },
                 ["Provenance"] = new PyDict
                 {
                     ["arm"] = a["id"], ["role"] = a["role"], ["keys"] = a["keys"], ["variant"] = a.Get("variant"), ["entry"] = ctx.Id,
@@ -50,7 +50,7 @@ public static class Candidates
         var combinedMods = Py.Strs(combined["mods"]);
         var combinedPlugins = Py.Strs(combined["plugins"]);
         var universe = Py.Unique(arms.SelectMany(a => Py.Strs(a["mods"])));
-        string modlist = "# evalpipeline base profile; strongest first\n"
+        string modlist = "# runcontrol base profile; strongest first\n"
                          + string.Concat(universe.Where(m => !combinedMods.Contains(m)).Select(m => "-" + m + "\n"))
                          + string.Concat(combinedMods.Select(m => "+" + m + "\n"));
         var files = new PyDict

@@ -24,7 +24,7 @@ public sealed class Driver
     public Dictionary<string, StageBody> Bodies { get; init; } = StageBodies.Built();
     public Func<PipelineArgs, RunContext> MakeContext { get; init; } = a => new RunContext(a.Entry!, a.Machine, a.Out!);
     /// <summary>Opens the run-log record for a run of the given mode (the entry id).</summary>
-    public Func<string, Run> OpenRun { get; init; } = mode => RunLog.Begin("evalpipeline", new RunOptions { Mode = mode, StageSource = StageSource.Counted });
+    public Func<string, Run> OpenRun { get; init; } = mode => RunLog.Begin("runcontrol-run", new RunOptions { Mode = mode, StageSource = StageSource.Counted });
     /// <summary>Whether the run-log folder is set for this process and its children (off in tests).</summary>
     public bool SetsRunLogFolder { get; init; } = true;
 

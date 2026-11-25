@@ -927,7 +927,7 @@ public sealed class InPlaceRunTests
             // no Python anywhere in what the run said, and the run's own run log holds the pipeline's record
             Assert.DoesNotContain("python", log, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("python", refusal, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("\"op\":\"evalpipeline\"", File.ReadAllText(Path.Combine(folder, "run", "runlog", "history.jsonl")).Replace(" ", ""));
+            Assert.Contains("\"op\":\"runcontrol-run\"", File.ReadAllText(Path.Combine(folder, "run", "runlog", "history.jsonl")).Replace(" ", ""));
             // on a real profile the window draws the opened finding with viewprobe, which is the window's own call and
             // rightly logs to the ambient store; any other record there would be the run's
             var strays = Directory.EnumerateFiles(decoy, "*", SearchOption.AllDirectories).Select(x => Path.GetRelativePath(decoy, x))

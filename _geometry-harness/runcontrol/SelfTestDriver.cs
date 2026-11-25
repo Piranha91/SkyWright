@@ -14,7 +14,7 @@ public static partial class SelfTest
     {
         bool was = RunLog.Enabled;
         RunLog.Enabled = false;
-        try { return RunLog.Begin("evalpipeline", new RunOptions { Mode = mode }); }
+        try { return RunLog.Begin("runcontrol-run", new RunOptions { Mode = mode }); }
         finally { RunLog.Enabled = was; }
     }
 
@@ -307,7 +307,7 @@ public static partial class SelfTest
                 if (r.Stopped != "deadline" || File.Exists(lockFile)) return "a lock is left after a confirmed tree stop";
                 var log = PyText.SplitLines(File.ReadAllText(PyPath.Join(t.Root, "idle_lock.log"))).Select(Json).ToList();
                 if (log.Count != 1 || log[0]["step"] as string != "released" || !S(log[0]["reason"]).Contains("outer-stop") || !Py.Eq(log[0]["heldPid"], 999999L)
-                    || S(log[0]["lock"]) != lockFile || log[0]["by"] as string != "evalpipeline")
+                    || S(log[0]["lock"]) != lockFile || log[0]["by"] as string != "runcontrol")
                     return $"idle_lock.log does not hold one release line naming the outer stop: {PyJson.Dumps(log.Cast<object?>().ToList())}";
                 if (!Report.Out.ToString()!.Contains("released the stopped slot command's lock")) return "the release was not said";
                 ChildLaunch.RunJob = (_, _, _, job) => Stopped(job, treeGone: false);

@@ -149,7 +149,7 @@ public sealed class LauncherUiTests : IDisposable
         var store = Path.Combine(_root, "runlog"); var active = Path.Combine(store, "active"); Directory.CreateDirectory(active);
         var t0 = DateTimeOffset.UtcNow.AddSeconds(-50);
         void Put(RunRecord r) => File.WriteAllText(Path.Combine(active, r.RunId + ".json"), JsonSerializer.Serialize(r, RunContract.Json));
-        var pipe = new RunRecord { RunId = "evalpipeline-1", Op = "evalpipeline", Status = RunStatus.Running, StartedUtc = t0, Pid = Environment.ProcessId,
+        var pipe = new RunRecord { RunId = "runcontrol-run-1", Op = "runcontrol-run", Status = RunStatus.Running, StartedUtc = t0, Pid = Environment.ProcessId,
                                    Stage = "stages", Notes = { "stage census started " + t0.ToString("o"), "stage scope started " + t0.AddSeconds(30).ToString("o") } };
         pipe.Stages.Add(new RunStage { Id = "stages", Title = "pipeline stages", Total = 8, Processed = 2, Unit = "stages", StartedUtc = t0 });
         Put(pipe);
@@ -160,7 +160,7 @@ public sealed class LauncherUiTests : IDisposable
         Assert.Contains("preparing the run: checking that each load order loads (step 3 of 8)", prep.Line);
         Assert.DoesNotContain("waiting its turn", prep.Line);
         // the checks begin and another probe runs: now it really is waiting its turn, and the preflight run is not counted
-        File.AppendAllLines(Path.Combine(store, "history.jsonl"), new[] { JsonSerializer.Serialize(new RunRecord { RunId = "eval-1", Op = "evalpipeline-evaluate-01", Status = RunStatus.Completed, Outcome = RunOutcome.Ok, StartedUtc = t0.AddSeconds(45) }, RunContract.Json) });
+        File.AppendAllLines(Path.Combine(store, "history.jsonl"), new[] { JsonSerializer.Serialize(new RunRecord { RunId = "eval-1", Op = "runcontrol-evaluate-01", Status = RunStatus.Completed, Outcome = RunOutcome.Ok, StartedUtc = t0.AddSeconds(45) }, RunContract.Json) });
         Put(new RunRecord { RunId = "other-1", Op = "otherprobe", Status = RunStatus.Running, StartedUtc = t0.AddSeconds(46), Pid = Environment.ProcessId });
         var turn = ProbeRuns.Of(store, "aprobe", aborted: false, runEnded: false, DateTimeOffset.UtcNow, first: null, pipelined: true);
         Assert.Contains("waiting its turn: otherprobe is running", turn.Line);

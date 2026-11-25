@@ -51,7 +51,7 @@ bool pipeline = command is "run" or "arms" or "status";
 // record itself (Driver.OpenRun below), once the entry has said where the run log goes.
 // `plan` records as evalrun.py's plan does (op evalrun-plan), opened where the plan is written (Plan.Run).
 using var __run = command is "run" or "plan" ? null
-    : pipeline ? RunLog.BeginProcess("evalpipeline", args, new RunOptions { Mode = command }) : RunLog.BeginProcess("runcontrol", args);
+    : pipeline ? RunLog.BeginProcess("runcontrol-run", args, new RunOptions { Mode = command }) : RunLog.BeginProcess("runcontrol", args);
 try
 {
     if (args.Length >= 1 && args[0] == "--self-test") return SelfTest.Run();
@@ -104,7 +104,7 @@ try
     if (command == "status") return Driver.PrintStatus(asked);
     return new Driver
     {
-        OpenRun = mode => RunLog.BeginProcess("evalpipeline", args, new RunOptions { Mode = mode, StageSource = StageSource.Counted }),
+        OpenRun = mode => RunLog.BeginProcess("runcontrol-run", args, new RunOptions { Mode = mode, StageSource = StageSource.Counted }),
     }.Run(asked);
 }
 catch (Refusal r)
