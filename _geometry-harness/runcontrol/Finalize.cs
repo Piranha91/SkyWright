@@ -14,7 +14,11 @@ public static class Finalizer
         return Exit.Judgement;
     }
 
-    public static int Run(string runFolder)
+    public static int Run(string runFolder) => Run(runFolder, null);
+
+    /// <summary>As above, with a caller's step that adds its own blocks to the disposition (given the run, the plan and
+    /// the receipts) before it and STATUS.md are written. runcontrol's own finalize passes none.</summary>
+    public static int Run(string runFolder, Action<PyDict, string, PyDict, PyDict>? amend)
     {
         string run = PyPath.Str(runFolder);
         EvalStore.SetRunStore(run);
@@ -50,6 +54,7 @@ public static class Finalizer
             {
                 (integrity, var badKeys) = EvidenceIntegrity.Check(run, plan, ledger, receipts);
                 disp = Disposition.Build(run, plan, ledger, receipts, integrity, badKeys);
+                amend?.Invoke(disp, run, plan, receipts);
                 PyJson.WriteEvalFile(PyPath.Join(run, "disposition.json"), disp);
                 Ev.WriteText(PyPath.Join(run, "STATUS.md"), StatusMd.Build(plan, disp));
             }

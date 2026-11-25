@@ -21,6 +21,11 @@ public static class Checkout
     /// <summary>One of SkyWright's programs in this layout.</summary>
     public static string Program(string name) => PyPath.Str(HarnessShared.CheckoutLayout.ProgramExe(Harness, name));
 
+    /// <summary>For another program using this library from outside the build (its own folder holds no marker): the
+    /// SkyWright build it works against, named by that build's root. runcontrol itself never calls this.</summary>
+    public static void UseBuild(string root) =>
+        _layout = HarnessShared.CheckoutLayout.Locate(root, out var why) ?? throw new Refusal(why + ".");
+
     static HarnessShared.CheckoutLayout.Layout Find() =>
         HarnessShared.CheckoutLayout.Locate(null, out var why) ?? throw new Refusal(why + ".");
 }

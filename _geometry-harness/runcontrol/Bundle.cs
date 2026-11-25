@@ -8,6 +8,9 @@ public sealed class BundleArgs
     public string Run = "";
     public string? Out, Media, Registry, Scope, Search, ReaderCmd;
     public bool NoNames;
+    /// <summary>The copies and the manifest only: no names step and no order step (for another program using this
+    /// library to bundle a run of its own; runcontrol's own command never sets it).</summary>
+    public bool CopyOnly;
     public List<string> ReaderEnv = [], ModName = [];
 }
 
@@ -195,6 +198,11 @@ public static class Bundle
                 record.Stage("bundle", total: 1, unit: "bundles");
                 if (Assemble(a, run, outDir, plan, ledger, receipts, decisions, premises, evidence, unassessedMedia) is string refused) return Refuse(refused);
                 record.Advance();
+                if (a.CopyOnly)
+                {
+                    Console.Out.WriteLine($"bundle: {evidence.Count} evidence file(s) under {outDir}");
+                    return Exit.Ok;
+                }
                 // the names step: each row's objects, their bases and models; a skip, a refusal or a partial read is stated
                 record.Stage("names", total: 1, unit: "enrichments");
                 if (a.NoNames)
