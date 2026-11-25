@@ -29,6 +29,9 @@ internal sealed class StateTools
     static readonly string[] DefaultParts = { "selection", "pending", "recheck" };
     /// <summary>The verbs that stage or write an edit: refused on a read-only scene.</summary>
     static readonly string[] EditVerbs = { "stage", "undo", "commit", "recheck", "revert", "drop", "move_with", "find_clear", "choose" };
+    /// <summary>Every verb workbench_act takes, as its description and its unknown-verb refusal name them (one list:
+    /// <c>StateToolsTests</c> holds each to the dispatch).</summary>
+    internal const string VerbList = "select, stage, undo, revert, drop, view, decide, commit, recheck, move_with, find_clear, choose, repair_preview, repair_write, layer, frame_log, load_order, map, results, world, open_profile, select_mods, select_probes, set_output, set_work_folder, run, abort, capture_window, show_tab, search_mods or open";
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
     internal static CallToolResult Refuse(string sentence) => new() { IsError = true, Content = [new TextContentBlock { Text = sentence }] };
@@ -138,7 +141,7 @@ internal sealed class StateTools
                  "The app never enables a patch: the load order is unchanged until the user enables it in Mod Organizer 2.")]
     public static Task<CallToolResult> Act(
         StateHub hub,
-        [Description("select, stage, undo, commit or recheck.")] string verb,
+        [Description("one of " + VerbList + "; the other arguments say which verb reads them.")] string verb,
         [Description("select: the rank of the conflict to open, as workbench_state's conflicts list it.")] int? conflict = null,
         [Description("select: the rank of a Findings row to open, as workbench_state's findings list it.")] int? finding = null,
         [Description("select or stage: a reference as XXXXXX:Plugin.esp (6 hex digits, a colon, the defining plugin), or \"none\" for select.")] string? @ref = null,
@@ -764,7 +767,7 @@ internal sealed class StateTools
                     break;
                 }
                 default:
-                    return Refuse($"'{verb}' is not a verb; use select, stage, undo, revert, drop, view, decide, commit, recheck, repair_preview, repair_write, open_profile, select_mods, select_probes, set_output, set_work_folder or run.");
+                    return Refuse($"'{verb}' is not a verb; use {VerbList}.");
             }
         }
         catch (InvalidOperationException ex) { return Refuse(ex.Message); }

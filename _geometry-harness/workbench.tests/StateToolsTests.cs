@@ -208,6 +208,23 @@ public sealed class StateToolsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Every_verb_the_description_names_is_taken_and_the_description_names_them_all()
+    {
+        // the verb's description is the endpoint's own word to an LLM: it names every verb, and each one it names is
+        // dispatched (answered or refused for its own reason, never "is not a verb")
+        var act = (await _client.ListToolsAsync()).Single(t => t.Name == "workbench_act").JsonSchema;
+        Assert.Contains(StateTools.VerbList, P(act, "properties", "verb", "description").GetString());
+        var verbs = StateTools.VerbList.Replace(" or ", ", ").Split(", ");
+        Assert.True(verbs.Length >= 31, $"the verb list holds {verbs.Length} verbs");
+        foreach (var v in verbs)
+        {
+            var (_, text) = await Call("workbench_act", A(("verb", v)));
+            Assert.DoesNotContain("is not a verb", text);
+        }
+        Assert.Contains("is not a verb", await Refused("workbench_act", A(("verb", "fly"))));
+    }
+
+    [Fact]
     public async Task State_projects_the_window_and_the_asked_for_parts_and_refuses_an_unknown_part()
     {
         var all = await Ok("workbench_state", A(("project", new[] { "bundle", "conflicts" })));
@@ -627,7 +644,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         var s0 = await Ok("workbench_state", A(("project", new[] { "launcher" })));
         Assert.False(P(s0, "launcher").TryGetProperty("controller", out _), "the launcher still reports a run engine choice");
         var why = await Refused("workbench_act", A(("verb", "set_controller")));
-        Assert.Equal("'set_controller' is not a verb; use select, stage, undo, revert, drop, view, decide, commit, recheck, repair_preview, repair_write, open_profile, select_mods, select_probes, set_output, set_work_folder or run.", why);
+        Assert.Equal("'set_controller' is not a verb; use " + StateTools.VerbList + ".", why);
 
         // a stand-in for runcontrol.exe: records its arguments and its run-log folder, and writes a bundle where the run asks
         var fake = Path.Combine(inst + "-fake", "runcontrol-stand-in.cmd");
