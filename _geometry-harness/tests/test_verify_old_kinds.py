@@ -143,7 +143,9 @@ def current_refused(tmp: Path, name: str, kind: str, relabel: str | None) -> Non
 
 def receipt_refused(tmp: Path, name: str, receipt_check: str | None) -> None:
     r, bundle = verify(copy(tmp, name, version=5, no_enrichment=True, receipt_check=receipt_check))
-    kind = [d for d in bundle.get("defects") or [] if d.get("kind") == "receipt-kind-unknown"]
+    # the fixture's author-advice receipt (adviceprobe, which left the app's registry in 9D-1) is refused the same way;
+    # this case is about the record import's receipt
+    kind = [d for d in bundle.get("defects") or [] if d.get("kind") == "receipt-kind-unknown" and d.get("path") == RECEIPT]
     check(f"{name}: a record import's receipt in a bundle of registry version 5 is refused", r.returncode == 3
           and bundle.get("complete") is False and not bundle.get("mismatched") and not bundle.get("missing"),
           f"exit {r.returncode}; {json.dumps(bundle)[:400]}")
