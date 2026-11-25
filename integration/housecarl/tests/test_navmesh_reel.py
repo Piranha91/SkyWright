@@ -86,7 +86,7 @@ def load(name: str, path: Path):
 
 
 def shipped():
-    pol = json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))
+    pol = reporting_data.scene_policy()
     pri = json.loads((SKILL / "report-priorities.json").read_text(encoding="utf-8"))
     return pol, pri
 

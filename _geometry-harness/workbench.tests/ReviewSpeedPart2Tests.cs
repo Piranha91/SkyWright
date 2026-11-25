@@ -31,7 +31,7 @@ public sealed class ReviewSpeedPart2Tests : IDisposable
         return dir!.FullName;
     }
 
-    internal static string SkillPolicy() => Path.Combine(HarnessShared.CheckoutLayout.Housecarl(RepoRoot()), ".claude", "skills", "evaluation-reporting", "references", "scene-policy.json");
+    internal static string ScenePolicy() => Path.Combine(RepoRoot(), "data", "scene-policy.json");
 
     static RankedRow Row(int rank, string refKey, string? other, string cell = "000100:HcWbTest.esp", string check = "geometry.object-overlap",
                          string kind = "OVERLAP", string a = "Subject.esp", string b = "Other.esp") =>
@@ -43,7 +43,7 @@ public sealed class ReviewSpeedPart2Tests : IDisposable
         new(rank, new FindingRow("geometry.navmesh-ownership", "NAVMESH", "Subject.esp", "Other.esp", $"finding {rank}", refKey, cell, null, "finding", $"f{rank}"),
             false, "", 0);
 
-    static SceneKeyPolicy Policy() => SceneKeyPolicy.Load(SkillPolicy());
+    static SceneKeyPolicy Policy() => SceneKeyPolicy.Load(ScenePolicy());
 
     const string C1 = "000100:HcWbTest.esp", C2 = "000200:HcWbTest.esp";
 
@@ -111,21 +111,21 @@ public sealed class ReviewSpeedPart2Tests : IDisposable
     }
 
     [Fact]
-    public void G7g_the_key_names_come_from_the_skill_file_and_an_unknown_name_is_refused()
+    public void G7g_the_key_names_come_from_the_grouping_file_and_an_unknown_name_is_refused()
     {
         var rows = new[] { Row(1, "000801:HcWbTest.esp", "000901:HcWbTest.esp"), Row(2, "000801:HcWbTest.esp", "000902:HcWbTest.esp", b: "Third.esp") };
         Assert.Equal(2, Assert.Single(Assert.Single(Scenes.Build(rows, Array.Empty<RankedFinding>(), Policy()).Scenes).Clusters).Groups.Count);
         var narrow = Path.Combine(_root, "narrow.json");
-        File.WriteAllText(narrow, File.ReadAllText(SkillPolicy()).Replace("\"groupKey\": [\"type\", \"pair\", \"cell\", \"field\"]", "\"groupKey\": [\"type\", \"cell\"]"));
+        File.WriteAllText(narrow, File.ReadAllText(ScenePolicy()).Replace("\"groupKey\": [\"type\", \"pair\", \"cell\", \"field\"]", "\"groupKey\": [\"type\", \"cell\"]"));
         var folded = Scenes.Build(rows, Array.Empty<RankedFinding>(), SceneKeyPolicy.Load(narrow));
         Assert.Single(Assert.Single(Assert.Single(folded.Scenes).Clusters).Groups);
         var odd = Path.Combine(_root, "odd.json");
-        File.WriteAllText(odd, File.ReadAllText(SkillPolicy()).Replace("\"groupKey\": [\"type\", \"pair\", \"cell\", \"field\"]", "\"groupKey\": [\"type\", \"storey\"]"));
+        File.WriteAllText(odd, File.ReadAllText(ScenePolicy()).Replace("\"groupKey\": [\"type\", \"pair\", \"cell\", \"field\"]", "\"groupKey\": [\"type\", \"storey\"]"));
         var ex = Assert.Throws<InvalidOperationException>(() => SceneKeyPolicy.Load(odd));
         Assert.Contains("storey", ex.Message);
     }
 
-    // P3: the group key's type is the skill's type by check id, not the row's kind
+    // P3: the group key's type is the grouping data's type by check id, not the row's kind
     [Fact]
     public void G7i_two_checks_the_skill_calls_one_type_fold_together_and_an_unmapped_check_takes_the_other_type()
     {

@@ -47,7 +47,7 @@ internal sealed class StateTools
                      "launcher (manual mode: the mode, instance, profile and game, the profile's mod folders, the probes, the Output and Work Folders, the run), " +
                      "view (view-only state: originals shown, the ghost, hidden and see-through references, the Restore visibility label), " +
                      "decisions (each Conflicts row's decision: real problem, intentional or unsure, its reason, and whether it still applies or is flagged to reconsider; and decisions whose row is not in this run). " +
-                     "scenes (the Conflicts rows by cell: inside a cell, rows naming a common reference are one cluster, and rows with equal values of the reporting skill's group key are one group; with each cell's clickable Findings rows), " +
+                     "scenes (the Conflicts rows by cell: inside a cell, rows naming a common reference are one cluster, and rows with equal values of the grouping data's group key are one group; with each cell's clickable Findings rows), " +
                      "context (the selected reference: doors within 256 units, each 'touches it' or 'near only', with the far side; what names it; its enable parent; what rests on it and what physics does with it at load; the navmesh under its bounds; what stays behind a move; 'reading' while the read runs), " +
                      "placements (find_clear's candidate positions: each one's move, drop, what it touches there, its word from the open row's re-check, what was and was not checked; wait_seconds waits for them). " +
                      "scene (what the 3D view shows or is loading: the cell, the load order it is built on, read-only or not, and the last build's time and the longest the window waited during it). " +
@@ -596,7 +596,7 @@ internal sealed class StateTools
     static CallToolResult SelectScene(StateHub hub, int number)
     {
         var s = hub.Surface;
-        if (ReviewList.ScenesFor(s, hub.Standings, true) is not { } views) return Refuse("the reporting skill's scene policy was not found, so there are no scenes to open.");
+        if (ReviewList.ScenesFor(s, hub.Standings, true) is not { } views) return Refuse("the grouping data (scene-policy.json) was not found, so there are no scenes to open.");
         if (views.FirstOrDefault(v => v.Scene.Number == number) is not { } view)
             return Refuse($"no scene is numbered {number}; read workbench_state with project [\"scenes\"] to see them.");
         string said;
@@ -800,7 +800,7 @@ internal sealed class StateTools
         physical = r.PhysicalLabel, evidence = r.EvidenceLabel, isNew = r.NewLabel, severity = r.Severity,
     };
 
-    /// <summary>Each Conflicts row's scene number; empty when the skill's policy is not found.</summary>
+    /// <summary>Each Conflicts row's scene number; empty when the grouping data is not found.</summary>
     static IReadOnlyDictionary<int, int> SceneNumbers(IWorkbenchSurface s)
     {
         var map = new Dictionary<int, int>();
@@ -814,7 +814,7 @@ internal sealed class StateTools
     static object ScenesJson(IWorkbenchSurface s, Dictionary<string, DecisionMatch> standings, bool includeDecided, bool includeFindingsOnly = false)
     {
         if (ReviewList.ScenesViewFor(s, standings, includeDecided, includeFindingsOnly) is not { } view)
-            return new { refused = "the reporting skill's scene policy was not found, so rows are not grouped into scenes." };
+            return new { refused = "the grouping data (scene-policy.json) was not found, so rows are not grouped into scenes." };
         var views = view.Scenes;
         return new
         {

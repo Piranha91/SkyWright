@@ -804,7 +804,7 @@ def rv_reason_only(tmp: Path, RP, A: str, B: str):
     import copy as _copy
     import inspect
     pres, names, masters, search, mods, captures = RV.capture_binding_fixture()
-    shipped = json.loads((reporting_data.SCENE_POLICY).read_text(encoding="utf-8"))["vignettes"]
+    shipped = reporting_data.scene_policy()["vignettes"]
     pol = dict(RV.POLICY, captureAttemptsPerType=1, stillReasons=shipped["stillReasons"])
     keep = [c for c in captures if c["request"] != "req-own"]
     pres2 = _copy.deepcopy(pres)

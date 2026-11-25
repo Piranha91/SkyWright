@@ -39,7 +39,7 @@ import reel_stills  # noqa: E402
 import reporting_data  # noqa: E402
 SKILL = reporting_data.DATA
 PR = json.loads((SKILL / "report-priorities.json").read_text(encoding="utf-8"))
-POLICY = dict(json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"])
+POLICY = dict(reporting_data.scene_policy()["vignettes"])
 POLICY["effectModelPattern"] = ((PR.get("reader") or {}).get("prediction") or {}).get("effectModelPattern")
 WORDS = PR["reel"]["words"]
 BASE, A, B, OTHER = P.BASE, P.MOD_A, P.MOD_B, P.OTHER

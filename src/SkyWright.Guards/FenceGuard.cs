@@ -96,15 +96,6 @@ internal static class FenceGuard
         ],
         SkillReadsOutside:
         [
-            new("Directory.Build.props", ["skills/evaluation-reporting"],
-                "the build copies the reporting skill's scene-policy.json into Data\\ for the app's grouping",
-                "step 2(a), after step 4 lands: the app reads SkyWright's own data/scene-policy.json"),
-            new("_geometry-harness/workbench/Scenes.cs", ["evaluation-reporting"],
-                "the app's grouping names the skill's file as a path relative to a checkout (RelativePath)",
-                "step 2(a), after step 4 lands"),
-            new("_geometry-harness/workbench.tests/ReviewSpeedPart2Tests.cs", ["evaluation-reporting"],
-                "the grouping tests open the skill's copy in the pin",
-                "step 2(a), after step 4 lands"),
         ],
         SkillReadsInside:
         [

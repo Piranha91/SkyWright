@@ -14,8 +14,37 @@ MODULE = Path(__file__).resolve().parent
 DATA = MODULE / "reporting-data"
 PRIORITIES = DATA / "report-priorities.json"
 SCENE_POLICY = DATA / "scene-policy.json"
+#: SkyWright's grouping of review rows (groupKey, types, otherType), the app's own data, read from the checkout
+GROUPS = MODULE.parent.parent / "data" / "scene-policy.json"
+GROUP_KEYS = ("groupKey", "groupKeyWhy", "types", "otherType")
 NARRATION = DATA / "narration.json"
 AGENTS = MODULE / "model-agents"
+
+
+def scene_policy(presentation: Path | None = None, groups: Path | None = None) -> dict:
+    """The scene policy the report and reel read: the module's reporting-data/scene-policy.json with SkyWright's grouping
+    (data/scene-policy.json) joined into its `vignettes`. Each key has one owner: a key in both files is refused, as is a
+    grouping file without its keys."""
+    import json
+    presentation = Path(presentation or SCENE_POLICY)
+    groups = Path(groups or GROUPS)
+    doc = json.loads(presentation.read_text(encoding="utf-8"))
+    g = json.loads(groups.read_text(encoding="utf-8"))
+    vign = doc.setdefault("vignettes", {})
+    both = sorted(k for k in GROUP_KEYS if k in vign)
+    if both:
+        raise ValueError(f"{presentation} sets {', '.join(both)}, which is SkyWright's grouping ({groups}); remove it there, so each key has one owner.")
+    missing = [k for k in GROUP_KEYS if k not in g]
+    if missing:
+        raise ValueError(f"SkyWright's grouping {groups} has no {', '.join(missing)}; the report and reel cannot group rows without it.")
+    for k in GROUP_KEYS:
+        vign[k] = g[k]
+    return doc
+
+
+def files() -> list[Path]:
+    """Every data file the report and reel words and rules come from, for the stage tool hashes."""
+    return [PRIORITIES, SCENE_POLICY, GROUPS, NARRATION]
 
 
 def under(tree: Path) -> Path:

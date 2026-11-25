@@ -2058,7 +2058,7 @@ def case_caveats():
 
 def case_skill_data():
     pr = json.loads((DATA / "report-priorities.json").read_text(encoding="utf-8"))
-    sp = json.loads((DATA / "scene-policy.json").read_text(encoding="utf-8"))
+    sp = reporting_data.scene_policy()
     words = ((pr.get("reel") or {}).get("words")) or {}
     vign = sp.get("vignettes") or {}
     # since R2 (2026-11-13) each patch case is one phrasing: one fact said one way in every vignette
@@ -2402,6 +2402,8 @@ def code_sabotage(name: str) -> int:
         (tmp / "integration/housecarl/tests").mkdir()
         shutil.copy2(Path(__file__), tmp / "integration/housecarl/tests" / Path(__file__).name)
         shutil.copytree(DATA, reporting_data.under(tmp))
+        (tmp / "data").mkdir()
+        shutil.copy2(reporting_data.GROUPS, tmp / "data" / reporting_data.GROUPS.name)
         for rel, old, new in edits:
             f = tmp / rel
             text = f.read_text(encoding="utf-8")

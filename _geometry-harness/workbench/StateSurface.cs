@@ -33,7 +33,7 @@ internal interface IWorkbenchSurface
     RowState RowStateOf(RankedRow r) => new(r.Row.Physical?.ToString(), r.Row.Summary, "");
     /// <summary>Why the last session save failed, said in the window; null when it did not.</summary>
     string? SaveRefusal { get => null; set { } }
-    /// <summary>Item 7: the reporting skill's grouping data; null when it was not found.</summary>
+    /// <summary>Item 7: SkyWright's grouping data; null when it was not found.</summary>
     SceneKeyPolicy? ScenePolicy => null;
     /// <summary>The Findings tab, ranked.</summary>
     IReadOnlyList<RankedFinding> Findings => Open is { } b ? FindingRanking.Rank(b.Findings, b.Targets, Severity) : Array.Empty<RankedFinding>();

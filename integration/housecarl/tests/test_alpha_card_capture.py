@@ -283,7 +283,7 @@ def c1896_refused_reason_true(tmp: Path):
     RV = load("ac_reel_vignettes", HERE / "test_reel_vignettes.py")
     import reel_plan as RP
     pres, names, masters, search, mods, captures = RV.capture_binding_fixture()
-    shipped = json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"]
+    shipped = reporting_data.scene_policy()["vignettes"]
     pol = dict(RV.POLICY, captureAttemptsPerType=1, stillReasons=shipped["stillReasons"],
                stillReasonsCount=shipped.get("stillReasonsCount"), stillReasonsShort=shipped.get("stillReasonsShort"))
     keep = [c for c in captures if c["request"] not in ("req-own", "req-cell-two")]
@@ -632,7 +632,7 @@ def c1936_refusal_reasons_by_table(tmp: Path):
     off for good said as one no camera could see; a camera-spot refusal said as one; an unknown code not falling back
     to the generic line."""
     import reel_plan as RP
-    pol = json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"]
+    pol = reporting_data.scene_policy()["vignettes"]
     table = pol.get("refusalReasons") or {}
     codes = emittable_refusal_codes()
     missing = sorted(c for c in codes if c not in table)
@@ -678,7 +678,7 @@ def c1938_no_overlap_candidate_words(tmp: Path):
     Wrong answers: the words "overlap candidate" anywhere in the report and reel words or the code that builds them; the
     what-to-do line for overlaps not in plain words."""
     hits = []
-    for f in [SKILL / "report-priorities.json", SKILL / "scene-policy.json", HARNESS / "reel_plan.py", HARNESS / "evalreport.py",
+    for f in [SKILL / "report-priorities.json", SKILL / "scene-policy.json", reporting_data.GROUPS, HARNESS / "reel_plan.py", HARNESS / "evalreport.py",
               HARNESS / "reel_stills.py", HARNESS / "evalreel.py", *sorted((HARNESS / "evalreport_templates").glob("*"))]:
         if f.is_file() and "overlap candidate" in f.read_text(encoding="utf-8", errors="replace").lower():
             hits.append(f.name)
@@ -725,7 +725,7 @@ def c1939_not_drawn_carried(tmp: Path):
     RV = load("ac_reel_vignettes3", HERE / "test_reel_vignettes.py")
     import reel_plan as RP
     pres, names, masters, search, mods, captures = RV.capture_binding_fixture()
-    shipped = json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"]
+    shipped = reporting_data.scene_policy()["vignettes"]
     pol = dict(RV.POLICY, captureAttemptsPerType=1, stillReasons=shipped["stillReasons"],
                stillReasonsShort=shipped.get("stillReasonsShort"), refusalReasons=shipped.get("refusalReasons"))
     keep = [c for c in captures if c["request"] not in ("req-own", "req-cell-two")]
@@ -756,7 +756,7 @@ def c1960_not_drawn_without_fields(tmp: Path):
     not-drawn refusal without viewprobe's cause fields (or with an unknown cause) said as having no model; the no-model
     line missing where viewprobe's fields say the base carries no model."""
     import reel_plan as RP
-    pol = json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"]
+    pol = reporting_data.scene_policy()["vignettes"]
     table = pol.get("refusalReasons") or {}
     base = {"code": "points-unpickable", "pickerCode": "points-not-drawn", "final": True}
     got = [RP.refusal_reason({"refusal": dict(base, **extra)}, table) for extra in (

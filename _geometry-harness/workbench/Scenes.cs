@@ -2,28 +2,26 @@ using System.Text.Json;
 
 namespace Workbench;
 
-/// <summary>The reporting skill's grouping data (scene-policy.json <c>vignettes</c>): the group key's names, the check id to
+/// <summary>SkyWright's grouping data (data\scene-policy.json, in the build's Data\): the group key's names, the check id to
 /// clash type map and the type a check outside the map takes. The workbench folds rows by this data, as the report does.</summary>
 internal sealed record SceneKeyPolicy(IReadOnlyList<string> Keys, IReadOnlyDictionary<string, string> Types, string OtherType)
 {
     /// <summary>The key names a Conflicts row has a value for.</summary>
     internal static readonly string[] Known = { "type", "pair", "cell", "field" };
 
-    /// <summary>The skill's file, relative to a checkout or a plugin root.</summary>
-    internal static readonly string RelativePath = Path.Combine(".claude", "skills", "evaluation-reporting", "references", "scene-policy.json");
-
-    /// <summary>Read the skill's scene policy; a key name the workbench does not map is refused.</summary>
+    /// <summary>Read the grouping data; a key name the workbench does not map is refused.</summary>
     internal static SceneKeyPolicy Load(string path)
     {
-        if (!File.Exists(path)) throw new InvalidOperationException($"the reporting skill's scene policy is not at '{path}', so rows are not grouped into scenes.");
+        if (!File.Exists(path)) throw new InvalidOperationException($"the grouping data is not at '{path}', so rows are not grouped into scenes; build SkyWright again.");
         using var doc = JsonDocument.Parse(File.ReadAllText(path));
-        if (!doc.RootElement.TryGetProperty("vignettes", out var v) || v.ValueKind != JsonValueKind.Object)
-            throw new InvalidOperationException($"'{path}' has no vignettes section, so rows are not grouped into scenes.");
+        var v = doc.RootElement;
+        if (v.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException($"'{path}' is not a JSON object, so rows are not grouped into scenes.");
         var keys = v.TryGetProperty("groupKey", out var gk) && gk.ValueKind == JsonValueKind.Array
             ? gk.EnumerateArray().Select(e => e.GetString() ?? "").ToList()
-            : throw new InvalidOperationException($"'{path}' names no vignettes.groupKey, so rows are not grouped into scenes.");
+            : throw new InvalidOperationException($"'{path}' names no groupKey, so rows are not grouped into scenes.");
         if (keys.FirstOrDefault(k => !Known.Contains(k)) is { } bad)
-            throw new InvalidOperationException($"the reporting skill's group key names '{bad}', which a Conflicts row has no value for; the workbench maps {string.Join(", ", Known)}.");
+            throw new InvalidOperationException($"the grouping data's group key names '{bad}', which a Conflicts row has no value for; the workbench maps {string.Join(", ", Known)}.");
         var types = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (v.TryGetProperty("types", out var t) && t.ValueKind == JsonValueKind.Object)
             foreach (var p in t.EnumerateObject()) if (p.Value.GetString() is { } s) types[p.Name] = s;
@@ -31,7 +29,7 @@ internal sealed record SceneKeyPolicy(IReadOnlyList<string> Keys, IReadOnlyDicti
         return new SceneKeyPolicy(keys, types, other);
     }
 
-    /// <summary>The clash type of a check id, by the skill's map.</summary>
+    /// <summary>The clash type of a check id, by the grouping data's map.</summary>
     internal string TypeOf(string checkId) => Types.TryGetValue(checkId, out var t) ? t : OtherType;
 
     /// <summary>A Conflicts row's group-key values, in the key's order. A geometry row has no field.</summary>

@@ -11546,7 +11546,7 @@ def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out:
     for s_ in ([sb] if sb is not None else []) + [Bundle(p_) for p_, _ in sibs if sibling is None or Path(p_) != Path(sibling)]:
         for k, v in (plugin_masters(s_) or {}).items():
             masters.setdefault(k, v)
-    policy = dict((load_json(SCENE_POLICY) or {}).get("vignettes") or {})
+    policy = dict(reporting_data.scene_policy().get("vignettes") or {})
     policy["effectModelPattern"] = ((pr.get("reader") or {}).get("prediction") or {}).get("effectModelPattern")
     words = (pr.get("reel") or {}).get("words") or {}
     mod_names, names_doc = resolved if resolved is not None else resolve_mod_names(bundle, sibling, a, out)
@@ -11679,6 +11679,7 @@ def compiler_hashes() -> dict:
         out[f"templates/{t.name}"] = sha256_file(t)
     out["report-priorities.json"] = sha256_file(PRIORITIES)
     out["scene-policy.json"] = sha256_file(SCENE_POLICY)
+    out["data/scene-policy.json"] = sha256_file(reporting_data.GROUPS)
     out["reel_plan.py"] = sha256_file(HERE / "reel_plan.py")
     return out
 

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "about": "SkyWright's grouping of review rows: the clash type of each check, the type a check outside the map takes, and the key by which rows are instances of one problem. The app's review (workbench/Scenes.cs) folds its rows by it, and the AI-driven report and reel group the same way, reading this file beside their own scene policy (no key is in both).",
+  "groupKey": ["type", "pair", "cell", "field"],
+  "groupKeyWhy": "Instances of one problem are pictured once, the count still said and the other members named: the type (an overlap and a placement are different problems), the mod pair (the patch sentence and the fix belong to the pair), the cell (the same change in two places is two things a player meets) and, for a record clash, the field (a moved NPC and a renamed one differ). A record clash's cell is the one the other mod's version is filed in; a geometry clash's is the cell its row names. A group's next member is its capture fallback.",
+  "types": {"geometry.object-overlap": "overlap", "geometry.object-contact": "contact",
+            "geometry.fixture-empty-space": "contact", "records.contested-fields": "record",
+            "records.cell-attributes": "cell", "state.conditional-geometry": "state",
+            "geometry.navmesh-ownership": "navmesh", "geometry.placement-contact": "contact"},
+  "otherType": "other"
+}

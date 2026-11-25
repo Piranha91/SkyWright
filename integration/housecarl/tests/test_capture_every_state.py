@@ -237,7 +237,7 @@ def c2168_blocked_state_refused_or_reposed(tmp: Path):
           and '"--state-order", f"without={cands[row[\'without\']]}"' in pipe,
           "the composed pose or the top-down is published unchecked in other states, or the pipeline does not name the "
           "setup without the mod")
-    pol = json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"]
+    pol = reporting_data.scene_policy()["vignettes"]
     key = (pol.get("refusalReasons") or {}).get("state-camera-blocked")
     import evalpipeline as EP
     check("C2168", key and key in pol.get("stillReasons", {}) and key in pol.get("stillReasonsShort", {})

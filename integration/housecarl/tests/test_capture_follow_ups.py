@@ -131,7 +131,7 @@ def c1832_reel_buried_reason_counts(tmp: Path):
     CF = load("fu_capture_fallbacks", HERE / "test_capture_fallbacks.py")
     import reel_plan as RP
     pres, names, masters, search, mods, captures = RV.capture_binding_fixture()
-    shipped = json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"]
+    shipped = reporting_data.scene_policy()["vignettes"]
     pol = dict(RV.POLICY, captureAttemptsPerType=1, stillReasons=shipped["stillReasons"],
                stillReasonsCount=shipped.get("stillReasonsCount"))
     keep = [c for c in captures if c["request"] not in ("req-own", "req-cell-two")]
@@ -190,7 +190,7 @@ def c1835_strongest_crossing_pictured(tmp: Path):
                                                                                                    "000209:Alpha.esp")
     rec.insert(rec.index(first) + 1, strong)
     names["refs"]["000209:Alpha.esp"] = {"base": "B2", "carriedBy": ["Alpha.esp"]}
-    shipped = json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"]
+    shipped = reporting_data.scene_policy()["vignettes"]
     pol = dict(RV.POLICY, strengthPattern=shipped.get("strengthPattern"))
     reel = RP.plan_reel(copy.deepcopy(pres), names, masters, pol, RV.binding_words(), search, mods, [],
                         markers=RV.MARKERS, switches=RV.SWITCHES, captures_final=False)
@@ -211,7 +211,7 @@ def c1836_untried_buried_said(tmp: Path):
     CF = load("fu_capture_fallbacks3", HERE / "test_capture_fallbacks.py")
     import reel_plan as RP
     pres, names, masters, search, mods, captures = RV.capture_binding_fixture()
-    shipped = json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"]
+    shipped = reporting_data.scene_policy()["vignettes"]
     pol = dict(RV.POLICY, stillReasons=shipped["stillReasons"], stillReasonsCount=shipped.get("stillReasonsCount"))
     a2, b2 = "000102:Target.esp", "000202:Alpha.esp"
     buried = dict(CF.buried_result({a2: 9, b2: 0}, 9, b2, keys=(a2, b2)), request="req-buried-102")

@@ -208,7 +208,7 @@ public sealed class ReviewSpeedPart2Round2Tests
         new(rank, new FindingRow("geometry.navmesh-ownership", "NAVMESH", "Subject.esp", "Other.esp", $"finding {rank}", $"{0xE00 + rank:X6}:HcWbTest.esp", cell, null, "finding", $"f{rank}"),
             false, "", 0);
 
-    static SceneKeyPolicy Policy() => SceneKeyPolicy.Load(ReviewSpeedPart2Tests.SkillPolicy());
+    static SceneKeyPolicy Policy() => SceneKeyPolicy.Load(ReviewSpeedPart2Tests.ScenePolicy());
     static (Decision?, DecisionMatch) Undecided(RankedRow r) => (null, new DecisionMatch(Standing.Undecided, "undecided"));
     const string C1 = "000100:HcWbTest.esp";
 

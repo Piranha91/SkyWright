@@ -337,16 +337,16 @@ internal static class Shell
         Dispatcher.PushFrame(f);
     }
 
-    /// <summary>The reporting skill's grouping data the scenes are built from, or why it is not there.</summary>
+    /// <summary>SkyWright's grouping data the scenes are built from, or why it is not there.</summary>
     internal static SceneKeyPolicy? ScenePolicy => _scenePolicy.Value.Policy;
     internal static string? ScenePolicyRefusal => _scenePolicy.Value.Refusal;
     static readonly Lazy<(SceneKeyPolicy? Policy, string? Refusal)> _scenePolicy = new(() =>
     {
-        // WB_SCENE_POLICY, else the build's Data\\scene-policy.json, copied from the pinned houseCARL's reporting skill, which owns it
+        // WB_SCENE_POLICY, else the build's Data\\scene-policy.json, copied from SkyWright's data\\scene-policy.json
         string? path;
-        try { path = Program.Piece(HarnessShared.CheckoutLayout.Piece.ScenePolicy, "reporting skill's scene-policy.json"); }
+        try { path = Program.Piece(HarnessShared.CheckoutLayout.Piece.ScenePolicy, "grouping data (scene-policy.json)"); }
         catch (InvalidOperationException ex) { return (null, ex.Message); }
-        if (!File.Exists(path)) return (null, $"the reporting skill's scene policy is not at '{path}', so rows are listed without scenes.");
+        if (!File.Exists(path)) return (null, $"the grouping data is not at '{path}', so rows are listed without scenes; build SkyWright again.");
         try { return (SceneKeyPolicy.Load(path), null); }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or System.Text.Json.JsonException) { return (null, ex.Message); }
     });

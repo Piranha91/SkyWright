@@ -74,7 +74,7 @@ def check(case: str, cond: bool, wrong: str, detail: str = "") -> bool:
 
 
 def shipped():
-    pol = json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))
+    pol = reporting_data.scene_policy()
     pri = json.loads((SKILL / "report-priorities.json").read_text(encoding="utf-8"))
     return pol, pri
 
@@ -187,7 +187,7 @@ def c2123_no_candidate_wording(tmp: Path):
     in the code that builds the report and the reel."""
     phrases = ("candidate for a visual check", "candidates for visual review")
     hits = []
-    for f in [SKILL / "report-priorities.json", SKILL / "scene-policy.json", HARNESS / "evalreport.py",
+    for f in [SKILL / "report-priorities.json", SKILL / "scene-policy.json", reporting_data.GROUPS, HARNESS / "evalreport.py",
               HARNESS / "reel_plan.py", HARNESS / "evalreel.py", HARNESS / "readerdoc.py"]:
         if f.is_file():
             low = f.read_text(encoding="utf-8", errors="replace").lower()

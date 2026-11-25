@@ -1056,7 +1056,7 @@ public sealed class StateToolsTests : IAsyncLifetime
     [Fact]
     public async Task G7h_the_scenes_part_lists_the_cell_and_select_scene_opens_its_best_row()
     {
-        _surface.ScenePolicy = SceneKeyPolicy.Load(ReviewSpeedPart2Tests.SkillPolicy());
+        _surface.ScenePolicy = SceneKeyPolicy.Load(ReviewSpeedPart2Tests.ScenePolicy());
         var st = await Ok("workbench_state", A(("project", new[] { "scenes" })));
         Assert.True(At(st, out var list, "scenes", "scenes") && list.ValueKind == JsonValueKind.Array, "no scenes list: " + st);
         var one = Assert.Single(list.EnumerateArray());
@@ -1190,7 +1190,7 @@ public sealed class StateToolsTests : IAsyncLifetime
     [Fact]
     public async Task G7l_the_conflicts_parts_rows_carry_their_scene()
     {
-        _surface.ScenePolicy = SceneKeyPolicy.Load(ReviewSpeedPart2Tests.SkillPolicy());
+        _surface.ScenePolicy = SceneKeyPolicy.Load(ReviewSpeedPart2Tests.ScenePolicy());
         var st = await Ok("workbench_state", A(("project", new[] { "conflicts" })));
         foreach (var row in P(st, "conflicts", "rows").EnumerateArray())
             Assert.True(At(row, out var sc, "scene") && sc.ValueKind == JsonValueKind.Number && sc.GetInt32() == 1, "a row without its scene: " + row);
@@ -1239,7 +1239,7 @@ public sealed class StateToolsTests : IAsyncLifetime
     [Fact]
     public async Task C4d_the_scenes_part_counts_findings_only_cells_and_lists_them_when_asked()
     {
-        _surface.ScenePolicy = SceneKeyPolicy.Load(ReviewSpeedPart2Tests.SkillPolicy());
+        _surface.ScenePolicy = SceneKeyPolicy.Load(ReviewSpeedPart2Tests.ScenePolicy());
         _surface.Findings = new[]
         {
             new RankedFinding(1, new FindingRow("geometry.navmesh-ownership", "NAVMESH", "Subject.esp", "Other.esp", "f1", "000E01:HcWbTest.esp", "000200:HcWbTest.esp", null, "finding", "f1"), false, "", 0),

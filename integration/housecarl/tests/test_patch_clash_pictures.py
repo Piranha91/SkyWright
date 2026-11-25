@@ -79,7 +79,7 @@ def check(case: str, cond: bool, wrong: str, detail: str = "") -> bool:
 
 
 def shipped():
-    pol = json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))
+    pol = reporting_data.scene_policy()
     pri = json.loads((SKILL / "report-priorities.json").read_text(encoding="utf-8"))
     return pol, pri
 
