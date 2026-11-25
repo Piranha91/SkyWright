@@ -375,11 +375,11 @@ public sealed class StateToolsTests : IAsyncLifetime
     [Fact]
     public async Task B10b_select_probes_refuses_a_check_that_is_not_a_probe_saying_why_in_words()
     {
-        // Piranha's note: a registry kind name ("mcp-only") means nothing to the modder; the refusal says it in words
-        var why = await Refused("workbench_act", A(("verb", "select_probes"), ("checks", new[] { "loadability.dangling-references" })));
-        Assert.Contains("Loadability: Dangling References is not a probe", why);
-        Assert.Contains("checked by Claude reading the records directly", why);
-        Assert.DoesNotContain("mcp-only", why);
+        // Piranha's note: a registry kind name ("manual") means nothing to the modder; the refusal says it in words
+        var why = await Refused("workbench_act", A(("verb", "select_probes"), ("checks", new[] { "environment.generated-output-regeneration" })));
+        Assert.Contains("Environment: Generated Output Regeneration is not a probe", why);
+        Assert.Contains("is a step done by hand", why);
+        Assert.DoesNotContain("manual", why);
     }
 
     [Fact]
@@ -514,7 +514,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         var probes = P(all, "launcher", "probes").EnumerateArray().ToList();
         Assert.All(probes, p => Assert.True(P(p, "selected").GetBoolean(), P(p, "checkId").GetString()));
         var others = P(all, "launcher", "notProbes").EnumerateArray().ToList();
-        Assert.Equal(6, others.Select(o => P(o, "why").GetString()).Distinct().Count());       // one plain reason per kind of non-probe check
+        Assert.Equal(3, others.Select(o => P(o, "why").GetString()).Distinct().Count());       // one plain reason per kind of non-probe check (derived, manual, unsupported)
         foreach (var o in others.GroupBy(o => P(o, "why").GetString()).Select(g => g.First()))
         {
             Assert.DoesNotContain(probes, p => P(p, "checkId").GetString() == P(o, "checkId").GetString());
