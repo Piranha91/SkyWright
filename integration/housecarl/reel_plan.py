@@ -807,11 +807,30 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     left_markers = len({r["formKey"] for r in marker_rows})
     types = policy.get("types") or {}
     clashes = {}
+
+    def clash_key(t, r):
+        return (t, r["formKey"]) if t in ("record", "cell") else (t, r["formKey"], tuple(r.get("other") or []))
+
+    def card_units(rs):
+        # per kind, the card's figure of these rows: its clashes, or its rows for a kind counted by rows
+        keys_, n_ = collections.defaultdict(set), collections.Counter()
+        for r in rs:
+            t = types.get(r.get("checkId")) or policy.get("otherType")
+            if t is not None:
+                keys_[t].add(clash_key(t, r))
+                n_[t] += 1
+        return {t: n_[t] if t in (policy.get("countRows") or []) else len(keys_[t]) for t in keys_}
+    # what each kind's card leaves out, in its unit: on an editor-only marker, then a change with no effect in play
+    units_all = card_units(rows)
+    units_no_marker = card_units([r for r in rows if r not in marker_rows])
+    units_kept = card_units(kept_rows)
+    left_by_kind = {t: {"markers": units_all[t] - units_no_marker.get(t, 0),
+                        "noEffect": units_no_marker.get(t, 0) - units_kept.get(t, 0)} for t in units_all}
     for r in kept_rows:
         t = types.get(r.get("checkId")) or policy.get("otherType")
         if t is None:
             continue
-        key = (t, r["formKey"]) if t in ("record", "cell") else (t, r["formKey"], tuple(r.get("other") or []))
+        key = clash_key(t, r)
         clashes.setdefault(key, {"type": t, "rows": [],
                                  "pair": tuple(sorted({r["A"], r["B"]} - {target})) + (target,)})["rows"].append(r)
     drawable = set(policy.get("drawableFields") or [])
@@ -1492,6 +1511,17 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     # the opening's "testing is incomplete" line is a caveat: the report says it at its top, the reel's closing sentence
     # points there (Piranha, 2026-11-10)
     incomplete = None
+    kind_w = words.get("leftOutKind") or {}
+
+    def kind_lines(why):
+        # each kind a rule leaves out of its card, with the card's unit and label, so the card plus these lines is the
+        # report's figure for the kind; None without the words (then the line says the total, as before)
+        if not kind_w.get(why):
+            return None
+        out_ = [fill(kind_w[why][0 if n_ == 1 else 1], count=n_, unit=card_unit(t, n_) or "", label=type_labels[t])
+                for t in policy.get("typeOrder") or [] if t in counts or t in left_by_kind
+                for n_ in [(left_by_kind.get(t) or {}).get(why) or 0] if n_ and t in type_labels]
+        return ". ".join(out_) or None
     opening_pages = [
         {"layout": "types", "title": fill(words["stillTitles"]["types"], mod=mod(target)),
          "rows": [{"label": type_labels[t], "count": card_count(t), "unit": card_unit(t, card_count(t)),
@@ -1499,10 +1529,12 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                   for t in policy["typeOrder"] if t in counts],
          **({"incomplete": incomplete} if incomplete else {}),
          "leftOut": {"noInGameEffect": left_out, "markers": left_markers,
-                     "line": fill(words["stillTitles"]["leftOut"], count=left_out, noun="record field" if left_out == 1 else "record fields")
-                     if left_out else None,
-                     "markersLine": fill(words["leftOutMarkers"], count=left_markers, noun="clash" if left_markers == 1 else "clashes")
-                     if left_markers else None}},
+                     "line": kind_lines("noEffect") or (fill(words["stillTitles"]["leftOut"], count=left_out,
+                                                              noun="record field" if left_out == 1 else "record fields")
+                                                         if left_out else None),
+                     "markersLine": kind_lines("markers") or (fill(words["leftOutMarkers"], count=left_markers,
+                                                                   noun="clash" if left_markers == 1 else "clashes")
+                                                              if left_markers else None)}},
         {"layout": "load-order", "title": words["stillTitles"]["loadOrder"], "legend": words["stillTitles"]["affected"],
          "plugins": full_order or order, "targets": [target],
          "affected": [p for p in (full_order or order) if str(p).lower() in affected_low] or sorted(affected),

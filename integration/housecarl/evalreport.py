@@ -6223,7 +6223,7 @@ def build_prediction(ctx: dict) -> dict:
     all_relevant = len(relevant_arms)
     everywhere_ = missing_everywhere(ctx["missing"], labels.keys())
     for reason, by_check in by_status.items():
-        subjects = []
+        subjects, wheres = [], []
         for check_id, arms_ in sorted(by_check.items(), key=lambda kv: title_of(kv[0])):
             # a missing comparison part is the comparison with the measured order, not the setup's own result
             def place(a, part):
@@ -6246,7 +6246,14 @@ def build_prediction(ctx: dict) -> dict:
                                                                                for _, pt in setups)
                      and not (check_id in sib_counted and any(a == p_arm for a, _ in setups)) else
                      " (for " + "; ".join(place(a, part) for a, part in setups) + ")")
-            subjects.append(title_of(check_id) + where)
+            # a comparison not accepted for rows measured on one side: its row count beside its check
+            rows_said = (ctx.get("missingRowsSaid") or (lambda _s: ""))(first_status(
+                statuses_of[check_id], words.get("missingReasonPrecedence")))
+            subjects.append(title_of(check_id) + rows_said + where)
+            wheres.append((title_of(check_id) + rows_said, where, bool(rows_said)))
+        if len(wheres) > 1 and all(r_ for _, _, r_ in wheres) and len({w_ for _, w_, _ in wheres}) == 1:
+            # one setup's comparisons: the setup said once, after its checks
+            subjects = ["; ".join(t_ for t_, _, _ in wheres) + wheres[0][1]]
         lines.append({"reason": bind(reasons["missing"], {"reason": reason}), "count": len(by_check),
                       "unit": "check" if len(by_check) == 1 else "checks", "subject": "; ".join(subjects)})
     # (2026-10-24, task report-route-cut-leads) A check that ran and reached no verdict may still have rated objects as
@@ -10822,11 +10829,21 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         if status.startswith("comparison-unmeasured|"):
             parts_ = status.split("|")
             n_ = int(parts_[1])
+            # the count is said beside each check (missing_rows), so one setup's comparisons are one statement
             said_ = bind(cmp_words["missingUnmeasured"], {"count": fmt_n(n_), "rowNoun": "row" if n_ == 1 else "rows"})
             if len(parts_) > 2 and cmp_words.get("missingUnmeasuredRemoved"):
                 said_ += bind(cmp_words["missingUnmeasuredRemoved"], {"mod": parts_[2]})
             return said_
         return reason_labels.get(status, fallback)
+
+    def missing_rows(status: str) -> int | None:
+        """The rows a comparison could not measure in both setups, from its status (said beside its check); else None."""
+        return int(status.split("|")[1]) if status.startswith("comparison-unmeasured|") else None
+
+    def missing_rows_said(status: str) -> str:
+        n_ = missing_rows(status)
+        return (bind(cmp_words["missingUnmeasuredRows"], {"count": fmt_n(n_), "rowNoun": "row" if n_ == 1 else "rows"})
+                if n_ is not None and cmp_words.get("missingUnmeasuredRows") else "")
     reason_explanations = reader_data.get("missingReasonExplanations") or {}
     # Grouped by status, as the reason is a statement about the status - but each subject names the setup it is
     # missing ON, in the setups-compared list's own words. The disposition's missing list is per arm, so a check
@@ -10853,14 +10870,26 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             subjects = [f"{title} — {setup}" for title, _, setup in sorted(dict.fromkeys(rows_))]
             reason_ = missing_reason(first_status(status_set, (reader_data.get("prediction") or {}).get(
                 "missingReasonPrecedence")), "has no accepted result")
+            n_rows_ = missing_rows(first_status(status_set, (reader_data.get("prediction") or {}).get(
+                "missingReasonPrecedence")))
+            counted_ = [(t_, s_, n_rows_) for t_, _, s_ in sorted(dict.fromkeys(rows_))] if n_rows_ is not None else []
             same_ = next((x_ for x_ in missing_summary if x_["reason"] == reason_), None)
             if same_ is not None:
                 same_["subjects"] = list(dict.fromkeys(same_["subjects"] + subjects))
+                same_["_rows"] = same_.get("_rows", []) + counted_
                 continue
             missing_summary.append({"reason": reason_,
                                     "subjects": subjects,
                                     "explanation": " ".join(x for x in (reason_explanations.get(st) for st in status_set) if x)
-                                    or None})
+                                    or None, **({"_rows": counted_} if counted_ else {})})
+        for x_ in missing_summary:
+            # each check's rows not measured in both setups, after its subjects (they stay "check — setup" for the reel)
+            rows_n_ = x_.pop("_rows", None)
+            if rows_n_ and cmp_words.get("missingUnmeasuredRowsLine"):
+                one_setup_ = len({s_ for _, s_, _ in rows_n_}) == 1
+                line_ = bind(cmp_words["missingUnmeasuredRowsLine"], {"list": "; ".join(
+                    f"{t_ if one_setup_ else t_ + ' — ' + s_} {fmt_n(n_)}" for t_, s_, n_ in rows_n_)})
+                x_["explanation"] = " ".join(y_ for y_ in (x_.get("explanation"), line_) if y_)
         return missing_summary
     missing_summary = summarise_missing(reader_missing)
     null_summary = []
@@ -11006,7 +11035,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         "declared": declared_patches, "patchLabels": patch_labels, "replacedPatches": {
             a_: {side_: [n for n in arm_replaced.get(a_) or [] if replaced_patch_side(a_, n) == side_]
                  for side_ in ("arm", "baseline")} for a_ in arm_changes}, "comparisonKinds": comparison_kinds, "armChanges": arm_changes, "armReplaced": arm_replaced,
-        "missing": reader_missing, "unassessed": un, "checkTitles": check_titles, "missingReason": missing_reason,
+        "missing": reader_missing, "unassessed": un, "checkTitles": check_titles, "missingReason": missing_reason, "missingRowsSaid": missing_rows_said,
         "checkTitle": b.check_title, "armLabels": arm_labels,
         "familyTitle": lambda x: (b.families.get(x) or {}).get("title") or str(x),
         "cannotRunChecks": [str(c.get("checkId")) for c in b.plan.get("checks") or []
