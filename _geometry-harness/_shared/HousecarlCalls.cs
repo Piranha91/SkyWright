@@ -22,9 +22,6 @@ public static class HousecarlCalls
         [ToolNames.AssetStatus] = typeof(AssetTools).GetMethod(nameof(AssetTools.AssetStatus))!,
     };
 
-    static readonly object CorpusGate = new();
-    static string? _corpus;
-
     static readonly Lazy<string> _identity = new(() => IdentityOf(typeof(LoadOrderService).Assembly.Location, typeof(WriteEngine).Assembly.Location));
 
     /// <summary>What answers the calls: houseCARL's server and core assemblies as this process loaded them, by content;
@@ -36,16 +33,10 @@ public static class HousecarlCalls
 
     /// <summary>A service over explicit Data, mods and profile folders (the server's explicit-paths mode, built as its own
     /// start-up builds it), its store and spilled results in <paramref name="dataDir"/>. The rulebook is one per
-    /// process (houseCARL keeps it in one static): a second, different one is refused.</summary>
+    /// process (<see cref="HousecarlRulebook.Use"/>): a second, different one is refused.</summary>
     public static LoadOrderService Open(string gameData, string modsDir, string profileDir, string dataDir, string corpusPath)
     {
-        var corpus = Path.GetFullPath(corpusPath);
-        lock (CorpusGate)
-        {
-            if (_corpus is not null && !string.Equals(_corpus, corpus, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException($"houseCARL's rulebook in this program is '{_corpus}', and a read or write asked for '{corpus}'; start the program again to use another rulebook.");
-            CorpusRulebook.CorpusPath = _corpus = corpus;
-        }
+        HousecarlRulebook.Use(corpusPath);
         Directory.CreateDirectory(dataDir);
         var store = new UserConfigStore(Path.Combine(dataDir, "houseCARL.user.json"));
         return LoadOrderService.WithExplicitPaths(gameData, modsDir, profileDir, 0, store);
