@@ -402,79 +402,8 @@ public static class Plan
             throw new Refusal($"the registry's applicability could not be derived from this scope: {ex.Message}");
         }
 
-        var checks = new List<PyDict>();
-        var unknownApplicability = new List<PyDict>();
-        var ordersweepProbes = new List<string>();
-        var touched = new PyDict();
-        var tools = new PyDict();
-        foreach (var check in regChecks)
-        {
-            string cid = Py.S(check["id"]);
-            var adapter = new PyDict(Py.DictOrEmpty(check.Get("adapter")));
-            object? kind = adapter.ContainsKey("kind") ? adapter["kind"] : "unsupported";
-            var row = Py.DictOrEmpty(appMap.Get(cid));
-            object? applicability = row.ContainsKey("applicability") ? row["applicability"] : "unknown";
-            object? evidence = row.ContainsKey("evidence") ? row["evidence"] : "the registry returned no applicability for this check";
-            if (applicability is not ("yes" or "no" or "unknown"))
-                throw new Refusal($"registry check {cid}: applicability {PyText.Repr(applicability)} is not yes/no/unknown");
-
-            var inputs = Py.DictOrEmpty(check.Get("inputs"));
-            object? want = inputs.ContainsKey("arms") ? inputs["arms"] : "all";
-            var armIds = PyValue.Eq(want, "all") ? arms.Select(x => Py.S(x["armId"])).ToList() : [singleArm];
-
-            string? exe = adapter.Get("exe") as string;
-            if (!string.IsNullOrEmpty(exe) && !tools.ContainsKey(exe)) tools[exe] = PlanIdentity.ToolRecord(harness, exe);
-
-            // first match wins: a check that could not have run is recorded as that, selected or not, and a caller's
-            // narrowing is recorded for optional checks too
-            string? baseStatus = null;
-            if (PyValue.Eq(applicability, "no")) baseStatus = "not-applicable";
-            else if (Py.Truthy(check.Get("optIn")) && !opted.Contains(cid)) baseStatus = NotOptedIn;
-            else if (kind is string k && NeverRunKinds.Contains(k)) baseStatus = k;
-
-            var perArm = new List<object?>();
-            foreach (string aid in armIds)
-            {
-                var arm = arms.First(x => Py.S(x["armId"]) == aid);
-                string? st = baseStatus;
-                if (st == null)
-                {
-                    if (PyValue.Eq(want, "baseline") && aid != singleArm) st = "unsupported-for-arm";
-                    else if (Py.Truthy(Py.DictOrEmpty(arm.Get("supplied")).Get("payloadMissing"))) st = "blocked-payload-missing";
-                    else if (excluded.ContainsKey(cid)) { st = "excluded"; touched[cid] = "excluded"; }
-                    else if (selected != null && !selected.Contains(cid)) { st = "skipped-user"; touched[cid] = "not in --select"; }
-                    else if (Py.Truthy(arm.Get("heldBack"))) st = "skipped-budget";
-                    else st = "planned";
-                }
-                else if (excluded.ContainsKey(cid)) touched[cid] = $"excluded, but the status is {st} (it could not have run anyway)";
-                else if (selected != null && !selected.Contains(cid)) touched[cid] = $"not in --select, but the status is {st} (it could not have run anyway)";
-                perArm.Add(new PyDict { ["armId"] = aid, ["status"] = st });
-            }
-            bool anyPlanned = perArm.Any(x => Py.D(x)["status"] as string == "planned");
-            baseStatus ??= anyPlanned ? "planned" : perArm.Count > 0 ? Py.S(Py.D(perArm[0])["status"]) : "planned";
-            if (anyPlanned && PyValue.Eq(kind, "ordersweep-probe") && !string.IsNullOrEmpty(exe)) ordersweepProbes.Add(exe);
-            if (PyValue.Eq(applicability, "unknown")) unknownApplicability.Add(new PyDict { ["checkId"] = cid, ["evidence"] = evidence });
-
-            var planned = new PyDict
-            {
-                ["checkId"] = cid, ["family"] = check.Get("family"), ["title"] = check.Get("title"),
-                ["required"] = Py.Truthy(check.Get("required")) || opted.Contains(cid),
-            };
-            if (Py.Truthy(check.Get("optIn"))) { planned["optIn"] = true; planned["optedIn"] = opted.Contains(cid); }
-            planned.Update(new PyDict
-            {
-                ["applicability"] = applicability, ["applicabilityEvidence"] = evidence,
-                ["prerequisites"] = new List<object?>(Py.ListOrEmpty(check.Get("prerequisites"))),
-                ["inputs"] = Py.Truthy(check.Get("inputs")) ? check["inputs"] : new PyDict(),
-                ["evidence"] = Py.Truthy(check.Get("evidence")) ? check["evidence"] : new PyDict(),
-                ["adapter"] = adapter,
-                ["manualDecisionAllowed"] = Py.Truthy(check.Get("manualDecisionAllowed")),
-                ["unsupportedReason"] = check.Get("unsupportedReason"),
-                ["arms"] = perArm,
-                ["status"] = baseStatus,
-            });
-            checks.Add(planned);
-        }
+        var (checks, unknownApplicability, ordersweepProbes, touched, tools) =
+            FreezeChecks(regChecks, appMap, arms, singleArm, opted, excluded, selected, harness, NeverRunKinds);
 
         // an arm the scene captures will refuse is refused here, by the same check, before anything runs
         var sceneArms = checks.Where(c => Py.D(c["adapter"]).Get("exe") as string == ScenePreflight.Probe)
@@ -674,6 +603,90 @@ public static class Plan
                         + "evaluation incomplete until measured");
         Report.Line($"written: {planFile}");
         return Exit.Ok;
+    }
+
+    /// <summary>The rule that freezes a list of checks into a plan: each check's planned row per arm, with the status
+    /// the first matching reason gives (not applicable, not opted in, a kind that is never run, the arm, a payload, an
+    /// exclusion, the selection, a held-back arm), its applicability, and the programs it names. runcontrol's plan
+    /// passes its own registry and never-run kinds; another program using this library freezes its own list by it.</summary>
+    public static (List<PyDict> checks, List<PyDict> unknownApplicability, List<string> ordersweepProbes, PyDict touched, PyDict tools) FreezeChecks(
+        IEnumerable<PyDict> regChecks, PyDict appMap, List<PyDict> arms, string singleArm, IReadOnlySet<string> opted, PyDict excluded,
+        IReadOnlySet<string>? selected, string harness, IReadOnlyCollection<string> neverRunKinds)
+    {
+        var checks = new List<PyDict>();
+        var unknownApplicability = new List<PyDict>();
+        var ordersweepProbes = new List<string>();
+        var touched = new PyDict();
+        var tools = new PyDict();
+        foreach (var check in regChecks)
+        {
+            string cid = Py.S(check["id"]);
+            var adapter = new PyDict(Py.DictOrEmpty(check.Get("adapter")));
+            object? kind = adapter.ContainsKey("kind") ? adapter["kind"] : "unsupported";
+            var row = Py.DictOrEmpty(appMap.Get(cid));
+            object? applicability = row.ContainsKey("applicability") ? row["applicability"] : "unknown";
+            object? evidence = row.ContainsKey("evidence") ? row["evidence"] : "the registry returned no applicability for this check";
+            if (applicability is not ("yes" or "no" or "unknown"))
+                throw new Refusal($"registry check {cid}: applicability {PyText.Repr(applicability)} is not yes/no/unknown");
+
+            var inputs = Py.DictOrEmpty(check.Get("inputs"));
+            object? want = inputs.ContainsKey("arms") ? inputs["arms"] : "all";
+            var armIds = PyValue.Eq(want, "all") ? arms.Select(x => Py.S(x["armId"])).ToList() : [singleArm];
+
+            string? exe = adapter.Get("exe") as string;
+            if (!string.IsNullOrEmpty(exe) && !tools.ContainsKey(exe)) tools[exe] = PlanIdentity.ToolRecord(harness, exe);
+
+            // first match wins: a check that could not have run is recorded as that, selected or not, and a caller's
+            // narrowing is recorded for optional checks too
+            string? baseStatus = null;
+            if (PyValue.Eq(applicability, "no")) baseStatus = "not-applicable";
+            else if (Py.Truthy(check.Get("optIn")) && !opted.Contains(cid)) baseStatus = NotOptedIn;
+            else if (kind is string k && neverRunKinds.Contains(k)) baseStatus = k;
+
+            var perArm = new List<object?>();
+            foreach (string aid in armIds)
+            {
+                var arm = arms.First(x => Py.S(x["armId"]) == aid);
+                string? st = baseStatus;
+                if (st == null)
+                {
+                    if (PyValue.Eq(want, "baseline") && aid != singleArm) st = "unsupported-for-arm";
+                    else if (Py.Truthy(Py.DictOrEmpty(arm.Get("supplied")).Get("payloadMissing"))) st = "blocked-payload-missing";
+                    else if (excluded.ContainsKey(cid)) { st = "excluded"; touched[cid] = "excluded"; }
+                    else if (selected != null && !selected.Contains(cid)) { st = "skipped-user"; touched[cid] = "not in --select"; }
+                    else if (Py.Truthy(arm.Get("heldBack"))) st = "skipped-budget";
+                    else st = "planned";
+                }
+                else if (excluded.ContainsKey(cid)) touched[cid] = $"excluded, but the status is {st} (it could not have run anyway)";
+                else if (selected != null && !selected.Contains(cid)) touched[cid] = $"not in --select, but the status is {st} (it could not have run anyway)";
+                perArm.Add(new PyDict { ["armId"] = aid, ["status"] = st });
+            }
+            bool anyPlanned = perArm.Any(x => Py.D(x)["status"] as string == "planned");
+            baseStatus ??= anyPlanned ? "planned" : perArm.Count > 0 ? Py.S(Py.D(perArm[0])["status"]) : "planned";
+            if (anyPlanned && PyValue.Eq(kind, "ordersweep-probe") && !string.IsNullOrEmpty(exe)) ordersweepProbes.Add(exe);
+            if (PyValue.Eq(applicability, "unknown")) unknownApplicability.Add(new PyDict { ["checkId"] = cid, ["evidence"] = evidence });
+
+            var planned = new PyDict
+            {
+                ["checkId"] = cid, ["family"] = check.Get("family"), ["title"] = check.Get("title"),
+                ["required"] = Py.Truthy(check.Get("required")) || opted.Contains(cid),
+            };
+            if (Py.Truthy(check.Get("optIn"))) { planned["optIn"] = true; planned["optedIn"] = opted.Contains(cid); }
+            planned.Update(new PyDict
+            {
+                ["applicability"] = applicability, ["applicabilityEvidence"] = evidence,
+                ["prerequisites"] = new List<object?>(Py.ListOrEmpty(check.Get("prerequisites"))),
+                ["inputs"] = Py.Truthy(check.Get("inputs")) ? check["inputs"] : new PyDict(),
+                ["evidence"] = Py.Truthy(check.Get("evidence")) ? check["evidence"] : new PyDict(),
+                ["adapter"] = adapter,
+                ["manualDecisionAllowed"] = Py.Truthy(check.Get("manualDecisionAllowed")),
+                ["unsupportedReason"] = check.Get("unsupportedReason"),
+                ["arms"] = perArm,
+                ["status"] = baseStatus,
+            });
+            checks.Add(planned);
+        }
+        return (checks, unknownApplicability, ordersweepProbes, touched, tools);
     }
 
     // Path(p).stem: the name without its last suffix.
