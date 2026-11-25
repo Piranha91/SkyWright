@@ -85,6 +85,18 @@ def evalcontrol(args, env):
                           encoding="utf-8", errors="replace", env=env, timeout=300)
 
 
+def overlay_list(folder: Path) -> Path:
+    """The shipped ai-checks.json less the live switch check: its app prerequisite (state.switch-census) is not in this
+    suite's trimmed app scan, and an overlay refuses a row whose app prerequisite the app plan lacks."""
+    lst = json.loads((SW.MODULE / "evalcontrol" / "ai-checks.json").read_text(encoding="utf-8"))
+    lst["checks"] = [c for c in lst["checks"] if c["id"] != "runtime.state-switch-flip"]
+    used = {c["family"] for c in lst["checks"]}
+    lst["families"] = [f for f in lst["families"] if f["id"] in used]
+    p = Path(folder) / "ai-checks-records.json"
+    p.write_text(json.dumps(lst, indent=2), encoding="utf-8")
+    return p
+
+
 def sha(p: Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
@@ -176,7 +188,7 @@ def main() -> int:
         # the record rows are the AI-side overlay's, planned over the finished, bundled app scan
         ok = [evalrun(["finalize", "--run", run], env).returncode,
               evalrun(["bundle", "--run", run, "--out", run / "bundle", "--no-names"], env).returncode,
-              evalcontrol(["plan", "--app", run, "--app-bundle", run / "bundle", "--out", run / "ai"], env).returncode,
+              evalcontrol(["plan", "--app", run, "--app-bundle", run / "bundle", "--out", run / "ai", "--list", overlay_list(run)], env).returncode,
               evalcontrol(["evaluate", "--run", run / "ai"], env).returncode]
         run = run / "ai"
         plan = json.loads((run / "plan.json").read_text(encoding="utf-8")) if (run / "plan.json").exists() else {}

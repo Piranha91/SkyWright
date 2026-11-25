@@ -10,7 +10,7 @@ the evaluation settings (the C# reader was a port of this file; it is gone, and 
     settings: the accepted model IDs of an agents folder
 and the three plan-command rows about the settings file that now belong here:
     plan command: settings: the live check asks, and nothing opted in      (the module says so; nothing is folded)
-    plan command: settings: the live check asks, and the flag opts in      (an entry that opts in is left as it is)
+    plan command: settings: the live check asks, and the flag opts in      (the entry's opt-in goes to the overlay; the entry runcontrol plans from loses it)
     plan command: settings: a file that is not valid is refused            (the module refuses the run in that sentence)
 
 Fixture: fixtures/evalsettings/known-answers.json (each case's files, environment, explicit path and flags, and its
@@ -185,7 +185,9 @@ def asks_nothing_opted():
 def asks_flag_opts_in():
     entry = dict(json.loads(json.dumps(ENTRY)), evaluation={"depth": "deep", "optIn": ["runtime.state-switch-flip"]})
     folded, said = EP.measuring_entry(json.loads(json.dumps(entry)), ES.load(str(settings_at(ASK))))
-    return None if folded == entry and said == [] else f"folded {folded}, said {said}"
+    want = dict(json.loads(json.dumps(entry)), evaluation={"depth": "deep", "optIn": []})
+    ai = EP.overlay_opt_in(json.loads(json.dumps(entry)), ES.load(str(settings_at(ASK))))
+    return None if folded == want and said == [] and ai == ["runtime.state-switch-flip"] else f"folded {folded}, said {said}, overlay {ai}"
 
 
 def invalid_file():
