@@ -10,6 +10,11 @@ public static class ChildLaunch
     /// <summary>How far past the slot command's own waits and hold a heavy child's outer deadline sits, in minutes.</summary>
     public static double HoldMarginMin { get; set; } = 5;
 
+    /// <summary>The program the run log names a child's job after (its op is "&lt;label&gt;-&lt;op&gt;") and that a released
+    /// lock's log line says released it. runcontrol's own commands keep "runcontrol"; another program launching
+    /// children through this library sets its own name once at start, so its runs are never read as runcontrol's.</summary>
+    public static string LogLabel { get; set; } = "runcontrol";
+
     /// <summary>Test seam: runs one job for (run-log op, log folder, deadline on the runner's clock).</summary>
     public static Func<string, string, double?, ChildJob, ChildResult> RunJob { get; set; } = RunReal;
 
@@ -59,7 +64,7 @@ public static class ChildLaunch
         var job = new ChildJob(op, args, Checkout.Root, env);
         bool lockBefore = lockFile != null && File.Exists(lockFile);
         double? deadline = deadlineMinutes is { } minutes ? ChildRunner.Now() + 60 * minutes : null;
-        var res = RunJob("runcontrol-" + op, PyPath.Str(ledgerDir), deadline, job);
+        var res = RunJob(LogLabel + "-" + op, PyPath.Str(ledgerDir), deadline, job);
         if (lockFile != null) AddWaited(PyPath.Join(ledgerDir, op + ".txt"));
         if (lockFile != null && !lockBefore && !string.IsNullOrEmpty(res.Stopped) && File.Exists(lockFile)) ReleaseStoppedLock(lockFile, res);
         return res;
@@ -108,7 +113,7 @@ public static class ChildLaunch
         {
             ["step"] = "released",
             ["reason"] = $"outer-stop: the stage's {res.Stopped} stopped the slot command; its process tree was confirmed gone",
-            ["by"] = "runcontrol", ["heldPid"] = held,
+            ["by"] = LogLabel, ["heldPid"] = held,
             ["t"] = now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " " + (zone.IsDaylightSavingTime(now) ? zone.DaylightName : zone.StandardName),
             ["lock"] = lockFile,
         };
