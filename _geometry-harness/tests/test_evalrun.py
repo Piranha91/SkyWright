@@ -1588,6 +1588,13 @@ def case_16(tmp):
           f"{case}/bytes-changed: the resume printed {b['stdoutContains']!r} - a change, never a gap (D4)")
 
 
+def view_providers(mods):
+    """HarnessOrderCli.Resolve's provider list for a configuration whose view is `mods`: the overwrite
+    layer, the view's mod folders in order, the game's Data folder. Written from the C#, not from evalrun."""
+    return ([{"name": "overwrite", "kind": "overwrite"}] + [{"name": m, "kind": "mod"} for m in mods]
+            + [{"name": "Data", "kind": "data"}])
+
+
 def case_18(tmp):
     """D1: an arm's requested providers are what THAT arm's configuration reads, and a plan frozen under
     the old meaning (the scope's providers on every arm) is refused by name wherever it would bind a

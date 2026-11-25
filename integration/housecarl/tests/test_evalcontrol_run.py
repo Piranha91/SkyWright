@@ -220,6 +220,9 @@ RECORD_CASES = ["case-17", "case-18", "case-42", "case-43", "case-44", "case-61"
 
 def run_record_cases(argv) -> int:
     import evalrun_record_cases as RC
+    # a second ER.main in this process makes its own temporary folder: the conflictdiff the first one built is gone
+    # with its folder, so this run's conflictdiff is chosen again
+    ER.DIFF_SOURCE = None
     return ER.main({k: getattr(RC, "case_" + k.split("-")[1]) for k in RECORD_CASES}, argv)
 
 

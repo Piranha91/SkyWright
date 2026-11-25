@@ -262,11 +262,8 @@ def case_17(tmp):
            "case-17: changed bundled raw evidence refuses verification", "import")
 
 
-def view_providers(mods):
-    """HarnessOrderCli.Resolve's provider list for a configuration whose view is `mods`: the overwrite
-    layer, the view's mod folders in order, the game's Data folder. Written from the C#, not from evalrun."""
-    return ([{"name": "overwrite", "kind": "overwrite"}] + [{"name": m, "kind": "mod"} for m in mods]
-            + [{"name": "Data", "kind": "data"}])
+# view_providers: the app suite's test helper (test_evalrun), which its half of case 18 uses too
+view_providers = ER.view_providers
 
 
 def mcp_import(folder: Path, plan: dict, cid: str, arm: dict, providers: list):
