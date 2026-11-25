@@ -299,7 +299,7 @@ public static class Disposition
         }
 
         var notExplored = new List<object?>(PyValue.Iter(PyValue.Dict(plan["states"])["notExplored"]));
-        notExplored.AddRange(Discovery.GeneratedNotExplored(run, plan));
+        notExplored.AddRange(DeepStates.GeneratedNotExplored(run, plan));
         var unjudgeable = new List<object?>();
         foreach (var r in receipts.Select(kv => PyValue.Dict(kv.Value)))
             foreach (var c in Ev.Items(Ev.OrEmpty(r.Get("result")).Get("coverage")).Select(PyValue.Dict))

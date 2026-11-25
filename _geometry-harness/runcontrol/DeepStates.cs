@@ -71,4 +71,20 @@ public static class DeepStates
         }
         return (tpath, record);
     }
+
+    /// <summary>Every arm's generated not-explored rows (a deep plan), with the arm and check named.</summary>
+    public static List<object?> GeneratedNotExplored(string run, PyDict plan)
+    {
+        var rows = new List<object?>();
+        if (!Ev.Eq(Ev.OrEmpty(plan.Get("states")).Get("depth"), "deep")) return rows;
+        foreach (var cid in Ev.Items(Ev.OrEmpty(PyValue.Dict(plan["states"]).Get("fromCensus")).Get("checks")))
+            foreach (var armRaw in PyValue.Iter(plan["arms"]))
+            {
+                object? aid = PyValue.Dict(armRaw)["armId"];
+                var doc = Ev.OrEmpty(PyJson.LoadEvalFile(PyPath.Join(run, "outputs", Ev.Str(cid), $"{Ev.Str(aid)}.states.json")));
+                foreach (var r in Ev.Items(doc.Get("notExplored")))
+                    rows.Add(new PyDict { ["checkId"] = cid, ["armId"] = aid }.Update(PyValue.Dict(r)));
+            }
+        return rows;
+    }
 }
