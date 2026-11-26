@@ -35,5 +35,8 @@
     <Compile Include="$(SkyWrightHarness)_shared\OverlapIndex.cs" Link="OverlapIndex.cs" />
     <Compile Include="$(SkyWrightHarness)_shared\DependencyIndex.cs" Link="DependencyIndex.cs" />
     <Compile Include="$(SkyWrightHarness)_shared\BosHook.cs" Link="BosHook.cs" />
+    <!-- the one owner of which rulebook houseCARL's code reads in this process (for the types option) -->
+    <Compile Include="$(SkyWrightHarness)_shared\HousecarlRulebook.cs" Link="HousecarlRulebook.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\CheckoutLayout.cs" Link="CheckoutLayout.cs" />
   </ItemGroup>
 </Project>
