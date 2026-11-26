@@ -1377,6 +1377,646 @@
       "bytes": "ew0KICJzY2hlbWFWZXJzaW9uIjogMiwNCiAicGxhbklkIjogInBsYW5hYWFhYWFhYSIsDQogInJlZ2lzdHJ5U2hhMjU2IjogInJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnIiLA0KICJydW5JZHMiOiBbXSwNCiAiZW50cmllcyI6IHt9DQp9"
      }
     ]
+   },
+   {
+    "name": "life, app facts only",
+    "plan": {
+     "schemaVersion": 2,
+     "planId": "planaaaaaaaa",
+     "requestProviders": "arm-view",
+     "registry": {
+      "path": "registry.json",
+      "registryVersion": 7,
+      "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+     },
+     "toolIdentity": {
+      "contract": 1,
+      "rule": "x",
+      "programs": {
+       "controller": {
+        "kind": "package",
+        "state": "present",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+       },
+       "probe:overlapprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "helper:conflictdiff": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "probe:depprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       }
+      }
+     },
+     "arms": [
+      {
+       "armId": "baseline",
+       "kind": "baseline"
+      },
+      {
+       "armId": "candidate-01",
+       "kind": "candidate"
+      }
+     ],
+     "checks": [
+      {
+       "checkId": "g.overlap",
+       "prerequisites": [
+        "l.masters"
+       ]
+      },
+      {
+       "checkId": "l.masters"
+      },
+      {
+       "checkId": "p.order",
+       "prerequisites": []
+      }
+     ]
+    },
+    "steps": [
+     {
+      "op": [
+       "write",
+       "ledger.json",
+       "{\r\n \"schemaVersion\": 2,\r\n \"planId\": \"planaaaaaaaa\",\r\n \"registrySha256\": \"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr\",\r\n \"runIds\": [],\r\n \"entries\": {}\r\n}"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "9dfe49288907cd15bdf178b188c4959398f6e5c3ccb6c4c883a9888124bc9875",
+       "journal.jsonl": null
+      }
+     },
+     {
+      "op": [
+       "write",
+       "journal.jsonl",
+       ""
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "9dfe49288907cd15bdf178b188c4959398f6e5c3ccb6c4c883a9888124bc9875",
+       "journal.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+     },
+     {
+      "op": [
+       "new"
+      ],
+      "want": true,
+      "files": {
+       "ledger.json": "9dfe49288907cd15bdf178b188c4959398f6e5c3ccb6c4c883a9888124bc9875",
+       "journal.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+     },
+     {
+      "op": [
+       "refusal"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "9dfe49288907cd15bdf178b188c4959398f6e5c3ccb6c4c883a9888124bc9875",
+       "journal.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+     },
+     {
+      "op": [
+       "open",
+       "run",
+       "evalrun-checks-1",
+       null
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "a5b17e33af11e701594eadeb132edffb4c334693464b29996ffd0e69b7fa4e1b",
+       "journal.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "l.masters",
+       "baseline",
+       null,
+       "running"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "3da891ab821337d831a4dc76d5560960fbbddb07e6bff68e0c1588409a91ac96",
+       "journal.jsonl": "40bb0fbb4e03c83193396227c45336d44b9498579d3bb63dda0a76616413d6af"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "l.masters",
+       "baseline",
+       null,
+       "completed",
+       {
+        "receipt_id": "abc",
+        "detector": "no-finding",
+        "detail": "ok \u00e9 \u2028 line",
+        "next_action": null
+       }
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "fc1b8f48610e3aa9eed6b5f1583170b27b8dd75544977397fcb632ab5e478d1e",
+       "journal.jsonl": "5c4bcf3229cccafb5d4937f058ddde8fb21309f8115515a008d86b078ce9480c"
+      }
+     },
+     {
+      "op": [
+       "entry",
+       "l.masters",
+       "baseline",
+       null
+      ],
+      "want": "{\"checkId\": \"l.masters\", \"armId\": \"baseline\", \"part\": null, \"status\": \"completed\", \"cause\": null, \"receiptId\": \"abc\", \"detector\": \"no-finding\", \"detail\": \"ok \\u00e9 \\u2028 line\", \"nextAction\": null, \"validation\": {\"accepted\": true, \"rejections\": []}, \"result\": {\"detector\": \"no-finding\", \"execution\": \"completed\"}, \"receiptPath\": \"receipts/l.masters__baseline.json\", \"runId\": \"evalrun-checks-1\", \"updatedUtc\": \"2026-01-01T00:00:04Z\"}",
+      "files": {
+       "ledger.json": "fc1b8f48610e3aa9eed6b5f1583170b27b8dd75544977397fcb632ab5e478d1e",
+       "journal.jsonl": "5c4bcf3229cccafb5d4937f058ddde8fb21309f8115515a008d86b078ce9480c"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "g.overlap",
+       "candidate-01",
+       "diff",
+       "rejected(exit-nonzero)",
+       {
+        "cause": "exit-nonzero",
+        "receipt_id": "def",
+        "rejections": [
+         {
+          "cause": "exit-nonzero",
+          "detail": "exit 3"
+         }
+        ],
+        "detail": "conflictdiff said \"no\"",
+        "next_action": "resume"
+       }
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "b08be37cfcf64949e02baccce45d65ca19ca887bf4fb3444a1ac0fe1f29e5d8c",
+       "journal.jsonl": "306d969d6cea7ec4277280522bbf82cce78fb210e9881d3edc5818c23aa90074"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "g.overlap",
+       "baseline",
+       "arm",
+       "completed",
+       {
+        "receipt_id": "r1",
+        "detector": "finding",
+        "extra": {
+         "reusedFromRunId": "old",
+         "derivedFrom": [
+          "a"
+         ],
+         "sweepFolder": "sweep/inv-0001"
+        }
+       }
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "160b67e7d530f8cd854177b0e69631066f6983bc62300db2a0970c1613632b6f",
+       "journal.jsonl": "6a2a9d05eaa5517aee00a89fcd5ce49dc935c80bc58d29592e3c2a64e59a69b7"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "g.overlap",
+       "baseline",
+       "arm",
+       "reused",
+       {
+        "receipt_id": "r1",
+        "detector": "finding"
+       }
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "c9a82d0e98236d98700945e4f76579367d9e742b611ca23ea99d98bd9dd3c155",
+       "journal.jsonl": "470c44353a10a84cb2367f21d7299fba8c70df6324ed0f186b873c20b5f4eca5"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "g.overlap",
+       "baseline",
+       "arm",
+       "reused",
+       {
+        "receipt_id": "r1",
+        "detector": "finding",
+        "extra": {
+         "reusedFromRunId": "newer"
+        }
+       }
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "c2c5306802b36987f875feab12d5a391c2f684930a17432ed1e9174f82fb4347",
+       "journal.jsonl": "6c0d36695a411b1496c5fd631e3bdb130462b22d7e65dca7e69fb2cdc55224a3"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "p.order",
+       "baseline",
+       null,
+       "completed",
+       {
+        "receipt_id": "i1",
+        "detector": "catalogue",
+        "extra": {
+         "checkId": "overridden"
+        }
+       }
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "a11bdf4a4c5a646013fe718abb71a7ead2aa0bf10e4df6c60d540cf62ad56277",
+       "journal.jsonl": "71460ea8be164be9965d3a723f4c6e370711bc3d34a41d5fb657586c69ce50da"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "p.order",
+       "baseline",
+       null,
+       "invalidated(the receipt file is gone)",
+       {
+        "cause": "stale-inputs",
+        "rejections": []
+       }
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "fa6bb907606839015fe95349d517f4a59cef42eb7fc11c8add5f119a8c5bc4f0",
+       "journal.jsonl": "a347354ba7d51160f42d4bbba2f320f19fc942cdae0e8c90c4dae9b73896ef35"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "l.masters",
+       "candidate-01",
+       null,
+       "running"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "5b7e2b285e57a6bd3316361f0afd17e3baf7fd4159c281cf9bc6070e7069777e",
+       "journal.jsonl": "72d58c45c63e9af4d63850311d589c925874af943d76c906120d9fbc822c7288"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "g.overlap",
+       "candidate-01",
+       "arm",
+       "running"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "1fcb095853db4baf9a5b523939469f7c5c85021a5087f2c7f541b98012eb94fc",
+       "journal.jsonl": "6c708128fb15cb2a199e6fe229cddb60d614eaddcb9c3e084f6e2b57cfab39ea"
+      }
+     },
+     {
+      "op": [
+       "open",
+       "resume",
+       "evalrun-checks-2",
+       "parent-1",
+       {
+        "budget_minutes": 12.5
+       }
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "c997afa38b49ea4d4f2fca99b9625cf2444b5dedfb434766ac8739bf4ced0ea2",
+       "journal.jsonl": "6c708128fb15cb2a199e6fe229cddb60d614eaddcb9c3e084f6e2b57cfab39ea"
+      }
+     },
+     {
+      "op": [
+       "open",
+       "resume",
+       null,
+       null,
+       {
+        "budget_minutes": 0
+       }
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "6ea3e2bf8b25ec7bd76f70620652ef77a8c463dca31cae2d49430ddd20fe4d4d",
+       "journal.jsonl": "6c708128fb15cb2a199e6fe229cddb60d614eaddcb9c3e084f6e2b57cfab39ea"
+      }
+     },
+     {
+      "op": [
+       "heal"
+      ],
+      "want": 2,
+      "files": {
+       "ledger.json": "1a0f490af0874214ca0655be18871232f0ec12f54ba4ed2327303574f2363536",
+       "journal.jsonl": "64fdedf884d3b4ab70bd2675f248c19fdaff00fe2d6f7d435246d2147d315511"
+      }
+     },
+     {
+      "op": [
+       "entry",
+       "l.masters",
+       "candidate-01",
+       null
+      ],
+      "want": "{\"checkId\": \"l.masters\", \"armId\": \"candidate-01\", \"part\": null, \"status\": \"interrupted\", \"cause\": \"the process did not write a terminal transition\", \"receiptId\": null, \"detector\": null, \"detail\": null, \"nextAction\": null, \"validation\": {\"accepted\": true, \"rejections\": []}, \"result\": {\"detector\": null, \"execution\": \"interrupted\"}, \"receiptPath\": \"receipts/l.masters__candidate-01.json\", \"runId\": null, \"updatedUtc\": \"2026-01-01T00:00:24Z\"}",
+      "files": {
+       "ledger.json": "1a0f490af0874214ca0655be18871232f0ec12f54ba4ed2327303574f2363536",
+       "journal.jsonl": "64fdedf884d3b4ab70bd2675f248c19fdaff00fe2d6f7d435246d2147d315511"
+      }
+     },
+     {
+      "op": [
+       "entry",
+       "nothing",
+       "here",
+       null
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "1a0f490af0874214ca0655be18871232f0ec12f54ba4ed2327303574f2363536",
+       "journal.jsonl": "64fdedf884d3b4ab70bd2675f248c19fdaff00fe2d6f7d435246d2147d315511"
+      }
+     }
+    ],
+    "tree": [
+     {
+      "path": "journal.jsonl",
+      "bytes": {
+       "z": "eNrNlUtOwzAQhvdI3MGaFUikaooKojuW7FkhNsaelAFnHNkOIBASx4FzcBNOgpO2NEVA07QgpCz8mIe//KOZB5AuP9Ewggvp0RAj7IGSpUcYcWlM3Fyiuq4tTC+XPqDz0URjkGRmNpmz+WzNeBeOVSDLs5NCujBbO1RIRajiTQ9KroPjjTRxndTpfJLGHNEJBv3BQdJP43fa74+qb/+surLxLpoz8Rget7ce1sQAey1eX8Tb07OYOk+QPnKswAXyQkEHsOEHmLJ5YTCgXkRTkjVpGTA6zfEA7ygkbPkenYUm6Lhnb9AZWTRBleXMkAqaskx4SVqcA9tzgO9VjHC+zKufMiGGyhcWmTVmXZgP52LiFaqIvNPE2V1V26+Q25dolegTl0u7YB0tk3J9kkbk3wdK04ZO8bmbp5mG/QOU/TVRip51Gt1meiBQJ4bh6vUFPkiDCXFRBg/tgVrV2YZ6ezpvB8TRp252eidcopjGFhkZFOTF2DLutmmP/3KIpUc/D7F2KJtudt1YBmkXFqhELZxV6L2I94JtELeOAgopojw5sTQiOMme6revomGXqb0AP9l8jTts1Gh8gyuLtoN6HeTlDXQp8hLBf2I+/I75HYLXQsQ="
+      }
+     },
+     {
+      "path": "ledger.json",
+      "bytes": {
+       "z": "eNrtVs1uEzEQviPxDtaeQGpCsqU99MYFiQMS4u9QWq1c7yRx67VXtrctVJF4HHgO3oQnYez9iZPsbjZqEQgRbTax58efZ74Z++7xIxIZtoCMfgRtuJLRCYkP3GwuqHyV4tD/o9Un8jINc26s/vxuQeOjY6ej7/mp/Ba4pEF/n3BE7tyrmnRrwDUVOBghXHZlRlNvgwo51SDt20pNFkJUAqayjEpvi3a1urFUW0g/WOYE8SQ+Hk2m+LyfTE7cMz2NnOLyYACGuB1DNVxBDJGAKTIYCCaOT2vNiyKdg33NZWHBhWgaj486cQZBGBSdvTAddmKaeED4OvfpxHU19wIPLxLjjBqLPEuSC2pAcAm1DOG4iJbRa/TqdajOSkljttqcXd8VgreFW9LtLxeAG2mSQAsD69oaGPDcls7pBatVU7RjVmk3LdVoxmXK5TyQUi6cTF2RH9/Jz6/fSIhKwq19wWxZTcFqyB2e0mq+3DauyhjkDuUJsbqAg2pawyV4F74czv3sskFtCmEDH71wMQ+3wIpq2SAsGz59JN5QuygZ4YfmWUvOxpdGNdW0szqLHLfcU27Pw3KL5mN1DVrQPEkYktOFC1A5SVI+m7WSpbHYIkvoYIMwkXe3RZky6JA+gVtuR1LJL6DV003+RKE0amNSCrMWJgVMWDGIKTkTnFkHiBjKU3KGKTyLWrm0Uai7+DSjwnQQqpysjXZsbh2xUyCHUSVZlr/DCbqKwgYxO4I/iKW9tHlYvh538bUujyRBBu5J1Y6+5hTaWIqpGtzV9LStqXV1tMDLH+1ivS2sCsC+zFhL0IOSYro6plPQ/BrSl1plqzqLaAn2vAHrNuB0mhuDhBvQIbPysdLobMdRWWnd66Dkskop1p5dAKliR2ZcAOGGzJWE7SaI9gJGXOaFNW1NcL3b9fXAv4RznY1pWHwGsXErqQ9Lw/XeFBzda0fhfleunlO0g03oRhd5y8UrctHLtWJgDEGnRCpLbjS3QChBq4xLKjCXVBrug/+P02oVqH2vYmFSWikUbHIHaeKBF7D9D7W++1frwfafOr+LOn1ZvS9/6qaDL/wufwHpu6Jk"
+      }
+     }
+    ]
+   },
+   {
+    "name": "rebuild from receipts, app facts only",
+    "plan": {
+     "schemaVersion": 2,
+     "planId": "planaaaaaaaa",
+     "requestProviders": "arm-view",
+     "registry": {
+      "path": "registry.json",
+      "registryVersion": 7,
+      "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+     },
+     "toolIdentity": {
+      "contract": 1,
+      "rule": "x",
+      "programs": {
+       "controller": {
+        "kind": "package",
+        "state": "present",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+       },
+       "probe:overlapprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "helper:conflictdiff": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "probe:depprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       }
+      }
+     },
+     "arms": [
+      {
+       "armId": "baseline",
+       "kind": "baseline"
+      },
+      {
+       "armId": "candidate-01",
+       "kind": "candidate"
+      }
+     ],
+     "checks": [
+      {
+       "checkId": "g.overlap",
+       "prerequisites": [
+        "l.masters"
+       ]
+      },
+      {
+       "checkId": "l.masters"
+      },
+      {
+       "checkId": "p.order",
+       "prerequisites": []
+      }
+     ]
+    },
+    "steps": [
+     {
+      "op": [
+       "write",
+       "journal.jsonl",
+       "{\"armId\":\"baseline\",\"cause\":null,\"checkId\":\"g.overlap\",\"detail\":null,\"from\":null,\"nextAction\":null,\"part\":\"arm\",\"receiptId\":null,\"runId\":\"run-1\",\"t\":\"T1\",\"to\":\"running\"}\r\n\r\n   \r\n{broken\r\n{\"armId\":\"baseline\",\"cause\":null,\"checkId\":\"g.overlap\",\"detail\":\"d\",\"from\":\"running\",\"nextAction\":null,\"part\":\"arm\",\"receiptId\":\"rid-1\",\"runId\":\"run-1\",\"t\":\"T2\",\"to\":\"completed\"}\r\n{\"armId\":\"baseline\",\"checkId\":\"l.masters\",\"part\":null,\"receiptId\":\"rid-other\",\"runId\":\"run-1\",\"t\":\"T3\",\"to\":\"completed\"}\r\n{\"armId\":\"candidate-01\",\"t\":\"T4\",\"to\":\"manual\"}\r\n{\"armId\":\"baseline\",\"checkId\":\"p.order\",\"part\":\"\",\"receiptId\":\"rid-9\",\"t\":\"T5\",\"to\":\"completed\"}\r\n"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": null,
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "write",
+       "receipts/g.overlap__baseline__arm.json",
+       "{\r\n \"receiptId\": \"rid-1\",\r\n \"planId\": \"planaaaaaaaa\",\r\n \"checkId\": \"g.overlap\",\r\n \"armId\": \"baseline\",\r\n \"part\": \"arm\",\r\n \"result\": {\r\n  \"detector\": \"no-finding\"\r\n },\r\n \"validation\": {\r\n  \"accepted\": 1,\r\n  \"rejections\": null\r\n }\r\n}"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": null,
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "write",
+       "receipts/l.masters__baseline.json",
+       "{\r\n \"receiptId\": \"rid-1\",\r\n \"planId\": \"planaaaaaaaa\",\r\n \"checkId\": \"l.masters\",\r\n \"armId\": \"baseline\",\r\n \"part\": null,\r\n \"result\": {\r\n  \"detector\": \"no-finding\"\r\n },\r\n \"validation\": {\r\n  \"accepted\": 1,\r\n  \"rejections\": null\r\n }\r\n}"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": null,
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "write",
+       "receipts/p.order__baseline.json",
+       "{\r\n \"receiptId\": \"rid-9\",\r\n \"planId\": \"planaaaaaaaa\",\r\n \"checkId\": \"p.order\",\r\n \"armId\": \"baseline\",\r\n \"part\": \"\",\r\n \"result\": null,\r\n \"validation\": {\r\n  \"rejections\": [\r\n   {\r\n    \"cause\": \"x\"\r\n   }\r\n  ]\r\n }\r\n}"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": null,
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "new"
+      ],
+      "want": false,
+      "files": {
+       "ledger.json": null,
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "rebuild"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "bd9ee70866f95c3327c633dc6ab94a6905967d7aed1775e3ac3dc8f2f4ea5209",
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "refusal"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "bd9ee70866f95c3327c633dc6ab94a6905967d7aed1775e3ac3dc8f2f4ea5209",
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "facts",
+       "g.overlap__baseline__arm",
+       {
+        "receiptId": null
+       }
+      ],
+      "want": "{}",
+      "files": {
+       "ledger.json": "bd9ee70866f95c3327c633dc6ab94a6905967d7aed1775e3ac3dc8f2f4ea5209",
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "facts",
+       "g.overlap__baseline__arm",
+       {
+        "receiptId": "rid-1",
+        "checkId": "g.overlap",
+        "armId": "baseline",
+        "part": "arm",
+        "status": "reused"
+       }
+      ],
+      "want": "{\"detector\": \"no-finding\", \"result\": {\"detector\": \"no-finding\", \"execution\": \"reused\"}, \"validation\": {\"accepted\": true, \"rejections\": []}}",
+      "files": {
+       "ledger.json": "bd9ee70866f95c3327c633dc6ab94a6905967d7aed1775e3ac3dc8f2f4ea5209",
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "facts",
+       "g.overlap__baseline__arm",
+       {
+        "receiptId": "rid-1",
+        "checkId": "g.overlap",
+        "armId": "baseline",
+        "part": null
+       }
+      ],
+      "want": "{}",
+      "files": {
+       "ledger.json": "bd9ee70866f95c3327c633dc6ab94a6905967d7aed1775e3ac3dc8f2f4ea5209",
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "facts",
+       "no__receipt",
+       {
+        "receiptId": "rid-1"
+       }
+      ],
+      "want": "{}",
+      "files": {
+       "ledger.json": "bd9ee70866f95c3327c633dc6ab94a6905967d7aed1775e3ac3dc8f2f4ea5209",
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     }
+    ],
+    "tree": [
+     {
+      "path": "journal.jsonl",
+      "bytes": "eyJhcm1JZCI6ImJhc2VsaW5lIiwiY2F1c2UiOm51bGwsImNoZWNrSWQiOiJnLm92ZXJsYXAiLCJkZXRhaWwiOm51bGwsImZyb20iOm51bGwsIm5leHRBY3Rpb24iOm51bGwsInBhcnQiOiJhcm0iLCJyZWNlaXB0SWQiOm51bGwsInJ1bklkIjoicnVuLTEiLCJ0IjoiVDEiLCJ0byI6InJ1bm5pbmcifQ0KDQogICANCnticm9rZW4NCnsiYXJtSWQiOiJiYXNlbGluZSIsImNhdXNlIjpudWxsLCJjaGVja0lkIjoiZy5vdmVybGFwIiwiZGV0YWlsIjoiZCIsImZyb20iOiJydW5uaW5nIiwibmV4dEFjdGlvbiI6bnVsbCwicGFydCI6ImFybSIsInJlY2VpcHRJZCI6InJpZC0xIiwicnVuSWQiOiJydW4tMSIsInQiOiJUMiIsInRvIjoiY29tcGxldGVkIn0NCnsiYXJtSWQiOiJiYXNlbGluZSIsImNoZWNrSWQiOiJsLm1hc3RlcnMiLCJwYXJ0IjpudWxsLCJyZWNlaXB0SWQiOiJyaWQtb3RoZXIiLCJydW5JZCI6InJ1bi0xIiwidCI6IlQzIiwidG8iOiJjb21wbGV0ZWQifQ0KeyJhcm1JZCI6ImNhbmRpZGF0ZS0wMSIsInQiOiJUNCIsInRvIjoibWFudWFsIn0NCnsiYXJtSWQiOiJiYXNlbGluZSIsImNoZWNrSWQiOiJwLm9yZGVyIiwicGFydCI6IiIsInJlY2VpcHRJZCI6InJpZC05IiwidCI6IlQ1IiwidG8iOiJjb21wbGV0ZWQifQ0K"
+     },
+     {
+      "path": "ledger.json",
+      "bytes": {
+       "z": "eNq9VMtO6zAQ3V+Jf4i8pgXK5UqwQSzZIfHYIBTNdaatwXEie4yKUP8dv5IaWkoAQaQ8fObMeObMOM87fwpm+BxruEFtRKPYSTHZ9WgrQZ1Xbhm+IF0s2DTOhCH9dDmHydE/z9HfvFJc67Y0Lt7tXVijIi3QA89uWbDZuHlELaEty/9gUAqFZQm67ggFc6Xwh5h2Tw6xnc0Ro6Xz7QwtaPK4j5QgQ0DWb8x4U7cSCavOxMEadBZlpUxQhQRCenbPUrigM05R0YyqkaNoKSaiRTU66DxC8QG1KkMj/wJoHmxxafbek2J8b9yWydm2FbjMr4l736sJW+WLnBrtUdWMpkJVQs1WWxorqdf0A7rr0gK5TZVmcgXrMsV8BClcLpHUxQXOsfXUk4K0xS6exnsMysVJiHH8MwZjclyDITeuq9I3DkDPGzoAWZu+2P8MGzwADc1Rf20INiixrf+HLFPxtCw5uEZ6xmj/YJOCWda9dK98BshXg7Igf0C7HE6irTPXFHtT9Ta1/uZqteNGV6g/mLjEGvzDYb8/bcfs86KtFb9NtiM28MhPQZp3znwEO6dMBbZgCVvGd/53cA93L18AHyPxYA=="
+      }
+     },
+     {
+      "path": "receipts/g.overlap__baseline__arm.json",
+      "bytes": "ew0KICJyZWNlaXB0SWQiOiAicmlkLTEiLA0KICJwbGFuSWQiOiAicGxhbmFhYWFhYWFhIiwNCiAiY2hlY2tJZCI6ICJnLm92ZXJsYXAiLA0KICJhcm1JZCI6ICJiYXNlbGluZSIsDQogInBhcnQiOiAiYXJtIiwNCiAicmVzdWx0Ijogew0KICAiZGV0ZWN0b3IiOiAibm8tZmluZGluZyINCiB9LA0KICJ2YWxpZGF0aW9uIjogew0KICAiYWNjZXB0ZWQiOiAxLA0KICAicmVqZWN0aW9ucyI6IG51bGwNCiB9DQp9"
+     },
+     {
+      "path": "receipts/l.masters__baseline.json",
+      "bytes": "ew0KICJyZWNlaXB0SWQiOiAicmlkLTEiLA0KICJwbGFuSWQiOiAicGxhbmFhYWFhYWFhIiwNCiAiY2hlY2tJZCI6ICJsLm1hc3RlcnMiLA0KICJhcm1JZCI6ICJiYXNlbGluZSIsDQogInBhcnQiOiBudWxsLA0KICJyZXN1bHQiOiB7DQogICJkZXRlY3RvciI6ICJuby1maW5kaW5nIg0KIH0sDQogInZhbGlkYXRpb24iOiB7DQogICJhY2NlcHRlZCI6IDEsDQogICJyZWplY3Rpb25zIjogbnVsbA0KIH0NCn0="
+     },
+     {
+      "path": "receipts/p.order__baseline.json",
+      "bytes": "ew0KICJyZWNlaXB0SWQiOiAicmlkLTkiLA0KICJwbGFuSWQiOiAicGxhbmFhYWFhYWFhIiwNCiAiY2hlY2tJZCI6ICJwLm9yZGVyIiwNCiAiYXJtSWQiOiAiYmFzZWxpbmUiLA0KICJwYXJ0IjogIiIsDQogInJlc3VsdCI6IG51bGwsDQogInZhbGlkYXRpb24iOiB7DQogICJyZWplY3Rpb25zIjogWw0KICAgew0KICAgICJjYXVzZSI6ICJ4Ig0KICAgfQ0KICBdDQogfQ0KfQ=="
+     }
+    ]
    }
   ],
   "keys": [
