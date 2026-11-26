@@ -917,7 +917,7 @@ public sealed class StateToolsTests : IAsyncLifetime
 
     // ---- Gate C review, round 2
 
-    static readonly RefPlacementEdit.Pose Z0 = new(new HousecarlCore.Vec3(0, 0, 0), new HousecarlCore.Vec3(0, 0, 0), 1f);
+    static readonly RefPlacementEdit.Pose Z0 = new(new SkyWright.Engine.Vec3(0, 0, 0), new SkyWright.Engine.Vec3(0, 0, 0), 1f);
 
     // C1d: another cell's staged and written edits survive a save from this scene
     [Fact]
@@ -927,7 +927,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         _surface.WorkFolder = work;
         var (path, _) = SessionFile.PathFor(work, "test-plan", "baseline");
         SessionFile.Write(path!, new SessionData("test-plan", "baseline", null, 2, null,
-            new[] { new SavedEdit("000A01:HcWbTest.esp", Z0, Z0 with { Position = new HousecarlCore.Vec3(5, 0, 0) }) },
+            new[] { new SavedEdit("000A01:HcWbTest.esp", Z0, Z0 with { Position = new SkyWright.Engine.Vec3(5, 0, 0) }) },
             new[] { new SavedWritten("000A02:HcWbTest.esp", "WbOld.esp", Path.Combine(work, "houseCARL - WbOld")) }));
         await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
         var saved = SessionFile.Read(path!)!;
@@ -1078,7 +1078,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         internal readonly TaskCompletionSource Gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public async Task<IReadOnlyList<string>> DoorsNearAsync(FormKey key, double within) { await Gate.Task; return new[] { "000901:HcWbTest.esp" }; }
         public Task<IReadOnlyList<(string Key, string Field)>> NamesAsync(FormKey key) => Task.FromResult<IReadOnlyList<(string, string)>>(Array.Empty<(string, string)>());
-        public Task<(string? FarDoor, string? FarCell, HousecarlCore.Vec3? Arrival)> DestinationAsync(string door) => Task.FromResult(((string?)null, (string?)null, (HousecarlCore.Vec3?)null));
+        public Task<(string? FarDoor, string? FarCell, SkyWright.Engine.Vec3? Arrival)> DestinationAsync(string door) => Task.FromResult(((string?)null, (string?)null, (SkyWright.Engine.Vec3?)null));
         public Task<string?> BaseTypeAsync(string key) => Task.FromResult<string?>(null);
         public Task<string?> EnableParentAsync(FormKey key) => Task.FromResult<string?>(null);
         public Task<string?> MismatchAsync(FormKey key) => Task.FromResult<string?>(null);
@@ -1125,8 +1125,8 @@ public sealed class StateToolsTests : IAsyncLifetime
         var writes = new List<string>();
         _scene.Trials = new TrialLane(work, (e, patch, outPath) => { writes.Add(outPath); return Task.FromResult("wrote " + patch); },
             (patch, folder, dir) => Task.FromResult(ReviewSpeedPart2Tests.Recheck("resolved")), p => (p, "lowered it 1 unit onto the terrain"), _ => Array.Empty<string>());
-        _scene.PairBoxesValue = (new SkyWright.Engine.Aabb(new HousecarlCore.Vec3(990, 10, 0), new HousecarlCore.Vec3(1010, 30, 20), false),
-                                 new SkyWright.Engine.Aabb(new HousecarlCore.Vec3(1000, 0, 0), new HousecarlCore.Vec3(1040, 40, 40), false));
+        _scene.PairBoxesValue = (new SkyWright.Engine.Aabb(new SkyWright.Engine.Vec3(990, 10, 0), new SkyWright.Engine.Vec3(1010, 30, 20), false),
+                                 new SkyWright.Engine.Aabb(new SkyWright.Engine.Vec3(1000, 0, 0), new SkyWright.Engine.Vec3(1040, 40, 40), false));
         await Ok("workbench_act", A(("verb", "select"), ("conflict", 1)));
         var asked = await Ok("workbench_act", A(("verb", "find_clear")));
         Assert.True(At(asked, out var said, "said") && (said.GetString() ?? "").Contains("3 positions"), "no cost sentence: " + asked);
@@ -1147,8 +1147,8 @@ public sealed class StateToolsTests : IAsyncLifetime
     public async Task C5s_move_with_stages_the_hosts_rigid_move_for_each_named_reference()
     {
         var ro = PlacementTests.OneRef(out var host);
-        var dep = Boxes.Box(0x801, new HousecarlCore.Vec3(1100, 20, 0), new System.Numerics.Vector3(10, 10, 10));
-        var other = Boxes.Box(0x802, new HousecarlCore.Vec3(1200, 20, 0), new System.Numerics.Vector3(10, 10, 10));
+        var dep = Boxes.Box(0x801, new SkyWright.Engine.Vec3(1100, 20, 0), new System.Numerics.Vector3(10, 10, 10));
+        var other = Boxes.Box(0x802, new SkyWright.Engine.Vec3(1200, 20, 0), new System.Numerics.Vector3(10, 10, 10));
         _surface.SceneShown = _scene = new FakeScene(new EditSession(new[] { ro, dep, other }));
         await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
         await Ok("workbench_act", A(("verb", "stage"), ("delta", new[] { 50f, 0f, 0f }), ("turn_degrees", 90f)));
@@ -1166,8 +1166,8 @@ public sealed class StateToolsTests : IAsyncLifetime
     {
         public Task<IReadOnlyList<string>> DoorsNearAsync(FormKey key, double within) => Task.FromResult<IReadOnlyList<string>>(new[] { "000801:HcWbTest.esp" });
         public Task<IReadOnlyList<(string Key, string Field)>> NamesAsync(FormKey key) => Task.FromResult<IReadOnlyList<(string, string)>>(Array.Empty<(string, string)>());
-        public Task<(string? FarDoor, string? FarCell, HousecarlCore.Vec3? Arrival)> DestinationAsync(string door) =>
-            Task.FromResult(((string?)"000AAA:HcWbTest.esp", (string?)"00BBBB:HcWbTest.esp", (HousecarlCore.Vec3?)new HousecarlCore.Vec3(1, 2, 3)));
+        public Task<(string? FarDoor, string? FarCell, SkyWright.Engine.Vec3? Arrival)> DestinationAsync(string door) =>
+            Task.FromResult(((string?)"000AAA:HcWbTest.esp", (string?)"00BBBB:HcWbTest.esp", (SkyWright.Engine.Vec3?)new SkyWright.Engine.Vec3(1, 2, 3)));
         public Task<string?> BaseTypeAsync(string key) => Task.FromResult<string?>("Door");
         public Task<string?> EnableParentAsync(FormKey key) => Task.FromResult<string?>(null);
         public Task<string?> MismatchAsync(FormKey key) => Task.FromResult<string?>(null);
@@ -1178,7 +1178,7 @@ public sealed class StateToolsTests : IAsyncLifetime
     public async Task C5t_a_dry_run_and_a_real_commit_say_what_stays_behind_and_a_ticked_doors_far_side()
     {
         var ro = PlacementTests.OneRef(out _);
-        var door = Boxes.Box(0x801, new HousecarlCore.Vec3(1100, 20, 0), new System.Numerics.Vector3(10, 10, 10));
+        var door = Boxes.Box(0x801, new SkyWright.Engine.Vec3(1100, 20, 0), new System.Numerics.Vector3(10, 10, 10));
         _surface.SceneShown = _scene = new FakeScene(new EditSession(new[] { ro, door })) { ContextSource = new DoorSource() };
         await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
         await Ok("workbench_act", A(("verb", "stage"), ("delta", new[] { 50f, 0f, 0f })));
@@ -1206,7 +1206,7 @@ public sealed class StateToolsTests : IAsyncLifetime
     {
         public Task<IReadOnlyList<string>> DoorsNearAsync(FormKey key, double within) => Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
         public Task<IReadOnlyList<(string Key, string Field)>> NamesAsync(FormKey key) => Task.FromResult<IReadOnlyList<(string, string)>>(Array.Empty<(string, string)>());
-        public Task<(string? FarDoor, string? FarCell, HousecarlCore.Vec3? Arrival)> DestinationAsync(string door) => Task.FromResult(((string?)null, (string?)null, (HousecarlCore.Vec3?)null));
+        public Task<(string? FarDoor, string? FarCell, SkyWright.Engine.Vec3? Arrival)> DestinationAsync(string door) => Task.FromResult(((string?)null, (string?)null, (SkyWright.Engine.Vec3?)null));
         public Task<string?> BaseTypeAsync(string key) => Task.FromResult<string?>("MiscItem");
         public Task<string?> EnableParentAsync(FormKey key) => Task.FromResult<string?>(null);
         public Task<string?> MismatchAsync(FormKey key) => Task.FromResult<string?>(null);
@@ -1216,9 +1216,9 @@ public sealed class StateToolsTests : IAsyncLifetime
     [Fact]
     public async Task C3a_choose_names_the_two_objects_resting_on_the_reference_and_the_move_with_hint()
     {
-        var subject = Boxes.Box(0x800, new HousecarlCore.Vec3(1000, 0, 0), new System.Numerics.Vector3(20, 20, 20), name: "Barrel");
-        var plank = Boxes.Box(0x801, new HousecarlCore.Vec3(1000, 0, 40.2f), new System.Numerics.Vector3(5, 5, 2), name: "Plank");
-        var bowl = Boxes.Box(0x802, new HousecarlCore.Vec3(1010, 12, 40.2f), new System.Numerics.Vector3(5, 5, 3), name: "Bowl");
+        var subject = Boxes.Box(0x800, new SkyWright.Engine.Vec3(1000, 0, 0), new System.Numerics.Vector3(20, 20, 20), name: "Barrel");
+        var plank = Boxes.Box(0x801, new SkyWright.Engine.Vec3(1000, 0, 40.2f), new System.Numerics.Vector3(5, 5, 2), name: "Plank");
+        var bowl = Boxes.Box(0x802, new SkyWright.Engine.Vec3(1010, 12, 40.2f), new System.Numerics.Vector3(5, 5, 3), name: "Bowl");
         var work = NewWorkFolder();
         _surface.WorkFolder = work;
         _surface.SceneShown = _scene = new FakeScene(new EditSession(new[] { subject, plank, bowl }))
@@ -1229,8 +1229,8 @@ public sealed class StateToolsTests : IAsyncLifetime
         _scene.View = new ViewState(_scene.Session, () => Array.Empty<ViewProbe.RefOcclusion>());
         _scene.Trials = new TrialLane(work, (e, patch, outPath) => Task.FromResult("wrote " + patch),
             (patch, folder, dir) => Task.FromResult(ReviewSpeedPart2Tests.Recheck("resolved")), p => (p, "lowered it 1 unit onto the terrain"), _ => Array.Empty<string>());
-        _scene.PairBoxesValue = (new SkyWright.Engine.Aabb(new HousecarlCore.Vec3(980, -20, 0), new HousecarlCore.Vec3(1020, 20, 40), false),
-                                 new SkyWright.Engine.Aabb(new HousecarlCore.Vec3(1000, -10, 0), new HousecarlCore.Vec3(1060, 30, 60), false));
+        _scene.PairBoxesValue = (new SkyWright.Engine.Aabb(new SkyWright.Engine.Vec3(980, -20, 0), new SkyWright.Engine.Vec3(1020, 20, 40), false),
+                                 new SkyWright.Engine.Aabb(new SkyWright.Engine.Vec3(1000, -10, 0), new SkyWright.Engine.Vec3(1060, 30, 60), false));
         await Ok("workbench_act", A(("verb", "select"), ("conflict", 1)));
         await Ok("workbench_act", A(("verb", "find_clear")));
         await Ok("workbench_state", A(("project", new[] { "placements" }), ("wait_seconds", 30)));
@@ -1264,8 +1264,8 @@ public sealed class StateToolsTests : IAsyncLifetime
     {
         _scene.Trials = new TrialLane(null, (e, p, o) => Task.FromResult(""), (p, f, d) => Task.FromResult(ReviewSpeedPart2Tests.Recheck("resolved")),
                                       p => (p, ""), _ => Array.Empty<string>());
-        _scene.PairBoxesValue = (new SkyWright.Engine.Aabb(new HousecarlCore.Vec3(0, 0, 0), new HousecarlCore.Vec3(1, 1, 1), false),
-                                 new SkyWright.Engine.Aabb(new HousecarlCore.Vec3(0, 0, 0), new HousecarlCore.Vec3(2, 2, 2), false));
+        _scene.PairBoxesValue = (new SkyWright.Engine.Aabb(new SkyWright.Engine.Vec3(0, 0, 0), new SkyWright.Engine.Vec3(1, 1, 1), false),
+                                 new SkyWright.Engine.Aabb(new SkyWright.Engine.Vec3(0, 0, 0), new SkyWright.Engine.Vec3(2, 2, 2), false));
         await Ok("workbench_act", A(("verb", "select"), ("conflict", 1)));
         Assert.Contains("set_work_folder", await Refused("workbench_act", A(("verb", "find_clear"))));
     }

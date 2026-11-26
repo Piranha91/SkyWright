@@ -971,7 +971,7 @@ public sealed class ManualWriteTests
         var before = Listing(w.Instance, game);
         await using var writer = await Start(w, o);
         var pose = new ViewProbe.RefPlacementEdit.Pose(TiltedRefWorld.Pos, TiltedRefWorld.Rot, 1f);
-        var answer = await writer.CommitAsync(new[] { new PendingEdit(TiltedRefWorld.Ref, pose, pose with { Position = new HousecarlCore.Vec3(600f, -256f, 64f) }) }, "WbManual", dryRun: false);
+        var answer = await writer.CommitAsync(new[] { new PendingEdit(TiltedRefWorld.Ref, pose, pose with { Position = new SkyWright.Engine.Vec3(600f, -256f, 64f) }) }, "WbManual", dryRun: false);
         Assert.True(File.Exists(Path.Combine(o, "houseCARL - WbManual", "WbManual.esp")), $"no patch under the Output Folder {o}: {answer}");
         var after = Listing(w.Instance, game);
         var changed = before.Keys.Union(after.Keys).Where(k => !before.TryGetValue(k, out var b) || !after.TryGetValue(k, out var a) || b != a).ToList();

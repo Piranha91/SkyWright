@@ -10,10 +10,12 @@ SkyWright finds where Skyrim mods clash in the 3D world, shows each clash, and w
 - **The module is fenced.** It has its own folder and its own build output (`integration\housecarl\bin\<Configuration>\`), and it may use SkyWright; nothing in the app, the probes, runcontrol or the rest of the tree refers into it, and nothing anywhere reads houseCARL's `evaluation-reporting` or `world-edit-compatibility` skill folders or `plugin/agents`. The fence guard checks both; what is not yet closed is on its named lists with the step that removes each. A scan the app starts (runcontrol through the bundle) reads no evaluation settings file and starts no Python; an AI-driven evaluation of a lab entry is run by the module, which runs runcontrol for the measuring stages. "SkyWright runs without houseCARL" is about the app: no houseCARL program runs; houseCARL's core compiled in from the pin is fine, and the module needs houseCARL by design.
 - **Do not edit `external/houseCARL`.** It is a pin. A fix to houseCARL's code goes to houseCARL's own checkout; then the pin moves in one SkyWright commit.
 - **Errors are one plain sentence: what went wrong and what to try.** No silently wrong answer and no silently degraded mode.
-- **Tests:** proportional. Strict checks for file destinations, patch contents, undo, configuration identity and any "resolved" claim; UI-only work gets a build and a screenshot.
+- **Tests:** targeted while working, whole once per merge. On a branch, run only the tests for what the change touches (the test class, suite or probe self-test concerned); every commit builds. The whole list under "Build and check" runs once per merge, on the tree `main` holds after it: on `main` itself, or on a branch that has merged `main` and will fast-forward to it. Never per commit or per step, and never twice on the same tree: a reviewer reads that run's logs instead of repeating it. What gets a strict test is unchanged: file destinations, patch contents, undo, configuration identity and any "resolved" claim; UI-only work gets a build and a screenshot.
 - **Wording** in the app uses the modder's words (load order, priority, mod, plugin), not internal terms.
 
 ## Build and check
+
+This is the whole check. It runs once per merge, on merged `main` (see Tests above); a branch runs the lines its change touches.
 
 ```
 git submodule update --init
@@ -25,6 +27,7 @@ bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.e
 bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.exe run-coverage
 bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.exe tool-index
 bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.exe fence
+bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.exe child-runner
 dotnet test integration\housecarl\bin\Release\Tests\HousecarlIntegration.Tests\HousecarlIntegration.Tests.dll
 ```
 

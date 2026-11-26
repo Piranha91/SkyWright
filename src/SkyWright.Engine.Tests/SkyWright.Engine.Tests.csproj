@@ -21,4 +21,10 @@
     <ProjectReference Include="..\SkyWright.Engine\SkyWright.Engine.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- ArchiveReadScopeTests builds its archives with houseCARL's BsaBuilder, compiled from the pin (a test helper of
+         houseCARL's generator; referencing that program would put houseCARL's server program in this folder). -->
+    <Compile Include="$(HousecarlSrc)housecarl-generator\BsaBuilder.cs" Link="BsaBuilder.cs" />
+  </ItemGroup>
+
 </Project>

@@ -1,4 +1,5 @@
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 // THE PER-REFERENCE DECISIONS of step 4 (Program.cs): whether a target cell's reference is judged in that cell at all, and

@@ -216,7 +216,7 @@ static class NavRepairFixture
         n.NavigationMeshInfoMaps.Add(Map());
         n.BeginWrite.ToPath(nPath).WithLoadOrder(skyRead).Write();
         string Sha(string pth) { using var fs = System.IO.File.OpenRead(pth); return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(fs)).ToLowerInvariant(); }
-        var moved = new HarnessShared.NavChange(); moved.Vertices[1] = new HousecarlCore.Vec3(400, 100, 6);
+        var moved = new HarnessShared.NavChange(); moved.Vertices[1] = new SkyWright.Engine.Vec3(400, 100, 6);
         var plan = new System.Text.Json.Nodes.JsonObject
         {
             ["order"] = new System.Text.Json.Nodes.JsonArray(skyPath, nPath),

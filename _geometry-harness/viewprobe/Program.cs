@@ -3345,9 +3345,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
 
             foreach (var ((gx, gy), (off, grad, quadLtex)) in landWin)
             {
-                // VHGT decode — HousecarlCore.LandHeight (moved there 2026-09-04 so the landscape-seam detector and
+                // VHGT decode — SkyWright.Engine.LandHeight (moved there 2026-09-04 so the landscape-seam detector and
                 // this renderer read one function): world units, [x, y].
-                var h = HousecarlCore.LandHeight.Decode(off, grad);
+                var h = SkyWright.Engine.LandHeight.Decode(off, grad);
                 landHeights[(gx, gy)] = h;
                 System.Numerics.Vector3 P(int x, int y) =>
                     new(gx * 4096f + x * 128f, gy * 4096f + y * 128f, h[x, y]);
@@ -4774,8 +4774,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 foreach (var (dx, dy) in new[] { (1, 0), (0, 1) })
                 {
                     if (!landHeights.TryGetValue((gx + dx, gy + dy), out var hB)) continue;
-                    var ea = HousecarlCore.LandHeight.Edge(hA, dx == 1 ? HousecarlCore.CellEdge.East : HousecarlCore.CellEdge.North);
-                    var eb = HousecarlCore.LandHeight.Edge(hB, dx == 1 ? HousecarlCore.CellEdge.West : HousecarlCore.CellEdge.South);
+                    var ea = SkyWright.Engine.LandHeight.Edge(hA, dx == 1 ? SkyWright.Engine.CellEdge.East : SkyWright.Engine.CellEdge.North);
+                    var eb = SkyWright.Engine.LandHeight.Edge(hB, dx == 1 ? SkyWright.Engine.CellEdge.West : SkyWright.Engine.CellEdge.South);
                     var (mx, over) = HarnessShared.DetectorModel.EdgeMismatch(ea, eb, seamEps);
                     if (over == 0) continue;
                     edges++; worst = MathF.Max(worst, mx);

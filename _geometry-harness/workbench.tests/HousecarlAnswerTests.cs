@@ -82,7 +82,7 @@ public sealed class HousecarlAnswerTests : IClassFixture<TiltedRefWorld>
         var o = Path.Combine(_w.Root, "ans3-" + Guid.NewGuid().ToString("N")[..6]); Directory.CreateDirectory(o);
         await using var p = PatchWriter.OpenInProcess(new WriteTarget(_w.Instance, "Default", _w.DataDir, o), Path.Combine(_w.Root, "hc-ans3"), TestCorpus.Path, _ => { });
         var drawn = new ViewProbe.RefPlacementEdit.Pose(TiltedRefWorld.Pos, TiltedRefWorld.Rot, 1f);
-        await p.CommitAsync(new[] { new PendingEdit(TiltedRefWorld.Ref, drawn, drawn with { Position = new HousecarlCore.Vec3(640, -256, 64) }) }, "WbTwiceUndo", dryRun: false);
+        await p.CommitAsync(new[] { new PendingEdit(TiltedRefWorld.Ref, drawn, drawn with { Position = new SkyWright.Engine.Vec3(640, -256, 64) }) }, "WbTwiceUndo", dryRun: false);
         var folder = Path.Combine(o, "houseCARL - WbTwiceUndo");
         Assert.StartsWith("removed ", await p.RevertWrittenAsync(TiltedRefWorld.Ref, folder));
         var again = await Assert.ThrowsAsync<InvalidOperationException>(() => p.RevertWrittenAsync(TiltedRefWorld.Ref, folder));

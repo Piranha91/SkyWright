@@ -46,8 +46,8 @@ Set `WB_MCP_PORT` to a port number to serve the app's state tools (`workbench_st
 | `_geometry-harness/viewprobe/` | The renderer host the 3D view uses (on SkyRender) |
 | `_geometry-harness/*.py`, `tests/`, `planeassess/` | Detector development tools and bundle enrichment, and their tests; not shipped in the app. They find built programs through `buildlayout.py` |
 | `integration/housecarl/` | The houseCARL integration module: tools for an AI that drives SkyWright (the AI-driven evaluation of a lab entry, which runs runcontrol for census to bundle and captures its records; the report, reel, narration and capture Python; the evaluation settings and the model agents; the in-game switch flips; `lookprobe`) and their data and tests. It uses SkyWright; nothing outside it refers into it (the `fence` guard). Its own solution builds to `integration\housecarl\bin\<Configuration>\` (with houseCARL's server program, built from the pin, in `Tools\housecarl-mcp\`), never into the app's build folder, and its Python finds SkyWright and the module's own build through `skywright_paths.py` |
-| `src/SkyWright.Engine/`, `src/SkyWright.Engine.Tests/` | The engine the probes share (geometry, contact, navmesh, Havok, reach), on houseCARL's core, and its tests |
-| `src/SkyWright.Guards/` | Checks a build and the unit tests do not reach: `harness-suites` runs the Python suites and the probes' self-tests (the module's too); `run-coverage` and `tool-index` check `docs/run-coverage.json` and `docs/TOOLS.md` through houseCARL's generator; `fence` checks that nothing outside `integration/housecarl/` refers into it and that nothing reads houseCARL's reporting or compatibility skill folders or its agents |
+| `src/SkyWright.Engine/`, `src/SkyWright.Engine.Tests/` | The engine the probes and the app share: reading the world (placements, land heights, archive reads, what stands near a reference), geometry, contact, navmesh, Havok, reach, and the child runner, on houseCARL's core, and its tests |
+| `src/SkyWright.Guards/` | Checks a build and the unit tests do not reach: `harness-suites` runs the Python suites and the probes' self-tests (the module's too); `run-coverage` and `tool-index` check `docs/run-coverage.json` and `docs/TOOLS.md` through houseCARL's generator; `fence` checks that nothing outside `integration/housecarl/` refers into it and that nothing reads houseCARL's reporting or compatibility skill folders or its agents; `child-runner` runs the engine's child runner on real children and the real clock |
 | `data/` | The check registry, the severity table, the grouping of review rows, the record field scope and the overlap triage policy |
 | `external/houseCARL/` | houseCARL, pinned as a git submodule: its core, server (which writes patches) and generator |
 | `scripts/build.ps1` | Builds the rulebook when missing, then Debug and Release, each with the integration module |
@@ -65,6 +65,7 @@ bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.e
 bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.exe run-coverage
 bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.exe tool-index
 bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.exe fence
+bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.exe child-runner
 dotnet test integration\housecarl\bin\Release\Tests\HousecarlIntegration.Tests\HousecarlIntegration.Tests.dll
 ```
 

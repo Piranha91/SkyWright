@@ -1,4 +1,5 @@
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 // THE NAVMESH VERSION HISTORY navownprobe's detectors read: every plugin that supplies each navmesh, in load order, with

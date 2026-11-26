@@ -1173,7 +1173,7 @@ flag someone typed, which is why neither is allowed to be silent.
   (exit 2) naming the plugin, its place in the order and the walk; so does a profile that lists an
   active plugin no file provides, and a LAND whose heightmap the render's terrain walk cannot read
   (naming the grid square). The terrain walk and the shared floor filing classify each LAND by one
-  rule (`HousecarlCore.LandHeight.Classify`, via `TerrainLand.cs`): a LAND whose DATA flag says it
+  rule (`SkyWright.Engine.LandHeight.Classify`, via `TerrainLand.cs`): a LAND whose DATA flag says it
   has heights and that gives none is unreadable (refused, named); a LAND whose flag does NOT say so
   and that has no VHGT DECLARES no terrain, so the square's earlier terrain is removed and nothing is
   drawn or filed there, since the game draws no ground over such a square and has no terrain
@@ -3108,7 +3108,7 @@ draw here so a row can be looked at from a planned camera. They report; the prob
 one heightmap unit — the smallest non-zero step the format can express) the render draws a ribbon along
 that run of the edge, lifted 6 u over the higher side: yellow under 32 u (a lip), orange under 128 u
 (a knee-high step), red beyond (a wall). The console lists every mismatched edge in the ring with its
-worst step and how many of the 33 vertices are over EPS. The decode is `HousecarlCore.LandHeight` —
+worst step and how many of the 33 vertices are over EPS. The decode is `SkyWright.Engine.LandHeight` —
 the same function the detector reads, moved out of this file on the same day so the two cannot hold
 different opinions about where the ground is. Winners only: whose seam it is (Introduced / Inherited,
 Blind / Seen) is `seamprobe`'s answer.

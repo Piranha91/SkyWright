@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 // TERRAIN SUPPORT — contactprobe --terrain (Research/TERRAIN-SUPPORT-DESIGN-2026-10-18.md; _shared/TerrainContactIndex.cs).

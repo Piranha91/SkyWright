@@ -219,6 +219,7 @@ internal sealed class WorldIndex : IDisposable
         foreach (var failure in view.LoadFailures) _notes.Add($"Left out of the index: {failure}");
 
         var worlds = new Dictionary<FormKey, (string? EditorId, string? Name)>();
+        var namedPersistent = new Dictionary<FormKey, List<FormKey?>>();   // what each plugin's copy of a worldspace names, in load order
         var drafts = new List<(FormKey Key, string? EditorId, string? Name, bool Interior, (int X, int Y)? Grid)>();
         string? reading = null;
         int pluginsRead = 0;
@@ -238,8 +239,9 @@ internal sealed class WorldIndex : IDisposable
             bool wins = view.ResolveWinner(fk) is { } w && string.Equals(w.WinnerPlugin, source, StringComparison.OrdinalIgnoreCase);
             if (body is IWorldspaceGetter ws)
             {
-                // Any plugin's copy names the persistent cell; the winner's copy need not carry it.
-                if (ws.TopCell is { } top) held.PersistentCellOf[fk] = top.FormKey;
+                // Any plugin's copy names the persistent cell; the winner's copy need not carry it (PersistentCell owns the rule).
+                if (!namedPersistent.TryGetValue(fk, out var named)) namedPersistent[fk] = named = new();
+                named.Add(ws.TopCell?.FormKey);
                 if (wins) worlds[fk] = (ws.EditorID, ws.Name?.String);
             }
             else if (wins && body is ICellGetter cell)
@@ -250,6 +252,8 @@ internal sealed class WorldIndex : IDisposable
             }
         }
 
+        foreach (var (wk, named) in namedPersistent)
+            if (PersistentCell.Of(named) is { } pc) held.PersistentCellOf[wk] = pc;
         var persistentCells = held.PersistentCellOf.Values.ToHashSet();
         var byWorld = new Dictionary<FormKey, List<CellRow>>();
         int sharedGrids = 0;
@@ -581,7 +585,7 @@ internal sealed class WorldIndex : IDisposable
 
     static FormKey? GridCellAt(Held held, FormKey world, float x, float y)
     {
-        int gx = (int)Math.Floor(x / NearSelection.CellUnits), gy = (int)Math.Floor(y / NearSelection.CellUnits);
+        int gx = (int)Math.Floor(x / NearReferences.CellUnits), gy = (int)Math.Floor(y / NearReferences.CellUnits);
         return held.Grid.TryGetValue((world, gx, gy), out var ck) ? ck : null;
     }
 

@@ -185,7 +185,12 @@ def spoken_text(text: str) -> str:
     text = SPOKEN_BRACKET_ID.sub(lambda m: m.group(0) if m.group(0).strip()[1:-1] in _NAMES else "", text)
     text = SPOKEN_EDITOR_ID.sub(words, text)
     text = SPOKEN_PASCAL_ID.sub(words, text)
-    text = re.sub(r"\b([A-Z][A-Za-z]*(?: [A-Za-z]+)*) and \1\b", r"\1 (two of them)", text)
+    # a name said twice is said once with a count only when both are sure to be the same whole name: the second ends at
+    # punctuation or the end (not ".esm", "'s", a number or another word), the first follows no capitalised word that
+    # may be part of it; when unsure both names stay as written (C2610)
+    text = re.sub(r"\b([A-Z][A-Za-z]*(?: [A-Za-z]+)*) and \1(?=[,;:!?)]|\.(?!\w)|$)",
+                  lambda m: m.group(0) if re.search(r"[A-Z][\w'’]* $", m.string[:m.start()]) else m.group(1) + " (two of them)",
+                  text)
     return " ".join(text.split())
 
 

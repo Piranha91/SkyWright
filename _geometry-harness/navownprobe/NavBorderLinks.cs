@@ -1,5 +1,6 @@
 using HarnessShared;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 
 // BORDER LINKS BY THEIR GEOMETRY (task 2026-11-16-navmesh-repair). DanglingLinks judges a link's table entry: does the navmesh

@@ -51,7 +51,7 @@ internal static class CellLighting
     /// <summary>The interior cell being drawn (null for an exterior), set before the scene list is built.</summary>
     internal static FormKey? TargetCell;
     /// <summary>The drawn LIGH references (Skyrim coordinates), filled while the scene list is built.</summary>
-    internal static readonly List<(HousecarlCore.Vec3 Position, FormKey Base, FormKey Ref)> Placed = new();
+    internal static readonly List<(SkyWright.Engine.Vec3 Position, FormKey Base, FormKey Ref)> Placed = new();
 
     /// <summary>One placed light's colour (times its fade, base fade plus the reference's offset),
     /// radius (the base's plus the reference's XRDS) and flags.</summary>

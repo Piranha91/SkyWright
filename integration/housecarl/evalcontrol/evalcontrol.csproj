@@ -22,6 +22,8 @@
       <Private>true</Private>
     </Reference>
     <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
+    <!-- runcontrol's types use SkyWright.Engine's (its child runner, ChildJob), as the module's probes do -->
+    <ProjectReference Include="$(SkyWrightSrc)SkyWright.Engine\SkyWright.Engine.csproj" />
     <!-- runcontrol's own package, so the libraries it was built against (System.Text.Json and the rest) come along -->
     <PackageReference Include="ModelContextProtocol.Core" Version="2.2.0" />
     <None Include="ai-checks.json" CopyToOutputDirectory="PreserveNewest" />

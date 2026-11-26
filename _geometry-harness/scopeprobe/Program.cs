@@ -6,6 +6,7 @@ using System.Text.Json;
 using HarnessShared;
 using HousecarlCore;
 using HousecarlCore.Progress;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Plugins.Binary.Headers;
 using Mutagen.Bethesda.Plugins.Binary.Translations;

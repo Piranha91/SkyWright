@@ -60,7 +60,7 @@ internal sealed class PatchWriter : IAsyncDisposable
         HousecarlAnswer.Checked(tool, await _library.CallAsync(tool, args, ct));
 
     static string F(float v) => v.ToString("R", CultureInfo.InvariantCulture);
-    static string V(HousecarlCore.Vec3 v) => $"{F(v.X)},{F(v.Y)},{F(v.Z)}";
+    static string V(SkyWright.Engine.Vec3 v) => $"{F(v.X)},{F(v.Y)},{F(v.Z)}";
 
     /// <summary>The ops one commit writes: Placement.Position and Placement.Rotation per edited reference.</summary>
     internal static List<Dictionary<string, object?>> Ops(IEnumerable<PendingEdit> edits) =>
@@ -71,7 +71,7 @@ internal sealed class PatchWriter : IAsyncDisposable
         }).ToList();
 
     /// <summary>The winner's Placement as the server reads it: (position, rotation), or a refusal.</summary>
-    internal async Task<(HousecarlCore.Vec3 Pos, HousecarlCore.Vec3 Rot)> ReadPlacementAsync(string formKey, string? source = null, CancellationToken ct = default)
+    internal async Task<(SkyWright.Engine.Vec3 Pos, SkyWright.Engine.Vec3 Rot)> ReadPlacementAsync(string formKey, string? source = null, CancellationToken ct = default)
     {
         var args = new Dictionary<string, object?>
         {
@@ -85,9 +85,9 @@ internal sealed class PatchWriter : IAsyncDisposable
     }
 
     /// <summary>Pull Placement.Position and Placement.Rotation out of a records json answer.</summary>
-    internal static (HousecarlCore.Vec3 Pos, HousecarlCore.Vec3 Rot) ParsePlacement(string json, string formKey)
+    internal static (SkyWright.Engine.Vec3 Pos, SkyWright.Engine.Vec3 Rot) ParsePlacement(string json, string formKey)
     {
-        HousecarlCore.Vec3? pos = null, rot = null;
+        SkyWright.Engine.Vec3? pos = null, rot = null;
         using var doc = JsonDocument.Parse(json);
         foreach (var el in Walk(doc.RootElement))
         {
@@ -100,13 +100,13 @@ internal sealed class PatchWriter : IAsyncDisposable
             throw new InvalidOperationException($"houseCARL's answer for {formKey} carried no Placement.Position and Placement.Rotation; reopen the scene to read it again.");
         return (pos.Value, rot.Value);
 
-        static HousecarlCore.Vec3 Parse(JsonElement v)
+        static SkyWright.Engine.Vec3 Parse(JsonElement v)
         {
             var s = v.ValueKind == JsonValueKind.String ? v.GetString()! : v.GetRawText();
             var parts = s.Trim('[', ']', '(', ')', ' ').Split(',');
             if (parts.Length != 3) throw new InvalidOperationException($"a placement value '{s}' is not three numbers.");
             float P(string x) => float.Parse(x.Trim(), CultureInfo.InvariantCulture);
-            return new HousecarlCore.Vec3(P(parts[0]), P(parts[1]), P(parts[2]));
+            return new SkyWright.Engine.Vec3(P(parts[0]), P(parts[1]), P(parts[2]));
         }
         static IEnumerable<JsonElement> Walk(JsonElement e)
         {
@@ -151,9 +151,9 @@ internal sealed class PatchWriter : IAsyncDisposable
         return $"The patch also carries {parents} as they win now, so loaded last it masks any later edit to those records.";
     }
 
-    static bool Near(HousecarlCore.Vec3 a, HousecarlCore.Vec3 b, float t) =>
+    static bool Near(SkyWright.Engine.Vec3 a, SkyWright.Engine.Vec3 b, float t) =>
         MathF.Abs(a.X - b.X) <= t && MathF.Abs(a.Y - b.Y) <= t && MathF.Abs(a.Z - b.Z) <= t;
-    static bool NearAngles(HousecarlCore.Vec3 a, HousecarlCore.Vec3 b, float t)
+    static bool NearAngles(SkyWright.Engine.Vec3 a, SkyWright.Engine.Vec3 b, float t)
     {
         static float D(float x, float y) { var d = MathF.Abs(x - y) % (2 * MathF.PI); return MathF.Min(d, 2 * MathF.PI - d); }
         return D(a.X, b.X) <= t && D(a.Y, b.Y) <= t && D(a.Z, b.Z) <= t;
@@ -161,7 +161,7 @@ internal sealed class PatchWriter : IAsyncDisposable
 
     /// <summary>The one placement check: null when the server's winning placement <paramref name="pos"/>/<paramref name="rot"/>
     /// is the pose the scene drew, else the one sentence every server answer about that reference is refused with.</summary>
-    internal string? Mismatch(Mutagen.Bethesda.Plugins.FormKey key, HousecarlCore.Vec3 pos, HousecarlCore.Vec3 rot, ViewProbe.RefPlacementEdit.Pose drawn,
+    internal string? Mismatch(Mutagen.Bethesda.Plugins.FormKey key, SkyWright.Engine.Vec3 pos, SkyWright.Engine.Vec3 rot, ViewProbe.RefPlacementEdit.Pose drawn,
                               float tolerance = 0.01f)
         => Near(pos, drawn.Position, tolerance) && NearAngles(rot, drawn.Rotation, 1e-4f) ? null
          : $"{key}'s winning placement in the load order ({V(pos)} / {V(rot)}) is not the one the scene drew "
@@ -213,15 +213,15 @@ internal sealed class PatchWriter : IAsyncDisposable
         return result;
     }
 
-    static (HousecarlCore.Vec3 Pos, HousecarlCore.Vec3 Rot)? PlacementOf(List<FieldValue> fields)
+    static (SkyWright.Engine.Vec3 Pos, SkyWright.Engine.Vec3 Rot)? PlacementOf(List<FieldValue> fields)
     {
         string? p = fields.FirstOrDefault(f => f.Path == "Placement.Position")?.Value, r = fields.FirstOrDefault(f => f.Path == "Placement.Rotation")?.Value;
         if (p is null || r is null) return null;
-        static HousecarlCore.Vec3 Parse(string s)
+        static SkyWright.Engine.Vec3 Parse(string s)
         {
             var parts = s.Trim('[', ']', '(', ')', ' ').Split(',');
             float P(string x) => float.Parse(x.Trim(), CultureInfo.InvariantCulture);
-            return new HousecarlCore.Vec3(P(parts[0]), P(parts[1]), P(parts[2]));
+            return new SkyWright.Engine.Vec3(P(parts[0]), P(parts[1]), P(parts[2]));
         }
         return (Parse(p), Parse(r));
     }

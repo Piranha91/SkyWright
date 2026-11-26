@@ -13,6 +13,15 @@ all-capital word MAS; Khajiit Will Follow's and INIGO's).
 C2167. The reel's unpictured line said "of 4 pairs, 2 pictured, 0 represented by the pictured example and 2 not
 pictured". A count of 0 is left out with its words. Wrong answers: a "0 ..." clause; a non-zero count missing; the
 clauses not joined with commas and a last "and".
+
+C2610. The boundary step 2 reel said "Ultimate Markarth (two of them) Expanded" for Ultimate Markarth and Ultimate
+Markarth Expanded: the final speech rule said a name repeated after "and" once with a count, and took the first words of
+a longer name for the repeat. A repeat is said once only when it is sure to be the same whole name: the second name ends
+at the end of the text or at punctuation (not ".esm" or "'s"), and the first is not preceded by a capitalised word that
+may be part of it. Merged: "Barrel and Barrel.", "a clash between Barrel and Barrel;", "Barrel and Barrel, ...".
+Left as two names (unsure, never garbled): a prefix or suffix of a longer name, a numbered name, a possessive, a plugin
+file name, a repeat followed by a word ("Barrel and Barrel clash here.") and a repeat after a capitalised word ("In
+Whiterun Barrel and Barrel."). Wrong answer: any name cut into a "(two of them)" with words left over.
 """
 from __future__ import annotations
 
@@ -120,7 +129,32 @@ def c2167_zero_counts_left_out(tmp: Path):
           f"{ {str(k): v for k, v in got.items()} }; {line!r}")
 
 
-CASES = {"C2166": c2166_declared_names_said_as_written, "C2167": c2167_zero_counts_left_out}
+def c2610_prefix_names_stay_two_names(tmp: Path):
+    import reel_stills as RS
+    want = {  # made-up names first; the boundary step 2 pair last
+        "between Lantern Works and Lantern Works Extended.": "between Lantern Works and Lantern Works Extended.",
+        "Grand Mill and Mill.": "Grand Mill and Mill.",
+        "Old Mill and Old Mill 2.": "Old Mill and Old Mill 2.",
+        "Old Mill and Old Mill's roof.": "Old Mill and Old Mill's roof.",
+        "Old Mill and Old Mill.esp.": "Old Mill and Old Mill.esp.",
+        "Barrel and Barrel clash here.": "Barrel and Barrel clash here.",
+        "In Whiterun Barrel and Barrel.": "In Whiterun Barrel and Barrel.",
+        "Barrel and Barrel.": "Barrel (two of them).",
+        "a clash between Barrel and Barrel; and an Urn.": "a clash between Barrel (two of them); and an Urn.",
+        "Barrel and Barrel, by the door.": "Barrel (two of them), by the door.",
+        "between JK's Skyrim and Ultimate Markarth Expanded; Ultimate Markarth and Ultimate Markarth Expanded.":
+            "between JK's Skyrim and Ultimate Markarth Expanded; Ultimate Markarth and Ultimate Markarth Expanded.",
+        "Nexus search for Ultimate Markarth and Ultimate Markarth Expanded: a file names both mods.":
+            "Nexus search for Ultimate Markarth and Ultimate Markarth Expanded: a file names both mods.",
+    }
+    got = {k: RS.spoken_text(k) for k in want}
+    bad = {k: v for k, v in got.items() if v != want[k]}
+    check("C2610", not bad, "a name is cut into \"(two of them)\", or a sure repeat is not said once",
+          "; ".join(f"{k!r} -> {v!r} (want {want[k]!r})" for k, v in bad.items()))
+
+
+CASES = {"C2166": c2166_declared_names_said_as_written, "C2167": c2167_zero_counts_left_out,
+         "C2610": c2610_prefix_names_stay_two_names}
 
 
 def main(argv=None) -> int:

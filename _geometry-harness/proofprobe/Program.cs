@@ -3230,7 +3230,7 @@ Console.WriteLine("\nPROOF — cell water: a synthetic order through CellBoundar
 }
 
 // ---------------------------------------------------------------------------------------
-// LANDSCAPE SEAMS (roadmap 4.9 Part B, frozen 2026-09-04) — HousecarlCore.LandHeight (the decode the renderer and the
+// LANDSCAPE SEAMS (roadmap 4.9 Part B, frozen 2026-09-04) — SkyWright.Engine.LandHeight (the decode the renderer and the
 // detector share), DetectorModel.EdgeMismatch / LandSeam, then a synthetic order through CellBoundaryIndex.MeasurePair.
 // ---------------------------------------------------------------------------------------
 Console.WriteLine("\nPROOF — landscape seams: the VHGT decode (LandHeight), the edge rule (DetectorModel.LandSeam)");

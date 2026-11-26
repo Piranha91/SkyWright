@@ -1,6 +1,7 @@
 using HarnessShared;
 using System.Numerics;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
 

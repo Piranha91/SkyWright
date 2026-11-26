@@ -1,5 +1,6 @@
 using System.Numerics;
 using HousecarlCore;
+using SkyWright.Engine;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
 
@@ -88,7 +89,7 @@ public sealed class LandSnap
     public LandSnap(int plugin, float offset, sbyte[,] gradients, string?[] quadBase)
     { Plugin = plugin; Offset = offset; Gradients = gradients; QuadBase = quadBase; }
 
-    /// <summary>World-unit heights [x, y], decoded once through HousecarlCore.LandHeight.</summary>
+    /// <summary>World-unit heights [x, y], decoded once through SkyWright.Engine.LandHeight.</summary>
     public float[,] Heights => _heights ??= LandHeight.Decode(Offset, Gradients);
 
     public bool SameHeightsAs(LandSnap o)
