@@ -1170,7 +1170,8 @@ def compare_frames(described: Path, now: Path) -> dict:
         args_a, args_b = render_arguments(a_img.text.get("viewprobe")), render_arguments(b_img.text.get("viewprobe"))
         a = np.asarray(a_img.convert("RGBA"), dtype=np.int16)
         b = np.asarray(b_img.convert("RGBA"), dtype=np.int16)
-    row = {"sameArguments": args_a == args_b}
+    # arguments not recorded on either side are never "the same": absent == absent says nothing about the picture
+    row = {"sameArguments": args_a is not None and args_b is not None and args_a == args_b}
     if a.shape != b.shape:
         return dict(row, size=[list(a.shape[:2]), list(b.shape[:2])], within=False)
     d = np.abs(a - b)

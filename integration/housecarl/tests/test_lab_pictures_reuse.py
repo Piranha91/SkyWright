@@ -449,7 +449,8 @@ def write_png(path: Path, arr, text: str):
     from PIL.PngImagePlugin import PngInfo
     path.parent.mkdir(parents=True, exist_ok=True)
     info = PngInfo()
-    info.add_text("viewprobe", text)
+    if text is not None:
+        info.add_text("viewprobe", text)
     Image.fromarray(np.clip(arr, 0, 255).astype("uint8"), "RGBA").save(path, pnginfo=info)
 
 
@@ -704,6 +705,24 @@ def case_217_another_path_argument_that_differs_asks():
         run.write({s: scattered(run.frames[s], 10)[0] for s in run.STATES}, texts)
         got = run.stage()
     assert asks(got), "a path argument other than --order named another folder and the observation was carried"
+
+
+def case_218_frames_with_no_recorded_arguments_ask():
+    """Review of df33d8f4: a frame whose render arguments were not recorded (no 'viewprobe' text) is never the same
+    picture, even when neither side has them (absent == absent is not "the same arguments")."""
+    results = {}
+    for label, before, after in (("neither side", None, None), ("the redone side", "keep", None)):
+        with tempfile.TemporaryDirectory() as t:
+            run = Run(Path(t))
+            if before is None:
+                run.texts = {s: None for s in run.STATES}
+                run.write()
+            run.bank()
+            texts = {s: (run.texts[s] if after == "keep" else None) for s in run.STATES}
+            run.write({s: scattered(run.frames[s], 10)[0] for s in run.STATES}, texts)
+            results[label] = run.stage()
+    assert asks(results["neither side"]), "frames with no recorded render arguments on either side were carried on pixels alone"
+    assert asks(results["the redone side"]), "a redone frame with no recorded render arguments was carried"
 
 
 def case_214_a_hand_edited_carry_record_asks():
