@@ -366,8 +366,11 @@ def case_113_every_program_folder_records_the_commit_and_dirtiness_it_was_built_
 
 def case_114_the_provenance_record_is_outside_the_package_identity():
     """F1, the other way: rewriting only the provenance record (another commit, dirty) leaves the digest unchanged."""
-    real = buildlayout.program_dir("viewprobe") / "provenance" / "build.json"
-    rel = real.relative_to(real.parent.parent) if real.is_file() else Path("provenance/build.json")
+    folder_ = buildlayout.program_dir("viewprobe")
+    # wherever the build writes the record (a build.json naming a commit) is where its identity is tested
+    found = [p for p in sorted(folder_.rglob("build.json")) if '"commit"' in p.read_text(encoding="utf-8", errors="replace")]
+    real = found[0] if found else folder_ / "provenance" / "build.json"
+    rel = real.relative_to(folder_)
     with tempfile.TemporaryDirectory() as t:
         fb = fake_build(Path(t))
         folder = fb["viewprobe"].parent
