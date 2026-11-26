@@ -20,7 +20,7 @@ image-observations, report, reel, deliver.
             stops with one sentence naming the runcontrol command; scenes, which runcontrol records refused and not
             blocking, carries its sentence on. A stage that exits 0 without its outputs is not accepted. The stages
             after the bundle also bind the code of the tools they run (STAGE_TOOLS: each script, the harness modules it
-            imports, the renderer's build, and runcontrol's build for the report's media bundle), so a tool change runs
+            imports, and what the renderer and controllers ARE: program_identity, not one build), so a tool change runs
             that stage again.
 
 What it does not do. It measures nothing itself and decides nothing about a mod: every finding comes from the probes,
@@ -180,9 +180,15 @@ STAGE_TOOLS = {
 }
 #: stages whose renderer build is part of their tools (capture_acquire's own default build when the machine names none)
 RENDERER_STAGES = frozenset({"capture"})
-#: stages that start the built-in controller (the report's media bundle, and evalreport plan's bundle check in every stage
-#: that runs it): its build is part of their tools
+#: stages that start the built-in controller (the capture's configuration fingerprints, and evalreport plan's bundle check
+#: in every stage that runs it) and this module's evalcontrol (evalreport's verify of the AI-side bundle, the report's
+#: media bundle): both builds, and the build's Data pieces the controllers read, are part of their tools
 CONTROLLER_STAGES = frozenset({"report-plan", "capture", "report"})
+#: any environment variable starting with this makes the controllers' identity unknown: a superset of the layout
+#: overrides CheckoutLayout honours (it stays their one owner), not a copy of its list
+LAYOUT_OVERRIDE_PREFIX = "WB_"
+#: the build's pieces the controllers read through the layout (buildlayout's marker keys), bound with the marker itself
+CONTROLLER_DATA = ("corpus", "registry", "severity", "scenePolicy")
 #: this driver: modules a tool imports may import it, and its code is recorded on every receipt, not bound
 DRIVER = "integration/housecarl/evalpipeline.py"
 
@@ -217,8 +223,9 @@ def _tool_digest(p: Path):
 
 def stage_tools(stage: str, machine: dict | None = None, root: Path | None = None) -> dict:
     """{repository-relative path: sha256} of the code a stage runs: its STAGE_TOOLS (or the precedent stage's own
-    script), every harness module those scripts import, followed transitively, and for the capture the renderer's build
-    (toolidentity's package digest). An absent file is None, so its appearing later is a change. {} for a stage with no
+    script), every harness module those scripts import, followed transitively, the renderer for the capture and the
+    controllers for CONTROLLER_STAGES (program_identity, controller_identities). An absent script is None, so its
+    appearing later is a change; a program whose identity cannot be established is unknown. {} for a stage with no
     tools of its own (its code is this driver's, which is recorded, not bound)."""
     root = Path(root or ROOT)
     machine = machine or {}
@@ -238,16 +245,85 @@ def stage_tools(stage: str, machine: dict | None = None, root: Path | None = Non
         if p.suffix == ".py" and p.is_file():
             todo += _local_imports(p, roots)
     if stage in RENDERER_STAGES:
-        import toolidentity
         vp = machine.get("viewprobe")
-        folder = Path(vp).parent if vp else buildlayout.program_dir("viewprobe")
-        seen["viewprobe"] = toolidentity.package(folder)["digest"]
+        seen["viewprobe"] = program_identity("viewprobe", Path(vp) if vp else buildlayout.program("viewprobe"))
     if stage in CONTROLLER_STAGES:
-        import toolidentity
-        rc = machine.get("runcontrol")
-        exe = Path(rc) if rc else buildlayout.runcontrol()
-        seen["runcontrol"] = toolidentity.package(exe.parent)["digest"] if exe.is_file() else None
+        seen.update(controller_identities(machine))
     return dict(sorted(seen.items()))
+
+
+def _unknown(why: str) -> dict:
+    """An identity that could not be established: never equal to "unchanged" (cmd_run runs the stage, see unknown_identities)."""
+    return {"unknown": why}
+
+
+def unknown_identities(tools: dict) -> list[str]:
+    """The sentences of every identity in a stage's tools that could not be established."""
+    return [v["unknown"] for v in (tools or {}).values() if isinstance(v, dict) and "unknown" in v]
+
+
+def program_identity(name: str, exe: Path):
+    """What a program IS: toolidentity's package digest of the folder its exe is in (the build writes no commit stamp,
+    so the same code in the same build folder is the same digest), or unknown when it is missing or unreadable."""
+    import toolidentity
+    exe = Path(exe)
+    if not exe.is_file():
+        return _unknown(f"{name} is not built at {fwd(exe)}")
+    try:
+        rec = toolidentity.package(exe.parent)
+    except toolidentity.Unreadable as ex:
+        return _unknown(f"{name}'s file {fwd(ex.path)} cannot be read ({ex.error})")
+    return rec["digest"] if rec.get("state") == "present" and rec.get("digest") else _unknown(f"{name} is not built at {fwd(exe)}")
+
+
+def _layout_root(exe: Path) -> Path | None:
+    """The build folder (its marker) a program sits in, or None when it is not inside a SkyWright build."""
+    for p in list(Path(exe).resolve().parents)[:4]:
+        if (p / buildlayout.MARKER).is_file():
+            return p
+    return None
+
+
+def build_data_identity(root: Path | None, what: str):
+    """The build's Data pieces the controllers read through its layout, and the marker, each by sha256 (None when a
+    piece is absent from the build, which is a fact about it); unknown when there is no build or a piece is unreadable."""
+    import toolidentity
+    if root is None:
+        return _unknown(f"{what} is not inside a SkyWright build, so the data it reads cannot be identified")
+    out = {}
+    try:
+        out[buildlayout.MARKER] = toolidentity.file_sha256(root / buildlayout.MARKER)
+        for key in CONTROLLER_DATA:
+            p = buildlayout.piece_under(root, key)
+            out[key] = toolidentity.file_sha256(p) if p.is_file() else None
+    except (toolidentity.Unreadable, KeyError, ValueError) as ex:
+        return _unknown(f"the build data {what} reads cannot be read ({ex})")
+    return out
+
+
+def controller_identities(machine: dict) -> dict:
+    """runcontrol and evalcontrol as the stages' children run them, and the build data they read: runcontrol from the
+    machine file, else HOUSECARL_RUNCONTROL, else the layout (evalbase.runcontrol_exe's order, which children inherit
+    through `child`); evalcontrol from the machine file or the module's build, and the module's build as well when it
+    differs (evalreport's verify starts that one)."""
+    named = (machine or {}).get("runcontrol") or (os.environ.get(RUNCONTROL_ENV) or "").strip()
+    rc = Path(named) if named else buildlayout.runcontrol()
+    out = {"runcontrol": program_identity("runcontrol", rc),
+           "runcontrol-data": build_data_identity(_layout_root(rc), "runcontrol")}
+    module_ev = SW.tool("evalcontrol")
+    ev = Path((machine or {}).get("evalcontrol") or module_ev)
+    out["evalcontrol"] = program_identity("evalcontrol", ev)
+    if not same_path(ev, module_ev):
+        out["evalcontrol-module"] = program_identity("evalcontrol", module_ev)
+    app_root = buildlayout.root()
+    if _layout_root(rc) is None or not same_path(_layout_root(rc), app_root):
+        out["app-data"] = build_data_identity(app_root if (app_root / buildlayout.MARKER).is_file() else None,
+                                              "evalcontrol")
+    overrides = sorted(k for k in os.environ if k.upper().startswith(LAYOUT_OVERRIDE_PREFIX))
+    if overrides:
+        out["layout-overrides"] = _unknown(f"the environment sets {', '.join(overrides)}, which can change what the "
+                                           f"controllers read")
+    return out
 
 def _fingerprint(p: Path):
     if not p.exists():
@@ -920,7 +996,8 @@ def reusable_capture(q: dict, qdir: Path, identity: dict | None = None) -> dict 
     doc = read_json(result)
     if doc.get("status") not in ("captured", "refused") or doc.get("request") not in (None, q["id"]):
         return None
-    if identity is None or doc.get("toolIdentity") != identity:
+    # an identity with a part that could not be read (None) is never the same build, on either side
+    if (identity is None or any(v is None for v in identity.values()) or doc.get("toolIdentity") != identity):
         return None
     if doc.get("status") == "refused":
         ref_ = doc.get("refusal") or {}
@@ -1660,7 +1737,14 @@ def cmd_run(a) -> int:
                 inputs["tools"] = tools
             if name == "plan" and (out / "scope" / "scope-line.json").is_file():
                 print("scope: " + str(read_json(out / "scope" / "scope-line.json").get("line") or ""))
-            if ledger.decide(name, inputs) == "reuse":
+            unknown = unknown_identities(tools)
+            if unknown:
+                # an identity that cannot be established is never "unchanged": the stage runs, and its receipt names
+                # this run alone, so every stage after it (bound to its inputs) runs again too
+                import uuid
+                inputs["unknownIdentityRun"] = uuid.uuid4().hex
+                print(f"{name}: runs again, because {'; '.join(unknown)}.")
+            elif ledger.decide(name, inputs) == "reuse":
                 print(f"{name}: reused (inputs and outputs unchanged)")
                 run.advance()
                 continue
@@ -1696,6 +1780,11 @@ def cmd_run(a) -> int:
             t0 = time.perf_counter()
             try:
                 extra, outputs = body(ctx, res, sdir)
+                # the receipt is bound to the programs the stage ran: one that changed while it ran (a rebuild) made
+                # part of its output, so the stage is refused rather than recorded under either identity
+                if tools and stage_tools(name, ctx.machine) != tools:
+                    raise Refusal(f"a program {name} runs changed while it ran (a rebuild?); run again when no build "
+                                  f"is under way.")
             except Awaiting as w:
                 ledger.record(name, inputs, [], exit_code=3, extra=None)
                 ledger.doc["history"][-1]["reason"] = "awaiting: " + str(w)

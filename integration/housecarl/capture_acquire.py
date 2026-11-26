@@ -151,14 +151,21 @@ def utcnow() -> str:
 
 
 def capture_tool_identity(vp=None) -> dict:
-    """The capture's tool identity: this module, the point picker and the renderer build. A result taken with another
-    identity is not reused (evalpipeline.reusable_capture)."""
+    """The capture's tool identity: this module, the point picker and the renderer build, the last as toolidentity's
+    package digest of viewprobe's folder (its code, not its apphost, which a code change leaves byte-identical). A part
+    that is missing or unreadable is None, and evalpipeline.reusable_capture never reuses a result under such an
+    identity, nor one taken with another identity."""
+    import toolidentity
     here_ = Path(__file__).resolve().parent
-    vp_ = Path(vp) if vp else VIEWPROBE
+    vp_ = Path(str(vp)) if vp else VIEWPROBE
     out_ = {}
-    for name_, p_ in (("capture_acquire.py", here_ / "capture_acquire.py"), ("capture_points.py", here_ / "capture_points.py"),
-                      ("viewprobe", Path(str(vp_)))):
+    for name_, p_ in (("capture_acquire.py", here_ / "capture_acquire.py"), ("capture_points.py", here_ / "capture_points.py")):
         out_[name_] = sha256_file(p_) if p_.is_file() else None
+    try:
+        rec_ = toolidentity.package(vp_.parent) if vp_.is_file() else {}
+    except toolidentity.Unreadable:
+        rec_ = {}
+    out_["viewprobe"] = rec_.get("digest") if rec_.get("state") == "present" else None
     return out_
 
 
