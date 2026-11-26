@@ -424,6 +424,20 @@ def overlay_verify(tmp):
           and not [e for e in mman.get("evidence") or [] if e.get("kind") == "media"],
           f"{case}: a media item with no app fingerprint is unassessed, not evidence")
 
+    # the app's own plan freezes no identity for a module probe; the overlay's freezes each it launches
+    app_run = tmp / f"{case}-run"
+    app_programs = ((load(app_run / "plan.json") or {}).get("toolIdentity") or {}).get("programs") or {}
+    ov_programs = ((load(run / "plan.json") or {}).get("toolIdentity") or {}).get("programs") or {}
+    module = {"probe:patchfind", "probe:fomodprobe", "probe:poolprobe", "probe:adviceprobe"}
+    expect(sorted(module & set(app_programs)), [], f"{case}: runcontrol's own plan holds no identity for a module probe")
+    check(bool(module & set(ov_programs)), f"{case}: the overlay plan freezes its module probes ({sorted(module & set(ov_programs))})")
+    # evalcontrol plan --probe-cmd stands in only this module's own probes, refused in one sentence otherwise
+    r = evalcontrol(["plan", "--app", app_run, "--app-bundle", app_run / "ai-app-bundle", "--out", tmp / f"{case}-ai2",
+                     "--probe-cmd", "contactprobe=python fake.py"], cwd=tmp)
+    expect((r.returncode, r.stderr.strip()), (2, "REFUSED: --probe-cmd contactprobe: no row of ai-checks.json launches a "
+           "probe of that name, and the overlay stands in only its own probes (runcontrol's --probe-cmd stands in the app's)."),
+           f"{case}: evalcontrol plan --probe-cmd refuses a probe that is not the module's")
+
     # aiEvaluation has one owner: evalreport takes the pair's completeness from verify, never recomputing it
     sys.path.insert(0, str(HERE.parent))
     import evalreport

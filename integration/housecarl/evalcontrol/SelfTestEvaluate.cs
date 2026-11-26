@@ -187,6 +187,35 @@ public static partial class SelfTest
         return bad.Count == 0 ? null : string.Join("; ", bad);
     });
 
+    // a module probe's frozen identity is its build folder's (runcontrol's package rule over this module's build): it
+    // changes when the probe's dll changes and its exe does not
+    static void ProbeIdentityCase() => Case("plan: a module probe's frozen identity changes when its dll changes, its exe untouched", () =>
+    {
+        string build = ModuleRows.ProbeBuild();
+        var frozen = PlanIdentity.Measure(new PyDict(), build, "probe:patchfind");
+        string folder = Path.GetDirectoryName(PlanIdentity.ProbeExe(build, "patchfind"))!;
+        if (!Ev.Eq(frozen.Get("state"), "present")) return $"this build has no patchfind probe at {folder}";
+        using var t = new Temp();
+        string copy = t.At("patchfind");
+        Directory.CreateDirectory(copy);
+        foreach (string f in Directory.GetFiles(folder)) File.Copy(f, PyPath.Join(copy, Path.GetFileName(f)));
+        if (Directory.Exists(PyPath.Join(folder, "runtimes")))
+            foreach (string f in Directory.GetFiles(PyPath.Join(folder, "runtimes"), "*", SearchOption.AllDirectories))
+            {
+                string to = PyPath.Join(copy, Path.GetRelativePath(folder, f));
+                Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+                File.Copy(f, to);
+            }
+        var same = ToolIdentity.Package(copy);
+        if (!Ev.Eq(same["digest"], frozen["digest"])) return "a copy of the probe's folder does not measure as the frozen identity";
+        string exe = PyPath.Join(copy, "patchfind.exe"), dll = PyPath.Join(copy, "patchfind.dll");
+        string exeBefore = Hashing.Sha256File(exe);
+        File.AppendAllText(dll, " ");
+        var changed = ToolIdentity.Package(copy);
+        return Hashing.Sha256File(exe) != exeBefore ? "the exe changed"
+            : Ev.Eq(changed["digest"], frozen["digest"]) ? "the identity did not change when the dll did" : null;
+    });
+
     // The folders brought to a recorded state: files under the overlay it does not list removed, files whose bytes
     // differ written (the app bundle beside it is written the same way).
     static void ApplyState(Temp t, object? tree)
