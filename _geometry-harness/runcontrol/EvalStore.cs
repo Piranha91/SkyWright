@@ -94,7 +94,6 @@ public static class EvalStore
     public const int ToolIdentityContract = 1;
     public const string NotOptedIn = "not-opted-in";
     public static readonly string[] TerminalOk = ["completed", "reused"];
-    public static readonly string[] ImportOrigins = ["fresh", "reused"];
     public static readonly string[] Claims = ["no-findings-in-completed-checks", "findings", "incomplete"];
 
     /// <summary>status in TERMINAL_OK.</summary>

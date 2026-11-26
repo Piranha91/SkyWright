@@ -34,6 +34,7 @@ public static partial class SelfTest
         AdviceGenericCases(Load("advice.json"));
         DiscoveryCases(Load("discovery.json"));
         EvaluateCases(Load("evaluate.json"));
+        ImportedEvidenceCases(Load("finalize-imports.json"));
         Console.WriteLine($"{_green} green, {_red} red, 0 skipped");
         return _red == 0 ? 0 : 1;
     }
@@ -279,7 +280,7 @@ public static partial class SelfTest
                 // the media rows of the shipped list (a case about media plans the media group alone)
                 ("the overlay plan", () => OverlayPlan.Run(t.Root, appBundle, ai, [], MediaList(t.Base))),
                 ("evaluate", () => OverlayEvaluate.Run(ai)),
-                ("finalize", () => Finalizer.Run(ai, OverlayFinalize.Amend, ModuleRows.LaunchKinds)),
+                ("finalize", () => Finalizer.Run(ai, OverlayFinalize.Amend, ModuleRows.LaunchKinds, OverlayFinalize.Sections)),
             };
             foreach (var (what, step) in steps)
             {

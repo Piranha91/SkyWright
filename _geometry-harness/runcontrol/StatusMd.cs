@@ -24,7 +24,11 @@ public static class StatusMd
     static PyDict D(object? v) => PyValue.Dict(v);
 
     /// <summary>The whole file's text, with "\n" line ends.</summary>
-    public static string Build(PyDict plan, PyDict disp)
+    public static string Build(PyDict plan, PyDict disp) => Build(plan, disp, null);
+
+    /// <summary>As above, with a caller's sections (StatusMdSections): lines added at the places it names, never a
+    /// line of this index changed or left out.</summary>
+    public static string Build(PyDict plan, PyDict disp, StatusMdSections? more)
     {
         var ev = D(disp["evaluation"]);
         var registry = D(plan["registry"]);
@@ -78,35 +82,7 @@ public static class StatusMd
                 L.Add($"- `{P(c["checkId"])}` [{P(c["armId"])}] — {P(c["count"])} {P(c["unit"])} catalogued "
                     + $"({P(c["kind"])}); a catalogue completes its check and is never a finding");
         else L.Add("- none");
-        if (PyValue.Truthy(disp.Get("importedEvidence")))
-        {
-            L.AddRange([
-                "", "## Imported evidence and where it came from", "",
-                "Origin is checked for accidental relabelling only: a capture token and timestamps are public and "
-                + "rewritable, so this is not proof of authenticity.", "",
-                "| check | arm | origin |", "|---|---|---|"]);
-            foreach (var x in PyValue.Iter(disp["importedEvidence"]).Select(D))
-            {
-                string said;
-                if (Ev.Eq(x["origin"], "fresh")) said = "fresh: captured for this plan's arm (capture token and time checked)";
-                else if (Ev.Eq(x["origin"], "reused"))
-                {
-                    var src = Ev.OrEmpty(x.Get("reusedFrom"));
-                    string where = Ev.Eq(x.Get("reusedWithin"), "this-evaluation")
-                        ? $"reused from setup `{P(src.Get("armId"))}` of THIS plan; not measured for this setup"
-                        : $"reused from plan `{P(src.Get("planId"))}` arm `{P(src.Get("armId"))}`; not measured for this plan";
-                    said = $"{where} (result `{Head(P(src.Get("resultSha256")), 12)}`, declared, not verified)"
-                        + (!Ev.Eq(x.Get("reusedWithin"), "unstated") ? "" : "; the receipt does not say whether the source is this evaluation or another")
-                        + (Ev.Eq(x.Get("sourceDisclosure"), "other-file")
-                            ? "; the capture states it was measured against " + $"`{P(x.Get("capturedAgainst"))}`"
-                            : Ev.Eq(x.Get("sourceDisclosure"), "unstated")
-                                ? "; the capture names NO candidate file, so which file it was measured against is not stated at all"
-                                : "");
-                }
-                else said = "origin not recorded: imported before origin was required";
-                L.Add($"| `{P(x["checkId"])}` | {P(x["armId"])} | {said} |");
-            }
-        }
+        if (more?.AfterCatalogues is { } after) L.AddRange(after(disp));
         L.AddRange(["", "## Missing checks (each keeps the evaluation incomplete)", ""]);
         if (PyValue.Truthy(ev["missing"]))
         {
@@ -155,6 +131,7 @@ public static class StatusMd
                 + PyJson.Canonical(p["unjudgeable"]));
         // supplied media is the houseCARL integration module's: a disposition that carries its sentence shows it
         if (un.ContainsKey("mediaUnassessed")) L.Add($"- media: {P(un["mediaUnassessed"])}");
+        if (more?.Limitations is { } limits) L.AddRange(limits(disp));
         L.Add($"- runtime: {P(un["runtimeObservations"])}");
         L.AddRange(["", "## Regeneration needs", ""]);
         var regen = PyValue.Iter(plan["checks"]).Select(D).Where(c => PyValue.Truthy(Ev.OrEmpty(c.Get("evidence")).Get("regeneration"))).ToList();
@@ -180,3 +157,8 @@ public static class StatusMd
         return string.Join("\n", L) + "\n";
     }
 }
+
+/// <summary>A caller's sections of STATUS.md (another program finalizing a run of its own): each returns the lines it
+/// adds at its place, given the disposition. AfterCatalogues follows "Completed catalogues"; Limitations goes among the
+/// "Limitations and what was not assessed" lines, before the runtime line.</summary>
+public sealed record StatusMdSections(Func<PyDict, IEnumerable<string>>? AfterCatalogues = null, Func<PyDict, IEnumerable<string>>? Limitations = null);

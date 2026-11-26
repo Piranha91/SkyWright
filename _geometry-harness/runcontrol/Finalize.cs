@@ -14,15 +14,16 @@ public static class Finalizer
         return Exit.Judgement;
     }
 
-    public static int Run(string runFolder) => Run(runFolder, null);
+    public static int Run(string runFolder) => Run(runFolder, null, null);
 
-    /// <summary>As above, with a caller's step that adds its own blocks to the disposition (given the run, the plan and
-    /// the receipts) before it and STATUS.md are written. runcontrol's own finalize passes none.</summary>
-    public static int Run(string runFolder, Action<PyDict, string, PyDict, PyDict>? amend) => Run(runFolder, amend, null);
+    /// <summary>A caller's step that adds its own blocks to the disposition before it and STATUS.md are written, given
+    /// the run, the plan, the receipts, the ledger and the receipts evidence integrity found bad (keyed by entry).</summary>
+    public delegate void Amend(PyDict disposition, string run, PyDict plan, PyDict receipts, Ledger ledger, PyDict badKeys);
 
-    /// <summary>As above, with the caller's own child-launching adapter kinds (Receipts.ReceiptRoles), so the evidence
-    /// integrity checks the emitter of its receipts too.</summary>
-    public static int Run(string runFolder, Action<PyDict, string, PyDict, PyDict>? amend, IReadOnlySet<string>? moreLaunchKinds)
+    /// <summary>As above, with a caller's step (Amend), the caller's own child-launching adapter kinds
+    /// (Receipts.ReceiptRoles, so the evidence integrity checks the emitter of its receipts too) and its STATUS.md
+    /// sections. runcontrol's own finalize passes none.</summary>
+    public static int Run(string runFolder, Amend? amend, IReadOnlySet<string>? moreLaunchKinds, StatusMdSections? sections = null)
     {
         string run = PyPath.Str(runFolder);
         EvalStore.SetRunStore(run);
@@ -58,9 +59,9 @@ public static class Finalizer
             {
                 (integrity, var badKeys) = EvidenceIntegrity.Check(run, plan, ledger, receipts, moreLaunchKinds);
                 disp = Disposition.Build(run, plan, ledger, receipts, integrity, badKeys);
-                amend?.Invoke(disp, run, plan, receipts);
+                amend?.Invoke(disp, run, plan, receipts, ledger, badKeys);
                 PyJson.WriteEvalFile(PyPath.Join(run, "disposition.json"), disp);
-                Ev.WriteText(PyPath.Join(run, "STATUS.md"), StatusMd.Build(plan, disp));
+                Ev.WriteText(PyPath.Join(run, "STATUS.md"), StatusMd.Build(plan, disp, sections));
             }
             catch (Exception ex)
             {

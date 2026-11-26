@@ -71,6 +71,34 @@ public static partial class SelfTest
         return null;
     });
 
+    // The disposition and STATUS.md cases of the imported-evidence block (known-answers/finalize-imports.json: moved
+    // from runcontrol's finalize.json with the block, answers unchanged): runcontrol's disposition over the recorded
+    // run, then this module's block and STATUS.md section, as `evalcontrol finalize` adds them.
+    static void ImportedEvidenceCases(PyDict ka)
+    {
+        foreach (var c in L(ka["cases"]).Select(D))
+            Case($"finalize: disposition and STATUS.md of '{S(c["name"])}'", () =>
+            {
+                using var t = new Temp("b");
+                BuildTree(t, ka["base"]);
+                ApplyOps(t, c["ops"]);
+                var plan = D(PyJson.LoadEvalFile(t.At("plan.json")));
+                return Clocked(() =>
+                {
+                    var ledger = new Ledger(t.Root, plan);
+                    var receipts = Receipts.ReadReceipts(t.Root);
+                    var (integrity, bad) = EvidenceIntegrity.Check(t.Root, plan, ledger, receipts);
+                    var disp = Disposition.Build(t.Root, plan, ledger, receipts, integrity, bad);
+                    ImportedEvidence.Add(disp, ledger, receipts, bad);
+                    var pairs = bad.Select(kv => (object?)new List<object?> { kv.Key, kv.Value }).ToList();
+                    return Same("integrity", t.Mask(PyJson.Dumps(integrity, indent: 1, ensureAscii: false)), Unpack(c["integrity"]))
+                        ?? SameJson("bad keys", pairs, c["bad"])
+                        ?? Same("disposition", t.Mask(PyJson.Dumps(disp, indent: 1, ensureAscii: false)), Unpack(c["disposition"]))
+                        ?? Same("STATUS.md", t.Mask(StatusMd.Build(plan, disp, OverlayFinalize.Sections)), Unpack(c["status"]));
+                });
+            });
+    }
+
     // The folders brought to a recorded state: files under the overlay it does not list removed, files whose bytes
     // differ written (the app bundle beside it is written the same way).
     static void ApplyState(Temp t, object? tree)

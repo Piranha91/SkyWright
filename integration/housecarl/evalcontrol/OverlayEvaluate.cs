@@ -114,8 +114,12 @@ public static class OverlayFinalize
 {
     public const string MediaSentence = "media is identified and assessed by `evalcontrol bundle --media`; see the overlay bundle's manifest";
 
-    public static void Amend(PyDict disposition, string run, PyDict plan, PyDict receipts)
+    /// <summary>STATUS.md's sections only an overlay has (runcontrol's finalizer adds them where they belong).</summary>
+    public static readonly StatusMdSections Sections = new(AfterCatalogues: ImportedEvidence.Section);
+
+    public static void Amend(PyDict disposition, string run, PyDict plan, PyDict receipts, Ledger ledger, PyDict badKeys)
     {
+        ImportedEvidence.Add(disposition, ledger, receipts, badKeys);
         var un = PyValue.Dict(disposition["unassessed"]);
         un["familiesUnsupportedOrManual"] = Families(un, plan);
         un["mediaUnassessed"] = MediaSentence;
