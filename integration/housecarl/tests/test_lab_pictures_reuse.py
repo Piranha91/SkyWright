@@ -207,6 +207,19 @@ def case_102_the_built_programs_carry_no_commit_stamp():
     assert not stamped, f"these built files carry a commit stamp, so an unchanged rebuild changes their bytes: {stamped}"
 
 
+def case_117_the_built_debug_files_carry_no_commit():
+    """A program's dll names its debug file by an ID derived from the debug file's bytes, so a commit written into the
+    debug file (source link) changes the dll on every commit: no pdb beside the programs may hold one."""
+    head = subprocess.run(["git", "-C", str(SW.CHECKOUT), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    pin = subprocess.run(["git", "-C", str(SW.HOUSECARL), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    vp, rc = buildlayout.program_dir("viewprobe"), buildlayout.program_dir("runcontrol")
+    ev = SW.tool("evalcontrol").parent
+    pdbs = sorted(p for d in (vp, rc, ev) for p in d.glob("*.pdb"))
+    assert pdbs, "no debug files found beside the programs; build first (scripts/build.ps1)"
+    hits = sorted({f"{p.parent.name}/{p.name}" for p in pdbs for c in (head, pin) if c and c.encode() in p.read_bytes()})
+    assert not hits, f"these debug files hold a commit id, so each commit changes the programs' bytes: {hits}"
+
+
 def case_103_a_real_renderer_change_runs_capture_again():
     with tempfile.TemporaryDirectory() as t:
         fb = fake_build(Path(t))
