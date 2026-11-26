@@ -1,0 +1,23 @@
+{
+ "$comment": "The rows an AI-side evaluation fills and the adapter kinds only they use, as settled at Gate B of step 3 of the SkyWright / houseCARL boundary (GATE-B.md, 4.1): none may be in the app's registry or its validator's vocabulary. Read by the boundary self-test (SelfTestBoundary.cs).",
+ "aiSideKinds": [
+  "mcp-only",
+  "live-import",
+  "media",
+  "patchprobe",
+  "adviceprobe"
+ ],
+ "aiSideRows": [
+  "loadability.dangling-references",
+  "loadability.missing-assets",
+  "records.contested-fields",
+  "records.cell-attributes",
+  "records.registration-and-dialogue",
+  "patch.discovery-installed",
+  "patch.discovery-fomod",
+  "patch.discovery-pool",
+  "patch.author-advice",
+  "runtime.supplied-observations",
+  "runtime.state-switch-flip"
+ ]
+}

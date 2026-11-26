@@ -159,6 +159,7 @@ public static partial class SelfTest
         SelfTestFinalize.RunRows(Case);
         EntryCopyCases();
         SelfTestFinalize.RunOwnCases(Case);
+        BoundaryCases(Skip);
         LiveCases();
 
         Console.WriteLine($"{_green} green, {_red} red, {_skipped} skipped");
