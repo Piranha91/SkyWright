@@ -97,6 +97,22 @@ public static partial class SelfTest
                         ?? Same("STATUS.md", t.Mask(StatusMd.Build(plan, disp, OverlayFinalize.Sections)), Unpack(c["status"]));
                 });
             });
+        // the media sentence Amend sets is the module's line among the limitations, just before the runtime line;
+        // runcontrol's STATUS.md alone does not print it
+        Case("finalize: an overlay's STATUS.md says its media sentence among the limitations", () =>
+        {
+            using var t = new Temp("b");
+            BuildTree(t, ka["base"]);
+            var plan = D(PyJson.LoadEvalFile(t.At("plan.json")));
+            var ledger = new Ledger(t.Root, plan);
+            var receipts = Receipts.ReadReceipts(t.Root);
+            var disp = Clocked(() => Disposition.Build(t.Root, plan, ledger, receipts));
+            PyValue.Dict(disp["unassessed"])["mediaUnassessed"] = OverlayFinalize.MediaSentence;
+            var lines = StatusMd.Build(plan, disp, OverlayFinalize.Sections).Split('\n').ToList();
+            int media = lines.IndexOf($"- media: {OverlayFinalize.MediaSentence}");
+            if (media < 0 || !lines[media + 1].StartsWith("- runtime: ", StringComparison.Ordinal)) return $"the media line is not just before the runtime line (at {media})";
+            return StatusMd.Build(plan, disp).Contains("- media: ", StringComparison.Ordinal) ? "runcontrol's STATUS.md printed the media line" : null;
+        });
     }
 
     // The folders brought to a recorded state: files under the overlay it does not list removed, files whose bytes
