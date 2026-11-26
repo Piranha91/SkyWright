@@ -359,9 +359,24 @@ def _provenance_files():
     return folders
 
 
-def case_113_every_program_folder_records_the_commit_and_dirtiness_it_was_built_from():
-    """F1: provenance/build.json in every program folder names HEAD and whether the tree was dirty."""
-    head = subprocess.run(["git", "-C", str(SW.CHECKOUT), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+def provenance_problem(doc) -> str | None:
+    """What is wrong with a provenance record, or None: what is true of any honest build's record, whenever it was made."""
+    if not isinstance(doc, dict):
+        return "not a JSON object"
+    commit, dirty = doc.get("commit"), doc.get("dirty")
+    if not (commit == "unknown" or (isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{40}", commit))):
+        return f"commit is {commit!r}, not 40 hex characters or 'unknown'"
+    if not (dirty == "unknown" or isinstance(dirty, bool)):
+        return f"dirty is {dirty!r}, not a boolean or 'unknown'"
+    if (commit == "unknown") != (dirty == "unknown"):
+        return f"commit {commit!r} and dirty {dirty!r} are not unknown together"
+    return None
+
+
+def case_113_every_program_folder_records_a_well_formed_provenance():
+    """F1: every program folder has provenance/build.json, and it is what any honest build writes (a 40-hex commit or
+    "unknown", a boolean or "unknown", unknown together). Whether it names the commit actually built is case 119, which
+    makes a build of the record for the purpose: a commit made after the last build is no defect here."""
     folders = _provenance_files()
     assert folders, "no program folders found; build first (scripts/build.ps1)"
     bad = []
@@ -372,9 +387,39 @@ def case_113_every_program_folder_records_the_commit_and_dirtiness_it_was_built_
         except (OSError, ValueError) as ex:
             bad.append(f"{f.name}: {type(ex).__name__}")
             continue
-        if doc.get("commit") != head or not isinstance(doc.get("dirty"), bool):
-            bad.append(f"{f.name}: {doc}")
-    assert not bad, f"{len(bad)} of {len(folders)} program folders do not record HEAD {head[:12]} and a dirty flag: {bad[:6]}"
+        why = provenance_problem(doc)
+        if why:
+            bad.append(f"{f.name}: {why}")
+    assert not bad, f"{len(bad)} of {len(folders)} program folders have no well-formed provenance record: {bad[:6]}"
+
+
+def case_119_the_provenance_target_names_the_commit_built_and_a_dirty_tree():
+    """The provenance target alone, into a temporary folder: against this checkout it names HEAD at that moment and its
+    dirtiness at that moment; against a scratch repository (GIT_DIR/GIT_WORK_TREE, so this worktree is never dirtied)
+    it names that repository's commit, clean and then dirty."""
+    def git(*a, cwd=None):
+        return subprocess.run(["git", *a], capture_output=True, text=True, cwd=cwd).stdout.strip()
+    head = git("-C", str(SW.CHECKOUT), "rev-parse", "HEAD")
+    dirty_now = bool(git("-C", str(SW.CHECKOUT), "status", "--porcelain"))
+    with tempfile.TemporaryDirectory() as t:
+        here = _provenance_target(Path(t) / "here", {})
+        repo = Path(t) / "scratch-repo"
+        repo.mkdir()
+        git("init", "-q", cwd=repo)
+        (repo / "a.txt").write_text("a", encoding="utf-8")
+        git("add", "a.txt", cwd=repo)
+        git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "a", cwd=repo)
+        scratch_head = git("rev-parse", "HEAD", cwd=repo)
+        env = {"GIT_DIR": str(repo / ".git"), "GIT_WORK_TREE": str(repo)}
+        clean = _provenance_target(Path(t) / "clean", env)
+        (repo / "a.txt").write_text("changed", encoding="utf-8")
+        dirty = _provenance_target(Path(t) / "dirty", env)
+    assert isinstance(here, dict) and here.get("commit") == head and here.get("dirty") == dirty_now, (
+        f"against this checkout the record must name HEAD {head[:12]} and dirty={dirty_now}: {here}")
+    assert isinstance(clean, dict) and clean.get("commit") == scratch_head and clean.get("dirty") is False, (
+        f"a clean scratch repository must give its commit {scratch_head[:12]} and dirty false: {clean}")
+    assert isinstance(dirty, dict) and dirty.get("commit") == scratch_head and dirty.get("dirty") is True, (
+        f"a scratch repository with a changed file must give its commit and dirty true: {dirty}")
 
 
 def case_114_the_provenance_record_is_outside_the_package_identity():
