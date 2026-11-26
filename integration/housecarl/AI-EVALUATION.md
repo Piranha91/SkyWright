@@ -127,7 +127,7 @@ decides for it even when the baseline's was accepted; one not attempted on the a
 they were. The gate applies to both origins.
 
 On acceptance, the importer copies the manifest and raw request/response beneath
-`RUN/imports/<checkId>__<armId>/`, records them as normal receipt outputs, and changes that ledger entry to
+`RUN/ai/imports/<checkId>__<armId>/`, records them as normal receipt outputs, and changes that ledger entry to
 `completed`. The receipt's `imported` block records `origin`; `fresh` adds `originCheck {token,
 initializeRequests, capturedUtc, planCreatedUtc}`, `reused` adds `reusedFrom`, `reusedFromVerified: false` and a
 note. Resume, finalize, bundle and relocated-bundle verification then re-hash the same evidence and configuration
@@ -152,7 +152,7 @@ for the ordinary reason — its own or a prerequisite's evidence is not what the
 replaces the import's carries `supersededImport` (the origin it claimed, its declared source, the folders its copied
 evidence is in), so the run still says an import was made and why it stopped counting. Its copied files stay on disk, backing
 no receipt, and do not travel in bundles. Once the prerequisite is settled the entry is `mcp-only` again and the
-evidence is imported again; a re-import is copied to the first free `RUN/imports/<checkId>__<armId>~<n>/`, leaving
+evidence is imported again; a re-import is copied to the first free `RUN/ai/imports/<checkId>__<armId>~<n>/`, leaving
 the older folder untouched. A destination is refused while its entry is still credited.
 
 The importer proves that the submitted files match the frozen request and remain unchanged. It cannot
@@ -171,7 +171,7 @@ the import's configuration fingerprint; and has its events among the outputs. It
 events** (`switchflip_outcome.classify`) and refuses a stored classification that differs, then re-reads the arm per
 condition (`arm_reading`): an unsettled condition is refused, and the import's stated detector must equal the re-read
 one. The configuration is checked by the same identity rules as an emit (§4.2) against the arm's frozen request, and
-the prerequisite gate of §4.8 applies, its app prerequisite (`state.switch-census`) read from the app scan's bundle. On acceptance the evidence is copied under `RUN/imports/<key>/`, the receipt's
+the prerequisite gate of §4.8 applies, its app prerequisite (`state.switch-census`) read from the app scan's bundle. On acceptance the evidence is copied under `RUN/ai/imports/<key>/`, the receipt's
 adapter is `{kind: live-import}`, its `imported.origin` is `fresh` with `bindingRecordedAtLaunch: true`, and finalize's
 `unassessed.runtimeObservations` names the checks with accepted live receipts instead of saying none was supplied.
 
