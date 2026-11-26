@@ -69,7 +69,7 @@ bin\Release\net9.0-windows10.0.19041.0\Tools\SkyWright.Guards\SkyWright.Guards.e
 dotnet test integration\housecarl\bin\Release\Tests\HousecarlIntegration.Tests\HousecarlIntegration.Tests.dll
 ```
 
-Twelve workbench tests read real evaluation output and fail without the environment variables that point at it.
+Eight workbench tests read real evaluation output and fail without the environment variables that point at it.
 
 ## Credits and license
 
