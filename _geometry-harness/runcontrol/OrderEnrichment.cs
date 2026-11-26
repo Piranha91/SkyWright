@@ -2,10 +2,10 @@ using HarnessShared;
 
 namespace RunControl;
 
-/// <summary>The bundle's order step (evalrun.order_step, with bundleenrich's recorded_plugin_headers, _record_imports,
-/// pair_headers and the refusals of enrich_order_variant): the manifest's `order` says whether the evaluated pair's
-/// order is a choice. The reversed setup's record rows (recordrows.derive) are not derived by this controller; a
-/// free pair whose setups hold a record import says so in its sentence.</summary>
+/// <summary>The bundle's order step (evalrun.order_step, with bundleenrich's recorded_plugin_headers and
+/// pair_headers): the manifest's `order` says whether the evaluated pair's order is a choice. The reversed setup's
+/// record rows are derived from record imports, which only an AI-side evaluation has: the houseCARL integration module
+/// derives them on its overlay bundle (recordenrich.py), and a free pair's sentence here says so.</summary>
 public static class OrderEnrichment
 {
     /// <summary>The header facts the bundle's own probe emits recorded (Configuration.Plugins[]), keyed by (plugin
@@ -43,42 +43,14 @@ public static class OrderEnrichment
         return found;
     }
 
-    /// <summary>The configuration of every credited record import that holds both its transcripts, in receipt order.</summary>
-    public static List<(PyDict receipt, PyDict configuration)> RecordImports(string d, PyDict manifest)
-    {
-        var registry = Ev.OrEmpty(EnrichCommit.Load(PyPath.Join(d, PyValue.Truthy(manifest.Get("registry")) ? Ev.Str(manifest["registry"]) : "registry/check-registry.json")));
-        var family = new Dictionary<string, object?>(StringComparer.Ordinal);
-        foreach (var c in Ev.Items(registry.Get("checks")).OfType<PyDict>()) family[PyValue.Hash(c.Get("id"))] = c.Get("family");
-        var found = new List<(PyDict, PyDict)>();
-        foreach (string file in Ev.SortedJson(PyPath.Join(d, "receipts")))
-        {
-            var rc = Ev.OrEmpty(EnrichCommit.Load(file));
-            if (!Ev.Eq(Ev.OrEmpty(rc.Get("adapter")).Get("kind"), "mcp-import") || !PyValue.Truthy(Ev.OrEmpty(rc.Get("validation")).Get("accepted"))) continue;
-            if (!Ev.Eq(family.GetValueOrDefault(PyValue.Hash(rc.Get("checkId"))), "records")) continue;
-            var outs = Ev.Items(rc.Get("outputs")).Select(o => Ev.G(o, "path")).ToList();
-            object? resultOut = outs.FirstOrDefault(o => Ev.Str(o).EndsWith("result.json", StringComparison.Ordinal));
-            if ((PyValue.Truthy(resultOut) ? EnrichCommit.Load(PyPath.Join(d, "evidence", (string)resultOut!)) : null) is not PyDict doc) continue;
-            var roles = Ev.Items(doc.Get("outputs")).Select(x => Ev.Str(Ev.G(x, "role"))).ToList();
-            var copied = outs.Where(o => !Ev.Eq(o, resultOut)).ToList();
-            var byRole = new Dictionary<string, object?>(StringComparer.Ordinal);
-            for (int i = 0; i < Math.Min(roles.Count, copied.Count); i++) byRole[roles[i]] = copied[i];
-            if (!PyValue.Truthy(byRole.GetValueOrDefault("request")) || !PyValue.Truthy(byRole.GetValueOrDefault("response"))) continue;
-            object? cfg = Ev.OrEmpty(rc.Get("consumed")).Get("configuration");
-            if (!PyValue.Truthy(cfg)) cfg = doc.Get("configuration");
-            found.Add((rc, Ev.OrEmpty(cfg)));
-        }
-        return found;
-    }
-
     /// <summary>The evaluated pair's header facts as the setup with both loads them: what the bundle's emits recorded
     /// for those bytes, else the file's header read at the recorded bytes (PluginHeader, the probes' reader), else absent.</summary>
     public static Dictionary<string, OrderChoice.Head> PairHeaders(string d, PyDict manifest, PyDict plan, List<string> pair,
-        List<((string name, string sha) key, OrderChoice.Head head)> recorded, List<(PyDict receipt, PyDict configuration)> imports)
+        List<((string name, string sha) key, OrderChoice.Head head)> recorded)
     {
         var pairLow = pair.Select(PyText.Lower).ToHashSet(StringComparer.Ordinal);
-        // the plan's setups first, then the record imports' own configurations (the bytes they read)
-        var sources = Ev.Items(plan.Get("arms")).Select(a => Ev.Items(Ev.OrEmpty(Ev.G(a, "requested")).Get("plugins")))
-            .Concat(imports.Select(i => Ev.Items(i.configuration.Get("plugins"))));
+        // the plan's setups
+        var sources = Ev.Items(plan.Get("arms")).Select(a => Ev.Items(Ev.OrEmpty(Ev.G(a, "requested")).Get("plugins")));
         var want = new List<(string low, PyDict q)>();
         foreach (var plugins in sources)
             foreach (var q in plugins.OfType<PyDict>())
@@ -104,43 +76,17 @@ public static class OrderEnrichment
     static List<string> Pair(PyDict plan) =>
         Ev.Items(plan.Get("targets")).OfType<PyDict>().Where(t => PyValue.Truthy(t.Get("name"))).Select(t => Ev.Str(t["name"])).ToList();
 
-    /// <summary>The refusals of enrich_order_variant for a free pair, in its order. It always refuses here: where
-    /// Python would derive the reversed setup's rows, this controller says it does not.</summary>
-    static void Variant(string d, List<string> pair, Dictionary<string, OrderChoice.Head> heads,
-        List<((string name, string sha) key, OrderChoice.Head head)> recorded)
+    /// <summary>The sentence a free pair is refused with: the reversed setup's record rows come from record imports,
+    /// which only an AI-side evaluation has.</summary>
+    public const string NotDerived = "this controller does not derive record rows for the reversed setup; the houseCARL "
+        + "integration module derives them from an AI-side evaluation's record imports on its overlay bundle";
+
+    /// <summary>The refusal of a free pair's reversed setup: the bundle's own refusal when it is already enriched with
+    /// one, else NotDerived.</summary>
+    static void Variant(string d)
     {
-        var manifest = EnrichCommit.Guard(d, "order-variant");
-        var allHeads = new Dictionary<string, OrderChoice.Head>(StringComparer.Ordinal);
-        foreach (var (key, head) in recorded) allHeads[key.name] = head;
-        foreach (var (low, head) in heads) allHeads[low] = head;
-        int todo = 0;
-        foreach (var (_, cfg) in RecordImports(d, manifest))
-        {
-            var ps = Ev.Items(cfg.Get("plugins")).ToList();
-            var low = ps.OfType<PyDict>().Select(p => PyText.Lower(Ev.Str(p.Get("name")))).ToList();
-            if (!pair.All(x => low.Contains(PyText.Lower(x)))) continue;
-            ps = ps.Where(p => p is PyDict).ToList();
-            int i = low.IndexOf(PyText.Lower(pair[0])), j = low.IndexOf(PyText.Lower(pair[1]));
-            if (i > j) (i, j) = (j, i);
-            // the earlier of the two moves to just after the later; every other plugin keeps its place
-            var moved = ps[i];
-            ps.RemoveAt(i);
-            ps.Insert(j, moved);
-            var order = ps.Select(p => PyText.Lower(Ev.Str(Ev.G(p, "name")))).ToList();
-            // every plugin's masters still load before it
-            for (int k = 0; k < order.Count; k++)
-            {
-                if (!allHeads.TryGetValue(order[k], out var h)) continue;
-                string? late = h.Masters.FirstOrDefault(m => order.Contains(PyText.Lower(m)) && order.IndexOf(PyText.Lower(m)) > k);
-                if (late != null)
-                    throw new EnrichRefused($"reversing {pair[0]} and {pair[1]} would load {Ev.Str(PyValue.Dict(ps[k])["name"])} before its master "
-                        + $"{late}, so no reversed setup was derived");
-            }
-            todo++;
-        }
-        if (todo == 0) throw new EnrichRefused("the bundle holds no credited record import whose setup loads both evaluated plugins");
-        throw new EnrichRefused("this controller does not derive record rows from a record import, so the reversed "
-            + $"setup of {todo} import(s) was left underived; the houseCARL integration module derives it on an AI-side overlay bundle");
+        EnrichCommit.Guard(d, "order-variant");
+        throw new EnrichRefused(NotDerived);
     }
 
     /// <summary>Writes the manifest's `order` statement and returns it. Never throws for a refusal.</summary>
@@ -160,7 +106,7 @@ public static class OrderEnrichment
         else
         {
             var recorded = RecordedHeaders(d, m);
-            var heads = PairHeaders(d, m, plan, pair, recorded, RecordImports(d, m));
+            var heads = PairHeaders(d, m, plan, pair, recorded);
             var ch = OrderChoice.Decide(pair[0], pair[1], heads);
             if (ch.Forced == null)
                 st = new PyDict
@@ -179,7 +125,7 @@ public static class OrderEnrichment
                 string why;
                 try
                 {
-                    Variant(d, pair, heads, recorded);
+                    Variant(d);
                     why = "";
                 }
                 catch (EnrichRefused ex) { why = ex.Message; }

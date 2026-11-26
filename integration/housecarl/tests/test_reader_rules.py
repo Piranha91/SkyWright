@@ -982,6 +982,51 @@ def case_item18_p3_order_variant_refuses_a_forced_pair():
     return ok, f"refusal {msg!r}; wrote {wrote}"
 
 
+def case_item18_p3_order_variant_refuses_a_swap_that_loads_a_plugin_before_its_master():
+    """The record-import half of runcontrol's "order: free, the swap would load a plugin before its master" (since
+    the import read moved here): P lists Q as a master and sits between the pair Q and W; moving Q to just after W
+    would load P before Q, so the enrichment refuses in one sentence naming both, and writes nothing."""
+    import bundleenrich
+    import recordenrich
+    with tempfile.TemporaryDirectory() as td:
+        rows_bundle(Path(td), [BASE, "Q.esp"], recorded={})
+        root = Path(td) / "bundle"
+        (root / "plan.json").write_text(json.dumps({"targets": [{"name": "Q.esp"}, {"name": "W.esp"}]}), encoding="utf-8")
+        try:
+            recordenrich.enrich_order_variant(root)
+            return False, "not refused"
+        except bundleenrich.Refused as ex:
+            msg = str(ex)
+        wrote = (root / "enrichment" / "order-variant").exists()
+    ok = msg == ("reversing Q.esp and W.esp would load P.esp before its master Q.esp, so no reversed setup was derived"
+                 ) and not wrote
+    return ok, f"refusal {msg!r}; wrote {wrote}"
+
+
+def case_item18_p3_order_variant_refuses_with_no_record_import_loading_both():
+    """The record-import half of runcontrol's "order: free, no record import loads both": the pair is Q and X, both
+    plain plugins with no master relation (a free order), and the bundle's one record import loads Q but not X, so
+    there is no setup to reverse: refused in one sentence, nothing written."""
+    import hashlib
+    import bundleenrich
+    import recordenrich
+    with tempfile.TemporaryDirectory() as td:
+        rows_bundle(Path(td), [BASE], recorded={})
+        root = Path(td) / "bundle"
+        x = tes4(Path(td) / "plugins" / "X.esp", [BASE])
+        arm = {"requested": {"plugins": [{"name": "X.esp", "path": str(x), "sha256": hashlib.sha256(x.read_bytes()).hexdigest()}]}}
+        (root / "plan.json").write_text(json.dumps({"targets": [{"name": "Q.esp"}, {"name": "X.esp"}], "arms": [arm]}),
+                                        encoding="utf-8")
+        try:
+            recordenrich.enrich_order_variant(root)
+            return False, "not refused"
+        except bundleenrich.Refused as ex:
+            msg = str(ex)
+        wrote = (root / "enrichment" / "order-variant").exists()
+    ok = msg == "the bundle holds no credited record import whose setup loads both evaluated plugins" and not wrote
+    return ok, f"refusal {msg!r}; wrote {wrote}"
+
+
 def case_item18_p3_reader_page_says_the_plans_order_fact():
     """The reader's page takes the order fact from the plan (no --order side file): with the reversed order weighed,
     its order paragraph is not the 'other order was not checked' sentence and names the fields that change hands."""
