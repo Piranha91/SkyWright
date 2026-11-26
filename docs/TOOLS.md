@@ -341,6 +341,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [What placed geometry surrounds this candidate camera point?](#tool-viewprobe.clear-at) — `viewprobe.clear-at`
 - [What placement records does the extractor read from this plugin or cell?](#tool-placeprobe) — `placeprobe`
 - [What presentation plan can be built from this verified evaluation bundle?](#tool-evalreport.plan) — `evalreport.plan`
+- [What stands near these placed references, whose version reaches each one, by what gap and by which rule?](#tool-nearprobe) — `nearprobe`
 - [What verdict does a plane patch's edit get from its scored views in the two arms?](#tool-_geometry-harness-planeassess-verdict.py) — `_geometry-harness/planeassess/verdict.py`
 - [What verdict does each plane edit of a plane patch get from its rendered views?](#tool-planeassess.verdicts) — `planeassess.verdicts`
 - [What walkable path connects these route endpoints?](#tool-viewprobe.route-solve) — `viewprobe.route-solve`
@@ -4730,6 +4731,31 @@ Modifiers (do not select a separate mode):
 - `--geometry` — Set geometry for this invocation; consult the linked parser for accepted values.
 - `--moved-ref-selftest` — Set moved ref selftest for this invocation; consult the linked parser for accepted values.
 - `--state` — Set state for this invocation; consult the linked parser for accepted values.
+
+<a id="tool-nearprobe"></a>
+
+### nearprobe
+
+**What stands near these placed references, whose version reaches each one, by what gap and by which rule?**
+
+An LLM's screen for a mod whose objects are all new: who else builds on the same spot (SkyWright.Engine.NearReferences.Of over a load order, as JSON), before a geometry run measures the pairs.
+
+Inputs: An MO2 instance, profile and game folder; the references (FormIDs, or a housecarl_records to_file= result); a radius; optional record types.
+
+Outputs: JSON on standard output: per record its hits (seed, provider, gap, rule), the engine's note, the radius the answer is complete to, and the plugins not read; exit 0 complete, 3 incomplete (named), 2 refused in one sentence.
+
+Source: [integration/housecarl/nearprobe/Program.cs](../integration/housecarl/nearprobe/Program.cs) — `// NEARPROBE — what stands near these placed references, for an LLM: SkyWright's own query (SkyWright.Engine.NearReferences.Of) over a load order, as JSON.`
+
+
+Modifiers (do not select a separate mode):
+
+- `--game` — The game folder whose Data the order reads; required.
+- `--instance` — The MO2 instance directory; required, never defaulted from the harness config.
+- `--of` — A reference to look near, XXXXXX:Plugin.esp (repeatable), or @ and the absolute path of a housecarl_records to_file= result naming them.
+- `--order` — Evaluate a candidate order file instead of the profile (_shared/HarnessOrderCli.cs).
+- `--profile` — The MO2 profile name; required.
+- `--types` — Keep records whose winning version is of this record type (a signature such as REFR, or a catalog name), resolved by houseCARL's own resolver; repeatable.
+- `--within` — The radius in game units between the two extents (0 for touching); refused past the cells the engine reads.
 
 <a id="tool-niflyprobe"></a>
 

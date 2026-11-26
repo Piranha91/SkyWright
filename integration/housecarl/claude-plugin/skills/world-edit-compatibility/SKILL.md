@@ -154,17 +154,26 @@ wins over an established overhaul is where damage happens.
 
 **Then ask who builds near what the mod places.** A mod whose objects are all new contests nothing —
 a notice board, a camp, a player home — yet another mod may build on the same spot. `conflicts_only`
-cannot see that; `near=` can. Write the mod's own placed references to a file, then select what stands
-near them:
+cannot see that; SkyWright's `nearprobe` can. Write the mod's own placed references to a file with
+houseCARL, then ask `nearprobe` what stands near them, on the same load order houseCARL's server reads
+(`housecarl_load_order_status` names it):
 
 ```
 housecarl_records(types=["REFR","ACHR"], plugins={"names": ["TheMod.esp"], "defined_in": true}, to_file="<abs>/seeds.jsonl")
-housecarl_records(near={"of": ["@<abs>/seeds.jsonl"], "within": 0}, project={"form": "aggregate", "group_by": "defined_in"})
-housecarl_records(near={"of": ["@<abs>/seeds.jsonl"], "within": 0}, format="json")
+nearprobe --instance <MO2 instance> --profile <profile> --game <game folder> --of @<abs>/seeds.jsonl --within 0
 ```
 
-Each match names the seed it stands near, the plugin whose version reaches it (a vanilla object
-another mod moved there is credited to that mod), the gap, and the rule: `sphere` for a placed object,
+`nearprobe` is a program of the module's build. To find it, read
+`SW/integration/housecarl/bin/Release/housecarl-integration-layout.json`: its `program` value, with `nearprobe` put
+for `{name}`, is the program's path relative to that file's folder. It prints one JSON answer on standard output
+(redirect it to a file for a large mod). Exit 0 is a complete answer; exit 3 is an answer with `complete: false`,
+the plugins it could not read named in `unread` and `notIndexed`; exit 2 is a refusal, one sentence on standard
+error (a reference not in the order, an unreadable seeds file, a radius past the cells it reads). `--types REFR`
+keeps only records whose winning version is of that type. Instead of naming the seeds file, pass each reference
+with its own `--of XXXXXX:Plugin.esp`.
+
+Each record in `records` lists its hits: the seed it stands near, the `provider` whose version reaches it (a
+vanilla object another mod moved there is credited to that mod), the `gap`, and the `rule`: `sphere` for a placed object,
 `primitive` for one whose reach comes from its own primitive (an occlusion plane or box, a trigger),
 `cell square` for terrain or navmesh in a cell the seed's extent reaches. Read it as a screen, not a
 verdict:
@@ -177,8 +186,11 @@ verdict:
   **other installed mod** that reaches a seed — that is a neighbour.
 - **Terrain counts.** A neighbour that only edits the cell's LAND or navmesh (`cell square`) can still
   be why a published patch moves an object; do not discard it because no object is near.
+- **Group by provider.** Collect `hits[].provider` across `records`: each plugin there other than the
+  mod, `Skyrim.esm` and `Update.esm` reaches a seed.
 - **"No neighbour" means none within the stated bound** — the cells within 5 grid cells of each seed
-  and the worldspace's persistent references, as the response says.
+  and the worldspace's persistent references, as `note` says. A `--within` that reaches past those cells
+  is refused, naming the radius the answer is complete to (`completeWithin`).
 - **Seeds must be in the active order.** For a mod not yet installed, build an evaluation profile
   that includes it first.
 
@@ -210,8 +222,8 @@ it the report can only say whether it needs the neighbour was not measured.
 
 This is the step that separates a real finding from noise, and it is where most of the value is.
 
-A neighbour from step 3's `near=` screen has no contested record to diff. Adjudicate it by what it
-puts there instead: read the matched records (`project={"form": "fields"}` or `"everything"`) to name
+A neighbour from step 3's `nearprobe` screen has no contested record to diff. Adjudicate it by what it
+puts there instead: read the matched records with `housecarl_records` (`project={"form": "fields"}` or `"everything"`) to name
 the objects, and hand the pair to the geometry probes, scoped to the seeds and the neighbour's matches,
 rather than sweeping the whole order.
 
@@ -338,7 +350,7 @@ chain resolves enabled at load, which is what the engine does. A Deep evaluation
 also judges every switched state each arm's census yields — each marker flipped alone and each quest
 stage's joint flip — and lists the states it could not express (`unassessed.statesNotExplored`); a
 Standard evaluation judges the load-time state only, and a mod that hangs references on a vanilla
-enable marker is then judged against that marker's other states only when you name them (`--states`). Two things follow for a report: name the state the finding is in, and, where a mod hangs
+enable marker is then judged against that marker's other states only when you name them (`runcontrol plan --states`). Two things follow for a report: name the state the finding is in, and, where a mod hangs
 content on someone else's marker, say whether the other states were looked at. Use the flag-only
 population only when reproducing historical results. For a current verdict, evaluate the
 enable-parent chain; the reference's own flag does not decide its presence wherever
@@ -456,7 +468,7 @@ the arm requested, refuses to reuse a measurement whose inputs are missing or ca
 refuses to finalize or package a claim whose evidence no longer matches its receipt — so a status index that
 says a check completed is one whose evidence is still there, not one whose receipt merely says so.
 
-Use all applicable available checks for a real evaluation. Restricting `--select` to a short list is
+Use all applicable available checks for a real evaluation. Restricting `runcontrol plan --select` to a short list is
 an explicit partial/demo run and must be stated near the verdict. The four record/asset checks are
 not optional simply because the process runner cannot call MCP directly. Enumerate the complete
 declared scope for a claimed complete check, and never substitute a limited path sample or conflict
@@ -489,7 +501,7 @@ Report in this order, so the user can stop reading as soon as they have their an
 - The evaluation is only as good as the ordering it was run against. Re-run after any sort change.
 - A mod can be perfectly compatible at the record level and still look wrong, because geometric
   overlap is invisible to record conflict detection. Absence of record conflicts is not absence of
-  collisions. Step 3's `near=` screen finds the neighbours to check; only a geometry run settles them.
+  collisions. Step 3's `nearprobe` screen finds the neighbours to check; only a geometry run settles them.
 - For a mod that distributes through SPID, KID, or SkyPatcher rather than records, the conflict
   surface is different and mostly outside the plugin graph — route to `spid-authoring`,
   `kid-authoring`, or `skypatcher-authoring` for those layers.

@@ -18,6 +18,9 @@ public sealed class DoorsNearUnreadTests : IClassFixture<DoorsNearUnreadTests.Wo
     {
         readonly string _dir;
         public LoadOrderResolver Resolver { get; }
+        /// <summary>The plugin files this world wrote, in load order (what <see cref="Resolver"/> was built from), for a
+        /// test that lays them out as a load order of its own.</summary>
+        public IReadOnlyList<string> PluginPaths { get; }
         static readonly SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
         public static readonly ModKey U = ModKey.FromNameAndExtension("hcDuMaster.esp");
         public static readonly ModKey X = ModKey.FromNameAndExtension("hcDuGone.esp");
@@ -46,7 +49,8 @@ public sealed class DoorsNearUnreadTests : IClassFixture<DoorsNearUnreadTests.Wo
             File(y, Interior(I));
             y.BeginWrite.ToPath(P(Y)).WithLoadOrder(new ISkyrimModGetter[] { m }).Write();
 
-            Resolver = LoadOrderResolver.Build(new[] { P(U), P(X), P(Y) });
+            PluginPaths = new[] { P(U), P(X), P(Y) };
+            Resolver = LoadOrderResolver.Build(PluginPaths);
             System.IO.File.Delete(P(X));                                                      // unreadable from here on
         }
 

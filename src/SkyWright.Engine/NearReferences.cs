@@ -28,10 +28,14 @@ public readonly record struct NearHit(FormKey Seed, string Provider, double Gap,
 
 /// <summary>The records standing near a seed set, nearest first, each with the hits that put it there; or a refusal.
 /// <paramref name="Unread"/> names the plugins that could not be read, so what they hold is not in the answer;
-/// <paramref name="Winners"/> holds the winning version of each key when a type filter asked for them.</summary>
+/// <paramref name="Winners"/> holds the winning version of each key when a type filter asked for them.
+/// <paramref name="CompleteWithin"/> is the radius up to which nothing the asked radius reaches can lie outside the cells
+/// read (the nearest edge of each exterior seed's read square, less the seed's own extent; +∞ when every seed is
+/// interior), and <paramref name="WithinIsComplete"/> says whether the asked radius stays inside it.</summary>
 public sealed record NearAnswer(IReadOnlyList<FormKey> Keys, IReadOnlyDictionary<FormKey, IReadOnlyList<NearHit>> Hits,
                                 string Note, IReadOnlyList<string> Unread, string? Refusal,
-                                IReadOnlyDictionary<FormKey, IMajorRecordGetter>? Winners = null)
+                                IReadOnlyDictionary<FormKey, IMajorRecordGetter>? Winners = null,
+                                double CompleteWithin = double.PositiveInfinity, bool WithinIsComplete = true)
 {
     public static NearAnswer Fail(string refusal) =>
         new(Array.Empty<FormKey>(), new Dictionary<FormKey, IReadOnlyList<NearHit>>(), "", Array.Empty<string>(), refusal);
@@ -82,6 +86,14 @@ public static class NearReferences
     public static NearAnswer Of(LoadOrderResolver.IndexView view, IReadOnlyList<FormKey> seedKeys, double within,
                                 IReadOnlyCollection<Type>? winnerTypes = null, CancellationToken ct = default)
     {
+        // A distance the hit test below cannot honour: NaN passes every gap, +infinity passes every gap in the cells read
+        // while those cells stay bounded, and a negative distance passes none.
+        if (double.IsNaN(within))
+            return NearAnswer.Fail("the distance asked for is not a number, so nothing can be measured against it; give a distance in game units, 0 or more.");
+        if (double.IsInfinity(within))
+            return NearAnswer.Fail("the distance asked for is infinite, but only the cells around each reference are read; give a distance in game units, 0 or more.");
+        if (within < 0)
+            return NearAnswer.Fail($"the distance asked for is negative ({within.ToString(CultureInfo.InvariantCulture)}), so nothing could be near; give 0 for touching or a positive distance in game units.");
         var clock = Stopwatch.StartNew();
         using var session = view.OpenSession();
         var unsized = new HashSet<FormKey>();
@@ -198,6 +210,23 @@ public static class NearReferences
             }
         var seeds = seedRefs.Select(s => new SeedRef(s.Key, s.Space, s.Ref.Position, RadiusOf(s.Ref))).ToList();
 
+        // ---- how far the answer is complete: an exterior seed reads the grid cells within GridReach of its own, so the
+        // nearest record it cannot see stands at least as far as the nearest edge of that square, less its own extent ----
+        double completeWithin = double.PositiveInfinity;
+        foreach (var seed in seeds)
+        {
+            if (!seed.Space.StartsWith("wrld:", StringComparison.Ordinal)) continue;          // an interior reads its whole cell
+            double edge = double.PositiveInfinity;
+            foreach (var at in new[] { (double)seed.At.X, seed.At.Y })
+            {
+                double g = Math.Floor(at / CellUnits);
+                edge = Math.Min(edge, Math.Min(at - (g - GridReach) * CellUnits, (g + GridReach + 1) * CellUnits - at));
+            }
+            completeWithin = Math.Min(completeWithin, edge - seed.Radius);
+        }
+        // the hit test keeps a gap up to within + 1e-9, so a record on the edge itself would already count
+        bool withinIsComplete = within + 1e-9 < completeWithin;
+
         // ---- the test ---------------------------------------------------------------------------------------
         var hits = new Dictionary<FormKey, List<NearHit>>();
         foreach (var (fk, where, provider, placedRef) in versions)
@@ -248,7 +277,7 @@ public static class NearReferences
                    "terrain and navmesh take their cell's square." +
                    (unsized.Count > 0 ? $" {unsized.Count} reference(s) had no bounds the load order could read and count by their origin only." : "") +
                    $" A plugin that moves a reference in from further than {GridReach} cells away without winning it is not read.";
-        return new NearAnswer(ordered, frozen, note, unread.ToList(), null, winners);
+        return new NearAnswer(ordered, frozen, note, unread.ToList(), null, winners, completeWithin, withinIsComplete);
 
         bool SizedByPrimitive(PlacedRef r)
         {

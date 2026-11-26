@@ -20,6 +20,9 @@ public sealed class DoorsNearTests : IClassFixture<DoorsNearTests.World>
     {
         readonly string _dir;
         public LoadOrderResolver Resolver { get; }
+        /// <summary>The plugin files this world wrote, in load order (what <see cref="Resolver"/> was built from), for a
+        /// test that lays them out as a load order of its own.</summary>
+        public IReadOnlyList<string> PluginPaths { get; }
 
         static readonly SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
         public static readonly ModKey M = ModKey.FromNameAndExtension("hcDnMaster.esp");
@@ -123,7 +126,8 @@ public sealed class DoorsNearTests : IClassFixture<DoorsNearTests.World>
             d.Worldspaces.Add(dws);
             d.BeginWrite.ToPath(P(D)).WithLoadOrder(new ISkyrimModGetter[] { master, a }).Write();
 
-            Resolver = LoadOrderResolver.Build(new[] { P(M), P(S), P(A), P(D) });
+            PluginPaths = new[] { P(M), P(S), P(A), P(D) };
+            Resolver = LoadOrderResolver.Build(PluginPaths);
         }
 
         static ObjectBounds Bounds(short x0, short y0, short z0, short x1, short y1, short z1) =>

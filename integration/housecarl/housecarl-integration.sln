@@ -29,6 +29,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "poolprobe", "poolprobe\pool
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "patchfind", "patchfind\patchfind.csproj", "{3009264B-DBD8-4D40-9546-A5E714DFE909}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "nearprobe", "nearprobe\nearprobe.csproj", "{81BC8C24-FE73-4D04-97A4-17170CA5208A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -183,6 +185,18 @@ Global
 		{3009264B-DBD8-4D40-9546-A5E714DFE909}.Release|x64.Build.0 = Release|Any CPU
 		{3009264B-DBD8-4D40-9546-A5E714DFE909}.Release|x86.ActiveCfg = Release|Any CPU
 		{3009264B-DBD8-4D40-9546-A5E714DFE909}.Release|x86.Build.0 = Release|Any CPU
+		{81BC8C24-FE73-4D04-97A4-17170CA5208A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{81BC8C24-FE73-4D04-97A4-17170CA5208A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{81BC8C24-FE73-4D04-97A4-17170CA5208A}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{81BC8C24-FE73-4D04-97A4-17170CA5208A}.Debug|x64.Build.0 = Debug|Any CPU
+		{81BC8C24-FE73-4D04-97A4-17170CA5208A}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{81BC8C24-FE73-4D04-97A4-17170CA5208A}.Debug|x86.Build.0 = Debug|Any CPU
+		{81BC8C24-FE73-4D04-97A4-17170CA5208A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{81BC8C24-FE73-4D04-97A4-17170CA5208A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{81BC8C24-FE73-4D04-97A4-17170CA5208A}.Release|x64.ActiveCfg = Release|Any CPU
+		{81BC8C24-FE73-4D04-97A4-17170CA5208A}.Release|x64.Build.0 = Release|Any CPU
+		{81BC8C24-FE73-4D04-97A4-17170CA5208A}.Release|x86.ActiveCfg = Release|Any CPU
+		{81BC8C24-FE73-4D04-97A4-17170CA5208A}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
