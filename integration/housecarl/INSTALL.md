@@ -43,6 +43,8 @@ reference, read 2026-11-25); each step names what it rests on.
    skills and three agents. In a session the skills are `/skywright:world-edit-compatibility`,
    `/skywright:evaluation-reporting` and `/skywright:driving-skywright` (or loaded by Claude when a request matches
    their descriptions), and the agents `skywright:model-claude-haiku-5-5`, `skywright:model-claude-sonnet-5-5` and
-   `skywright:model-claude-opus-5-5`, the names `evalsettings.py route` gives.
+   `skywright:model-claude-opus-5-5`, the names `evalsettings.py route` gives. Not yet shown: when this module was
+   delivered, an agent of the plugin was listed but never invoked by its full name, since the Claude Code CLI on the
+   delivering machine could not authenticate; this needs the owner signed in.
 
 `claude plugin validate <...>\claude-plugin --strict` checks the manifest and the skill and agent files.
