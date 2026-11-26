@@ -28,10 +28,14 @@ public readonly record struct NearHit(FormKey Seed, string Provider, double Gap,
 
 /// <summary>The records standing near a seed set, nearest first, each with the hits that put it there; or a refusal.
 /// <paramref name="Unread"/> names the plugins that could not be read, so what they hold is not in the answer;
-/// <paramref name="Winners"/> holds the winning version of each key when a type filter asked for them.</summary>
+/// <paramref name="Winners"/> holds the winning version of each key when a type filter asked for them.
+/// <paramref name="CompleteWithin"/> is the radius up to which nothing the asked radius reaches can lie outside the cells
+/// read (the nearest edge of each exterior seed's read square, less the seed's own extent; +∞ when every seed is
+/// interior), and <paramref name="WithinIsComplete"/> says whether the asked radius stays inside it.</summary>
 public sealed record NearAnswer(IReadOnlyList<FormKey> Keys, IReadOnlyDictionary<FormKey, IReadOnlyList<NearHit>> Hits,
                                 string Note, IReadOnlyList<string> Unread, string? Refusal,
-                                IReadOnlyDictionary<FormKey, IMajorRecordGetter>? Winners = null)
+                                IReadOnlyDictionary<FormKey, IMajorRecordGetter>? Winners = null,
+                                double CompleteWithin = double.PositiveInfinity, bool WithinIsComplete = true)
 {
     public static NearAnswer Fail(string refusal) =>
         new(Array.Empty<FormKey>(), new Dictionary<FormKey, IReadOnlyList<NearHit>>(), "", Array.Empty<string>(), refusal);

@@ -19,6 +19,9 @@ public sealed class NearSelectionTests : IClassFixture<NearSelectionTests.World>
     {
         readonly string _dir;
         public LoadOrderResolver Resolver { get; }
+        /// <summary>The plugin files this world wrote, in load order (what <see cref="Resolver"/> was built from), for a
+        /// test that lays them out as a load order of its own (the houseCARL integration module's nearprobe tests).</summary>
+        public IReadOnlyList<string> PluginPaths { get; }
 
         public static readonly ModKey M = ModKey.FromNameAndExtension("hcNearMaster.esp");
         public static readonly ModKey S = ModKey.FromNameAndExtension("hcNearSeed.esp");
@@ -130,7 +133,8 @@ public sealed class NearSelectionTests : IClassFixture<NearSelectionTests.World>
             c.Worldspaces.Add(cws);
             Write(c, P(C), master);
 
-            Resolver = LoadOrderResolver.Build(new[] { P(M), P(S), P(A), P(B), P(C) });
+            PluginPaths = new[] { P(M), P(S), P(A), P(B), P(C) };
+            Resolver = LoadOrderResolver.Build(PluginPaths);
         }
 
         static void Write(SkyrimMod mod, string path, SkyrimMod master) =>
@@ -283,6 +287,74 @@ public sealed class NearSelectionTests : IClassFixture<NearSelectionTests.World>
         Assert.Contains("primitive)", note);
         Assert.DoesNotContain("sphere)", note);
         Assert.Contains("sphere)", m[Fid(World.Touching)]);              // a base-sized match keeps its own label
+    }
+
+    // N1-N4: the radius up to which the answer is complete (NearAnswer.CompleteWithin), derived by hand from the fixture:
+    // the cells read are the grid cells within 5 of the seed's own cell, so the read square is [(g-5)*4096, (g+6)*4096) on
+    // each axis; the bound is the distance from the seed to the square's nearest edge, less the seed's own extent (base
+    // hcNearSmall, bounds -16..16 on each axis, so its corner sphere is sqrt(3 * 16^2) = 27.712812921102035, scale 1).
+    //   Seed (4000, 2000) in cell (0,0): square [-20480, 24576) on both axes; west 24480, east 20576, south 22480,
+    //   north 22576; nearest 20576; bound 20576 - 27.712812921102035 = 20548.287187078898.
+    //   SeedIsolated (82020, 82020) in cell (20,20): square [61440, 106496); west and south 20580, east and north 24476;
+    //   bound 20580 - 27.712812921102035 = 20552.287187078898.
+    //   SeedInterior reads its whole cell: no bound (+infinity).
+    const double SeedBound = 20548.287187078898, IsolatedBound = 20552.287187078898;
+
+    [Fact]
+    public void N1_the_complete_radius_of_an_exterior_seed_is_the_read_square_edge_less_its_extent()
+    {
+        var a = Near(new[] { World.Seed });
+        Assert.True(a.Refusal is null, "refused: " + a.Refusal);
+        Assert.Equal(SeedBound, a.CompleteWithin, 6);
+        Assert.Equal(IsolatedBound, Near(new[] { World.SeedIsolated }).CompleteWithin, 6);
+    }
+
+    [Fact]
+    public void N2_several_seeds_are_complete_to_the_nearest_bound_and_an_interior_seed_has_none()
+    {
+        Assert.Equal(SeedBound, Near(new[] { World.SeedIsolated, World.Seed }).CompleteWithin, 6);
+        Assert.Equal(double.PositiveInfinity, Near(new[] { World.SeedInterior }).CompleteWithin);
+        Assert.Equal(SeedBound, Near(new[] { World.SeedInterior, World.Seed }).CompleteWithin, 6);
+    }
+
+    // N3: the asked radius is complete only strictly inside the bound: a point-sized record on the square's edge would
+    // have a gap of exactly the bound, and the hit test keeps a gap equal to the radius, so the bound itself is not.
+    [Fact]
+    public void N3_the_asked_radius_is_complete_only_inside_the_bound()
+    {
+        Assert.True(Near(new[] { World.Seed }, within: 100).WithinIsComplete);
+        Assert.True(Near(new[] { World.Seed }, within: SeedBound - 1e-6).WithinIsComplete);
+        Assert.False(Near(new[] { World.Seed }, within: SeedBound).WithinIsComplete);
+        Assert.False(Near(new[] { World.Seed }, within: 100_000).WithinIsComplete);         // case 482's far query
+        Assert.True(Near(new[] { World.SeedInterior }, within: 100_000).WithinIsComplete);  // case 485's
+    }
+
+    // N4: a distance that is not a number, infinite or negative is refused in one sentence (before, NaN and +infinity
+    // listed every version in the cells read, and a negative distance listed nothing); 0 and -0 are answered.
+    [Theory]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(double.NegativeInfinity)]
+    [InlineData(-1.0)]
+    [InlineData(-1e-12)]
+    public void N4_a_distance_that_is_not_a_finite_non_negative_number_is_refused(double within)
+    {
+        var a = NearReferences.Of(_w.Resolver.Capture(), new[] { World.Seed }, within);
+        Assert.NotNull(a.Refusal);
+        Assert.Contains("distance", a.Refusal);
+        Assert.EndsWith(".", a.Refusal);
+        Assert.Equal(1, a.Refusal!.Split(". ").Length);
+        Assert.Empty(a.Keys);
+    }
+
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(-0.0)]
+    public void N4b_zero_is_answered(double within)
+    {
+        var a = NearReferences.Of(_w.Resolver.Capture(), new[] { World.Seed }, within);
+        Assert.True(a.Refusal is null, "refused: " + a.Refusal);
+        Assert.Contains(Fid(World.Touching), (IDictionary<string, string>)Matches(a));
     }
 
     // 489: "each misuse is refused in one sentence" — the two that are not the server's grammar (an empty list, a
