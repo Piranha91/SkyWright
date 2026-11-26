@@ -88,6 +88,13 @@ public static class VerifyBundle
             // a plan of the current registry names only checks of kinds this SkyWright runs: one naming another kind was
             // not made here, and its rows would be accepted unjudged
             bool current = PyValue.IsIntOrBool(version) && PyValue.Int(version) == CurrentRegistryVersion;
+            // a plan of a registry newer than this SkyWright's was made by a newer SkyWright, whose rules this one does not
+            // know: it is refused, in one sentence, and its rows are neither judged nor listed as not checked
+            bool newer = PyValue.IsIntOrBool(version) && PyValue.Int(version) > CurrentRegistryVersion;
+            if (newer)
+                Defect("registry-version-newer", "plan.json",
+                    $"the plan records registry version {Ev.Str(version)}, newer than this SkyWright's {CurrentRegistryVersion}, "
+                    + "so a newer SkyWright made this bundle; check it with that SkyWright's runcontrol verify-bundle.");
             if (current)
                 foreach (var c in Ev.Items(plan.Get("checks")).Select(PyValue.Dict))
                     if (Ev.OrEmpty(c.Get("adapter")).Get("kind") is not string pk || !Registry.App.AdapterKinds.Contains(pk))
@@ -226,7 +233,7 @@ public static class VerifyBundle
             foreach (var (path, kind) in unjudged)
             {
                 if (older) notChecked.Add(new PyDict { ["path"] = path, ["kind"] = kind, ["why"] = NotCheckedWhy });
-                else Defect("evidence-kind-unknown", path,
+                else if (!newer) Defect("evidence-kind-unknown", path,
                     $"an evidence row of kind {kind}, which this SkyWright neither writes nor checks, in a bundle whose plan records "
                     + $"registry version {Ev.Str(version)}: a bundle this SkyWright made holds none, so it is refused");
             }

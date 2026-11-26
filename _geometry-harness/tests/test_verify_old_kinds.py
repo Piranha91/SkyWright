@@ -21,6 +21,10 @@ registry version the bundle's own plan records (hashed, so bound), never on a li
     V5  a version-5 plan naming a check of an adapter kind outside the app's vocabulary (the fixture at version 5, its
         enrichment rows out, check geometry.object-overlap's kind set to live-import, plan.sha256 re-hashed): refused,
         exit 3, with a defect plan-kind-unknown naming that check and kind in one sentence
+    V6  a bundle whose plan records a registry newer than this SkyWright's (the fixture at version 6, plan.sha256
+        re-hashed): refused, exit 3, with exactly one defect, registry-version-newer on plan.json, one sentence naming
+        both versions and what to try; nothing listed as not checked (the wrong answer it rejects: a newer SkyWright's
+        bundle, whose rules this one does not know, accepted or judged by this one's)
 
 The controller is HOUSECARL_RUNCONTROL, else this checkout's build (buildlayout.runcontrol()). Every case works on a copy
 (verify-bundle writes verify.json into the folder it checks). Exit 0: every case passed; 1: a case failed.
@@ -166,6 +170,20 @@ def plan_kind_refused(tmp: Path, name: str) -> None:
           f"defects {bundle.get('defects')}")
 
 
+def newer_refused(tmp: Path, name: str) -> None:
+    r, bundle = verify(copy(tmp, name, version=6))
+    defects = bundle.get("defects") or []
+    check(f"{name}: a bundle whose plan records a registry newer than this SkyWright's is refused",
+          r.returncode == 3 and bundle.get("complete") is False and not bundle.get("mismatched") and not bundle.get("missing"),
+          f"exit {r.returncode}; {json.dumps(bundle)[:400]}")
+    check(f"{name}: one defect registry-version-newer on plan.json, one sentence naming both versions and what to try",
+          len(defects) == 1 and defects[0].get("kind") == "registry-version-newer" and defects[0].get("path") == "plan.json"
+          and "version 6" in defects[0].get("detail", "") and "this SkyWright's 5" in defects[0].get("detail", "")
+          and "\n" not in defects[0].get("detail", "") and defects[0].get("detail", "").endswith("."), f"defects {defects}")
+    check(f"{name}: nothing is listed as not checked, and no sentence says so", not bundle.get("notChecked") and not sentences(r),
+          f"notChecked {bundle.get('notChecked')}; lines {sentences(r)!r}")
+
+
 def main() -> int:
     if not Path(RUNCONTROL).is_file():
         print(f"FAIL runcontrol is not built at {RUNCONTROL}; build the solution (scripts/build.ps1).")
@@ -179,6 +197,7 @@ def main() -> int:
         receipt_refused(tmp, "V4", None)
         receipt_refused(tmp, "V4-relabelled", "geometry.object-overlap")
         plan_kind_refused(tmp, "V5")
+        newer_refused(tmp, "V6")
     print(f"\n{failed} failed")
     return 1 if failed else 0
 

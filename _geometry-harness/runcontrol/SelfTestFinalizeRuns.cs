@@ -108,7 +108,48 @@ public static partial class SelfTestFinalize
         foreach (var c in L(ka["finalize"]).Select(D)) FinalizeCase(c, bases);
         var verify = D(ka["verify"]);
         foreach (var c in L(verify["cases"]).Select(D)) VerifyCase(c, verify["base"]);
+        NewerRegistryCase(verify["base"]);
     }
+
+    // Worked by hand from the rule: the verify base (an older bundle, holding receipts of kinds this SkyWright does not
+    // check) with its plan re-labelled one version past this SkyWright's and every hash of the plan carried (plan.sha256,
+    // the manifest's two rows), so the version is the only change: refused, exit 3, exactly one defect, on plan.json,
+    // naming both versions; nothing is listed as not checked and nothing is mismatched. The wrong answer it rejects: a
+    // newer SkyWright's bundle accepted, or its rows judged or listed by this one's rules (test_verify_old_kinds.py V6
+    // is the same rule on the record-rows fixture).
+    static void NewerRegistryCase(object? baseTree) =>
+        Case("verify-bundle: a plan of a registry newer than this SkyWright's is refused, its rows neither judged nor listed", () =>
+        {
+            using var t = new Temp("b");
+            BuildTree(t, baseTree);
+            var plan = D(PyJson.LoadEvalFile(t.At("plan.json")));
+            long newer = VerifyBundle.CurrentRegistryVersion + 1;
+            D(plan["registry"])["registryVersion"] = newer;
+            PyJson.WriteEvalFile(t.At("plan.json"), plan);
+            WritePlanSha(t);
+            var manifest = D(PyJson.LoadEvalFile(t.At("manifest.json")));
+            int carried = 0;
+            foreach (var e in L(manifest["evidence"]).Select(D))
+                if (S(e["path"]) is "plan.json" or "plan.sha256")
+                {
+                    e["sha256"] = Hashing.Sha256File(t.At(S(e["path"])));
+                    e["bytes"] = new FileInfo(t.At(S(e["path"]))).Length;
+                    carried++;
+                }
+            PyJson.WriteEvalFile(t.At("manifest.json"), manifest);
+            if (carried != 2) return $"the base's manifest lists {carried} of plan.json and plan.sha256, not 2";
+            var (exit, stdout, _) = Captured(() => VerifyBundle.Run(t.Root));
+            var bundle = D(D(PyJson.LoadEvalFile(t.At("verify.json")))["bundle"]);
+            var defects = L(bundle["defects"]).Select(D).ToList();
+            string want = $"the plan records registry version {newer}, newer than this SkyWright's {VerifyBundle.CurrentRegistryVersion}, "
+                + "so a newer SkyWright made this bundle; check it with that SkyWright's runcontrol verify-bundle.";
+            return Same("exit", exit.ToString(), "3")
+                ?? Same("defects", string.Join("; ", defects.Select(d => $"{S(d["kind"])} on {Ev.Str(d["path"])}: {S(d["detail"])}")),
+                    $"registry-version-newer on plan.json: {want}")
+                ?? (bundle.ContainsKey("notChecked") ? "verify.json lists rows as not checked" : null)
+                ?? (stdout.Contains("does not check", StringComparison.Ordinal) ? "the not-checked sentence was printed" : null)
+                ?? (L(bundle["mismatched"]).Count + L(bundle["missing"]).Count > 0 ? "a file is mismatched or missing: the re-label was not carried" : null);
+        });
 
     static void ClassificationCases(PyDict ka)
     {
