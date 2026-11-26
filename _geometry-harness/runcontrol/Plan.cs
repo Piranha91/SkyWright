@@ -17,7 +17,7 @@ public static class Plan
     { "order", "emit", "json", "base", "out", "run", "arm", "target", "nexusId", "switchMap", "pair" };
 
     static readonly Regex PlaceholderForm = new(@"\{([A-Za-z0-9_]+)\}", RegexOptions.CultureInvariant);
-    static readonly string[] NeverRunKinds = ["unsupported", "mcp-only", "manual"];
+    static readonly string[] NeverRunKinds = ["unsupported", "manual"];
 
     /// <summary>An input path as the plan stores it: absolute against the current folder, links and mapped drives kept.</summary>
     public static string GivenPath(string p) => PyPath.NormPath(Path.GetFullPath(p));
