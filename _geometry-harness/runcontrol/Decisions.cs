@@ -6,9 +6,12 @@ public static class Decisions
 {
     static readonly object?[] Permitted = ["completed-with-finding", "completed-no-finding", "not-applicable"];
 
-    /// <summary>Every decisions/*.json as a row, in Python's sorted path order.</summary>
-    public static List<object?> Load(string run, PyDict plan)
+    /// <summary>Every decisions/*.json as a row, in Python's sorted path order. A decision on an unsupported check
+    /// never satisfies completion, nor one on a check of a kind the caller names in `neverCompleting` (another
+    /// program's kinds no command line measures); the names only add to runcontrol's.</summary>
+    public static List<object?> Load(string run, PyDict plan, IReadOnlyCollection<string>? neverCompleting = null)
     {
+        var never = (neverCompleting ?? []).Where(k => k != "unsupported").Append("unsupported").ToList();
         var rows = new List<object?>();
         string d = PyPath.Join(run, "decisions");
         if (!Ev.Exists(d)) return rows;
@@ -49,11 +52,11 @@ public static class Decisions
                 if (missing.Count > 0) row["why"] = "evidence path(s) do not exist: " + string.Join(", ", missing);
                 else row["accepted"] = true;
             }
-            if (check != null && Ev.G(check["adapter"], "kind") is "mcp-only" or "unsupported")
+            if (check != null && Ev.G(check["adapter"], "kind") is string kind && never.Contains(kind))
             {
                 row["satisfiesCompletion"] = false;
                 row["why"] = (row["why"] as string ?? "")
-                    + "; recorded, but a decision on an mcp-only/unsupported check never satisfies completion";
+                    + $"; recorded, but a decision on an {string.Join("/", never)} check never satisfies completion";
             }
             else row["satisfiesCompletion"] = row["accepted"];
             rows.Add(row);

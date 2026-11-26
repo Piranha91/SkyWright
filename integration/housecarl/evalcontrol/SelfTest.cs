@@ -281,7 +281,7 @@ public static partial class SelfTest
                 // the media rows of the shipped list (a case about media plans the media group alone)
                 ("the overlay plan", () => OverlayPlan.Run(t.Root, appBundle, ai, [], MediaList(t.Base))),
                 ("evaluate", () => OverlayEvaluate.Run(ai)),
-                ("finalize", () => Finalizer.Run(ai, OverlayFinalize.Amend, ModuleRows.LaunchKinds, OverlayFinalize.Sections)),
+                ("finalize", () => Finalizer.Run(ai, OverlayFinalize.Amend, ModuleRows.LaunchKinds, OverlayFinalize.Sections, AiList.NeverCompletingKinds)),
             };
             foreach (var (what, step) in steps)
             {

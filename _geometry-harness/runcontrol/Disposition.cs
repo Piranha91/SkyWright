@@ -98,11 +98,12 @@ public static class Disposition
     static object? Count(PyDict d, string key) => Ev.G(d, key, 0L);
 
     /// <summary>The disposition: what is missing, what was found, each arm's order evaluation, what was not assessed.</summary>
-    public static PyDict Build(string run, PyDict plan, Ledger ledger, PyDict receipts, PyDict? integrity = null, PyDict? badKeys = null)
+    public static PyDict Build(string run, PyDict plan, Ledger ledger, PyDict receipts, PyDict? integrity = null, PyDict? badKeys = null,
+        IReadOnlyCollection<string>? neverCompleting = null)
     {
         integrity = PyValue.Truthy(integrity) ? integrity! : new PyDict { ["ok"] = true, ["defects"] = new List<object?>() };
         badKeys ??= new PyDict();
-        var decisions = Decisions.Load(run, plan);
+        var decisions = Decisions.Load(run, plan, neverCompleting);
         var decided = new HashSet<string>(StringComparer.Ordinal);
         foreach (var d in decisions.Select(PyValue.Dict))
             if (PyValue.Truthy(d.Get("satisfiesCompletion"))) decided.Add(PyValue.Hash(d["checkId"]) + "\0" + PyValue.Hash(d["armId"]));

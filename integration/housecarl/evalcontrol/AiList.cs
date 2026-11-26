@@ -31,6 +31,10 @@ public static class AiList
     /// waits for an import. (A media row is planned and accounted at evaluate, then assessed by bundle --media.)</summary>
     public static readonly string[] NeverRunKinds = ["mcp-only", "live-import"];
 
+    /// <summary>The kinds on which a manual decision never satisfies completion: a record reader's judgement is
+    /// imported, never decided by hand.</summary>
+    public static readonly string[] NeverCompletingKinds = ["mcp-only"];
+
     /// <summary>Every problem with the list: runcontrol's validator with this vocabulary, and each appPrerequisites
     /// entry naming a check of the app plan.</summary>
     public static List<string> Validate(PyDict list, PyDict appPlan)

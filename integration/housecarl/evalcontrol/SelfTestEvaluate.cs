@@ -88,7 +88,7 @@ public static partial class SelfTest
                     var ledger = new Ledger(t.Root, plan);
                     var receipts = Receipts.ReadReceipts(t.Root);
                     var (integrity, bad) = EvidenceIntegrity.Check(t.Root, plan, ledger, receipts);
-                    var disp = Disposition.Build(t.Root, plan, ledger, receipts, integrity, bad);
+                    var disp = Disposition.Build(t.Root, plan, ledger, receipts, integrity, bad, AiList.NeverCompletingKinds);
                     ImportedEvidence.Add(disp, ledger, receipts, bad);
                     var pairs = bad.Select(kv => (object?)new List<object?> { kv.Key, kv.Value }).ToList();
                     return Same("integrity", t.Mask(PyJson.Dumps(integrity, indent: 1, ensureAscii: false)), Unpack(c["integrity"]))

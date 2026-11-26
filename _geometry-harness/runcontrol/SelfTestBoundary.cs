@@ -93,5 +93,44 @@ public static partial class SelfTest
             }
             return why.Count == 0 ? null : string.Join("; ", why);
         });
+
+        // another program's kinds on which a decision never completes only add to runcontrol's: no list a caller passes
+        // lets a decision on an unsupported check complete, and runcontrol's own bundle command takes no such list, nor
+        // a folder to link
+        Case("boundary: a caller's never-completing kinds and linked folders cannot loosen runcontrol's own rules", () =>
+        {
+            using var t = new Temp();
+            var plan = D(PyJson.Loads("{\"checks\": [{\"checkId\": \"u.check\", \"manualDecisionAllowed\": true, \"adapter\": {\"kind\": \"unsupported\"}}, "
+                + "{\"checkId\": \"o.check\", \"manualDecisionAllowed\": true, \"adapter\": {\"kind\": \"other\"}}]}"));
+            void Write(string rel, string text)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(t.At(rel))!);
+                File.WriteAllBytes(t.At(rel), PyJson.Utf8(text));
+            }
+            Write("decisions/evidence/note.txt", "seen");
+            foreach (string id in new[] { "u.check", "o.check" })
+                Write($"decisions/{id}.json", ("{\"checkId\": \"" + id + "\", \"armId\": \"baseline\", \"decidedBy\": \"Reviewer\", "
+                    + "\"decision\": \"completed-no-finding\", \"evidence\": [\"decisions/evidence/note.txt\"]}"));
+            string? Completes(IReadOnlyCollection<string>? never) => string.Join(" ", Decisions.Load(t.Root, plan, never).Select(D)
+                .Select(r => $"{S(r["checkId"])}={r["satisfiesCompletion"]}"));
+            var why = Same("runcontrol's own", Completes(null), "o.check=True u.check=False")
+                ?? Same("an empty list", Completes([]), "o.check=True u.check=False")
+                ?? Same("a caller's list adds its kind", Completes(["other"]), "o.check=False u.check=False");
+            if (why != null) return why;
+            foreach (string flag in new[] { "--linked-folder", "--never-completing" })
+            {
+                var before = Console.Error;
+                var sink = new StringWriter();
+                Console.SetError(sink);
+                int code;
+                try { code = EvalCommands.Run(["bundle", "--run", t.Root, flag, "imports"]); }
+                catch (Refusal r) { sink.Write(r.Message); code = Exit.Refused; }
+                finally { Console.SetError(before); }
+                string err = sink.ToString();
+                if (code == Exit.Ok || !err.Contains($"bundle does not take {flag}.", StringComparison.Ordinal))
+                    return $"runcontrol bundle with {flag}: exit {code}, {err.Trim()}";
+            }
+            return new BundleArgs() is { LinkedFolders.Count: 0, NeverCompletingKinds.Count: 0 } ? null : "a bundle's arguments start with a caller's list";
+        });
     }
 }

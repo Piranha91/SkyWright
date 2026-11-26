@@ -145,7 +145,9 @@ public static partial class SelfTestFinalize
                     var b = NativeFile.Identity(t.At(rel["evidence/".Length..]));
                     if (a == null || b == null || a.Value.index != b.Value.index) return $"{rel}: Python linked it to the run's file; here it is a copy";
                 }
-                else if (rel.StartsWith("evidence/imports/", StringComparison.Ordinal)) return $"{rel}: Python copied it; the answers are out of date";
+                else if (rel.StartsWith("evidence/imports/", StringComparison.Ordinal)
+                         && NativeFile.Identity(file) is { } a && NativeFile.Identity(t.At(rel["evidence/".Length..])) is { } b && a.index == b.index)
+                    return $"{rel}: runcontrol's own bundle links no folder; here it is a hard link to the run's file";
             }
             return null;
         });

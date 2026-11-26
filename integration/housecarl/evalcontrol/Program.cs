@@ -67,7 +67,7 @@ public static class Program
                 "plan" => OverlayPlan.Run(a.Need("--app"), a.Need("--app-bundle"), a.Need("--out"), a.Many("--opt-in"), a.One("--list"), a.Many("--probe-cmd")),
                 "evaluate" => OverlayEvaluate.Run(a.Need("--run"), a.Has("--rebuild-ledger")),
                 "import" => RecordImport.Run(a.Need("--run"), a.Need("--file")),
-                "finalize" => Finalizer.Run(a.Need("--run"), OverlayFinalize.Amend, ModuleRows.LaunchKinds, OverlayFinalize.Sections),
+                "finalize" => Finalizer.Run(a.Need("--run"), OverlayFinalize.Amend, ModuleRows.LaunchKinds, OverlayFinalize.Sections, AiList.NeverCompletingKinds),
                 "bundle" => OverlayBundle.Run(a.Need("--run"), a.Need("--out"), a.One("--media"), a.One("--registry"), a.One("--scope"), a.One("--search")),
                 "verify" => OverlayVerify.Run(a.Positional ?? throw new Refusal("verify needs the overlay bundle's folder: evalcontrol verify DIR [--app BUNDLE] [--out FILE]."),
                     a.One("--app"), a.One("--out")),

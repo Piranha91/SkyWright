@@ -12,6 +12,12 @@ public sealed class BundleArgs
     /// library to bundle a run of its own; runcontrol's own command never sets it).</summary>
     public bool CopyOnly;
     public List<string> ReaderEnv = [], ModName = [];
+    /// <summary>Another program's run folders whose files are written once and never changed, so the bundle hard-links
+    /// them instead of copying (relative to the run); runcontrol's own command links none.</summary>
+    public List<string> LinkedFolders = [];
+    /// <summary>Another program's kinds on which a decision never satisfies completion (Decisions.Load); they only add
+    /// to runcontrol's.</summary>
+    public List<string> NeverCompletingKinds = [];
 }
 
 /// <summary>`runcontrol bundle --run RUN [--out DIR] …` (evalrun.py's cmd_bundle): one evidence bundle assembled from
@@ -175,7 +181,7 @@ public static class Bundle
         if (ledger.Refusal() is string ledgerBad) return Refuse(ledgerBad);
 
         var receipts = Receipts.ReadReceipts(run);
-        var decisions = Decisions.Load(run, plan);
+        var decisions = Decisions.Load(run, plan, a.NeverCompletingKinds);
         if (Refusal(run, plan, ledger, receipts, decisions) is string bad)
         {
             Console.Error.WriteLine($"REFUSED: {bad}");
@@ -195,7 +201,7 @@ public static class Bundle
             try
             {
                 record.Stage("bundle", total: 1, unit: "bundles");
-                Assemble(run, outDir, plan, ledger, receipts, decisions, premises, evidence);
+                Assemble(run, outDir, plan, ledger, receipts, decisions, premises, evidence, a.LinkedFolders);
                 record.Advance();
                 if (a.CopyOnly)
                 {
@@ -251,11 +257,11 @@ public static class Bundle
 
     // The copies and the manifest.
     static void Assemble(string run, string outDir, PyDict plan, Ledger ledger, PyDict receipts, List<object?> decisions,
-        Dictionary<string, string> premises, List<object?> evidence)
+        Dictionary<string, string> premises, List<object?> evidence, IReadOnlyList<string> linkedFolders)
     {
         Directory.CreateDirectory(outDir);
         var copied = new Dictionary<string, PyDict>(StringComparer.Ordinal);
-        string imports = PyPath.Resolve(PyPath.Join(run, "imports"));
+        var linked = linkedFolders.Select(f => PyPath.Resolve(PyPath.Join(run, f))).ToList();
 
         // Copies one file in and indexes it. When a receipt recorded a hash for it, the copy happens only if the file
         // still hashes to it, and the row carries the recorded hash and the receipt that recorded it.
@@ -269,8 +275,8 @@ public static class Bundle
             if (recordedSha != null && !Ev.Eq(got, recordedSha)) return;   // refused before this; never copied under a new hash
             string dst = PyPath.Join(outDir, rel);
             Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
-            // an import folder is written once and never changed, so its files are linked rather than copied again
-            StoreFile(src, dst, link: PyPath.RelativeTo(PyPath.Resolve(src), imports) != null);
+            // a caller's folder written once and never changed: its files are linked rather than copied again
+            StoreFile(src, dst, link: linked.Any(f => PyPath.RelativeTo(PyPath.Resolve(src), f) != null));
             var row = new PyDict
             {
                 ["id"] = Hashing.Sha256Text(rel)[..16], ["kind"] = kind, ["path"] = rel, ["sha256"] = recordedSha ?? got,

@@ -22,8 +22,10 @@ public static class Finalizer
 
     /// <summary>As above, with a caller's step (Amend), the caller's own child-launching adapter kinds
     /// (Receipts.ReceiptRoles, so the evidence integrity checks the emitter of its receipts too) and its STATUS.md
-    /// sections. runcontrol's own finalize passes none.</summary>
-    public static int Run(string runFolder, Amend? amend, IReadOnlySet<string>? moreLaunchKinds, StatusMdSections? sections = null)
+    /// sections, and its kinds on which a decision never satisfies completion (Decisions.Load). runcontrol's own
+    /// finalize passes none.</summary>
+    public static int Run(string runFolder, Amend? amend, IReadOnlySet<string>? moreLaunchKinds, StatusMdSections? sections = null,
+        IReadOnlyCollection<string>? neverCompleting = null)
     {
         string run = PyPath.Str(runFolder);
         EvalStore.SetRunStore(run);
@@ -58,7 +60,7 @@ public static class Finalizer
             try
             {
                 (integrity, var badKeys) = EvidenceIntegrity.Check(run, plan, ledger, receipts, moreLaunchKinds);
-                disp = Disposition.Build(run, plan, ledger, receipts, integrity, badKeys);
+                disp = Disposition.Build(run, plan, ledger, receipts, integrity, badKeys, neverCompleting);
                 amend?.Invoke(disp, run, plan, receipts, ledger, badKeys);
                 PyJson.WriteEvalFile(PyPath.Join(run, "disposition.json"), disp);
                 Ev.WriteText(PyPath.Join(run, "STATUS.md"), StatusMd.Build(plan, disp, sections));

@@ -30,7 +30,13 @@ public static class OverlayBundle
                     + $"({PyPath.Suffix(src)}); a media item is an image or video file");
         }
 
-        int rc = Bundle.Run(new BundleArgs { Run = run, Out = dir, CopyOnly = true, Registry = registry, Scope = scope, Search = search });
+        // an import folder is written once and never changed, so its files are linked; a decision on a row only an import
+        // settles never completes it
+        int rc = Bundle.Run(new BundleArgs
+        {
+            Run = run, Out = dir, CopyOnly = true, Registry = registry, Scope = scope, Search = search,
+            LinkedFolders = ["imports"], NeverCompletingKinds = [.. AiList.NeverCompletingKinds],
+        });
         if (rc != Exit.Ok) return rc;
 
         string manifestPath = PyPath.Join(dir, "manifest.json");
