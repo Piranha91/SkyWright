@@ -37,11 +37,36 @@ public static class RecordEvidence
                 && Ev.Eq(Ev.OrEmpty(Ev.OrEmpty(PyJson.LoadEvalFile(PyPath.Join(d, "receipts", k + ".json"))).Get("adapter")).Get("kind"), ImportKind))
                 judged.Add($"receipts/{k}.json");
         judged = judged.Distinct(StringComparer.Ordinal).ToList();
+        // in an overlay every row is this module's, so one of another kind is a fault (Judge says so); a bundle without
+        // an overlay block is an older SkyWright's combined one, whose rows of kinds neither SkyWright nor this module
+        // checks now (a patchprobe or mcp-only receipt, made and accepted by the evalrun of its day) stay listed as not
+        // checked, with runcontrol's reason, rather than judged by rules they were not made under
+        var left = new List<object?>();
+        if (!plan.ContainsKey(OverlayPlan.Key))
+            foreach (string path in judged.ToList())
+                if (!Owned(d, manifest, path))
+                {
+                    judged.Remove(path);
+                    left.Add(Ev.Items(block.Get("notChecked")).FirstOrDefault(x => Ev.Eq(Ev.G(x, "path"), path))
+                        ?? new PyDict { ["path"] = path, ["kind"] = "unknown", ["why"] = "named by runcontrol as a defect of a kind it does not know" });
+                }
         foreach (string path in judged) Judge(d, manifest, plan, path, defect);
         block["defects"] = kept;
         block.Pop("notChecked");
+        if (left.Count > 0) block["notChecked"] = left;
         block["judgedByTheModule"] = judged.Cast<object?>().ToList();
         return (kept, judged);
+    }
+
+    // Whether this module writes or checks the row at path: a receipt of a module probe or a record import, or an
+    // enrichment of a kind it checks (Judge's own three branches).
+    static bool Owned(string d, PyDict manifest, string path)
+    {
+        if (path.StartsWith("receipts/", StringComparison.Ordinal))
+            return Ev.OrEmpty(Ev.OrEmpty(PyJson.LoadEvalFile(PyPath.Join(d, path))).Get("adapter")).Get("kind") is string k
+                && (ModuleRows.LaunchKinds.Contains(k) || k == ImportKind);
+        var e = Ev.Items(manifest.Get("evidence")).Select(PyValue.Dict).FirstOrDefault(x => Ev.Eq(x.Get("path"), path));
+        return e != null && Ev.Eq(e.Get("kind"), "enrichment") && e.Get("enrichment") is string ek && EnrichmentKinds.Contains(ek);
     }
 
     /// <summary>One row runcontrol did not judge (its path in the bundle), judged here; `defect` takes each fault.</summary>

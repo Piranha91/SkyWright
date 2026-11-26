@@ -246,6 +246,11 @@ public static partial class SelfTest
             // ...and no configuration block, which the executor's accounting receipt reads; the scope's stands in
             var scopeDoc = Ev.OrEmpty(PyJson.LoadEvalFile(t.At(Ev.Str(Ev.G(recordedPlan["scope"], "path")))));
             recordedPlan["configuration"] = Py.Copy(Ev.OrEmpty(scopeDoc.Get("configuration")));
+            // ...and it records registry version 7, newer than the app's, which verify-bundle refuses: by content it is a
+            // run made before the AI-side rows left the registry, so it is labelled older (4), as runcontrol's own
+            // synthetic bases are (the registry copy's bytes, and so the hash the plan froze, are left as recorded)
+            if (!Ev.Eq(D(recordedPlan["registry"])["registryVersion"], 7L)) return "the recorded plan no longer records registry version 7";
+            D(recordedPlan["registry"])["registryVersion"] = 4L;
             PyJson.WriteEvalFile(t.At("plan.json"), recordedPlan);
             WritePlanSha(t);
             // the recording's app run credits two record imports (r.contested, adapter kind mcp-import): an app scan
