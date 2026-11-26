@@ -101,6 +101,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does overlap attribution satisfy the independent acceptance controls?](#tool-_geometry-harness-tests-test_overlap_attribution_contract.py) — `_geometry-harness/tests/test_overlap_attribution_contract.py`
 - [Does overlap triage preserve locality, counterpart identity and incomplete reviews?](#tool-integration-housecarl-tests-test_overlap_triage.py) — `integration/housecarl/tests/test_overlap_triage.py`
 - [Does overlapprobe --reverse-of give the full reverse's emit, and refuse a baseline emit that is not this run's own?](#tool-_geometry-harness-tests-test_reverse_reconcile.py) — `_geometry-harness/tests/test_reverse_reconcile.py`
+- [Does patch.candidate-qualification qualify a supplied patch by its bytes without discovery, and read not-applicable on a plan with no supplied patch?](#tool-_geometry-harness-tests-test_candidate_qualification.py) — `_geometry-harness/tests/test_candidate_qualification.py`
 - [Does planeassess class plane edits, read placed primitives and test the frustum and rule shapes correctly?](#tool-_geometry-harness-planeassess-test_planeassess.py) — `_geometry-harness/planeassess/test_planeassess.py`
 - [Does reading a capture's arms side by side keep each arm's evidence its own, choose workers from memory, and report failure, stop and resume as one worker does?](#tool-integration-housecarl-tests-test_records_parallel.py) — `integration/housecarl/tests/test_records_parallel.py`
 - [Does render-batch readiness enforce the offline planning and refusal contracts?](#tool-_geometry-harness-viewprobe-tools-test_renderbatch.py) — `_geometry-harness/viewprobe/tools/test_renderbatch.py`
@@ -115,6 +116,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does the GPU occlusion query count the same pixels as the CPU depth compare on this machine?](#tool-viewprobe.occlusion-query-selftest) — `viewprobe.occlusion-query-selftest`
 - [Does the actual overlap probe enforce the imported scene-scope contract?](#tool-_geometry-harness-tests-test_scene_scope_import.py) — `_geometry-harness/tests/test_scene_scope_import.py`
 - [Does the actual planner verify and export the camera justified by its queries?](#tool-_geometry-harness-viewprobe-tools-test_shotplan_plan.py) — `_geometry-harness/viewprobe/tools/test_shotplan_plan.py`
+- [Does the app's controller still accept an old lab bundle, say in one sentence what it does not check, and refuse the commands that moved to the houseCARL integration module?](#tool-_geometry-harness-tests-test_app_bundle_boundary.py) — `_geometry-harness/tests/test_app_bundle_boundary.py`
 - [Does the asset path length limits diagnostic satisfy its expected contract?](#tool-viewprobe.asset-path-budget) — `viewprobe.asset-path-budget`
 - [Does the atomic report publication diagnostic satisfy its expected contract?](#tool-viewprobe.report-sink-selftest) — `viewprobe.report-sink-selftest`
 - [Does the basic renderer startup diagnostic satisfy its expected contract?](#tool-viewprobe.smoke) — `viewprobe.smoke`
@@ -794,6 +796,21 @@ Modifiers (do not select a separate mode):
 - `--out` — where to write the generated fixtures (never the tracked tree)
 - `--registry-from` — Set registry from for this invocation; consult the linked parser for accepted values.
 
+<a id="tool-_geometry-harness-tests-test_app_bundle_boundary.py"></a>
+
+### _geometry-harness/tests/test_app_bundle_boundary.py
+
+**Does the app's controller still accept an old lab bundle, say in one sentence what it does not check, and refuse the commands that moved to the houseCARL integration module?**
+
+Qualify a change to what runcontrol accepts of a bundle made before the AI-side rows left the app, or to the commands it refuses as the module's.
+
+Inputs: tests/fixtures/old-bundles/lab-record-rows (copies).
+
+Outputs: Assertion results for: Does the app's controller still accept an old lab bundle, say in one sentence what it does not check, and refuse the commands that moved to the houseCARL integration module?
+
+Source: [_geometry-harness/tests/test_app_bundle_boundary.py](../_geometry-harness/tests/test_app_bundle_boundary.py) — `Known answers for what the app's controller checks after the AI-side rows left it`
+
+
 <a id="tool-_geometry-harness-tests-test_asset_only_selection.py"></a>
 
 ### _geometry-harness/tests/test_asset_only_selection.py
@@ -822,6 +839,21 @@ Inputs: The Release build and its skywright-layout.json.
 Outputs: Assertion results for: Does buildlayout.py's fallback marker equal the one the build writes, and do its paths exist in that build?
 
 Source: [_geometry-harness/tests/test_buildlayout.py](../_geometry-harness/tests/test_buildlayout.py) — `buildlayout.py against the build the solution wrote`
+
+
+<a id="tool-_geometry-harness-tests-test_candidate_qualification.py"></a>
+
+### _geometry-harness/tests/test_candidate_qualification.py
+
+**Does patch.candidate-qualification qualify a supplied patch by its bytes without discovery, and read not-applicable on a plan with no supplied patch?**
+
+Qualify a change to the app's candidate-qualification row (its supplied-patch rule or its applicability).
+
+Inputs: test_evalrun.py's generated fixtures for case-19 (no supplied patch) and case-16 (one supplied patch file), planned on the app registry's candidate-qualification row.
+
+Outputs: Assertion results for: Does patch.candidate-qualification qualify a supplied patch by its bytes without discovery, and read not-applicable on a plan with no supplied patch?
+
+Source: [_geometry-harness/tests/test_candidate_qualification.py](../_geometry-harness/tests/test_candidate_qualification.py) — `Known answers for patch.candidate-qualification once patch discovery is not the app's`
 
 
 <a id="tool-_geometry-harness-tests-test_contact_memory_route.py"></a>

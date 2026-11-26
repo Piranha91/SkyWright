@@ -8196,6 +8196,48 @@
       ]
     },
     {
+      "id": "_geometry-harness/tests/test_app_bundle_boundary.py",
+      "path": "_geometry-harness/tests/test_app_bundle_boundary.py",
+      "kind": "script",
+      "answers": [
+        "Does the app's controller still accept an old lab bundle, say in one sentence what it does not check, and refuse the commands that moved to the houseCARL integration module?"
+      ],
+      "useWhen": "Qualify a change to what runcontrol accepts of a bundle made before the AI-side rows left the app, or to the commands it refuses as the module's.",
+      "evidence": [
+        {
+          "path": "_geometry-harness/tests/test_app_bundle_boundary.py",
+          "anchor": "Known answers for what the app's controller checks after the AI-side rows left it"
+        }
+      ],
+      "inputs": [
+        "tests/fixtures/old-bundles/lab-record-rows (copies)."
+      ],
+      "outputs": [
+        "Assertion results for: Does the app's controller still accept an old lab bundle, say in one sentence what it does not check, and refuse the commands that moved to the houseCARL integration module?"
+      ]
+    },
+    {
+      "id": "_geometry-harness/tests/test_candidate_qualification.py",
+      "path": "_geometry-harness/tests/test_candidate_qualification.py",
+      "kind": "script",
+      "answers": [
+        "Does patch.candidate-qualification qualify a supplied patch by its bytes without discovery, and read not-applicable on a plan with no supplied patch?"
+      ],
+      "useWhen": "Qualify a change to the app's candidate-qualification row (its supplied-patch rule or its applicability).",
+      "evidence": [
+        {
+          "path": "_geometry-harness/tests/test_candidate_qualification.py",
+          "anchor": "Known answers for patch.candidate-qualification once patch discovery is not the app's"
+        }
+      ],
+      "inputs": [
+        "test_evalrun.py's generated fixtures for case-19 (no supplied patch) and case-16 (one supplied patch file), planned on the app registry's candidate-qualification row."
+      ],
+      "outputs": [
+        "Assertion results for: Does patch.candidate-qualification qualify a supplied patch by its bytes without discovery, and read not-applicable on a plan with no supplied patch?"
+      ]
+    },
+    {
       "id": "integration/housecarl/tests/test_evalspeech.py",
       "path": "integration/housecarl/tests/test_evalspeech.py",
       "kind": "script",
