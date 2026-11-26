@@ -8,6 +8,10 @@
     <!-- The SkyRender package version every program builds on. A build can override it (for example
          -p:SkyRenderVersion=4.1.0-cutouttint.2 to test a prerelease from a local feed). -->
     <SkyRenderVersion Condition="'$(SkyRenderVersion)' == ''">4.0.0</SkyRenderVersion>
+    <!-- The same code builds to the same bytes in one build folder: no '+<commit>' suffix on the informational version
+         (the SDK's default), so a rebuild after a commit that changes no code keeps every program's package identity
+         (toolidentity). Which commit built a program is recorded in its provenance\build.json instead (below). -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <!-- The see-through fill and the tint that follows a leaf card's cut-out exist from SkyRender 4.1. -->
     <DefineConstants Condition="$([MSBuild]::VersionGreaterThanOrEquals('$(SkyRenderVersion.Split(`-`)[0])', '4.1'))">$(DefineConstants);SKYRENDER_CUTOUT_TINT</DefineConstants>
     <!-- Distant LOD on a live scene (LiveDistantLod, a draw-time cut) exists from SkyRender 4.1, but not in the 4.1
@@ -53,6 +57,38 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <OutputPath>$(SkyWrightLayoutRoot)$(SkyWrightTools)\$(MSBuildProjectName)\</OutputPath>
   </PropertyGroup>
+
+  <!-- Provenance: every program this tree builds records the commit it was built from and whether the tree was dirty, in
+       provenance\build.json beside it. A subfolder other than runtimes\ is outside the package identity
+       (toolidentity), so the record never changes what a program is; when git cannot be run or fails, both are
+       "unknown", never a commit or false. SkyWrightProvenanceDir writes it elsewhere (the tests run this target alone). -->
+  <Target Name="SkyWrightProvenance" AfterTargets="Build" Condition="'$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe' or '$(SkyWrightProvenanceDir)' != ''">
+    <PropertyGroup>
+      <_SwProvDir>$(SkyWrightProvenanceDir)</_SwProvDir>
+      <_SwProvDir Condition="'$(_SwProvDir)' == ''">$(OutDir)provenance\</_SwProvDir>
+    </PropertyGroup>
+    <Exec Command="git rev-parse HEAD" WorkingDirectory="$(MSBuildThisFileDirectory)" ConsoleToMSBuild="true" IgnoreExitCode="true" EchoOff="true"
+          StandardOutputImportance="low" StandardErrorImportance="low" IgnoreStandardErrorWarningFormat="true">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_SwHead" />
+      <Output TaskParameter="ExitCode" PropertyName="_SwHeadExit" />
+    </Exec>
+    <Exec Command="git status --porcelain" WorkingDirectory="$(MSBuildThisFileDirectory)" ConsoleToMSBuild="true" IgnoreExitCode="true" EchoOff="true"
+          StandardOutputImportance="low" StandardErrorImportance="low" IgnoreStandardErrorWarningFormat="true">
+      <Output TaskParameter="ConsoleOutput" ItemName="_SwStatusLines" />
+      <Output TaskParameter="ExitCode" PropertyName="_SwStatusExit" />
+    </Exec>
+    <PropertyGroup>
+      <_SwHead>$(_SwHead.Trim())</_SwHead>
+      <_SwKnown>false</_SwKnown>
+      <_SwKnown Condition="'$(_SwHeadExit)' == '0' and '$(_SwStatusExit)' == '0' and $([System.Text.RegularExpressions.Regex]::IsMatch('$(_SwHead)', '^[0-9a-f]{40}$'))">true</_SwKnown>
+      <_SwDirty>false</_SwDirty>
+      <_SwDirty Condition="'@(_SwStatusLines)' != ''">true</_SwDirty>
+      <_SwProvJson Condition="'$(_SwKnown)' == 'true'">{ "commit": "$(_SwHead)", "dirty": $(_SwDirty) }</_SwProvJson>
+      <_SwProvJson Condition="'$(_SwKnown)' != 'true'">{ "commit": "unknown", "dirty": "unknown" }</_SwProvJson>
+    </PropertyGroup>
+    <MakeDir Directories="$(_SwProvDir)" />
+    <WriteLinesToFile File="$(_SwProvDir)build.json" Lines="$(_SwProvJson)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
 
   <!-- houseCARL's server code as a library, for a project that sets SkyWrightHousecarlLibrary: its built assembly is
        referenced by the path houseCARL's project reports, so only housecarl-mcp.dll (and what it references) is copied,
