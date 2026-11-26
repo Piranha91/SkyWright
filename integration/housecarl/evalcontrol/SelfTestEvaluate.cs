@@ -162,6 +162,31 @@ public static partial class SelfTest
         });
     }
 
+    // aiEvaluation.complete, worked by hand: both bundles verify and both evaluations are complete, and nothing less;
+    // a foreign overlay (one bound to another app bundle) is an overlay bundle that does not verify
+    static void AiEvaluationCases() => Case("verify: aiEvaluation.complete needs both bundles and both evaluations complete", () =>
+    {
+        var rows = new (string what, bool app, object? appEval, bool overlay, object? overlayEval, bool want)[]
+        {
+            ("both bundles verify, both evaluations complete", true, true, true, true, true),
+            ("the app evaluation incomplete", true, false, true, true, false),
+            ("the overlay evaluation incomplete", true, true, true, false, false),
+            ("both evaluations incomplete", true, false, true, false, false),
+            ("the app bundle does not verify", false, true, true, true, false),
+            ("a foreign overlay: the overlay bundle does not verify", true, true, false, true, false),
+            ("the app evaluation unknown", true, null, true, true, false),
+        };
+        var bad = new List<string>();
+        foreach (var (what, app, appEval, overlay, overlayEval, want) in rows)
+        {
+            var ai = OverlayVerify.AiEvaluation(app, appEval, overlay, overlayEval);
+            if (ai["complete"] is not bool got || got != want) bad.Add($"{what}: complete {Ev.Str(ai["complete"])}, want {want}");
+            var parts = D(ai["parts"]);
+            if (!Ev.Eq(parts["appEvaluation"], appEval) || !Ev.Eq(parts["overlayEvaluation"], overlayEval)) bad.Add($"{what}: the parts are not the inputs");
+        }
+        return bad.Count == 0 ? null : string.Join("; ", bad);
+    });
+
     // The folders brought to a recorded state: files under the overlay it does not list removed, files whose bytes
     // differ written (the app bundle beside it is written the same way).
     static void ApplyState(Temp t, object? tree)

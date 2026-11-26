@@ -87,7 +87,8 @@ public static class OverlayVerify
         b["complete"] = complete;
         var overlayEval = Ev.OrEmpty(verify.Get("evaluation"));
         var appEval = Ev.OrEmpty(Ev.OrEmpty(PyJson.LoadEvalFile(appVerifyFile)).Get("evaluation"));
-        bool aiComplete = complete && appComplete && appEvaluation is true && overlayEval.Get("complete") is true;
+        var ai = AiEvaluation(appComplete, appEvaluation, complete, overlayEval.Get("complete"));
+        bool aiComplete = ai["complete"] is true;
         bool anyFinding = Ev.Eq(appEval.Get("claim"), "findings") || Ev.Eq(overlayEval.Get("claim"), "findings");
         verify["app"] = new PyDict { ["dir"] = app, ["complete"] = appComplete, ["evaluationComplete"] = appEvaluation, ["verify"] = PyPath.Name(appVerifyFile) };
         verify["overlayEvaluation"] = overlayEval;
@@ -97,15 +98,7 @@ public static class OverlayVerify
             ["complete"] = aiComplete, ["claim"] = !aiComplete ? "incomplete" : anyFinding ? "findings" : "no-findings-in-completed-checks",
             ["missing"] = Ev.Items(appEval.Get("missing")).Concat(Ev.Items(overlayEval.Get("missing"))).ToList(),
         };
-        verify["aiEvaluation"] = new PyDict
-        {
-            ["complete"] = aiComplete,
-            ["rule"] = "the app bundle verifies and its evaluation is complete, and this overlay verifies and its evaluation is complete",
-            ["parts"] = new PyDict
-            {
-                ["appBundle"] = appComplete, ["appEvaluation"] = appEvaluation, ["overlayBundle"] = complete, ["overlayEvaluation"] = overlayEval.Get("complete"),
-            },
-        };
+        verify["aiEvaluation"] = ai;
         PyJson.WriteEvalFile(outFile != null ? PyPath.Resolve(outFile) : PyPath.Join(d, "verify.json"), verify);
         Console.Out.WriteLine($"verify: overlay {Ev.Str(b.Get("verified"))} file(s) verified, {PyValue.Len(Ev.OrList(b.Get("missing")))} missing, "
             + $"{PyValue.Len(Ev.OrList(b.Get("mismatched")))} mismatched, {allDefects.Count} defect(s); app bundle complete: {Ev.Str(appComplete)}; "
@@ -114,4 +107,16 @@ public static class OverlayVerify
             Console.Error.WriteLine($"   {Ev.Str(x["kind"])}: {(PyValue.Truthy(x["path"]) ? Ev.Str(x["path"]) : "-")} — {Ev.Str(x["detail"])}");
         return complete && appComplete ? Exit.Ok : Exit.Judgement;
     }
+
+    /// <summary>aiEvaluation: complete only when the app bundle verifies and its evaluation is complete, and this
+    /// overlay verifies and its evaluation is complete (the one owner of that rule; evalreport reads it).</summary>
+    public static PyDict AiEvaluation(bool appBundle, object? appEvaluation, bool overlayBundle, object? overlayEvaluation) => new()
+    {
+        ["complete"] = appBundle && appEvaluation is true && overlayBundle && overlayEvaluation is true,
+        ["rule"] = "the app bundle verifies and its evaluation is complete, and this overlay verifies and its evaluation is complete",
+        ["parts"] = new PyDict
+        {
+            ["appBundle"] = appBundle, ["appEvaluation"] = appEvaluation, ["overlayBundle"] = overlayBundle, ["overlayEvaluation"] = overlayEvaluation,
+        },
+    };
 }

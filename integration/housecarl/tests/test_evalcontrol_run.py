@@ -308,7 +308,141 @@ def case_51(tmp):
           f"{case}: its why names the hash compared ({(rows[0].get('why') if rows else None)!r})")
 
 
-CASES = {"case-10": case_10, "case-51": case_51, "C1933": c1933, "plan-oracles": plan_oracles, "record-oracles": record_oracles,
+def _copy_pair(tmp: Path, bundle: Path, tag: str) -> tuple[Path, Path]:
+    """A copy of an overlay bundle and of the app bundle it is bound to, the copy's binding pointed at the app copy."""
+    import shutil
+    man = load(bundle / "manifest.json") or {}
+    app = (bundle / man["overlay"]["appBundleFromBundle"]).resolve()
+    ov, app2 = tmp / f"{tag}-overlay", tmp / f"{tag}-app"
+    shutil.copytree(bundle, ov)
+    shutil.copytree(app, app2)
+    for f in ("verify.json", "verify-app.json"):
+        (ov / f).unlink(missing_ok=True)
+    man["overlay"]["appBundleFromBundle"] = os.path.relpath(app2, ov).replace("\\", "/")
+    (ov / "manifest.json").write_text(json.dumps(man, indent=1), encoding="utf-8")
+    return ov, app2
+
+
+def _verify(ov: Path, cwd: Path) -> tuple[int, dict]:
+    r = subprocess.run([str(EVALCONTROL), "verify", str(ov)], capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", cwd=cwd, timeout=300)
+    return r.returncode, load(ov / "verify.json") or {}
+
+
+def _kinds(v: dict) -> list:
+    return sorted({d.get("kind") for d in ((v.get("bundle") or {}).get("defects") or [])})
+
+
+def _rehash(ov: Path, rel: str) -> None:
+    """The manifest's row for rel made to hash the edited file, so only this module's judgement can catch the edit."""
+    man = load(ov / "manifest.json")
+    data = (ov / rel).read_bytes()
+    rows = [e for e in man.get("evidence") or [] if e.get("path") == rel]
+    check(len(rows) == 1, f"{rel} is one evidence row of the overlay's manifest")
+    for e in rows:
+        e["sha256"], e["bytes"] = hashlib.sha256(data).hexdigest(), len(data)
+    (ov / "manifest.json").write_text(json.dumps(man, indent=1), encoding="utf-8")
+
+
+def overlay_verify(tmp):
+    """Gate A finding A6 (T4/T6): what `evalcontrol verify` checks of an overlay and the app bundle it is bound to, each
+    on a copy of one recorded overlay (one record import credited): an overlay over another app bundle is refused by its
+    binding; an edited import receipt, a module probe's receipt for a row not planned for it and a probe role bound to
+    another program are faults this module finds (runcontrol's hashes made to pass); a media item stating no app
+    fingerprint is unassessed; aiEvaluation is decided here and evalreport adopts it, never recomputing it."""
+    import evalrun_record_cases as RC
+    case = "overlay-verify"
+    bundle, plan, cid, arm, _ = RC.recorded_bundle(tmp, case)
+    code, v = _verify(*_copy_pair(tmp, bundle, f"{case}-as-made")[:1], tmp)
+    expect(code, 0, f"{case}: the copied pair verifies as made")
+    parts = (v.get("aiEvaluation") or {}).get("parts") or {}
+    expect((v.get("aiEvaluation") or {}).get("complete"),
+           all(parts.get(k) is True for k in ("appBundle", "appEvaluation", "overlayBundle", "overlayEvaluation")),
+           f"{case}: aiEvaluation.complete is the conjunction of its four parts")
+    expect((v.get("evaluation") or {}).get("complete"), (v.get("aiEvaluation") or {}).get("complete"),
+           f"{case}: the pair's evaluation.complete is aiEvaluation.complete")
+
+    # an overlay bound to another app bundle: the app copy's manifest is not the one the overlay was planned over
+    ov, app2 = _copy_pair(tmp, bundle, f"{case}-foreign")
+    m = load(app2 / "manifest.json")
+    m["note"] = "another app bundle"
+    (app2 / "manifest.json").write_text(json.dumps(m, indent=1), encoding="utf-8")
+    code, v = _verify(ov, tmp)
+    check(code != 0 and "binding-app-manifest" in _kinds(v),
+          f"{case}: an overlay over another app bundle is refused by its binding (exit {code}, defects {_kinds(v)})")
+    expect((v.get("aiEvaluation") or {}).get("complete"), False, f"{case}: a foreign overlay's aiEvaluation is not complete")
+
+    # an edited import receipt: its import document no longer hashes as the receipt records it (each edit below also
+    # leaves the disposition older than its receipt: runcontrol's disposition-stale, beside this module's fault)
+    ov, _ = _copy_pair(tmp, bundle, f"{case}-import")
+    rel = f"receipts/{cid}__{arm['armId']}.json"
+    rc = load(ov / rel)
+    rc["imported"]["sourceSha256"] = "0" * 64
+    (ov / rel).write_text(json.dumps(rc, indent=1), encoding="utf-8")
+    _rehash(ov, rel)
+    code, v = _verify(ov, tmp)
+    check(code != 0 and _kinds(v) == ["disposition-stale", "import-source-changed"],
+          f"{case}: an edited import receipt is the module's fault import-source-changed (exit {code}, defects {_kinds(v)})")
+
+    # a module probe's receipt moved to a row the overlay plan did not plan for that probe
+    probe = next(p for p in sorted((bundle / "receipts").glob("patch.discovery-installed__*.json")))
+    ov, _ = _copy_pair(tmp, bundle, f"{case}-unplanned")
+    rel = f"receipts/{probe.name}"
+    rc = load(ov / rel)
+    rc["checkId"] = cid
+    (ov / rel).write_text(json.dumps(rc, indent=1), encoding="utf-8")
+    _rehash(ov, rel)
+    code, v = _verify(ov, tmp)
+    check(code != 0 and _kinds(v) == ["disposition-stale", "receipt-not-planned"],
+          f"{case}: a probe receipt for a row not planned for it is receipt-not-planned (exit {code}, defects {_kinds(v)})")
+
+    # a probe role bound to another program than the one the overlay plan froze
+    ov, _ = _copy_pair(tmp, bundle, f"{case}-role")
+    rc = load(ov / rel)
+    progs = (rc.get("consumed") or {}).get("programs") or {}
+    role = next(k for k in progs if k != "controller")
+    progs[role]["digest"] = "folder:" + "e" * 64
+    (ov / rel).write_text(json.dumps(rc, indent=1), encoding="utf-8")
+    _rehash(ov, rel)
+    code, v = _verify(ov, tmp)
+    check(code != 0 and _kinds(v) == ["disposition-stale", "tool-identity-mismatch"],
+          f"{case}: a probe role bound to another program is a fault (exit {code}, defects {_kinds(v)})")
+
+    # a media item that states no app fingerprint: unassessed, never evidence
+    run = tmp / f"{case}-run" / "ai"     # recorded_bundle's overlay run (to_overlay)
+    shot = tmp / f"{case}-shot.png"
+    shot.write_bytes(b"\x89PNG\r\n\x1a\nno-fingerprint")
+    media = tmp / f"{case}-media.json"
+    media.write_text(json.dumps([{"path": str(shot), "mediaKind": "native-screenshot", "state": "baseline",
+                                  "subject": {"checkId": cid, "armId": arm["armId"], "description": "a shot"},
+                                  "provenance": {"tool": "devbench", "capturedUtc": "2026-09-11T00:00:00Z"}}]), encoding="utf-8")
+    mb = tmp / f"{case}-media-bundle"
+    r = evalcontrol(["bundle", "--run", run, "--out", mb, "--media", media], cwd=tmp)
+    expect(r.returncode, 0, f"{case}: the overlay bundles with the media file")
+    mman = load(mb / "manifest.json") or {}
+    check([u.get("path") for u in mman.get("unassessedMedia") or [] if shot.name in str(u.get("path"))] != []
+          and not [e for e in mman.get("evidence") or [] if e.get("kind") == "media"],
+          f"{case}: a media item with no app fingerprint is unassessed, not evidence")
+
+    # aiEvaluation has one owner: evalreport takes the pair's completeness from verify, never recomputing it
+    sys.path.insert(0, str(HERE.parent))
+    import evalreport
+    man = load(bundle / "manifest.json") or {}
+    app = (bundle / man["overlay"]["appBundleFromBundle"]).resolve()
+    evalreport.AI_BUNDLES[str(app)] = bundle
+    try:
+        view = evalreport.Bundle(app)
+        expect((view.disposition.get("evaluation") or {}).get("complete"), None,
+               f"{case}: the joined view states no completeness of its own")
+        view.adopt_verdict({"evaluation": {"complete": True, "claim": "findings"},
+                            "aiEvaluation": {"complete": True, "parts": {"appEvaluation": False}}})
+        expect(view.disposition["evaluation"].get("complete"), True,
+               f"{case}: evalreport says the completeness verify stated, whatever the parts")
+    finally:
+        evalreport.AI_BUNDLES.pop(str(app), None)
+
+
+CASES = {"overlay-verify": overlay_verify, "case-10": case_10, "case-51": case_51, "C1933": c1933, "plan-oracles": plan_oracles, "record-oracles": record_oracles,
          "case-803": case_803, "advice-oracles": advice_oracles}
 
 
