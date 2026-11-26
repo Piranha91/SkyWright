@@ -7978,6 +7978,6 @@ Judge a placed-object conflict by eye and fix it by moving or turning a referenc
 
 Inputs: With no arguments: the launcher (Start tab; workbench_act open_profile, select_mods, select_probes, set_output, set_work_folder, run), in free mode on any MO2 instance or houseCARL mode (WB_HOUSECARL_LAUNCH or the housecarl entry of ~/.claude.json); WB_MACHINE for the pipeline's machine file. Or --bundle DIR [--arm A] (a verified evaluation bundle; WB_OUTPUT names the Output Folder writes go under), then viewprobe's command line; optionally WB_SCRIPT steps for a headless run, and WB_MCP_PORT for the MCP state tools on 127.0.0.1.
 
-Outputs: A window with the launcher, the run's ranked Conflicts and Findings tabs, a Records tree and the built scene; staged edits; a new patch plugin under the Output Folder, or a one-sentence refusal; with WB_MCP_PORT, workbench_state, workbench_act and the forwarded houseCARL tools over Streamable HTTP.
+Outputs: A window with the launcher, the run's ranked Conflicts and Findings tabs, a Records tree and the built scene; staged edits; a new patch plugin under the Output Folder, or a one-sentence refusal; with WB_MCP_PORT (or --mcp-port N), the two MCP tools workbench_state and workbench_act over Streamable HTTP on 127.0.0.1.
 
 Source: [_geometry-harness/workbench/Program.cs](../_geometry-harness/workbench/Program.cs) — `/// <summary>Entry point: viewprobe's own command line builds the scene`
