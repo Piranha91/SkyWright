@@ -129,6 +129,7 @@ def old_listed(tmp: Path, name: str, kind: str, relabel: str | None) -> None:
           (ROWS, f"enrichment {kind}") in listed and any(p == RECEIPT for p, _ in listed), f"notChecked {sorted(listed)}")
     check(f"{name}: one sentence, printed once, counts them and names who checks them",
           len(said) == 1 and str(len(listed)) in said[0] and "houseCARL integration module" in said[0]
+          and "with no overlay are judged by nothing now" in said[0]   # an older bundle has no overlay (t14 item 4)
           and said[0].rstrip().endswith("."), f"lines {said!r}")
 
 

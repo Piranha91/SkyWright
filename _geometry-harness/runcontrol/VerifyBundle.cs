@@ -20,13 +20,15 @@ public static class VerifyBundle
     /// check or a credited receipt of a kind this SkyWright does not run is refused.</summary>
     public const int CurrentRegistryVersion = 5;
 
-    const string NotCheckedWhy = "made before the AI-side checks left SkyWright's registry: hashed and chained, not judged here";
+    const string NotCheckedWhy = "made before the AI-side checks left SkyWright's registry: hashed and not judged here";
 
     /// <summary>The one sentence verify-bundle prints for the rows it did not judge.</summary>
     public static string NotCheckedSentence(IReadOnlyCollection<object?> rows) =>
         $"verify: {rows.Count} evidence row(s) are of kinds this SkyWright does not check ("
         + string.Join(", ", rows.Select(r => Ev.Str(PyValue.Dict(r)["kind"])).Distinct(StringComparer.Ordinal))
-        + "): they are hashed and chained, not judged; the houseCARL integration module checks them.";
+        + "): they are hashed and not judged here. An AI-side evaluation's rows are checked by the houseCARL integration "
+        + "module when the bundle has its overlay; the rows of an older SkyWright's bundle with no overlay are judged by "
+        + "nothing now.";
 
     // (v or {}) of a loaded file.
     static PyDict Loaded(string path) => Ev.OrEmpty(PyJson.LoadEvalFile(path));

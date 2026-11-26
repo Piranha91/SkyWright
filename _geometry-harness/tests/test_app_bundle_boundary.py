@@ -58,7 +58,9 @@ def b1_b2(tmp: Path) -> None:
           f"exit {r.returncode}; bundle {json.dumps(bundle)[:300]}; stderr {r.stderr.strip()[-300:]!r}")
     lines = [ln for ln in r.stdout.splitlines() if "does not check" in ln]
     check("B2 one sentence says how many evidence rows are of kinds this SkyWright does not check, and who checks them",
-          len(lines) == 1 and "houseCARL integration module" in lines[0] and lines[0].rstrip().endswith("."),
+          len(lines) == 1 and "houseCARL integration module" in lines[0] and lines[0].rstrip().endswith(".")
+          # an older bundle has no overlay: the sentence says nothing judges its rows now (t14 item 4)
+          and "with no overlay are judged by nothing now" in lines[0],
           f"lines {lines!r}; stdout {r.stdout.strip()[-400:]!r}")
     listed = {(x.get("path") or "") for x in (bundle.get("notChecked") or [])}
     want = {"enrichment/record-rows/records.cell-attributes__baseline.json", "receipts/records.cell-attributes__baseline.json"}
