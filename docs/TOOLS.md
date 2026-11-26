@@ -307,6 +307,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Is a same-named plugin from another folder planned and reported as itself, not as the measured copy?](#tool-integration-housecarl-tests-test_same_name_variant.py) — `integration/housecarl/tests/test_same_name_variant.py`
 - [Is a selection whose only effect is its meshes evaluated in place: do object overlap and placement contact apply when a selected folder's mesh wins for a placed object and differs (with a plugin that places nothing or none), does a mesh-only mod get its new crossings, and is the scope line built from the mesh reach?](#tool-_geometry-harness-tests-test_asset_only_selection.py) — `_geometry-harness/tests/test_asset_only_selection.py`
 - [Is an AI-side evaluation complete, and does its overlay bundle still bind to the app bundle it was made over?](#tool-evalcontrol) — `evalcontrol`
+- [Is each overlap pair of a combined setup new, inherited, changed, absent or unresolved against each source setup?](#tool-overlap-attribution) — `overlap-attribution`
 - [Is the machine idle enough to launch the game or time a heavy job?](#tool-machineidle) — `machineidle`
 - [Is this evaluation settings file valid?](#tool-evalsettings.validate) — `evalsettings.validate`
 - [Is this flip plan one the live driver can honour?](#tool-switchflip.validate) — `switchflip.validate`
@@ -413,7 +414,6 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Which occlusion-plane edits does a plane patch make (new, moved or resized, disabled, restored), and over whose version?](#tool-planeassess) — `planeassess`
 - [Which occlusion-plane edits does this patch make, and over whose version?](#tool-planeassess.patch) — `planeassess.patch`
 - [Which of the controller suite's record cases (imports and rows derived from them) hold on the AI-side overlay?](#tool-integration-housecarl-tests-evalrun_record_cases.py) — `integration/housecarl/tests/evalrun_record_cases.py`
-- [Which overlap findings require both mods rather than already occurring in a source setup?](#tool-overlap-attribution) — `overlap-attribution`
 - [Which patches sit on disk not enabled, which runtime files point at plugins or records the order lacks, which two mods' swaps meet on one base, which scripts lack a parent or called class, and what names an empty dummy plugin?](#tool-lookprobe) — `lookprobe`
 - [Which placed objects overlap across mods under this configuration?](#tool-overlapprobe) — `overlapprobe`
 - [Which placement and navmesh types and members exist in the pinned Mutagen API?](#tool-mutagenprobe) — `mutagenprobe`
@@ -2207,7 +2207,7 @@ Modifiers (do not select a separate mode):
 
 **What are the widths of these navmesh corridors, and how do live paths compare with the route rule?**
 
-Evaluate a narrow passage using navmesh width and, when supplied, measured travel evidence.
+An instrument for calibrating the route rule: measure navmesh corridor widths and read walked in-game arms back through the rule. No scan the app starts runs it; for a passage a mod blocks, the check is route cut (geometry.route-cut), which runs the same rule through blockprobe. --plugin is read from the game's Data folder only, so it reads Bethesda's plugins, not a mod's.
 
 Inputs: One plugin and selected cell navmesh, optional recorded live paths.
 
@@ -3147,7 +3147,7 @@ Modifiers (do not select a separate mode):
 
 **How far is the nearest actor-solid surface from a standing body's column at a point (clear <Cell> <file>)?**
 
-Investigate actors walking above a floor or beneath its surface by measuring navmesh-to-floor separation.
+An instrument for investigating actors that seem to walk above a floor or sink into it. No scan the app starts runs it, and a navmesh-to-floor offset is not a clash by itself: in game the feet follow the collision floor, not the navmesh. The floor rule a modder relies on is already part of the route-cut, conditional-geometry and navmesh-ownership checks.
 
 Inputs: Winning navmesh and physical floor surfaces for selected cells.
 
@@ -3226,7 +3226,7 @@ Modifiers (do not select a separate mode):
 
 **Do the winning mesh bounds disagree with the plugin's stored bounds?**
 
-Investigate culling or spatial-query anomalies where stored object bounds may not enclose the winning mesh.
+An instrument for investigations: compare each record's stored object bounds with the winning mesh. No scan the app starts runs it. A disagreement is not a clash by itself: measured on 2026-11-26 on the lab order, Bethesda's own meshes disagree with their stored bounds more often than meshes that come from a mod (13.7 % against 8.4 % more than a quarter off), and what stale bounds do in game has not been tested.
 
 Inputs: Winning mesh files and plugin-stored object bounds.
 
@@ -4649,7 +4649,7 @@ Source: [integration/housecarl/modnames.py](../integration/housecarl/modnames.py
 
 **What moves in this mesh, through which animations, and what space does the moving part sweep?**
 
-Read an animated object's motion (NIF sequences and controllers, behaviour-graph clips), pose it at a named animation time or rest state, or measure its swept region before judging a clash with it.
+An instrument for investigations: read an animated object's motion (NIF sequences and controllers, behaviour-graph clips), pose it at a named animation time or rest state, or measure the space its moving part sweeps. No scan the app starts runs it. Its engine is used by the overlap and contact checks only when --motion swept is asked for, which no scan passes.
 
 Inputs: A mesh, clip or behaviour-graph path, resolved through a load order or a loose Data-like folder.
 
@@ -4794,7 +4794,7 @@ Source: [_geometry-harness/niflyprobe/Program.cs](../_geometry-harness/niflyprob
 
 **Which clashes between mods did a whole-order pass find for an added mod, at a place, or between two plugins, and where do I look first?**
 
-After a whole-order pass (orderpass.py), to read its leads for a mod you are adding, a cell you care about or a pair of plugins, with dummies, no-signal plugins and unassessed checks named.
+After a whole-order pass (orderpass.py), to read its leads for a mod you are adding, a cell you care about or a pair of plugins, with dummies, no-signal plugins and unassessed checks named. Leads are places to open, not verdicts; the verdicts are the checks' own. No scan the app starts runs it.
 
 Inputs: A pass folder: ordermap's map.json and the checks' outputs; optionally a dummy list or cell-name table for a map that lacks sizes or names.
 
@@ -4842,7 +4842,7 @@ Modifiers (do not select a separate mode):
 
 **Which plugins and mod folders in a whole load order meet, and how: shared records, cells, neighbouring cells, placed bases, form links and asset paths compared by bytes?**
 
-Before a whole-order pass (orderpass.py), or to see which installed plugins meet a given one: one index over every plugin and mod folder, with every cell's FormKey, EditorID, worldspace and grid, and each plugin's size so an empty header-only plugin (a dummy) can be told.
+A helper of the whole-order pass (orderpass.py), or to see which installed plugins meet a given one: one index over every plugin and mod folder, with every cell's FormKey, EditorID, worldspace and grid, and each plugin's size so an empty header-only plugin (a dummy) can be told. It finds no clash, and no scan the app starts runs it.
 
 Inputs: An MO2 instance, profile and game folder (or a --order candidate file).
 
@@ -4885,7 +4885,7 @@ Modifiers (do not select a separate mode):
 
 **How do I run every check over a whole load order once, and get its leads with an added mod's view first?**
 
-Screen a whole order (or the order plus a mod you are adding) without picking pairs first; read the result with orderleads.py.
+Screen a whole order (or the order plus a mod you are adding) without picking pairs first; read the result with orderleads.py. A development driver, not a check: it runs the existing checks once over the order and their rows become leads. No scan the app starts runs it; the app compares the profile with and without the mods the modder ticks.
 
 Inputs: An MO2 instance, profile and game folder (or a --order file) and the built probes.
 
@@ -4998,9 +4998,9 @@ Modifiers (do not select a separate mode):
 
 ### overlap-attribution
 
-**Which overlap findings require both mods rather than already occurring in a source setup?**
+**Is each overlap pair of a combined setup new, inherited, changed, absent or unresolved against each source setup?**
 
-Decide whether a combined setup introduces a geometry conflict or inherits it from a source configuration.
+A helper for overlap investigations: label each pair of a combined scene against scenes captured without some of the mods. New means absent from a setup without one of the mods, so pairs inside one mod are new too: it is not a test that an overlap needs both mods. No scan the app starts runs it; the app's overlap check (geometry.object-overlap) classifies pairs its own way.
 
 Inputs: Separate source and combined overlap results with matching scope.
 
@@ -5023,7 +5023,7 @@ Modifiers (do not select a separate mode):
 
 **How can I rank and group overlap findings into local incidents while retaining every member?**
 
-Reduce a large collision finding list to reviewable incidents without dropping the underlying pairs.
+A helper for overlap investigations: rank and group a long list of overlap pairs into local incidents (one cell, a shared object, within the policy's incident radius) without dropping any pair. No scan the app starts runs it. The app's own grouping owns the review rows (one scene per cell, joined by any shared object, keyed by data/scene-policy.json); triage's 384-unit incident rule is not ported into the app.
 
 Inputs: Overlap findings with subject/counterpart identities.
 
@@ -6147,7 +6147,7 @@ Modifiers (do not select a separate mode):
 
 **Which installed plugins should one new mod be evaluated against, and why is each other plugin left out?**
 
-Before evaluating a mod a user wants to add to a working order: pick the installed plugins it shares records, cells, neighbouring cells, asset paths or placed bases with.
+A helper for choosing what to check: before evaluating a mod a user wants to add to a working order, pick the installed plugins it shares records, cells, neighbouring cells, asset paths or placed bases with. It finds no clash, and no scan the app starts runs it; in the app the modder ticks the mods to check instead.
 
 Inputs: A newcomer (a mod folder or plugin files) and an installed order (an MO2 profile read by path, or a --order candidate file).
 
