@@ -21,7 +21,7 @@ public sealed class DoorsNearTests : IClassFixture<DoorsNearTests.World>
         readonly string _dir;
         public LoadOrderResolver Resolver { get; }
         /// <summary>The plugin files this world wrote, in load order (what <see cref="Resolver"/> was built from), for a
-        /// test that lays them out as a load order of its own (the houseCARL integration module's nearprobe tests).</summary>
+        /// test that lays them out as a load order of its own.</summary>
         public IReadOnlyList<string> PluginPaths { get; }
 
         static readonly SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
