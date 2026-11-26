@@ -5,6 +5,7 @@ most one more saying how to check it.
 
 ## Unreleased
 
+- **A lab evaluation keeps its pictures and report across a rebuild of unchanged code, and a redone capture whose frames match the described ones within one colour level in at most 0.01 % of their pixels no longer asks for the pictures to be described again.** Programs are built without a commit stamp (the commit is in each program's `provenance/build.json`); see `integration/housecarl/AI-EVALUATION.md` section 5.
 - **SkyWright's scan, its finalize and its bundle check know nothing only an AI-side evaluation uses: an imported record check's rows, their origin, their reuse, the hard links of an import folder, a manual decision on an imported row and the discovery result kind are the houseCARL integration module's (`evalcontrol`), passed in as add-only rules where runcontrol's own steps are reused.** Run `runcontrol --self-test` (the `boundary:` cases) and `evalcontrol --self-test`.
 - **An accepted import whose prerequisite fails later is blocked and recorded by the integration module's evaluate (it was marked reused there), and one no longer credited keeps its cause.** Run `evalcontrol --self-test` ("sweep and derived rows: an accepted import whose prerequisite fails later, and one that is no longer credited").
 - **runcontrol evaluating an older SkyWright's plan accounts a row whose status it no longer knows (`mcp-only`, `live-import`) as unsupported in one sentence, "plan the run again to evaluate it", instead of launching it.** Plan the run again with this SkyWright to evaluate it.
