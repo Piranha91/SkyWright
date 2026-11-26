@@ -11,6 +11,15 @@ skill (`integration/housecarl/claude-plugin/skills/`).
 **Where the checks are today.** The record import (§1), the live receipts' rule (§2) and the media rule are applied
 by this module's `evalcontrol` (`import`, `bundle --media`) on the AI-side overlay.
 
+**What else is this module's.** `evalcontrol evaluate` runs the module's probes as children: the launch kind
+`patchfind` covers `patchfind`, `fomodprobe` and `poolprobe` (each writes a schema-1 hit list), and `adviceprobe` is a
+kind of its own; their results are of the result kind `discovery`, read as a catalogue. The same evaluate blocks an
+accepted import whose prerequisite fails later and keeps the cause of one no longer credited. `evalcontrol finalize`
+adds the `importedEvidence` block and its STATUS.md section, the media line and the families of the record imports
+and the media row; a manual decision on an `mcp-only` row never completes it; `evalcontrol bundle` hard-links the
+overlay's `imports/` files. runcontrol reuses its own steps for all of this with these rules passed in, and its own
+scan uses none of them.
+
 ## 1. Importing an existing MCP result
 
 

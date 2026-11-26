@@ -46,7 +46,7 @@ nothing else. It carries an integer `registryVersion` and its
 sha256 is recorded in every plan; a plan whose registry hash no longer matches cannot be finalized (§7).
 
 ```
-{ "schemaVersion": 1, "registryVersion": 1, "skill": "world-edit-compatibility",
+{ "schemaVersion": 1, "registryVersion": 1,
   "families": [ { "id": "loadability", "title": "...", "packetRow": "..." }, ... ],
   "checks": [ { "id": "geometry.navmesh-ownership", "family": "geometry", "title": "...", "required": true,
                 "applicability": { "trigger": <expr>, "note": "...", "dependsOnExtents": ["alias-fill", ...] },
@@ -55,13 +55,15 @@ sha256 is recorded in every plan; a plan whose registry hash no longer matches c
                 "adapter": { "kind": <kind>, "exe": "...", "args": [...], "reverse": true|false, "commonFlags": true|false,
                              "output": "conflict-file" | "json" | "text" | null, "result": {...}, "population": "...", "state": "...",
                              "statesFlag": "--state", "statesFileFlag": "--states-file" },
-                "evidence": { "strength": "record-fact" | "calibrated-inference" | "engine-observation" | "supplied-media",
+                "evidence": { "strength": "record-fact" | "calibrated-inference" | "engine-observation",
                               "claim": "<CLAIMS.md row>" | null, "limits": "..." },
                 "manualDecisionAllowed": false, "unsupportedReason": "..." } ] }
 ```
 
-**Adapter kinds** (closed): `scopeprobe`, `ordersweep-probe`, `probe-emit`, `probe-json`, `probe-target`, `adviceprobe`,
-`patchprobe`, `derived`, `media`, `manual`, `mcp-only`, `live-import`, `unsupported`. A kind that runs a child carries `commonFlags` (whether
+**Adapter kinds** (closed): `scopeprobe`, `ordersweep-probe`, `probe-emit`, `probe-json`, `probe-target`, `derived`,
+`manual`, `unsupported`. The AI-side kinds (`media`, `mcp-only`, `live-import`, `adviceprobe`, `patchfind`) are the
+integration module's: [`AI-EVALUATION.md`](../integration/housecarl/AI-EVALUATION.md). `patchprobe` is retired and
+appears only in older bundles (§8). A kind that runs a child carries `commonFlags` (whether
 the probe accepts `--instance/--profile/--game`; every child also receives them through `HOUSECARL_MO2_INSTANCE`,
 `HOUSECARL_MO2_PROFILE`, `HOUSECARL_GAME_PATH`) and, for a `json`/`text` output, a `result` (§4.5). A kind that runs no child
 carries `output: null`. A probe whose emit judges a population other than the arm's declares it (`adapter.population`,
@@ -85,7 +87,7 @@ evaluation incomplete on it. A trigger names record kinds because a check is ABO
 comes from `scopeprobe`, by Mutagen's own enumeration, never from a list in a tool.
 
 **Validation refuses, by name:** a duplicate id; an unknown family or kind; a required check with no trigger; a prerequisite
-naming an unknown id or forming a cycle; a check on every arm resting on a baseline-only prerequisite; a `manual`, `mcp-only`
+naming an unknown id or forming a cycle; a check on every arm resting on a baseline-only prerequisite; a `manual`
 or `unsupported` check without `unsupportedReason`; a `json`/`text` adapter without `result`, a `result` without a named group
 or with a regex on json; a child-running kind without `commonFlags`; a no-child kind carrying one; a null `claim` without
 `limits` saying why.
@@ -112,7 +114,7 @@ What the controller needs from it, and nothing more:
 | `evidence.strength` | copied into the receipt; never folded into execution status |
 | `evidence.regeneration` | optional; printed under STATUS.md's regeneration needs |
 | `manualDecisionAllowed` | whether a `decisions/` file may satisfy this check |
-| `unsupportedReason` | required for `manual` / `mcp-only` / `unsupported`; printed wherever the check is accounted |
+| `unsupportedReason` | required for `manual` / `unsupported`; printed wherever the check is accounted |
 
 ---
 
@@ -120,7 +122,7 @@ What the controller needs from it, and nothing more:
 
 ```
 runcontrol plan --registry R [--scope scope.json] --candidates DIR [--alt FILE]... [--supplied SPEC]...
-             [--depth standard|deep | --states baseline[,NAME...]] [--settings FILE]
+             [--depth standard|deep | --states baseline[,NAME...]]
              [--select TOKEN,...] [--exclude CHECK=reason]... [--opt-in CHECK]...
              [--budget-minutes N] [--max-candidates N] --out RUN
              [--instance D --profile N --game D --harness D --probe-args S --probe-cmd NAME=CMD
@@ -132,7 +134,7 @@ runcontrol plan --registry R [--scope scope.json] --candidates DIR [--alt FILE].
 | `planId` | 12 hex of the sha256 over the canonical plan JSON with `planId` removed |
 | `registry` | path, `registryVersion`, and the registry FILE's sha256 |
 | `tools` | per registry exe, diagnostic: the apphost `exeSha256`, the managed `dllSha256`, the `coreDllSha256`, and `present` |
-| `toolIdentity` | **the identity of every program this plan can launch, frozen with it** (§3.1): `{contract: 1, rule, programs: {"probe:<exe>" \| "helper:conflictdiff" \| "controller": {kind, state, digest, locator, files \| inputs}}}`. `run`, `resume` and `import-results` refuse a plan without it (`plan-identity-outdated`) |
+| `toolIdentity` | **the identity of every program this plan can launch, frozen with it** (§3.1): `{contract: 1, rule, programs: {"probe:<exe>" \| "helper:conflictdiff" \| "controller": {kind, state, digest, locator, files \| inputs}}}`. `run` and `resume` refuse a plan without it (`plan-identity-outdated`) |
 | `runner` | in a plan made by the Python controller, the sha256 of its scripts (diagnostic; the gating record is `toolIdentity.programs.controller`) |
 | `schemaVersion` | **2**. A plan that declares anything else is refused by name (`plan-schema-unsupported`) |
 | `requestProviders` | **`arm-view`**: every `arms[].requested.providers` is that arm's own view (below). A plan without it is refused by name where it would bind a new receipt (`plan-request-outdated`) |
@@ -148,7 +150,7 @@ runcontrol plan --registry R [--scope scope.json] --candidates DIR [--alt FILE].
 | `states` | `selected` (default `["baseline"]`), `depth` (`standard`, `deep` or `explicit` when `--states` named them), `notExplored` (one row per check whose `inputs.states` is `all`) and, for `deep`, `fromCensus` {`generator`, `sha256`, `checks`}: each listed check's states are generated at run time by `stategen.py` from that arm's own accepted `state.switch-census` output and written to `outputs/<check>/<arm>.states.json` (the list, the not-explored rows with reasons, the census and generator hashes) and `<arm>.states.txt` (handed to the probe as `statesFileFlag`); the receipt's `states` block carries both files' hashes and the count. An arm whose census yields no state is accounted `not-applicable` with the reason. The disposition's `unassessed.statesNotExplored` adds every arm's generated rows, each with its `checkId` and `armId` |
 | `checks[]` | `checkId`, `family`, `required`, `applicability`, `applicabilityEvidence`, `prerequisites`, `inputs`, `evidence`, `adapter`, `arms: [{armId, status}]`, `status` |
 | `budgets` | `minutes`, `maxCandidates`, `candidatesHeldBack` (this plan's held-back arms AND `candidates.json`'s own `Budget`), `statesNotExplored` |
-| `explicitDecisions` | resolved `--select`, the raw tokens, `--exclude` with reasons, and `touched` — every check a narrowing flag touched, whatever status won; `optIn` with `optInSource` (a flag, or the saved `evaluation.liveSwitchCheck: always`); `settings` — the saved evaluation settings this plan froze: `{path, sha256, schemaVersion, source: "file" \| "built-in defaults", options: {KEY: {value, source: flag \| environment \| file \| built-in default}}, newOptions}`. `run`/`resume` read this copy, never the file |
+| `explicitDecisions` | resolved `--select`, the raw tokens, `--exclude` with reasons, and `touched` — every check a narrowing flag touched, whatever status won; `optIn` with `optInSource` (`flag` for each). `plan` reads no evaluation settings file: `--settings` is refused, and the measuring choices come by flag |
 | `options` | instance / profile / game / harness / probeArgs / probeCmd / diffTolerance / noReverse / population; hashed into every receipt's `optionsSha256` |
 | `population` | the plan's population (P25): `{scoped: true, file: "population.json", sha256, identity, plugins, mods, targets, scopedProbes, scopedChecks, wholeOrderChecks: {checkId: reason}, note, adoptedFrom?}` or `{scoped: false, reason, wholeOrderChecks}`. The population is the plan's targets plus every plugin and mod folder the arms differ by (presence, or relative order); `RUN/population.json` names each plugin by path and sha256 and each mod folder by path, and is frozen with the plan. The ordersweep adapter passes it to the `scopedProbes` only (`--population`, part of their request key by its hash), and the controller passes it to the `probe-emit` checks in `scopedChecks` (`scopedChecks` lists every scoped check by id); every other check runs on the whole order and is listed with its reason. The state check stays on the whole order when a delta plugin carries RACE records (every actor band reads them). A scoped emit's `Population` is `<population>+population:<first 12 of sha256>`. The plan is unscoped, with the reason, whenever a file cannot be stated (a plugin without one agreed path and hash, a mod folder without `--instance`, a delta mod folder shipping a `*_SWAP.ini`); `--population-from FILE` adopts another plan's file byte for byte when it covers this plan's own population, so a sibling evaluation is scoped identically. A plan without this key runs exactly as before, and a plan without `scopedChecks` runs its `probe-emit` checks on the whole order |
 
@@ -157,7 +159,7 @@ inside a Windows path; the full candidate file name stays in the arm record.
 
 **Planned status, first match wins.** `applicability: no` → `not-applicable`; an opt-in check (`optIn: true`) the
 caller did not name with `--opt-in` → `not-opted-in`; adapter kind
-`unsupported` / `mcp-only` / `manual` / `live-import` → that kind (the runner could not have run it, selected or not);
+`unsupported` / `manual` → that kind (the runner could not have run it, selected or not);
 `unsupported-for-arm` per arm; `blocked-payload-missing`; then `--exclude` → `excluded`; then not in `--select` →
 `skipped-user` (optional checks too — `required` decides whether a skip *blocks completion*, not whether it is
 *recorded*); then a `--max-candidates` held-back arm → `skipped-budget`; else `planned`.
@@ -176,8 +178,8 @@ configuration the arm asked for — and a reader that finds nothing to check mus
 
 **A plan frozen before per-arm providers is refused where it would bind a new receipt.** Such a plan carries no
 `requestProviders` and copied the scope's providers onto every arm, so an arm whose `Mods` differ from the scope's
-view has a request no honest child of that arm can match — an import of what it really read is refused
-`identity-mismatch`, and one stating the scope's view would be accepted. `run`, `resume` and `import-results`
+view has a request no honest child of that arm can match — an emit of what it really read is refused
+`identity-mismatch`, and one stating the scope's view would be accepted. `run` and `resume`
 refuse it as **`plan-request-outdated`** (exit 2), with the next action "plan again from the same registry, scope
 and candidates". The plan is never re-read under the new meaning: `arms[].mods` does not keep an empty `Mods`
 apart from an absent one. `finalize`, `bundle`, `status` and `verify-bundle` bind nothing new and read such a plan
@@ -204,7 +206,7 @@ verification reads no live path at all (§8).
 | `scripts` | the controller of a plan made by the Python controller (read, never written now) | the scripts whose code decided a run's, resume's or import's result. Today's controller is `runcontrol`, identified as a `package`: the folder it runs from (`Tools/runcontrol/` of a build) |
 
 `programs` holds only what can launch under this plan: the controller; the probe of every child-launching check
-(`scopeprobe`, `ordersweep-probe`, `probe-emit`, `probe-json`, `probe-target`, `adviceprobe`, `patchprobe`) that has
+(`scopeprobe`, `ordersweep-probe`, `probe-emit`, `probe-json`, `probe-target`) that has
 a planned arm; conflictdiff when a swept check plans a non-baseline arm. A tool whose checks are all excluded,
 skipped, not applicable, not opted in or never executable is not recorded and never gated. A package with no folder
 is recorded `state: absent`; still absent at run time its checks are `blocked(tool-missing)` as before and nothing
@@ -235,22 +237,19 @@ check or an import), never copied from the plan.
 | `probe-emit` | an emitting probe with `--order` and `--emit`, no `--base`: per arm, no reverse arm | as `inputs.arms` |
 | `probe-json` | a probe with `--json` | as `inputs.arms` |
 | `probe-target` | takes the target positionally, no `--order`: baseline only; other arms `unsupported-for-arm` | baseline |
-| `adviceprobe` | forced offline: `--offline`, or `--refresh offline`. A registry asking for a network refresh is `blocked(network-refused)`, never quietly downgraded | as `inputs.arms` |
-| `patchprobe` | local patch/installer discovery. **It indexes the machine on every run (~2 minutes per arm)**, so an all-arms discovery check costs that per arm - budget for it, and prefer `--budget-minutes` over discovering the cost mid-run | as `inputs.arms` |
 | `derived` | computed from other receipts; runs no child (§4.5) | all |
-| `media` | never run: `blocked(no-identified-media)` unless `bundle --media` identifies matching evidence | as `inputs.arms` |
 | `manual` | never run: execution `manual`; a `decisions/` file is read at finalize | as `inputs.arms` |
-| `mcp-only`, `unsupported` | never run; **accounted**, with `unsupportedReason` | as `inputs.arms` |
-| `live-import` | never run by the controller (it launches no game); opt-in only (`optIn: true`, §4.9); accounted `live-import` until an import completes it | as `inputs.arms` |
+| `unsupported` | never run; **accounted**, with `unsupportedReason` | as `inputs.arms` |
+
+The AI-side kinds (`adviceprobe`, `patchfind`, `media`, `mcp-only`, `live-import`) are run or accounted by the
+integration module: [`AI-EVALUATION.md`](../integration/housecarl/AI-EVALUATION.md).
 
 The probe-specific FLAGS live in `adapter.args` as registry data, with placeholders the controller fills:
-`{order}`, `{emit}`, `{json}`, `{out}`, `{run}`, `{arm}`, `{target}`, `{nexusId}`, `{switchMap}`, `{pair}`. A
+`{order}`, `{emit}`, `{json}`, `{out}`, `{run}`, `{arm}`, `{target}`, `{switchMap}`. A
 placeholder is substituted in the SHAPE the args give it (`--target {target}` repeats with its flag; a bare
 `{target}` repeats positionally), and a placeholder whose source is absent blocks the check by name rather than
-reaching the probe literally. `{pair}` on the BASELINE arm is the plan-wide pair set - every candidate arm's
-relative-order flips plus every supplied arm's (target, supplied plugin) pairs - because the baseline is the
-reference and what a patch must reconcile is what the other arms move; on any other arm it is that arm's own
-pairs. `blocked(no-pair-source)` only when that arm's set and the plan-wide set are both empty. A new probe is a registry row, not a new
+reaching the probe literally. `{nexusId}` and `{pair}` are filled only for the integration module's own checks
+([`AI-EVALUATION.md`](../integration/housecarl/AI-EVALUATION.md)). A new probe is a registry row, not a new
 verb in the controller.
 
 **`scopeprobe` on an add/remove arm — a legal target omission.** Every arm's scopeprobe child is told every plan
@@ -324,12 +323,12 @@ are identical (`plannedPath` and `emitPath`) — the limit travels with the rece
 without pretending their paths were the same.
 
 **An accounting receipt is rewritten only when what it states changes.** A row that launched nothing in an
-invocation (not-applicable, skipped, unsupported, mcp-only, manual, live-import, blocked, stopped) is accounted on
+invocation (not-applicable, skipped, unsupported, manual, blocked, stopped) is accounted on
 every `run` and `resume`. When the receipt already at its path is this plan's and this (check, arm, part)'s and equals
 the new one in every field but `receiptId`, `endedUtc` and `parentRunId`, the file is left byte-for-byte as it is. A
 kept receipt's `receiptId`, `endedUtc` and `parentRunId` therefore name the invocation that FIRST wrote that account;
 the journal line and the ledger entry's `runId` name the latest invocation that accounted it. Any other difference (a
-status, cause, note, superseded import, or a stopped child's `runId`, log or exit code) writes a new receipt with a new
+status, cause, note, or a stopped child's `runId`, log or exit code) writes a new receipt with a new
 id. An unchanged `run` or `resume` leaves `RUN/receipts/` byte-identical.
 
 ### 4.3 Rejection causes (closed) and execution statuses (closed)
@@ -380,29 +379,16 @@ matching `Configuration.Source`, is not agreement with the request. Each of thes
   providers, overlays, population and state by `ConfigurationIdentity.Compute`'s text (`_shared/Configuration.cs`
   — **one** fingerprint rule, spelled once in the controller). A mismatch reads "the fingerprint is not the digest
   of the stated configuration".
-- **source** — `Configuration.Source` must name the reference arm's candidate. **One exception, and only
-  one:** an import the origin checks have already accepted as `origin: "reused"` with a well-formed
-  `reusedFrom` (§4.8). Its capture names the candidate file of the arm it WAS measured against. Where the two
-  setups' candidate files happen to share a name the rule is satisfied and this exception does nothing. Where
-  the names DIFFER, refusing would leave editing the capture's own statement of what it measured as the only
-  way through, which §4.8 forbids — so the difference is recorded instead, under `validation.identityLimits`
-  as `{capturedAgainst, armCandidate, declaredSource: {planId, armId}, detail}`, and the capture's `Source` is
-  kept as captured, never rewritten to the destination's. Every other rule in this list still decides that
-  import, as does the importer's own comparison of the emit's fingerprint with the one recomputed from the
-  destination arm's frozen request, which binds the plugins and their order, their bytes, the providers and
-  their order, and the population. That comparison does **not** bind state: it takes state from the emit, so
-  the state line is identical on both sides and cancels — state is bound by the **within one arm** rule below,
-  against the plan's selected states. The exception is keyed on the ORIGIN decision, not on anything in the
-  emit: a `fresh` import, a controller-produced emit on the run or resume lane, and a bare `origin: "reused"`
-  with no valid `reusedFrom` all keep the strict rule. A configuration digest binds the configuration text and
-  nothing else — asset bytes among them — and this exception does not widen what it covers.
+- **source** — `Configuration.Source` must name the reference arm's candidate. The one exception, for an
+  AI-side import that declares it reuses an earlier capture, is the integration module's:
+  [`AI-EVALUATION.md`](../integration/housecarl/AI-EVALUATION.md), "Importing an existing MCP result".
 - **within one arm** — a fingerprint that differs from this arm's other accepted receipts declaring the same
   population and state. Keyed on (reference arm, population, state), so two supported probes declaring different
   populations over the same plugins carry different fingerprints and **both pass**: content is compared to the
   request, fingerprints only within one population and state.
 
 Execution status (closed): `completed`, `rejected(<cause>)`, `failed`, `refused`, `skipped-user`,
-`skipped-budget`, `stopped(deadline)`, `blocked(<what>)`, `unsupported`, `mcp-only`, `live-import`, `manual`, `not-applicable`,
+`skipped-budget`, `stopped(deadline)`, `blocked(<what>)`, `unsupported`, `manual`, `not-applicable`,
 `pending`, `running`, `interrupted`, `invalidated(<what>)`, `refused-reuse(<gap>)`, `reused`.
 
 Detector result (closed): `finding`, `no-finding`, `catalogue`, `inconclusive`, `null` (undetermined).
@@ -514,7 +500,7 @@ A conflict-file output needs no `result`: the detector reading is implicit (§4.
 told about.
 
 ```
-adapter.result = { kind: "detector" | "catalogue" | "discovery",
+adapter.result = { kind: "detector" | "catalogue",
                    findings: <spec>, judged: <spec>, unjudgeable: <spec>, unit: "<what judged counts>" }
 ```
 
@@ -525,11 +511,12 @@ or — for a `text` output — `regex:<pattern>` with a named group `n`, applied
 - a spec that does not resolve → **`schema-unsupported`**. It is never read as a zero.
 - `judged` 0 with `unjudgeable` > 0 → **`extraction-failed`**, the same rule a conflict file's coverage gets.
 - `kind: detector` → `finding` when findings > 0, else `no-finding`.
-- `kind: catalogue` / `discovery` → detector **`catalogue`**: a completed measurement whose rows are EVIDENCE,
-  not defects (a switch census, a dependency census, a discovery listing, an advice read). A `catalogue`
+- `kind: catalogue` → detector **`catalogue`**: a completed measurement whose rows are EVIDENCE,
+  not defects (a switch census, a dependency census). A `catalogue`
   **satisfies completion**, and the disposition lists it under `evaluation.completedCatalogues`
   `[{checkId, armId, count, unit, kind}]` — **never** under `findings` and never under `completedNullChecks`.
-  A `discovery` result also feeds `disposition.discovery.listings`.
+  The result kind `discovery` (patch discovery, the author's advice) is the integration module's:
+  [`AI-EVALUATION.md`](../integration/housecarl/AI-EVALUATION.md).
 
 The registry validator (`Registry.Validate`) refuses a `json`/`text` adapter with no `result`, except kind `scopeprobe`, whose
 `complete` field D2 itself defines.
@@ -539,7 +526,7 @@ The registry validator (`Registry.Validate`) refuses a `json`/`text` adapter wit
 | `adapter.derives` | what it computes |
 |---|---|
 | `order-evaluation` | per arm, from that arm's ACCEPTED `diff` receipts — when any ordersweep check planned on the arm has a `diff` part that is not `completed`/`reused` (rejected, stopped, blocked, absent) the evaluation is `blocked(prerequisite:<that check>)` naming the unaccepted diffs, and the finalizer's per-arm summary reads accepted receipts only: the classification verbatim when one launch measured all of them (§4.4; else null with `classificationNote` and `historicalClassifications`), per-probe repaired / reclassified / created / newDefect / attributed / unmeasured, and `regression: true` when ANY probe's `created.newDefect > 0`. `not-applicable` on the baseline — the baseline is the reference, not a thing measured against itself |
-| `candidate-qualification` | a plugin is `qualified` only when its content hash is in an evaluated arm; anything else is `unqualified`, with the sentence that a downloadable hit stays a lead until its payload is measured. Rows: each supplied arm's declared files (the hash its request recorded), each `candidates.json` order file (`catalogued`), and each RELEVANT hit in an accepted patchprobe / poolprobe / fomodprobe `--json` hit list (schema 1, `_geometry-harness/_shared/DiscoveryHits.cs`; the hit's own sha256, `null` with the probe's `unhashedReason`). A hit is relevant when its masters, FOMOD conditions or pair name a plan target or a plan pair's plugin; every other hit is counted in `notRelevant` per probe with the reason. A hit list read only after its sha256 matches its receipt; a missing, changed, text-only or non-schema-1 one makes the derivation `inconclusive`, naming the receipt. A planned discovery check with no accepted receipt is named in `discovery.sourcesNotSearched` |
+| `candidate-qualification` | a plugin is `qualified` only when its content hash is in an evaluated arm; anything else is `unqualified`, with the sentence that a downloadable hit stays a lead until its payload is measured. Rows: each supplied arm's declared files (the hash its request recorded) and each `candidates.json` order file (`catalogued`). A plan none of whose arms supplies a patch file is `not-applicable`, with that reason. Qualifying the patches discovered on the machine is the integration module's ([`AI-EVALUATION.md`](../integration/housecarl/AI-EVALUATION.md)) |
 
 A `derives` value the controller does not compute is `unsupported`, named — never silently skipped.
 
@@ -550,8 +537,8 @@ that is not settled on this arm or on the baseline makes it **`blocked(prerequis
 there (`rejected(...)` or `failed`) is decided by this arm alone — a `loadability.masters-and-order` refused on a
 candidate arm blocks that arm's `order-evaluation` even though the baseline's is accepted. So is a prerequisite
 that is itself `blocked(prerequisite:…)` on this arm, which carries the rule down a chain: a `state.switch-census`
-blocked by the arm's refused order blocks that arm's `state.conditional-geometry`, and a discovery check blocked
-that way blocks its `candidate-qualification`, rather than borrowing the baseline's answer one step down. The
+blocked by the arm's refused order blocks that arm's `state.conditional-geometry`, rather than borrowing the
+baseline's answer one step down. The
 baseline still answers for a prerequisite the arm has no entry for, or one not attempted there for another
 reason. The same rule decides which arms enter the ordersweep and whether any other adapter's child is launched
 on an arm: a probe whose prerequisite decides against its arm is not launched there, and the blocked entry names
@@ -559,7 +546,7 @@ that arm's own status. It also governs reuse: an entry accepted in an earlier in
 baseline's answer, before the arm's own prerequisite was measured) is blocked, not reused, once a prerequisite's
 own status on that arm decides against it — for ordinary and derived checks and for every ordersweep part of that
 arm, and the sweep is then not skipped as all-reusable. It is never derived over the absence: a
-`candidate-qualification` computed with its discovery check excluded would read "nothing discovered" as a
+derived check computed with its prerequisite excluded would read the absence as a
 measurement, and its `no-finding` would be counted under `completedNullChecks`. The blocked entry is `missing`
 and keeps the evaluation incomplete.
 
@@ -634,9 +621,9 @@ the app's registry; an AI-side evaluation imports them over the app's run. How, 
 the integration module's [`AI-EVALUATION.md`](../integration/housecarl/AI-EVALUATION.md), "Importing an existing MCP
 result".
 
-### 4.9 Opt-in checks and live receipts (`live-import`)
+### 4.9 Opt-in checks
 
-A registry check may carry `optIn: true` (only with `required: false`; a `live-import` check must carry it). It is
+A registry check may carry `optIn: true` (only with `required: false`). It is
 planned only when the caller names it: `runcontrol plan --opt-in CHECK` (repeatable; naming a check that is not opt-in is
 refused). Opting in makes the check **required for that run** (`required: true`, `optedIn: true` on the plan row, and
 `explicitDecisions.optIn` lists it), so an evaluation that asked for it cannot finalize complete without it. Not opted
@@ -657,8 +644,8 @@ transition. Its head carries `planId`, `registrySha256` and `runIds` (one per `r
 with its runlog id). On `run`/`resume` the journal is read first: a `running` entry with no terminal line becomes
 `interrupted` and is re-queued, never counted as done. A corrupt or missing ledger is refused **by name**;
 `resume --rebuild-ledger` rebuilds it from the journal and the receipts, re-validating each. The journal
-carries the transition; the per-entry facts a transition also writes — `detector`, `validation`, and an
-import's `imported` / `importOrigin` — live in the receipt, and the rebuild restores them from the receipt
+carries the transition; the per-entry facts a transition also writes — `detector` and `validation` (an AI-side
+import's own facts are the integration module's) — live in the receipt, and the rebuild restores them from the receipt
 the entry NAMES, refused unless that receipt's `receiptId`, `planId`, check, arm and part all match. This is
 load-bearing rather than cosmetic: `finalize` reads `detector` from the ledger, so an entry that keeps its
 status through a reconstruction but loses its detector is finalized as `detector-undetermined` — a check with
@@ -729,9 +716,8 @@ and the action: "restore the recorded build, or make a new plan in a new directo
 premise check, `--rebuild-ledger`, the run store, the invocation record, healing, revalidation, invalidation, any child
 and any output write, so a refused RUN is byte-for-byte what it was: plan, seal, ledger, journal, receipts and
 evidence. Nothing rewrites `plan.json`, its seal or an old receipt to make a changed tool look unchanged.
-**After a controller change (any of its ten scripts, §3.1), every evaluation planned before it is refused, by design:
-re-plan in a new directory.** `import-results` applies the same contract check and the controller part of the
-preflight before it copies anything.
+**After a controller change (any file of its package, §3.1), every evaluation planned before it is refused, by design:
+re-plan in a new directory.**
 
 **And again at each launch and before each result is accepted.** Immediately before a child starts (a generic
 adapter's probe, or the one ordersweep child with every swept probe, conflictdiff and the controller) its programs
@@ -785,7 +771,7 @@ no longer matches the run (§8), so yesterday's claims cannot be packaged as tod
 `yes` **or `unknown`** has an accepted receipt with `detector ∈ {finding, no-finding, catalogue}` on every arm it applies to
 — or an arm-level `not-applicable`, or an admitted manual decision. `unknown` applicability is listed under BOTH
 `unknownApplicability` and `missing`, and keeps `complete` false: unknown never becomes not-applicable.
-`unsupported`, `mcp-only`, `manual` with no decision, `skipped-*`, `blocked`, `failed`, `rejected`,
+`unsupported`, `manual` with no decision, `skipped-*`, `blocked`, `failed`, `rejected`,
 `inconclusive`, `invalidated`, `interrupted`, `pending` and a completed check whose detector is
 **undetermined** all keep it false and are listed by name under `missing`.
 
@@ -809,15 +795,14 @@ counts say** — no sum across probes, no net.
 `{checkId, armId, decidedBy, decidedUtc, decision: completed-with-finding | completed-no-finding |
 not-applicable, evidence: [RUN-relative paths], note}`. Accepted only when the registry check has
 `manualDecisionAllowed: true`, the decision is one of the three words, `decidedBy` is present, and every evidence
-path exists (hashes recorded). Listed with strength `attributed-decision`. A decision on an `mcp-only` or
+path exists (hashes recorded). Listed with strength `attributed-decision`. A decision on an
 `unsupported` check is **recorded but never satisfies completion**.
 
 `unassessed` names, always: states not explored, candidates held back (this plan's and `candidates.json`'s own
 `Budget`), populations with unjudgeable counts per coverage line, families unsupported or manual, the scope's own
-`unmeasured` extents, media, and runtime observations. `explicitDecisions` carries `--select` / `--exclude`.
-`discovery` carries sources searched, sources not searched, candidates with their qualification (one row per relevant
-discovered hit, `notRelevant` counting the rest per probe), and advice provenance with the sentence that a cached
-source's age is not the date a report was assembled.
+`unmeasured` extents, and runtime observations. `explicitDecisions` carries `--select` / `--exclude`.
+Media, patch discovery and the author's advice are the integration module's, and its own disposition carries them:
+[`AI-EVALUATION.md`](../integration/housecarl/AI-EVALUATION.md).
 
 `STATUS.md` is the **review index, not the report**: findings per check and arm, completed null checks, missing
 checks with cause, order evaluation per arm, limitations, regeneration needs, explicit decisions, manual
@@ -829,16 +814,15 @@ load, §4.1) is stated there and not only counted as a coverage line.
 
 ## 8. The bundle
 
-`runcontrol bundle --run RUN [--out DIR] [--media media.json] [--registry FILE] [--scope FILE]` writes `<out>/manifest.json`:
+`runcontrol bundle --run RUN [--out DIR] [--registry FILE] [--scope FILE]` writes `<out>/manifest.json`:
 
 ```
 { bundleSchema: 2, planId, createdUtc, runIds,
   required: [paths a reader may demand],
   evidence: [{id, kind, path (bundle-relative, forward slashes), sha256, bytes, checkId, armId,
               strength, provenance, recordedBy}],
-  plan, ledger, journal, disposition, status, registry, search, scope, discovery,
-  excluded: [{what: "plugin and asset binaries", why: "identities only"}],
-  unassessedMedia: [...] }
+  plan, ledger, journal, disposition, status, registry, search, scope,
+  excluded: [{what: "plugin and asset binaries", why: "identities only"}] }
 ```
 
 and copies plan / ledger / journal / receipts / decisions / candidates / emits / logs / sweep outputs / scope /
@@ -863,11 +847,14 @@ whose plan predates the contract verifies as before with `guarantee: "legacy"`, 
 
 ### Evidence derived after measurement (enrichment)
 
-`evalrun enrich --bundle DIR --kind record-rows|names|order-variant [--reader-cmd CMD] [--reader-env K=V ...] [--mod-name P=N ...]`
+`evalrun enrich --bundle DIR --kind names|order-geometry [--sweep DIR ...] [--reader-cmd CMD] [--reader-env K=V ...] [--mod-name P=N ...]`
 adds files derived after measurement to a bundle that verifies (refused otherwise). It derives; it never measures.
 
-- `record-rows`, `order-variant`: derived from imported record reads, which only an AI-side evaluation holds; see
-  the module's [`AI-EVALUATION.md`](../integration/housecarl/AI-EVALUATION.md), "Record rows".
+- `record-rows`, `order-variant`: refused here. They are derived from imported record reads, which only an AI-side
+  evaluation holds; see the module's [`AI-EVALUATION.md`](../integration/housecarl/AI-EVALUATION.md), "Record rows".
+- `order-geometry`: the geometry rows of the setup without the patch in both orders of a free evaluated pair, from
+  the ordersweep folders `--sweep` names (the measured order and its reversal). Refused when the pair's order is not
+  a choice. Each probe's emits are copied into the bundle and cited by sha256.
 - `names`: in-game names for the places and objects the bundle's rows name, read with `housecarl_records` from the
   plugin files the plan records — each hashed first and refused by name, before any read, when its bytes differ —
   on a private instance in which no plugin of the setup is active, so every read is an off-order read of the file at
@@ -879,8 +866,9 @@ adds files derived after measurement to a bundle that verifies (refused otherwis
 
 **The order step of `bundle`.** After the names step, `runcontrol bundle` says in the manifest's `order`
 `{status, pair, rule, sentence}` whether the evaluated pair's order is a choice: `forced` (with `loadsFirst`),
-`unknown` (a header fact missing), `derived` (free, and the `order-variant` enrichment was written) or `refused` (free,
-but the enrichment could not run, with its reason).
+`unknown` (a header fact missing) or `refused` (free: this controller does not derive the reversed setup's record
+rows, and the sentence says so; the module derives them on its own bundle, see
+[`AI-EVALUATION.md`](../integration/housecarl/AI-EVALUATION.md), "Record rows").
 
 **The names step of `bundle`.** `runcontrol bundle` runs the `names` enrichment on the bundle it has just written (after
 the bundle verifies), so every bundle carries what the report's body rule needs without a hand step. The reader is
@@ -903,10 +891,10 @@ Each kind writes `enrichment/<kind>/…` and an `enrichment.json` recording the 
 sha256 and the disposition's sha256; its manifest rows are `kind: enrichment` with `derivedFrom`, and enter
 `required`. A bundle is enriched once per kind (`already enriched` otherwise). **An enrichment may not change the
 disposition, a receipt, the ledger, a claim or a count.** verify-bundle checks it: every enrichment file against its
-manifest hash; a record-rows file without `derivedFrom`, with a cited source absent or hashing otherwise, or with a
-row that cites no reads (`enrichment-source-missing` / `enrichment-source-changed`); names read from bytes the plan
+manifest hash; an order-geometry file whose cited emit is absent from the bundle or hashes otherwise
+(`enrichment-source-changed`); names read from bytes the plan
 does not record (`enrichment-source-foreign`); and a disposition that is not the one recorded beside the enrichment
-(`enrichment-stale`).
+(`enrichment-stale`). Record-rows and order-variant files are checked by the module.
 
 ### Additive overlap triage evidence (`overlap-triage-v1`)
 
@@ -982,7 +970,8 @@ refused the *missing* and *changed* cases above, which is what `required` would 
 **Never a plugin or asset binary.** Files with a plugin, archive, mesh, texture, animation, audio or executable
 suffix are referred to by name and hash and are not copied.
 
-**Media.** Supplied screenshots, video and schematics are an AI-side addition; their item schema and admission
+**Media.** Supplied screenshots, video and schematics are an AI-side addition, and `runcontrol bundle` refuses
+`--media`; their item schema and admission
 rules are in the module's [`AI-EVALUATION.md`](../integration/housecarl/AI-EVALUATION.md), "Supplied media".
 
 `runcontrol verify-bundle DIR` reads **nothing outside the bundle** and writes `verify.json`. Its steps, in order,
@@ -1006,6 +995,12 @@ each with a named defect:
    names a terminal-ok entry with that detector (`disposition-unsupported-claim`); `evaluation.complete` is false
    whenever `missing` or `unknownApplicability` is non-empty (`disposition-complete-contradiction`); its
    `derivedFrom` matches the bundle's ledger and receipts (`disposition-stale`).
+
+**Rows of kinds this SkyWright does not check.** A bundle whose plan records a registry version below 5 may hold
+receipts and enrichments of the AI-side kinds or of the retired `patchprobe`: they are hashed and chained as above,
+listed under `bundle.notChecked` and not judged. In a bundle of registry version 5 such a row is refused
+(`plan-kind-unknown`, `receipt-kind-unknown`, `evidence-kind-unknown`), and a plan of a newer registry is refused
+(`registry-version-newer`).
 
 ```
 verify.json: { schemaVersion, checkedUtc, dir, bundleSchema, planId,
@@ -1063,19 +1058,21 @@ SkyWright's `docs/run-coverage.json`.
     behind a list of what happened to be copied.
 13. A relocated bundle verifies identically with no installed mod and no original workspace, a bundle never carries
     a plugin or asset binary, and bundle integrity and evaluation completion are reported as two separate states.
-14. **Results come from the programs the plan recorded.** `run`, `resume` and `import-results` refuse, before writing
+14. **Results come from the programs the plan recorded.** `run` and `resume` refuse, before writing
     anything, when a program the plan can launch or retained work came from is not the recorded build (content, not
     path); every accepted receipt binds the measured identity per role; finalize, bundle and verify-bundle reject a
     receipt bound to another build, offline.
 
 **Limits this runner states rather than works around.**
 
-- **It cannot run an MCP-only check.** The record-semantics family lives behind MCP tools this controller cannot
-  call. Those checks are `mcp-only`, accounted, and keep a required evaluation incomplete.
+- **It has no record check.** Checks that only houseCARL's record tools can answer are not in its registry; an
+  AI-side evaluation adds them ([`AI-EVALUATION.md`](../integration/housecarl/AI-EVALUATION.md), "Importing an
+  existing MCP result").
 - **It cannot observe the engine.** No game is launched. Runtime, appearance, performance and crash behaviour are
-  `manual` or supplied media, at their real strength, never inferred from static checks.
-- **It cannot fetch.** Discovery reads the stored catalogue snapshot offline; a registry adapter asking for a
-  network refresh is refused, not downgraded.
+  accounted as checks it does not run (`unsupported` or `manual`), never inferred from static checks; supplied media
+  is the module's.
+- **It cannot fetch.** It opens no network connection; patch discovery and the author's advice, which read a stored
+  catalogue offline, are the module's.
 - **It cannot stage a supplied patch's payload.** A supplied arm is ESP-only, and says so on the arm, in the
   disposition and in STATUS.md.
 - **It cannot resolve a supplied plugin without the instance the probes read.** The measured scope states no
@@ -1092,7 +1089,7 @@ SkyWright's `docs/run-coverage.json`.
   `validation.identityLimits`, and a child that states no identity is `refused-reuse(<gap>)` on that plugin,
   as before.
 - **Program identity has a boundary.** It covers the files §3.1 names, not the shared .NET runtime, the Python interpreter or its standard library, nor what an override's program imports. A change made and undone while a child runs, or between two jobs of one ordersweep launch, is not detected (§6).
-- **Enrichment readers are outside the identity guarantee.** `enrich` and the names step derive evidence after measurement and change no result: `enrichment/<kind>/enrichment.json` records the sha256 of the enrichment scripts (`bundleenrich.py`, and `recordrows.py` for record rows), and `manifest.enrichmentStatus.names.reader` records only where the record reader's command came from, not the reader's own identity.
+- **Enrichment readers are outside the identity guarantee.** `enrich` and the names step derive evidence after measurement and change no result: `enrichment/<kind>/enrichment.json` records the sha256 of the program that wrote it (`bundleenrich.py`, with `ordersweep.py` for order geometry; `runcontrol.dll` for the names step `bundle` runs), and `manifest.enrichmentStatus.names.reader` records only where the record reader's command came from, not the reader's own identity.
 - **It cannot enumerate world states.** `states.notExplored` says the extent is unknown, not empty.
 - **It cannot read a finding count out of an output shape it has not been told about.** A `json`/`text` adapter
   with no `adapter.result` is refused by the registry's own validation, and a `result` spec that does not resolve
