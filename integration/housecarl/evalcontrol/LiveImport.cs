@@ -255,7 +255,7 @@ public static class LiveImport
                     errors.Add($"identity-mismatch: plugin {S(row.Get("name"))} does not hash to its stated sha256");
             }
             var validator = new Validator(run, plan);
-            foreach (var x in validator.IdentityChecks(identity, arm, doc, Ev.OrEmpty(check.Get("adapter")), null, limits, null).Select(PyValue.Dict))
+            foreach (var x in validator.IdentityChecks(identity, arm, doc, Ev.OrEmpty(check.Get("adapter")), null, limits).Select(PyValue.Dict))
                 errors.Add($"{S(x["cause"])}: {S(x["detail"])}");
             var req = Ev.OrEmpty(arm.Get("requested"));
             string expected = Validator.Fingerprint(Ev.Items(req.Get("plugins")), req.Get("providers"), req.Get("overlays"), req.Get("population"), identity.Get("state"));

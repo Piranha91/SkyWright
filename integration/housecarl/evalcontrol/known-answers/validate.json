@@ -47,5 +47,353 @@
     }
    ]
   }
+ ],
+ "reuseIdentity": [
+  {
+   "plan": {
+    "z": "eNrtWFtv2zYU/iuBnueUlCiKMoYBSbOtBbamaLM9rM4DL4e2FlnSdMkFhv/7DilLlpu0KdBdjGGGHyTykPz4ncPvHGoTNHoFa/kr1E1WFsH8JPzmJKhyWbw2+OKfSP+jAfbU8EcHTfu2Lm8zg2OcjazXs9sM7ly/rkG2YH5ptesJSchnhOL/ipC5///Wz7LMmrZ+QJtNUMl25Yy/fXd5ebVYfLdYVDWsswaaxWIwPP29QXCTkXu8CbY2KxnG3E3CYirSiMZgKE1DJljEtCGU8sQwbsGEMQlTpWWskyihYENBSGxNHKUqNjoSwRana8syf22gaLO2h6jLoq2lbvGFOhBdDm6xe4eoqstlLdfN3rDMc6j9601WeBYbXWdV2zjzpkV+PLM1NLiEazPZEjmdGM71V/78NhCZgnmjywr84wGkSuobuYTnIdkyR0fP5Vf+JojKW6hzWR0VJuc4dPBRYTJwXBzhQdWro0IkzW2mjyu4/XpHgmgFeYVzYWzbPNOtyaz9l0FtvbzKegmtE8wPm6CQa7/ulW88haZySxdw3zU+A9EwYm5QaQx2bBzLPvO4MUV54odvr90OnM49m1C81ZhN9nlDAVEyiQBCFgptFWYRKww1VIskYjH28lSnPBTWcJaYyJKY4ljKTCRASM+hLtdVDp7Gtu4AW7piDbLpanA7+RD8dPbm4gTuW+S3Ca7drrQsTGaQ+uYiqw8x77vc3Jhjd4ThU5+alWwgzwq/9ODRads4wQ9Zn67Ghhkhs8Fy5CIvpQHzuvgRGX1T9sFQlO1J3+4znXxwL55j9NNlkbvsaGXegI//vFtmhUcZvL95qLM1enPtBp4Nbj0fHibevp5CffvIdXsaJs9PbmDsfT96lcaGEdCSUqo1SyKsCSKa6FCwhAsTJXEslFZJFIehEsBjBlwwzSUWAgnjOppUPNDve7LJfewe7vaJ8OsHLRaHhvvoi6gC4GmUMki0ssYorqnRkJBEc8IRNUtppBiLScwMUGOJiuI40lyxBGLrZlvJZvW+7GoNfSHhTsPWnZgB5eiFzwAcbSYVFUtsGJEUFJc2TcFgFaU4FWEkhFUh0IRba42NYqmACZlwKqkiaergszj8ImznX4Dt/DE2EkY8YZKnIkopYUYqlkZGhSlQHhIs6JAvYyJ0NA0TwUVqGAidKiM10kjUF2E7VKbPADw03KPESpNHSB9jlIKyXCeJQqqAxokmoU4NpyFPUiaQSIONLkhVzCySabVQ5JMor/usM1bik5D8uTRnU2FYl+ZwVxeylVMD4979jH159uAn9CuUVZfLtq+2vUzM2mztSQrgvgI9no1PGA7ppZeGUaKutx7QqGeT002nyMb250SNzjDNVf+EoI2hePaXCdpH4J8QM0sTxUEqIUQaRiFmLEnimDCB6sVjzgk1IZ5Kk6iQJSQlEkVC4TsFwVVo4v+UmB2zYByz0P4vZn+bmF1PuzYBdgyzTe1cXQ1VTztaF0bWXotQmb6/r/JyVytu9hW5P7EzU/ZV3d3qYRCycYVtX0uuQN+MG1Wd2RXZm2CdFV0PKyWnBDvX8v7lvrycn7CDUvQV5OYcrwZ+qh0xeH/I2gvQmfvqMt0gPhZdnnsrnXcGBgDFXnJXWbHESr2uyzvwngvKqh3nwXBDHnws7GbCMLA7eb8AK7vcX0eWvbN3NitZF9D470+v5i+KcjY0DDexs3rpe8eGl2vv2a2/2Vh7VeZQH65blO8A46WBIQs8EzDuO9H+u8/B5wO4h0fQXkytTp2FZ20v8TsYJs8/btIYFxePm4fL2pC0fBjgbS9bdvWAeRNYpB/qqs6K/jL3lT9/BMbTO4bN/PPV+ZHmmqMQ7qPIbEeWJo4gH5S1W/oOoHrrTuzTYzZ9/jLTwjErqq6X3u32T7CdY9g="
+   },
+   "rows": [
+    {
+     "name": "another candidate's capture",
+     "doc": {
+      "Probe": "contactprobe",
+      "Conflicts": [],
+      "Coverage": [
+       {
+        "Population": "references",
+        "Judged": 3,
+        "Unjudgeable": {}
+       }
+      ],
+      "Configuration": {
+       "SchemaVersion": 1,
+       "Fingerprint": "3066ed7d3ab26e321afba80af925904e9af434636554b6a3f079c751a8108841",
+       "Source": "candidate:candidate-09-other.json",
+       "Plugins": [
+        {
+         "Name": "Skyrim.esm",
+         "Path": "<ROOT\\>\\plugins\\Skyrim.esm",
+         "Sha256": "31bee69394e7cbfddb6c1dce707c6061934913b445054de1df0b3553c6b47e5f"
+        },
+        {
+         "Name": "A.esp",
+         "Path": "<ROOT\\>\\plugins\\A.esp",
+         "Sha256": "447f2309eb6af99edfedb6182388fb2e176fffdf35abe48a761a1b099ce70452"
+        },
+        {
+         "Name": "B.esp",
+         "Path": "<ROOT\\>\\plugins\\B.esp",
+         "Sha256": "023674a69839104dab493db29e16205dc505dd33751278689d4e8c9bdac4de0b"
+        },
+        {
+         "Name": "Target.esp",
+         "Path": "<ROOT\\>\\plugins\\Target.esp",
+         "Sha256": "73763eb64411ebf6c77bbe4e157c02c9d612679486ffd1571931b54f48afc8b0"
+        }
+       ],
+       "Providers": [
+        {
+         "Name": "ModA",
+         "Kind": "mod"
+        },
+        {
+         "Name": "Data",
+         "Kind": "data"
+        }
+       ],
+       "Overlays": [],
+       "Population": "load-time",
+       "State": "baseline",
+       "Limits": []
+      }
+     },
+     "declared": {
+      "reusedFrom": {
+       "planId": "planXYZ",
+       "armId": "candidate-09"
+      }
+     },
+     "rejections": [],
+     "limits": [
+      {
+       "capturedAgainst": "candidate:candidate-09-other.json",
+       "armCandidate": "candidate:candidate-00-baseline.json",
+       "declaredSource": {
+        "planId": "planXYZ",
+        "armId": "candidate-09"
+       },
+       "detail": "declared reuse: the capture states it was measured against 'candidate:candidate-09-other.json', not this arm's 'candidate:candidate-00-baseline.json'. It is credited because its stated configuration equals this arm's frozen request, not because the files are the same file; the source name is kept as captured, and which run it names is the importer's caller's declaration, not verified here"
+      }
+     ]
+    },
+    {
+     "name": "a capture with no source",
+     "doc": {
+      "Probe": "contactprobe",
+      "Conflicts": [],
+      "Coverage": [
+       {
+        "Population": "references",
+        "Judged": 3,
+        "Unjudgeable": {}
+       }
+      ],
+      "Configuration": {
+       "SchemaVersion": 1,
+       "Fingerprint": "3066ed7d3ab26e321afba80af925904e9af434636554b6a3f079c751a8108841",
+       "Source": "",
+       "Plugins": [
+        {
+         "Name": "Skyrim.esm",
+         "Path": "<ROOT\\>\\plugins\\Skyrim.esm",
+         "Sha256": "31bee69394e7cbfddb6c1dce707c6061934913b445054de1df0b3553c6b47e5f"
+        },
+        {
+         "Name": "A.esp",
+         "Path": "<ROOT\\>\\plugins\\A.esp",
+         "Sha256": "447f2309eb6af99edfedb6182388fb2e176fffdf35abe48a761a1b099ce70452"
+        },
+        {
+         "Name": "B.esp",
+         "Path": "<ROOT\\>\\plugins\\B.esp",
+         "Sha256": "023674a69839104dab493db29e16205dc505dd33751278689d4e8c9bdac4de0b"
+        },
+        {
+         "Name": "Target.esp",
+         "Path": "<ROOT\\>\\plugins\\Target.esp",
+         "Sha256": "73763eb64411ebf6c77bbe4e157c02c9d612679486ffd1571931b54f48afc8b0"
+        }
+       ],
+       "Providers": [
+        {
+         "Name": "ModA",
+         "Kind": "mod"
+        },
+        {
+         "Name": "Data",
+         "Kind": "data"
+        }
+       ],
+       "Overlays": [],
+       "Population": "load-time",
+       "State": "baseline",
+       "Limits": []
+      }
+     },
+     "declared": {
+      "reusedFrom": {
+       "planId": "planXYZ",
+       "armId": "candidate-09"
+      }
+     },
+     "rejections": [],
+     "limits": [
+      {
+       "capturedAgainst": null,
+       "armCandidate": "candidate:candidate-00-baseline.json",
+       "declaredSource": {
+        "planId": "planXYZ",
+        "armId": "candidate-09"
+       },
+       "detail": "declared reuse: the capture states NO candidate source, so which file it was measured against is not stated at all - this arm's is 'candidate:candidate-00-baseline.json'. It is credited because its stated configuration equals this arm's frozen request; nothing here says the two are the same file"
+      }
+     ]
+    },
+    {
+     "name": "the same candidate file",
+     "doc": {
+      "Probe": "contactprobe",
+      "Conflicts": [],
+      "Coverage": [
+       {
+        "Population": "references",
+        "Judged": 3,
+        "Unjudgeable": {}
+       }
+      ],
+      "Configuration": {
+       "SchemaVersion": 1,
+       "Fingerprint": "3066ed7d3ab26e321afba80af925904e9af434636554b6a3f079c751a8108841",
+       "Source": "candidate:candidate-00-baseline.json",
+       "Plugins": [
+        {
+         "Name": "Skyrim.esm",
+         "Path": "<ROOT\\>\\plugins\\Skyrim.esm",
+         "Sha256": "31bee69394e7cbfddb6c1dce707c6061934913b445054de1df0b3553c6b47e5f"
+        },
+        {
+         "Name": "A.esp",
+         "Path": "<ROOT\\>\\plugins\\A.esp",
+         "Sha256": "447f2309eb6af99edfedb6182388fb2e176fffdf35abe48a761a1b099ce70452"
+        },
+        {
+         "Name": "B.esp",
+         "Path": "<ROOT\\>\\plugins\\B.esp",
+         "Sha256": "023674a69839104dab493db29e16205dc505dd33751278689d4e8c9bdac4de0b"
+        },
+        {
+         "Name": "Target.esp",
+         "Path": "<ROOT\\>\\plugins\\Target.esp",
+         "Sha256": "73763eb64411ebf6c77bbe4e157c02c9d612679486ffd1571931b54f48afc8b0"
+        }
+       ],
+       "Providers": [
+        {
+         "Name": "ModA",
+         "Kind": "mod"
+        },
+        {
+         "Name": "Data",
+         "Kind": "data"
+        }
+       ],
+       "Overlays": [],
+       "Population": "load-time",
+       "State": "baseline",
+       "Limits": []
+      }
+     },
+     "declared": {
+      "reusedFrom": {}
+     },
+     "rejections": [],
+     "limits": []
+    },
+    {
+     "name": "a name holding this arm's stem",
+     "doc": {
+      "Probe": "contactprobe",
+      "Conflicts": [],
+      "Coverage": [
+       {
+        "Population": "references",
+        "Judged": 3,
+        "Unjudgeable": {}
+       }
+      ],
+      "Configuration": {
+       "SchemaVersion": 1,
+       "Fingerprint": "3066ed7d3ab26e321afba80af925904e9af434636554b6a3f079c751a8108841",
+       "Source": "candidate:candidate-00-baseline-alternate.json",
+       "Plugins": [
+        {
+         "Name": "Skyrim.esm",
+         "Path": "<ROOT\\>\\plugins\\Skyrim.esm",
+         "Sha256": "31bee69394e7cbfddb6c1dce707c6061934913b445054de1df0b3553c6b47e5f"
+        },
+        {
+         "Name": "A.esp",
+         "Path": "<ROOT\\>\\plugins\\A.esp",
+         "Sha256": "447f2309eb6af99edfedb6182388fb2e176fffdf35abe48a761a1b099ce70452"
+        },
+        {
+         "Name": "B.esp",
+         "Path": "<ROOT\\>\\plugins\\B.esp",
+         "Sha256": "023674a69839104dab493db29e16205dc505dd33751278689d4e8c9bdac4de0b"
+        },
+        {
+         "Name": "Target.esp",
+         "Path": "<ROOT\\>\\plugins\\Target.esp",
+         "Sha256": "73763eb64411ebf6c77bbe4e157c02c9d612679486ffd1571931b54f48afc8b0"
+        }
+       ],
+       "Providers": [
+        {
+         "Name": "ModA",
+         "Kind": "mod"
+        },
+        {
+         "Name": "Data",
+         "Kind": "data"
+        }
+       ],
+       "Overlays": [],
+       "Population": "load-time",
+       "State": "baseline",
+       "Limits": []
+      }
+     },
+     "declared": {
+      "origin": "reused"
+     },
+     "rejections": [],
+     "limits": [
+      {
+       "capturedAgainst": "candidate:candidate-00-baseline-alternate.json",
+       "armCandidate": "candidate:candidate-00-baseline.json",
+       "declaredSource": {
+        "planId": null,
+        "armId": null
+       },
+       "detail": "declared reuse: the capture states it was measured against 'candidate:candidate-00-baseline-alternate.json', not this arm's 'candidate:candidate-00-baseline.json'. It is credited because its stated configuration equals this arm's frozen request, not because the files are the same file; the source name is kept as captured, and which run it names is the importer's caller's declaration, not verified here"
+      }
+     ]
+    },
+    {
+     "name": "not declared",
+     "doc": {
+      "Probe": "contactprobe",
+      "Conflicts": [],
+      "Coverage": [
+       {
+        "Population": "references",
+        "Judged": 3,
+        "Unjudgeable": {}
+       }
+      ],
+      "Configuration": {
+       "SchemaVersion": 1,
+       "Fingerprint": "3066ed7d3ab26e321afba80af925904e9af434636554b6a3f079c751a8108841",
+       "Source": "candidate:candidate-09-other.json",
+       "Plugins": [
+        {
+         "Name": "Skyrim.esm",
+         "Path": "<ROOT\\>\\plugins\\Skyrim.esm",
+         "Sha256": "31bee69394e7cbfddb6c1dce707c6061934913b445054de1df0b3553c6b47e5f"
+        },
+        {
+         "Name": "A.esp",
+         "Path": "<ROOT\\>\\plugins\\A.esp",
+         "Sha256": "447f2309eb6af99edfedb6182388fb2e176fffdf35abe48a761a1b099ce70452"
+        },
+        {
+         "Name": "B.esp",
+         "Path": "<ROOT\\>\\plugins\\B.esp",
+         "Sha256": "023674a69839104dab493db29e16205dc505dd33751278689d4e8c9bdac4de0b"
+        },
+        {
+         "Name": "Target.esp",
+         "Path": "<ROOT\\>\\plugins\\Target.esp",
+         "Sha256": "73763eb64411ebf6c77bbe4e157c02c9d612679486ffd1571931b54f48afc8b0"
+        }
+       ],
+       "Providers": [
+        {
+         "Name": "ModA",
+         "Kind": "mod"
+        },
+        {
+         "Name": "Data",
+         "Kind": "data"
+        }
+       ],
+       "Overlays": [],
+       "Population": "load-time",
+       "State": "baseline",
+       "Limits": []
+      }
+     },
+     "declared": null,
+     "rejections": [
+      {
+       "cause": "identity-mismatch",
+       "detail": "the emit's Configuration.Source is 'candidate:candidate-09-other.json', not this arm's 'candidate:candidate-00-baseline.json'"
+      }
+     ],
+     "limits": []
+    }
+   ]
+  }
  ]
 }

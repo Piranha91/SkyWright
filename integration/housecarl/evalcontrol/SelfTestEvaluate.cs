@@ -145,6 +145,21 @@ public static partial class SelfTest
                 }
                 return null;
             });
+        // moved from runcontrol's evaluate.json with the declared-reuse relaxation (ImportReuse), answers unchanged
+        var reuse = D(L(ka["reuseIdentity"])[0]);
+        Case("validate: an import declared as a reuse keeps its own source name as a recorded limit", () =>
+        {
+            using var t = new Temp();
+            var plan = PlanOf(t, reuse["plan"]);
+            return Rows(L(reuse["rows"]), row =>
+            {
+                var doc = D(t.Unmask(row["doc"]));
+                var limits = new List<object?>();
+                var rej = ImportReuse.IdentityChecks(new Validator(t.Root, plan), Validator.EmitIdentity(doc)!, D(L(plan["arms"])[0]), doc,
+                    new PyDict { ["kind"] = "probe-emit", ["exe"] = "contactprobe" }, limits, row["declared"] as PyDict);
+                return SameJson("rejections", t.Mask(rej), row["rejections"]) ?? SameJson("limits", t.Mask(limits), row["limits"]);
+            });
+        });
     }
 
     // The folders brought to a recorded state: files under the overlay it does not list removed, files whose bytes

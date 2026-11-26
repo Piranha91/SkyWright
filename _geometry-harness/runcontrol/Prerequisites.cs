@@ -1,7 +1,8 @@
 namespace RunControl;
 
 /// <summary>What gates a row before it runs or is reused (evalrun.py): the candidate file still being the plan's,
-/// the prerequisite rule, an import that is no longer credited, and the live switch check's scope.</summary>
+/// the prerequisite rule and the reuse of an accepted entry. (An import's own gate is the houseCARL integration
+/// module's, which reads these rules.)</summary>
 public static class Prerequisites
 {
     /// <summary>Null when the candidate file on disk still hashes to the plan's frozen value, else why not: the

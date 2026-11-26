@@ -109,20 +109,6 @@ public static partial class SelfTestFinalize
                 }
                 return null;
             });
-        var reuse = D(L(ka["reuseIdentity"])[0]);
-        Case("validate: an import declared as a reuse keeps its own source name as a recorded limit", () =>
-        {
-            using var t = new Temp();
-            var plan = PlanOf(t, reuse["plan"]);
-            return Rows(L(reuse["rows"]), row =>
-            {
-                var doc = D(t.Unmask(row["doc"]));
-                var limits = new List<object?>();
-                var rej = new Validator(t.Root, plan).IdentityChecks(Validator.EmitIdentity(doc)!, D(L(plan["arms"])[0]), doc,
-                    new PyDict { ["kind"] = "probe-emit", ["exe"] = "contactprobe" }, null, limits, row["declared"] as PyDict);
-                return SameJson("rejections", t.Mask(rej), row["rejections"]) ?? SameJson("limits", t.Mask(limits), row["limits"]);
-            });
-        });
         var owner = D(L(ka["ownerDifferences"])[0]);
         Case("owner: a null population or state adds no text to the fingerprint (ConfigurationIdentity), where Python hashes the text None", () =>
         {

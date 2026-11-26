@@ -291,7 +291,7 @@ public static class RecordImport
                         errors.Add($"identity-mismatch: {kind} {named} does not hash to its stated sha256");
                 }
             var validator = new Validator(run, plan);
-            foreach (var x in validator.IdentityChecks(identity, arm, doc, adapter, null, limits, declaredReuse).Select(PyValue.Dict))
+            foreach (var x in ImportReuse.IdentityChecks(validator, identity, arm, doc, adapter, limits, declaredReuse).Select(PyValue.Dict))
                 errors.Add($"{Ev.Str(x["cause"])}: {Ev.Str(x["detail"])}");
             var req = Ev.OrEmpty(arm.Get("requested"));
             string expected = Validator.Fingerprint(Ev.Items(req.Get("plugins")), req.Get("providers"), req.Get("overlays"), req.Get("population"), identity.Get("state"));

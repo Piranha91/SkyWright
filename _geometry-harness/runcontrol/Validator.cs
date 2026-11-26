@@ -45,8 +45,12 @@ public sealed class Validator
     // str(v)[:12].
     static string Head12(object? v) => Head(Ev.Str(v), 12);
 
-    // (v or ""), which must then be text.
-    static string TextOrEmpty(object? v) => !PyValue.Truthy(v) ? ""
+    /// <summary>The rejection detail of a source that names another candidate than the reference arm's.</summary>
+    public static string SourceMismatch(string source, string wantSource) =>
+        $"the emit's Configuration.Source is '{source}', not this arm's '{wantSource}'";
+
+    /// <summary>A text field read as Python's `(v or "")` with a string's methods.</summary>
+    public static string TextOrEmpty(object? v) => !PyValue.Truthy(v) ? ""
         : v as string ?? throw new PyError($"'{PyValue.TypeName(v)}' object has no attribute 'strip'");
 
     // d.get(upper, d.get(lower)).
@@ -452,14 +456,11 @@ public sealed class Validator
             .Select(x => (object?)new PyTuple([x.kind, x.sha])).ToList();
 
     /// <summary>An accepted emit must describe the configuration the plan asked for: the rejections, with what was
-    /// accepted under a stated limit added to `limits`. `declaredReuse` is the origin block of an import already
-    /// accepted as a reuse: only the candidate file name rule is relaxed for it, into a recorded limit.</summary>
+    /// accepted under a stated limit added to `limits`.</summary>
     public List<object?> IdentityChecks(PyDict identity, PyDict arm, PyDict doc, PyDict? adapter, string? part = null,
-        List<object?>? limits = null, PyDict? declaredReuse = null)
+        List<object?>? limits = null)
     {
         var rej = new List<object?>();
-        if (PyValue.Truthy(declaredReuse) && limits == null)
-            throw new PyError("_identity_checks: declared_reuse requires a `limits` list to record into");
         var note = limits ?? [];
         var reference = ReferenceArm(arm, part);
         var req = Ev.OrEmpty(reference.Get("requested"));
@@ -554,36 +555,13 @@ public sealed class Validator
                 + $"emit says {Head12(identity.Get("fingerprint"))}, its own plugins, "
                 + $"providers, overlays, population and state digest to {Head(recomputed, 12)}"));
 
-        // (f) the source must name the reference arm's candidate; a declared reuse keeps its own source, as a recorded limit
+        // (f) the source must name the reference arm's candidate
         string source = TextOrEmpty(identity.Get("source"));
         object? candidateFile = reference["candidateFile"];
         string wantSource = $"candidate:{Ev.Str(candidateFile)}";
-        bool differs = PyValue.Truthy(candidateFile) && PyText.Lower(source) != PyText.Lower(wantSource);
-        if (PyValue.Truthy(declaredReuse))
-        {
-            if (differs)
-            {
-                var src = Ev.OrEmpty(declaredReuse!.Get("reusedFrom"));
-                note.Add(new PyDict
-                {
-                    ["capturedAgainst"] = source.Length > 0 ? source : null, ["armCandidate"] = wantSource,
-                    ["declaredSource"] = new PyDict { ["planId"] = src.Get("planId"), ["armId"] = src.Get("armId") },
-                    ["detail"] = source.Length > 0
-                        ? $"declared reuse: the capture states it was measured against '{source}', "
-                          + $"not this arm's '{wantSource}'. It is credited because its stated "
-                          + "configuration equals this arm's frozen request, not because the files "
-                          + "are the same file; the source name is kept as captured, and which run "
-                          + "it names is the importer's caller's declaration, not verified here"
-                        : "declared reuse: the capture states NO candidate source, so which file it "
-                          + $"was measured against is not stated at all - this arm's is '{wantSource}'. "
-                          + "It is credited because its stated configuration equals this arm's frozen "
-                          + "request; nothing here says the two are the same file",
-                });
-            }
-        }
-        else if (source.Length > 0 && PyValue.Truthy(candidateFile) && PyText.Lower(source) != PyText.Lower(wantSource)
+        if (source.Length > 0 && PyValue.Truthy(candidateFile) && PyText.Lower(source) != PyText.Lower(wantSource)
                  && !PyText.Lower(source).Contains(PyText.Lower(Ev.Stem(Ev.Str(candidateFile))), StringComparison.Ordinal))
-            rej.Add(Rejection("identity-mismatch", $"the emit's Configuration.Source is '{source}', not this arm's '{wantSource}'"));
+            rej.Add(Rejection("identity-mismatch", SourceMismatch(source, wantSource)));
 
         // (g) the within-arm rules, keyed on the reference arm
         var key = (Ev.Str(reference["armId"]), Ev.Str(identity.Get("population")), Ev.Str(identity.Get("state")));
