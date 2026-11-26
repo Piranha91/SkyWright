@@ -7,8 +7,9 @@ using ViewProbe;
 
 namespace Workbench;
 
-/// <summary>One staged placement edit: the reference and its pose before and after. Nothing is on disk until a commit.</summary>
-internal sealed record PendingEdit(FormKey Ref, RefPlacementEdit.Pose Before, RefPlacementEdit.Pose After);
+/// <summary>One staged edit: the reference and its pose before and after, or (<paramref name="Disable"/>) the reference to be
+/// written "initially disabled" at the pose it has. Nothing is on disk until a commit.</summary>
+internal sealed record PendingEdit(FormKey Ref, RefPlacementEdit.Pose Before, RefPlacementEdit.Pose After, bool Disable = false);
 
 /// <summary>The workbench's session state: the selected reference and the ordered list of staged edits. The window and
 /// (stage 5) the MCP state tools both call these methods; nothing keeps a second copy of the state.
@@ -134,6 +135,12 @@ internal sealed class EditSession
                         + (applied.Stale.Count > 0 ? "; " + string.Join("; ", applied.Stale) : ""));
         return e;
     }
+
+    /// <summary>Stage "disable this object" (Gate B; not built yet).</summary>
+    internal PendingEdit? StageDisable(FormKey key) => null;
+
+    /// <summary>The reference has a staged or written disable (Gate B; not built yet).</summary>
+    internal bool IsDisabled(FormKey key) => false;
 
     /// <summary>Move by <paramref name="delta"/> (Skyrim units) and turn by <paramref name="radians"/> about world
     /// <paramref name="axis"/>, composed with the current rotation.</summary>
