@@ -88,7 +88,8 @@ public static partial class SelfTest
                 using var t = new Temp();
                 BuildTree(t, c["tree"]);
                 var plan = D(PyJson.LoadEvalFile(t.At("plan.json")));
-                var ex = new Executor(t.Root, plan, new Ledger(t.Root, plan) { RunId = "run-2" }, resume: false) { ParentRunId = "parent-2" };
+                var ex = new Executor(t.Root, plan, new Ledger(t.Root, plan) { RunId = "run-2" }, resume: false)
+                    { ParentRunId = "parent-2", MoreCatalogueKinds = AiList.Vocabulary.ResultKinds };
                 var check = L(ex.Plan["checks"]).Select(D).First(x => S(x["checkId"]) == S(c["check"]));
                 PyDict? launch = null;
                 var real = EvalStore.UtcNow;

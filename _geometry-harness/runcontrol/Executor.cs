@@ -48,6 +48,9 @@ public sealed class Executor
     /// <summary>A caller's own child-launching adapter kinds, added to runcontrol's (Receipts.ReceiptRoles).</summary>
     public IReadOnlySet<string>? MoreLaunchKinds { get; init; }
 
+    /// <summary>A caller's catalogue-like result kinds, handed to this executor's validator (Validator.MoreCatalogueKinds).</summary>
+    public IReadOnlySet<string> MoreCatalogueKinds { get => Validator.MoreCatalogueKinds; init => Validator.MoreCatalogueKinds = value; }
+
     PyDict MeasureNow(string pid) => MeasureProgram != null ? MeasureProgram(pid) : PlanIdentity.Measure(Opts, ProbeHarness, pid);
 
     /// <summary>One child through the runner, under this invocation's deadline, its log in logs/ID.txt.</summary>

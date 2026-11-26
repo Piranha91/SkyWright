@@ -16,6 +16,10 @@ public sealed class Validator
     readonly Dictionary<string, Dictionary<string, object?>> _armPluginHashes = new(StringComparer.Ordinal);
     readonly HashSet<string> _seenKeys = new(StringComparer.Ordinal);
 
+    /// <summary>A caller's result kinds whose rows are evidence, not defects, as a catalogue's are (another
+    /// program's list); runcontrol's own validator has none, and the set only adds to `catalogue`.</summary>
+    public IReadOnlySet<string> MoreCatalogueKinds { get; set; } = new HashSet<string>();
+
     public Validator(string run, PyDict plan)
     {
         Run = PyPath.Str(run);
@@ -410,7 +414,7 @@ public sealed class Validator
             object? resultKind = !Ev.Eq(outKind, "conflict-file") && !Ev.Eq(adapter.Get("kind"), "scopeprobe")
                 ? Ev.OrEmpty(adapter.Get("result")).Get("kind") : "detector";
             // a catalogue's rows are evidence, not defects: it completes, and is neither a finding nor a null check
-            if (resultKind is "catalogue" or "discovery") detector = "catalogue";
+            if (resultKind is "catalogue" || resultKind is string more && MoreCatalogueKinds.Contains(more)) detector = "catalogue";
             else if (findings == null) detector = null;
             else detector = PyValue.AboveZero(findings) ? "finding" : "no-finding";
             if (Ev.Eq(adapter.Get("kind"), "scopeprobe") && doc is PyDict sd && sd.ContainsKey("complete") && !PyValue.Truthy(sd.Get("complete")) && !legalOmission)

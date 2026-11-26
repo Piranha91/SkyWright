@@ -132,5 +132,19 @@ public static partial class SelfTest
             }
             return new BundleArgs() is { LinkedFolders.Count: 0, NeverCompletingKinds.Count: 0 } ? null : "a bundle's arguments start with a caller's list";
         });
+
+        // a caller's catalogue-like result kinds are its own: runcontrol's validator and executor start with none, and
+        // the app registry refuses the AI-side result kind by name
+        Case("boundary: a caller's catalogue-like result kinds never reach runcontrol's own validator or registry", () =>
+        {
+            var recorded = D(PyJson.Loads(System.Text.Encoding.UTF8.GetString(B64(D(LoadAnswers("plan-modules.json")["registry"])["bytes"]))));
+            var row = L(recorded["checks"]).Select(D).FirstOrDefault(c => Ev.OrEmpty(c.Get("adapter")).Get("result") is PyDict);
+            if (row == null) return "the recorded registry has no row with a result to give the kind";
+            D(D(row["adapter"])["result"])["kind"] = "discovery";
+            var said = Registry.Validate(recorded);
+            if (!said.Any(p => p.Contains("unknown result kind 'discovery'", StringComparison.Ordinal)))
+                return $"the app registry took the result kind discovery: {(said.Count == 0 ? "accepted" : said[0])}";
+            return new Validator(".", new PyDict()).MoreCatalogueKinds.Count == 0 ? null : "runcontrol's validator starts with a caller's kinds";
+        });
     }
 }

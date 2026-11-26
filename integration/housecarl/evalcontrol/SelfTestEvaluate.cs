@@ -115,6 +115,38 @@ public static partial class SelfTest
         });
     }
 
+    // The validator with this module's catalogue-like result kinds (known-answers/validate.json: moved from runcontrol's
+    // evaluate.json with the discovery kind, answers unchanged; the step is runcontrol's self-test's).
+    static void ValidateCases(PyDict ka)
+    {
+        foreach (var c in L(ka["validate"]).Select(D))
+            Case($"validate: {S(c["name"])}", () =>
+            {
+                using var t = new Temp();
+                var plan = PlanOf(t, c["plan"]);
+                var v = new Validator(t.Root, plan) { MoreCatalogueKinds = AiList.Vocabulary.ResultKinds };
+                int n = 0;
+                foreach (var step in L(c["steps"]).Select(D))
+                {
+                    n++;
+                    foreach (var f in L(step["files"]).Select(D))
+                    {
+                        string p = t.Write(S(f["path"]), PyJson.Utf8(t.Unmask(Unpack(f["text"])!)));
+                        File.SetLastWriteTimeUtc(p, DateTime.UnixEpoch.AddSeconds(Py.Float(f["mtime"])));
+                    }
+                    var arm = L(plan["arms"]).Select(D).First(a => S(a["armId"]) == S(step["arm"]));
+                    var pre = new Dictionary<string, string?>(StringComparer.Ordinal);
+                    foreach (var (rel, h) in D(step["pre"])) pre[t.At(rel)] = h is "same" ? Hashing.Sha256File(t.At(rel)) : (string?)h;
+                    var got = v.Validate(new PyDict { ["checkId"] = step["check"] }, arm, (string?)step["part"], D(step["adapter"]),
+                        step["exit"] == null ? null : (long)PyValue.Int(step["exit"]), S(step["log"]), Strings(step["outputs"]).Select(t.At).ToList(), pre,
+                        step["started"] == null ? null : Py.Float(step["started"]));
+                    string? why = SameJson($"call {n}", t.Mask(got), step["want"]);
+                    if (why != null) return why;
+                }
+                return null;
+            });
+    }
+
     // The folders brought to a recorded state: files under the overlay it does not list removed, files whose bytes
     // differ written (the app bundle beside it is written the same way).
     static void ApplyState(Temp t, object? tree)

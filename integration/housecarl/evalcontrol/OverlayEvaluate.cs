@@ -38,6 +38,7 @@ public static class OverlayEvaluate
             var ex = new Executor(run, plan, ledger, false)
             {
                 ParentRunId = parent.RunId, Preflight = measured, ProbeHarness = probeBuild, MoreLaunchKinds = ModuleRows.LaunchKinds,
+                MoreCatalogueKinds = AiList.Vocabulary.ResultKinds,
             };
             ledger.HealInterrupted();
             if (ledger.Entries.Any(kv => EvalStore.IsTerminalOk(Ev.G(kv.Value, "status")))) Revalidate.Run(run, plan, ledger);

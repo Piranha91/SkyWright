@@ -36,6 +36,7 @@ public static partial class SelfTest
         EvaluateCases(Load("evaluate.json"));
         ImportedEvidenceCases(Load("finalize-imports.json"));
         LedgerScriptCases(Load("ledger.json"));
+        ValidateCases(Load("validate.json"));
         Console.WriteLine($"{_green} green, {_red} red, 0 skipped");
         return _red == 0 ? 0 : 1;
     }

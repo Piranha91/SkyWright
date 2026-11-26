@@ -1,0 +1,51 @@
+{
+ "about": "moved from runcontrol known-answers/evaluate.json validate with the discovery result kind (work/t14/b2_move_validate.py); answers unchanged",
+ "validate": [
+  {
+   "name": "a discovery",
+   "plan": {
+    "z": "eNrtWFtv2zYU/iuBnueUlCiKMoYBSbOtBbamaLM9rM4DL4e2FlnSdMkFhv/7DilLlpu0KdBdjGGGHyTykPz4ncPvHGoTNHoFa/kr1E1WFsH8JPzmJKhyWbw2+OKfSP+jAfbU8EcHTfu2Lm8zg2OcjazXs9sM7ly/rkG2YH5ptesJSchnhOL/ipC5///Wz7LMmrZ+QJtNUMl25Yy/fXd5ebVYfLdYVDWsswaaxWIwPP29QXCTkXu8CbY2KxnG3E3CYirSiMZgKE1DJljEtCGU8sQwbsGEMQlTpWWskyihYENBSGxNHKUqNjoSwRana8syf22gaLO2h6jLoq2lbvGFOhBdDm6xe4eoqstlLdfN3rDMc6j9601WeBYbXWdV2zjzpkV+PLM1NLiEazPZEjmdGM71V/78NhCZgnmjywr84wGkSuobuYTnIdkyR0fP5Vf+JojKW6hzWR0VJuc4dPBRYTJwXBzhQdWro0IkzW2mjyu4/XpHgmgFeYVzYWzbPNOtyaz9l0FtvbzKegmtE8wPm6CQa7/ulW88haZySxdw3zU+A9EwYm5QaQx2bBzLPvO4MUV54odvr90OnM49m1C81ZhN9nlDAVEyiQBCFgptFWYRKww1VIskYjH28lSnPBTWcJaYyJKY4ljKTCRASM+hLtdVDp7Gtu4AW7piDbLpanA7+RD8dPbm4gTuW+S3Ca7drrQsTGaQ+uYiqw8x77vc3Jhjd4ThU5+alWwgzwq/9ODRads4wQ9Zn67Ghhkhs8Fy5CIvpQHzuvgRGX1T9sFQlO1J3+4znXxwL55j9NNlkbvsaGXegI//vFtmhUcZvL95qLM1enPtBp4Nbj0fHibevp5CffvIdXsaJs9PbmDsfT96lcaGEdCSUqo1SyKsCSKa6FCwhAsTJXEslFZJFIehEsBjBlwwzSUWAgnjOppUPNDve7LJfewe7vaJ8OsHLRaHhvvoi6gC4GmUMki0ssYorqnRkJBEc8IRNUtppBiLScwMUGOJiuI40lyxBGLrZlvJZvW+7GoNfSHhTsPWnZgB5eiFzwAcbSYVFUtsGJEUFJc2TcFgFaU4FWEkhFUh0IRba42NYqmACZlwKqkiaergszj8ImznX4Dt/DE2EkY8YZKnIkopYUYqlkZGhSlQHhIs6JAvYyJ0NA0TwUVqGAidKiM10kjUF2E7VKbPADw03KPESpNHSB9jlIKyXCeJQqqAxokmoU4NpyFPUiaQSIONLkhVzCySabVQ5JMor/usM1bik5D8uTRnU2FYl+ZwVxeylVMD4979jH159uAn9CuUVZfLtq+2vUzM2mztSQrgvgI9no1PGA7ppZeGUaKutx7QqGeT002nyMb250SNzjDNVf+EoI2hePaXCdpH4J8QM0sTxUEqIUQaRiFmLEnimDCB6sVjzgk1IZ5Kk6iQJSQlEkVC4TsFwVVo4v+UmB2zYByz0P4vZn+bmF1PuzYBdgyzTe1cXQ1VTztaF0bWXotQmb6/r/JyVytu9hW5P7EzU/ZV3d3qYRCycYVtX0uuQN+MG1Wd2RXZm2CdFV0PKyWnBDvX8v7lvrycn7CDUvQV5OYcrwZ+qh0xeH/I2gvQmfvqMt0gPhZdnnsrnXcGBgDFXnJXWbHESr2uyzvwngvKqh3nwXBDHnws7GbCMLA7eb8AK7vcX0eWvbN3NitZF9D470+v5i+KcjY0DDexs3rpe8eGl2vv2a2/2Vh7VeZQH65blO8A46WBIQs8EzDuO9H+u8/B5wO4h0fQXkytTp2FZ20v8TsYJs8/btIYFxePm4fL2pC0fBjgbS9bdvWAeRNYpB/qqs6K/jL3lT9/BMbTO4bN/PPV+ZHmmqMQ7qPIbEeWJo4gH5S1W/oOoHrrTuzTYzZ9/jLTwjErqq6X3u32T7CdY9g="
+   },
+   "steps": [
+    {
+     "files": [
+      {
+       "path": "outputs/g.check/baseline.json",
+       "text": "{\n \"hits\": [\n  {\n   \"file\": \"p.7z\"\n  }\n ]\n}",
+       "mtime": 1767225600.0
+      }
+     ],
+     "check": "g.check",
+     "arm": "baseline",
+     "part": null,
+     "adapter": {
+      "kind": "patchprobe",
+      "exe": "patchprobe",
+      "output": "json",
+      "result": {
+       "kind": "discovery",
+       "findings": "hits"
+      }
+     },
+     "exit": 0,
+     "log": "",
+     "outputs": [
+      "outputs/g.check/baseline.json"
+     ],
+     "pre": {},
+     "started": 1767225500.0,
+     "want": {
+      "accepted": true,
+      "rejections": [],
+      "detector": "catalogue",
+      "findings": 1,
+      "coverage": [],
+      "verdict": null,
+      "identity": null,
+      "identityLimits": []
+     }
+    }
+   ]
+  }
+ ]
+}
