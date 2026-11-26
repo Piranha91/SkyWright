@@ -212,6 +212,42 @@
       }
     },
     {
+      "id": "nearprobe",
+      "kind": "csharp-exe",
+      "path": "integration/housecarl/nearprobe/nearprobe.csproj",
+      "adapter": "csharp",
+      "stageSource": "single-stage",
+      "answers": [
+        "What stands near these placed references, whose version reaches each one, by what gap and by which rule?"
+      ],
+      "useWhen": "An LLM's screen for a mod whose objects are all new: who else builds on the same spot (SkyWright.Engine.NearReferences.Of over a load order, as JSON), before a geometry run measures the pairs.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/nearprobe/Program.cs",
+          "anchor": "// NEARPROBE — what stands near these placed references, for an LLM: SkyWright's own query (SkyWright.Engine.NearReferences.Of) over a load order, as JSON."
+        }
+      ],
+      "inputs": [
+        "An MO2 instance, profile and game folder; the references (FormIDs, or a housecarl_records to_file= result); a radius; optional record types."
+      ],
+      "outputs": [
+        "JSON on standard output: per record its hits (seed, provider, gap, rule), the engine's note, the radius the answer is complete to, and the plugins not read; exit 0 complete, 3 incomplete (named), 2 refused in one sentence."
+      ],
+      "flagCoverage": {
+        "parser": "csharp-args",
+        "path": "integration/housecarl/nearprobe/Program.cs"
+      },
+      "modifiers": {
+        "--game": "The game folder whose Data the order reads; required.",
+        "--instance": "The MO2 instance directory; required, never defaulted from the harness config.",
+        "--of": "A reference to look near, XXXXXX:Plugin.esp (repeatable), or @ and the absolute path of a housecarl_records to_file= result naming them.",
+        "--order": "Evaluate a candidate order file instead of the profile (_shared/HarnessOrderCli.cs).",
+        "--profile": "The MO2 profile name; required.",
+        "--types": "Keep records whose winning version is of this record type (a signature such as REFR, or a catalog name), resolved by houseCARL's own resolver; repeatable.",
+        "--within": "The radius in game units between the two extents (0 for touching); refused past the cells the engine reads."
+      }
+    },
+    {
       "id": "evalcontrol",
       "kind": "csharp-exe",
       "path": "integration/housecarl/evalcontrol/evalcontrol.csproj",
