@@ -166,7 +166,8 @@ namespace NearProbe
                 return new("", Refused,
                     $"--within {request.Within.ToString(CultureInfo.InvariantCulture)} reaches past the cells read around {named} " +
                     $"(the {NearReferences.GridReach} grid cells on each side), so records farther out would be missed; the answer is complete " +
-                    $"only below {answer.CompleteWithin.ToString("0.###", CultureInfo.InvariantCulture)} units, so ask with a smaller --within.");
+                    $"only below {answer.CompleteWithin.ToString("0.######", CultureInfo.InvariantCulture)} units, so ask with --within " +
+                    $"{Offer(answer.CompleteWithin)} or less.");
             }
 
             bool complete = answer.Unread.Count == 0 && notIndexed.Count == 0;
@@ -233,6 +234,12 @@ namespace NearProbe
             if (answer.UnreadSentence is { } unread) parts.Add(unread);
             return new(json, Incomplete, string.Join("; ", parts) + "; close any program holding them, or fix or disable them, and ask again.");
         }
+
+        /// <summary>The radius a refusal offers for an answer complete to <paramref name="completeWithin"/>: rounded DOWN to
+        /// three decimals and kept clear of the bound, so asking with the printed number is answered (the engine judges
+        /// completeness strictly below the bound, with its own 1e-9 tolerance).</summary>
+        public static string Offer(double completeWithin) =>
+            (Math.Floor((completeWithin - 1e-6) * 1000) / 1000).ToString("0.###", CultureInfo.InvariantCulture);
 
         static string OneLine(string s) => string.Join(" ", s.Split('\n', '\r').Select(x => x.Trim()).Where(x => x.Length > 0)).Replace(". ", ", ").TrimEnd('.');
 

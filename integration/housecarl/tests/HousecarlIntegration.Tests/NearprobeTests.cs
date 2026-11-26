@@ -205,6 +205,37 @@ public sealed class NearprobeSelectionTests : IClassFixture<NearprobeSelectionWo
         Nearprobe.OneSentence(why);
     }
 
+    // The radius the refusal offers is answered when asked, through the command line. (On these fixtures rounding to
+    // nearest would also have offered an answered value, 20548.287 below 20548.287187…; Mo1 below pins bounds where it
+    // would not.)
+    [Theory]
+    [InlineData("Seed")]
+    [InlineData("SeedIsolated")]
+    public void M482_offer_the_radius_the_refusal_offers_is_answered(string seedName)
+    {
+        var seed = Fid((FormKey)typeof(NearSelectionTests.World).GetField(seedName)!.GetValue(null)!);
+        var why = Nearprobe.Refusal(Ask("--of", seed, "--within", "100000"));
+        var offer = Regex.Match(why, @"ask with --within ([0-9.]+) or less");
+        Assert.True(offer.Success, "the refusal offers no radius: " + why);
+        var a = Nearprobe.Answer(Ask("--of", seed, "--within", offer.Groups[1].Value));
+        Assert.True(a.GetProperty("complete").GetBoolean());
+        Assert.True(double.Parse(offer.Groups[1].Value, CultureInfo.InvariantCulture) < a.GetProperty("completeWithin").GetDouble());
+    }
+
+    // In process: the offered radius for bounds where rounding to nearest would print the bound itself or a value past
+    // it; each printed number, read back, stays inside the engine's completeness test (within + 1e-9 < bound).
+    [Theory]
+    [InlineData(20548.2876, "20548.287")]     // to nearest: 20548.288, past the bound
+    [InlineData(20548.287, "20548.286")]      // to nearest: the bound itself, not complete
+    [InlineData(20548.2870004, "20548.286")]  // within 1e-6 of a three-decimal value
+    [InlineData(21662.929670863352, "21662.929")]   // the lab door seed's bound
+    public void Mo1_in_process_the_offered_radius_is_rounded_down_clear_of_the_bound(double bound, string expected)
+    {
+        var offer = NearProbeMain.Offer(bound);
+        Assert.Equal(expected, offer);
+        Assert.True(double.Parse(offer, CultureInfo.InvariantCulture) + 1e-9 < bound, $"{offer} is not inside {bound}");
+    }
+
     // 483: a master reference moved beside the seed is credited to the mover, never the master.
     [Fact]
     public void M483_a_moved_reference_is_credited_to_the_mover()
