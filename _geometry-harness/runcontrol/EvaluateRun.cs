@@ -158,25 +158,25 @@ public static class EvaluateRun
                 if (AlreadyDone(cid, aid))
                 {
                     string? pre = Ev.Eq(st, "planned") ? Prerequisites.ReuseBlockedBy(ex, check, aid) : null;
-                    // only an import credits an import row, and it stays credited only while its gate still holds on this arm
-                    if (Import(st)) pre = Prerequisites.Satisfied(ex, check, aid);
                     if (Ev.Eq(kind, "derived")) { }   // reused or blocked after the loop, where derived checks are decided
                     else if (pre != null)
-                        ex.Account(check, arm, $"blocked(prerequisite:{pre})", "blocked-prerequisite",
-                            Prerequisites.BlockDetail(ex, pre, aid) + ImportNote(st), extra: Prerequisites.SupersededImport(ex, check, arm));
+                        ex.Account(check, arm, $"blocked(prerequisite:{pre})", "blocked-prerequisite", Prerequisites.BlockDetail(ex, pre, aid));
                     else MarkReused(cid, aid);
                     advance();
                     continue;
                 }
                 if (AccountPlanStatus(ex, check, arm, st)) { }
-                else if (Import(st) && AccountUncreditedImport(ex, check, arm)) { }
-                else if (st is "unsupported" or "mcp-only")
+                else if (Ev.Eq(st, "unsupported"))
                     ex.Account(check, arm, (string)st, null,
                         PyValue.Truthy(check.Get("unsupportedReason")) ? (string)check["unsupportedReason"]! : "the registry records no CLI adapter for this check");
                 else if (Ev.Eq(st, "manual"))
                     ex.Account(check, arm, "manual", null,
                         PyValue.Truthy(check.Get("unsupportedReason")) ? (string)check["unsupportedReason"]!
                             : "this check is completed by an attributed manual decision, read at finalize");
+                else if (!Ev.Eq(st, "planned"))
+                    // a status only another program's plan gives (an older SkyWright planned this run): never launched here
+                    ex.Account(check, arm, "unsupported", null,
+                        $"the plan gives this row the status {PyText.Repr(st)}, which this SkyWright does not evaluate; plan the run again to evaluate it");
                 else if (Ev.Eq(kind, "derived")) { }   // after the loop: derived checks consume other receipts
                 else
                 {
@@ -221,33 +221,6 @@ public static class EvaluateRun
     /// take, a held-back arm, a missing payload, an opt-in check not opted in), accounted by its plan status; false for
     /// a status this rule does not answer. runcontrol's evaluation and another program evaluating a plan of its own
     /// use the same rule.</summary>
-    /// <summary>An import row whose import is no longer credited, accounted with its cause: blocked by name while its
-    /// prerequisite still fails on this arm, else the cause an earlier gate recorded (invalidated or refused reuse).
-    /// False when the row's import was never un-credited.</summary>
-    public static bool AccountUncreditedImport(Executor ex, PyDict check, PyDict arm)
-    {
-        object? aid = arm["armId"];
-        object? st = Ev.Items(check["arms"]).Select(PyValue.Dict).FirstOrDefault(r => Ev.Eq(r["armId"], aid))?.Get("status");
-        if (Prerequisites.UncreditedImportStillBlocked(ex, check, aid))
-        {
-            // an import this gate un-credited earlier stays blocked, by name, while its prerequisite still fails
-            string pre = Prerequisites.Satisfied(ex, check, aid)!;
-            ex.Account(check, arm, $"blocked(prerequisite:{pre})", "blocked-prerequisite",
-                Prerequisites.BlockDetail(ex, pre, aid) + ImportNote(st), extra: Prerequisites.SupersededImport(ex, check, arm));
-            return true;
-        }
-        if (Prerequisites.UncreditedImportCause(ex, check, aid) is not { } was) return false;
-        // an import whose entry was invalidated or refused reuse keeps that cause
-        string? also = Prerequisites.Satisfied(ex, check, aid);
-        ex.Account(check, arm, was, "stale-inputs",
-            "an accepted import of this check is no longer credited: " + was
-            + ". Its copied evidence stays under imports/ but backs no receipt; import it again "
-            + "(the re-import is copied beside the old folder) once its inputs are what it states"
-            + (also == null ? "" : $". A re-import is refused until {also} is settled on this arm as well: " + Prerequisites.BlockDetail(ex, also, aid)),
-            extra: Prerequisites.SupersededImport(ex, check, arm));
-        return true;
-    }
-
     public static bool AccountPlanStatus(Executor ex, PyDict check, PyDict arm, object? st)
     {
         var plan = ex.Plan;
@@ -292,10 +265,4 @@ public static class EvaluateRun
             ledger.Transition(Ev.Str(cid), Ev.Str(aid), part, "reused", receiptId: e.Get("receiptId") as string,
                 detector: e.Get("detector") as string, extra: new PyDict { ["reusedFromRunId"] = e.Get("runId") });
     }
-
-    // st in IMPORT_ROW_STATUSES.
-    static string ImportNote(object? st) => !Import(st) ? ""
-        : ". The imported evidence stays under imports/ but is no longer credited; import it again once the prerequisite is settled on this arm";
-
-    static bool Import(object? st) => st is string s && EvalStore.ImportRowStatuses.Contains(s);
 }

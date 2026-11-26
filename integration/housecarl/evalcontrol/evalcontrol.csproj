@@ -31,6 +31,7 @@
     <EmbeddedResource Include="known-answers\live.json" LogicalName="live.json" />
     <EmbeddedResource Include="known-answers\advice.json" LogicalName="advice.json" />
     <EmbeddedResource Include="known-answers\discovery.json" LogicalName="discovery.json" />
+    <EmbeddedResource Include="known-answers\evaluate.json" LogicalName="evaluate.json" />
   </ItemGroup>
 
   <!-- where the app's build is, seen from this program's folder: the module never spells it anywhere else -->

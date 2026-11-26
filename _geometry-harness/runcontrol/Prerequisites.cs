@@ -83,44 +83,6 @@ public static class Prerequisites
         return null;
     }
 
-    /// <summary>True when this import row is blocked(prerequisite:...) and a prerequisite still fails for the arm.</summary>
-    public static bool UncreditedImportStillBlocked(Executor ex, PyDict check, object? armId) =>
-        StatusOf(ex, check["checkId"], armId).StartsWith("blocked(prerequisite:", StringComparison.Ordinal) && Satisfied(ex, check, armId) != null;
-
-    /// <summary>The status word of an import row that resume stopped crediting: invalidated(...) or refused-reuse(...).</summary>
-    public static string? UncreditedImportCause(Executor ex, PyDict check, object? armId)
-    {
-        string own = StatusOf(ex, check["checkId"], armId);
-        return own.StartsWith("invalidated(", StringComparison.Ordinal) || own.StartsWith("refused-reuse(", StringComparison.Ordinal) ? own : null;
-    }
-
-    /// <summary>{supersededImport: ...} when the receipt an accounting receipt is about to replace is an accepted
-    /// import, so its origin does not vanish with it; a receipt that already carries the record hands it on.</summary>
-    public static PyDict? SupersededImport(Executor ex, PyDict check, PyDict arm)
-    {
-        string key = Ledger.Key(check["checkId"], arm["armId"], null);
-        if (PyJson.LoadEvalFile(PyPath.Join(ex.Run, "receipts", $"{key}.json")) is not PyDict rc) return null;
-        if (rc.Get("imported") is not PyDict imported || !PyValue.Truthy(Ev.OrEmpty(rc.Get("validation")).Get("accepted")))
-            return rc.Get("supersededImport") is PyDict carried ? new PyDict { ["supersededImport"] = carried } : null;
-        // the folders of this key only: KEY and its re-imports KEY~n
-        string imports = PyPath.Join(ex.Run, "imports");
-        var folders = !Directory.Exists(imports) ? []
-            : PyOrder.SortedPaths(Directory.EnumerateDirectories(imports)
-                    .Where(p => PyPath.Name(p).StartsWith(key, StringComparison.OrdinalIgnoreCase))
-                    .Where(p => PyPath.Name(p) == key || PyPath.Name(p).StartsWith(key + "~", StringComparison.Ordinal)))
-                .Select(p => (object?)PyPath.RelTo(ex.Run, p)).ToList();
-        return new PyDict
-        {
-            ["supersededImport"] = new PyDict
-            {
-                ["receiptId"] = rc.Get("receiptId"), ["origin"] = PyValue.Truthy(imported.Get("origin")) ? imported["origin"] : "unknown",
-                ["reusedFrom"] = imported.Get("reusedFrom"), ["sourceSha256"] = imported.Get("sourceSha256"),
-                ["capturedUtc"] = imported.Get("capturedUtc"), ["folders"] = folders,
-                ["note"] = "this check was credited by an import that is no longer credited; the status and cause on this receipt say why",
-            },
-        };
-    }
-
     /// <summary>The first prerequisite whose own status on this arm now decides against an entry accepted earlier:
     /// such an entry is blocked, not reused.</summary>
     public static string? ReuseBlockedBy(Executor ex, PyDict check, object? armId)

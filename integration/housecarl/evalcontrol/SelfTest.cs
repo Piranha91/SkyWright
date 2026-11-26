@@ -33,6 +33,7 @@ public static partial class SelfTest
         AdviceCases();
         AdviceGenericCases(Load("advice.json"));
         DiscoveryCases(Load("discovery.json"));
+        EvaluateCases(Load("evaluate.json"));
         Console.WriteLine($"{_green} green, {_red} red, 0 skipped");
         return _red == 0 ? 0 : 1;
     }

@@ -43,31 +43,42 @@ public static class OverlayEvaluate
             if (ledger.Entries.Any(kv => EvalStore.IsTerminalOk(Ev.G(kv.Value, "status")))) Revalidate.Run(run, plan, ledger);
             var planned = Ev.Items(plan["checks"]).Select(PyValue.Dict).ToList();
             parent.Stage("checks", total: planned.Sum(c => PyValue.Len(c["arms"])), unit: "check-arms");
-            foreach (var check in EvaluateRun.Schedule(plan))
-            {
-                string kind = Ev.Str(Ev.OrEmpty(check["adapter"]).Get("kind"));
-                foreach (var armRow in Ev.Items(check["arms"]).Select(PyValue.Dict))
-                {
-                    var arm = ex.Arm(armRow["armId"]);
-                    object? st = armRow["status"];
-                    if (EvaluateRun.AlreadyDone(ledger, check["checkId"], arm["armId"], null)) EvaluateRun.MarkReused(ledger, check["checkId"], arm["armId"], null);
-                    else if (EvaluateRun.AccountPlanStatus(ex, check, arm, st)) { }
-                    // an import no longer credited (its evidence changed, its reuse refused) keeps its cause, by runcontrol's rule
-                    else if (st is "mcp-only" or "live-import" && EvaluateRun.AccountUncreditedImport(ex, check, arm)) { }
-                    else if (kind == "media") ex.Account(check, arm, "blocked(no-identified-media)", null, NoMedia);
-                    else if (Ev.Eq(st, "mcp-only"))
-                        // open until `evalcontrol import` binds a record reader's evidence to it
-                        ex.Account(check, arm, "mcp-only", null,
-                            PyValue.Truthy(check.Get("unsupportedReason")) ? (string)check["unsupportedReason"]! : "the list records no command-line adapter for this check");
-                    else if (Ev.Eq(st, "live-import")) AccountLive(ex, run, plan, ledger, check, arm);
-                    else if (Ev.Eq(st, "planned") && ModuleRows.LaunchKinds.Contains(kind)) LaunchRow(ex, run, plan, check, arm);
-                    else throw new Refusal($"{Ev.Str(check["checkId"])}: adapter kind {PyText.Repr(kind)} is not one evalcontrol evaluates.");
-                    parent.Advance();
-                }
-            }
+            Rows(ex, run, plan, ledger, () => parent.Advance());
         }
         EvalStatus.Print(plan, ledger);
         return Exit.Ok;
+    }
+
+    /// <summary>The loop itself: every row of the overlay plan, in runcontrol's schedule order, each counted through
+    /// `advance` once it is settled.</summary>
+    public static void Rows(Executor ex, string run, PyDict plan, Ledger ledger, Action advance)
+    {
+        foreach (var check in EvaluateRun.Schedule(plan))
+        {
+            string kind = Ev.Str(Ev.OrEmpty(check["adapter"]).Get("kind"));
+            foreach (var armRow in Ev.Items(check["arms"]).Select(PyValue.Dict))
+            {
+                var arm = ex.Arm(armRow["armId"]);
+                object? st = armRow["status"];
+                if (EvaluateRun.AlreadyDone(ledger, check["checkId"], arm["armId"], null))
+                {
+                    // only an import credits an import row, and it stays credited only while its gate still holds on this arm
+                    if (!(ImportRows.IsImport(st) && ImportRows.BlockReused(ex, run, plan, check, arm))) EvaluateRun.MarkReused(ledger, check["checkId"], arm["armId"], null);
+                }
+                else if (EvaluateRun.AccountPlanStatus(ex, check, arm, st)) { }
+                // an import no longer credited (its evidence changed, its reuse refused) keeps its cause
+                else if (ImportRows.IsImport(st) && ImportRows.AccountUncredited(ex, run, plan, check, arm)) { }
+                else if (kind == "media") ex.Account(check, arm, "blocked(no-identified-media)", null, NoMedia);
+                else if (Ev.Eq(st, "mcp-only"))
+                    // open until `evalcontrol import` binds a record reader's evidence to it
+                    ex.Account(check, arm, "mcp-only", null,
+                        PyValue.Truthy(check.Get("unsupportedReason")) ? (string)check["unsupportedReason"]! : "the list records no command-line adapter for this check");
+                else if (Ev.Eq(st, "live-import")) AccountLive(ex, run, plan, ledger, check, arm);
+                else if (Ev.Eq(st, "planned") && ModuleRows.LaunchKinds.Contains(kind)) LaunchRow(ex, run, plan, check, arm);
+                else throw new Refusal($"{Ev.Str(check["checkId"])}: adapter kind {PyText.Repr(kind)} is not one evalcontrol evaluates.");
+                advance();
+            }
+        }
     }
 
     /// <summary>A planned row of a module probe: held until its app prerequisites are settled on this arm in the
@@ -75,17 +86,9 @@ public static class OverlayEvaluate
     /// runcontrol's generic row with this module's rules (ModuleRows).</summary>
     static void LaunchRow(Executor ex, string run, PyDict plan, PyDict check, PyDict arm)
     {
-        if (RecordImport.AppPrerequisite(run, plan, check, arm["armId"]) is { } app)
-        {
-            ex.Account(check, arm, app.status, "blocked-prerequisite", app.detail);
-            return;
-        }
-        if (Prerequisites.Satisfied(ex, check, arm["armId"]) is { } pre)
-        {
-            ex.Account(check, arm, $"blocked(prerequisite:{pre})", "blocked-prerequisite", Prerequisites.BlockDetail(ex, pre, arm["armId"]));
-            return;
-        }
-        ModuleRows.Run(ex, check, arm);
+        if (ImportRows.Gate(ex, run, plan, check, arm["armId"]) is { } g)
+            ex.Account(check, arm, g.status, "blocked-prerequisite", g.detail);
+        else ModuleRows.Run(ex, check, arm);
     }
 
     /// <summary>An opted-in live row (moved from runcontrol's evaluate with the check): not applicable when the arm's
