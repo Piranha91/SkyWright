@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- nearprobe: the houseCARL integration module's "what stands near these placed references" for an LLM, over a load
+       order read the way lookprobe reads one (_shared/HarnessOrderCli.cs) and answered by SkyWright's own query,
+       SkyWright.Engine.NearReferences.Of. Record type names are resolved by houseCARL's own resolver (TypeLookup, in
+       housecarl-mcp, reached by reflection because it is internal there; see NearProbe.ResolveTypes). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>nearprobe</AssemblyName>
+    <RootNamespace>NearProbe</RootNamespace>
+    <NoWarn>CA1416</NoWarn>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <!-- houseCARL's server code as a library (Directory.Build.props), for its record type resolver; never its program -->
+    <SkyWrightHousecarlLibrary>true</SkyWrightHousecarlLibrary>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
+    <ProjectReference Include="$(SkyWrightSrc)SkyWright.Engine\SkyWright.Engine.csproj" />
+    <ProjectReference Include="$(HousecarlSrc)housecarl-mcp\housecarl-mcp.csproj" ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="$(SkyWrightHarness)_shared\StateArm.cs" Link="StateArm.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\EnableArms.cs" Link="EnableArms.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\DetectorModel.cs" Link="DetectorModel.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\OrderMasters.cs" Link="OrderMasters.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\Configuration.cs" Link="Configuration.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\PlacementHistory.cs" Link="PlacementHistory.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\DeletionHistory.cs" Link="DeletionHistory.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\OverlapIndex.cs" Link="OverlapIndex.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\DependencyIndex.cs" Link="DependencyIndex.cs" />
+    <Compile Include="$(SkyWrightHarness)_shared\BosHook.cs" Link="BosHook.cs" />
+  </ItemGroup>
+</Project>
