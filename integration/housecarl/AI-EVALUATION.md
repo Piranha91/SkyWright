@@ -267,7 +267,8 @@ refuses the whole `--media` document by name rather than dropping the item.
 programs they start are the same: viewprobe (capture), runcontrol and evalcontrol (all three), each as toolidentity's
 package digest of the folder the stage's child actually runs (the machine file's, else `HOUSECARL_RUNCONTROL` for
 runcontrol, else the build), and the build's `Data` pieces the controllers read (corpus, check registry, severity,
-scene policy, and the layout marker). The build writes no commit stamp into a program (`Directory.Build.props`), so a
+scene policy, and the layout marker). The build writes no commit into a program, neither as a version stamp nor
+through source link in its debug file (`Directory.Build.props`), so a
 rebuild of the same code in the same build folder is the same digest and the stages are reused; a build of it in
 another folder (another worktree) differs in its debug path and runs them again. Which commit built a program, and
 whether the tree was dirty, is in its `provenance/build.json`, outside the identity ("unknown" when git could not say).
