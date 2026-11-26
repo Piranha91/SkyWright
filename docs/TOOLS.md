@@ -49,6 +49,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does a bundle the built-in controller makes with its names step get reported with no hand step (C567)?](#tool-integration-housecarl-tests-test_report_plan_reads_names.py) — `integration/housecarl/tests/test_report_plan_reads_names.py`
 - [Does a buried clash read as buried in the reel and the report, and does a top-down hide what covers the pair from above by the cutaway's rule?](#tool-integration-housecarl-tests-test_capture_fallbacks.py) — `integration/housecarl/tests/test_capture_fallbacks.py`
 - [Does a fresh user get the settings window once, and is a saved choice honoured?](#tool-integration-housecarl-tests-test_evalsettings.py) — `integration/housecarl/tests/test_evalsettings.py`
+- [Does a lab run keep its pictures across a rebuild of unchanged code, redo them after a real change to the renderer or controller, and carry banked picture descriptions only when a redone capture matches within the stated tolerance?](#tool-integration-housecarl-tests-test_lab_pictures_reuse.py) — `integration/housecarl/tests/test_lab_pictures_reuse.py`
 - [Does a lab run's measuring entry fold only the two measuring choices, keep every other key, and does the module record the model choice?](#tool-integration-housecarl-tests-test_measuring_entry.py) — `integration/housecarl/tests/test_measuring_entry.py`
 - [Does a lab run's record capture read the open arms, take the machine slot, import only rows that were open, and refuse in one sentence?](#tool-integration-housecarl-tests-test_record_capture.py) — `integration/housecarl/tests/test_record_capture.py`
 - [Does a named compatibility patch cover the exact records a detector reported in conflict?](#tool-patchprobe) — `patchprobe`
@@ -3827,6 +3828,21 @@ Inputs: The evalrun fixtures, SkyWright's registry trimmed to the record rows' a
 Outputs: Assertion results for: Does evalcontrol accept a judged-0 record import only when it states no members on an arm without the targets, and refuse every other?
 
 Source: [integration/housecarl/tests/test_import_empty_population.py](../integration/housecarl/tests/test_import_empty_population.py) — `A judged-0 import is "nothing to judge" only on two independent facts (cases 1340-1346).`
+
+
+<a id="tool-integration-housecarl-tests-test_lab_pictures_reuse.py"></a>
+
+### integration/housecarl/tests/test_lab_pictures_reuse.py
+
+**Does a lab run keep its pictures across a rebuild of unchanged code, redo them after a real change to the renderer or controller, and carry banked picture descriptions only when a redone capture matches within the stated tolerance?**
+
+Check changes to how evalpipeline.py binds its picture stages to the programs they run, to the build's provenance record, or to the image-observations picture comparison.
+
+Inputs: Controlled fixtures for test_lab_pictures_reuse, and the build's program folders.
+
+Outputs: Assertion results for: Does a lab run keep its pictures across a rebuild of unchanged code, redo them after a real change, and carry banked picture descriptions only within the stated tolerance?
+
+Source: [integration/housecarl/tests/test_lab_pictures_reuse.py](../integration/housecarl/tests/test_lab_pictures_reuse.py) — `Known answers for a lab run's pictures across a rebuild, and for the blind observations' picture comparison`
 
 
 <a id="tool-integration-housecarl-tests-test_machineidle.py"></a>

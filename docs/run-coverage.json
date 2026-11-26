@@ -10069,6 +10069,27 @@
       ]
     },
     {
+      "id": "integration/housecarl/tests/test_lab_pictures_reuse.py",
+      "path": "integration/housecarl/tests/test_lab_pictures_reuse.py",
+      "kind": "script",
+      "answers": [
+        "Does a lab run keep its pictures across a rebuild of unchanged code, redo them after a real change to the renderer or controller, and carry banked picture descriptions only when a redone capture matches within the stated tolerance?"
+      ],
+      "useWhen": "Check changes to how evalpipeline.py binds its picture stages to the programs they run, to the build's provenance record, or to the image-observations picture comparison.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/tests/test_lab_pictures_reuse.py",
+          "anchor": "Known answers for a lab run's pictures across a rebuild, and for the blind observations' picture comparison"
+        }
+      ],
+      "inputs": [
+        "Controlled fixtures for test_lab_pictures_reuse, and the build's program folders."
+      ],
+      "outputs": [
+        "Assertion results for: Does a lab run keep its pictures across a rebuild of unchanged code, redo them after a real change, and carry banked picture descriptions only within the stated tolerance?"
+      ]
+    },
+    {
       "id": "integration/housecarl/tests/test_reader_rules.py",
       "path": "integration/housecarl/tests/test_reader_rules.py",
       "kind": "script",
