@@ -408,6 +408,16 @@ def overlay_verify(tmp):
     check(code != 0 and _kinds(v) == ["disposition-stale", "tool-identity-mismatch"],
           f"{case}: a probe role bound to another program is a fault (exit {code}, defects {_kinds(v)})")
 
+    # in an overlay every row is this module's: a receipt of a kind neither SkyWright nor this module writes is a fault
+    ov, _ = _copy_pair(tmp, bundle, f"{case}-foreign-row")
+    rc = load(ov / rel)
+    rc["adapter"]["kind"] = "patchprobe"
+    (ov / rel).write_text(json.dumps(rc, indent=1), encoding="utf-8")
+    _rehash(ov, rel)
+    code, v = _verify(ov, tmp)
+    check(code != 0 and "evidence-kind-unknown" in _kinds(v),
+          f"{case}: a foreign row in an overlay is a fault (exit {code}, defects {_kinds(v)})")
+
     # a media item that states no app fingerprint: unassessed, never evidence
     run = tmp / f"{case}-run" / "ai"     # recorded_bundle's overlay run (to_overlay)
     shot = tmp / f"{case}-shot.png"
@@ -456,7 +466,32 @@ def overlay_verify(tmp):
         evalreport.AI_BUNDLES.pop(str(app), None)
 
 
-CASES = {"overlay-verify": overlay_verify, "case-10": case_10, "case-51": case_51, "C1933": c1933, "plan-oracles": plan_oracles, "record-oracles": record_oracles,
+def old_combined(tmp):
+    """An older SkyWright's combined bundle (no overlay; its AI-side rows were made and accepted by the evalrun of its
+    day): evalcontrol verify says its one sentence and states no AI-side evaluation; runcontrol verify-bundle lists the
+    retired-kind rows as not checked, with their count, and says nothing judges them now."""
+    import shutil
+    case = "old-combined"
+    b = tmp / case
+    shutil.copytree(SW.HARNESS / "tests" / "fixtures" / "old-bundles" / "lab-record-rows", b)
+    r = evalcontrol(["verify", b], cwd=tmp)
+    expect((r.returncode, r.stderr.strip()), (2, "REFUSED: this bundle was made before the AI-side rows left SkyWright's check "
+           "registry: its imported and AI-side rows were checked by the runcontrol that made it (its receipts name that "
+           "controller's digest), and runcontrol verify-bundle still hashes them; there is no overlay to verify, so verify it "
+           "with runcontrol verify-bundle."), f"{case}: evalcontrol verify says its one sentence")
+    check(not (b / "verify.json").exists(), f"{case}: evalcontrol verify writes no verify.json, so no aiEvaluation.complete")
+    rv = subprocess.run([str(ER.RUNCONTROL), "verify-bundle", str(b)], capture_output=True, text=True,
+                        encoding="utf-8", errors="replace", timeout=300)
+    v = load(b / "verify.json") or {}
+    rows = (v.get("bundle") or {}).get("notChecked") or []
+    said = [ln for ln in rv.stdout.splitlines() if "does not check" in ln]
+    check(rv.returncode == 0 and len(rows) == 3 and len(said) == 1 and said[0].startswith("verify: 3 evidence row(s)")
+          and "with no overlay are judged by nothing now" in said[0],
+          f"{case}: runcontrol lists the 3 retired-kind rows as not checked, nothing judging them (exit {rv.returncode}, {said})")
+    check("aiEvaluation" not in v, f"{case}: runcontrol's verify.json states no AI-side evaluation")
+
+
+CASES = {"overlay-verify": overlay_verify, "old-combined": old_combined, "case-10": case_10, "case-51": case_51, "C1933": c1933, "plan-oracles": plan_oracles, "record-oracles": record_oracles,
          "case-803": case_803, "advice-oracles": advice_oracles}
 
 
