@@ -42,6 +42,7 @@ import ast
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import sys
@@ -1125,6 +1126,93 @@ def observations_state(key: list[dict], obs: dict | None) -> tuple[str, str]:
     return "accepted", f"{len(want)} frames observed blind."
 
 
+#: a redone frame is the described picture when every channel is within this many levels ...
+PICTURE_LEVELS = 1
+#: ... at no more than this share of its pixels (92 at 1280 x 720), and its recorded render arguments are the same. Measured:
+#: renders of one camera by one build differ by one level in up to 54 pixels (MSAA; AI-EVALUATION.md, section 5)
+PICTURE_SHARE = 0.0001
+#: where the frames the banked observations describe are kept, and the record of a carry
+DESCRIBED, CARRIED = "described", "carried.json"
+
+
+def picture_tolerance_text() -> str:
+    return f"every channel within {PICTURE_LEVELS} level, at most {PICTURE_SHARE * 100:g} % of the pixels, the same render arguments"
+
+
+def keep_described(banked: dict | None, packet: Path, described: Path) -> None:
+    """Copy each packet frame that hashes to its banked sha256 into `described`, unless a copy with those bytes is there."""
+    for f in (banked or {}).get("frames") or []:
+        name, want = f.get("image"), f.get("sha256")
+        if not name or not want:
+            continue
+        dst, src = described / name, packet / name
+        if dst.is_file() and sha256_file(dst) == want:
+            continue
+        if src.is_file() and sha256_file(src) == want:
+            described.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+
+
+def render_arguments(text: str | None) -> str | None:
+    """A frame's recorded render arguments (its PNG tEXt 'viewprobe') with ONLY the --order argument's folder set aside:
+    where the order file sits depends on where the run folder is, and its bytes are bound by the upstream receipts.
+    Every other argument, path-valued ones included, is compared exactly."""
+    if text is None:
+        return None
+    return re.sub(r"(--order )(\S+)", lambda m: m.group(1) + re.split(r"[\\/]", m.group(2))[-1], text)
+
+
+def compare_frames(described: Path, now: Path) -> dict:
+    """{differing, maxLevel, sameArguments, within} for a redone frame against the described one."""
+    import numpy as np
+    from PIL import Image
+    with Image.open(described) as a_img, Image.open(now) as b_img:
+        args_a, args_b = render_arguments(a_img.text.get("viewprobe")), render_arguments(b_img.text.get("viewprobe"))
+        a = np.asarray(a_img.convert("RGBA"), dtype=np.int16)
+        b = np.asarray(b_img.convert("RGBA"), dtype=np.int16)
+    row = {"sameArguments": args_a == args_b}
+    if a.shape != b.shape:
+        return dict(row, size=[list(a.shape[:2]), list(b.shape[:2])], within=False)
+    d = np.abs(a - b)
+    differing, level = int(np.any(d > 0, axis=2).sum()), int(d.max())
+    limit = int(a.shape[0] * a.shape[1] * PICTURE_SHARE)
+    return dict(row, differing=differing, maxLevel=level, limit=limit,
+                within=row["sameArguments"] and level <= PICTURE_LEVELS and differing <= limit)
+
+
+def carried_frames(key: list[dict], banked: dict, described: Path) -> tuple[list | None, str]:
+    """Whether a redone capture keeps the banked observations: the same frames by name, each observed, and each frame
+    whose bytes changed within the tolerance of the frame that was described (which must still hash to the bank).
+    Returns (rows, "") or (None, why)."""
+    frames = {f.get("image"): f for f in banked.get("frames") or []}
+    if sorted(frames) != sorted(k["image"] for k in key):
+        return None, "the frames are not the ones described"
+    if any(not str(f.get("observation") or "").strip() for f in frames.values()):
+        return None, ""
+    try:
+        import numpy  # noqa: F401
+        from PIL import Image  # noqa: F401
+    except ImportError:
+        return None, "Pillow and numpy are needed to compare a redone frame with the described one"
+    rows = []
+    for k in key:
+        want = frames[k["image"]].get("sha256")
+        row = {"image": k["image"], "bankedSha256": want, "sha256": k["sha256"]}
+        if k["sha256"] != want:
+            d = described / k["image"]
+            if not d.is_file() or sha256_file(d) != want:
+                return None, f"the described {k['image']} is not kept with the bytes the observations name"
+            cmp_ = compare_frames(d, Path(k["source"]))
+            if not cmp_["within"]:
+                why = ("its render arguments differ" if not cmp_["sameArguments"] else
+                       f"its size differs" if "size" in cmp_ else
+                       f"{cmp_['differing']} pixels differ, by up to {cmp_['maxLevel']} levels")
+                return None, f"{k['image']} is another picture ({why}; {picture_tolerance_text()})"
+            row.update({x: cmp_[x] for x in ("differing", "maxLevel")})
+        rows.append(row)
+    return rows, ""
+
+
 def no_frame_sentence(rows: list[dict]) -> str:
     """Why a capture stage left no frame, from its rows: nothing asked for, every request refused, or none produced one."""
     if not rows:
@@ -1153,6 +1241,11 @@ def stage_image_observations(ctx: Context, res: dict, sdir: Path) -> tuple[dict,
             key.append({"image": f"image-{n:03d}.png", "source": fwd(png), "sha256": sha256_file(png),
                         "request": row["id"]})
     kept = read_json(sdir / "image-key.json") if (sdir / "image-key.json").is_file() else None
+    obs_path = sdir / "observations.json"
+    banked = read_json(obs_path) if obs_path.is_file() else None
+    # the frames the banked observations describe are kept before the packet is replaced: a later capture is compared
+    # with them (never with an intermediate one)
+    keep_described(banked, packet, sdir / DESCRIBED)
     if kept != key or not packet.is_dir():
         if packet.exists():
             shutil.rmtree(packet)
@@ -1163,8 +1256,31 @@ def stage_image_observations(ctx: Context, res: dict, sdir: Path) -> tuple[dict,
         (packet / "README.txt").write_text("Indexed frames for a blind review. Describe what each image shows; no "
                                            "names or expectations are supplied.\n", encoding="utf-8")
     key = read_json(sdir / "image-key.json")
-    obs_path = sdir / "observations.json"
-    state, sentence = observations_state(key, read_json(obs_path) if obs_path.is_file() else None)
+    state, sentence = observations_state(key, banked)
+    carried_path = sdir / CARRIED
+    if state == "refused" and banked is not None:
+        rows, why = carried_frames(key, banked, sdir / DESCRIBED)
+        if rows is None:
+            raise Refusal(f"{sentence[:-1]}: {why}." if why else sentence)
+        doc = {"tolerance": picture_tolerance_text(), "frames": rows}
+        if carried_path.is_file():
+            try:
+                old = read_json(carried_path)
+            except (OSError, ValueError):
+                old = None
+            same_capture = old is not None and [(r.get("image"), r.get("sha256")) for r in old.get("frames") or []] \
+                == [(r["image"], r["sha256"]) for r in rows]
+            if same_capture and old != doc:
+                raise Refusal(f"{fwd(carried_path)} does not say what the comparison of these frames finds (it was "
+                              f"changed by hand); observe this packet again.")
+        write_json(carried_path, doc)
+        changed = sum(1 for r in rows if r["sha256"] != r["bankedSha256"])
+        print(f"image-observations: {changed} of {len(rows)} frames differ from the described ones within the "
+              f"tolerance ({picture_tolerance_text()}); the banked observations are carried.")
+        return ({"images": len(key), "observations": sha256_file(obs_path), "carried": changed},
+                [sdir / "image-key.json", obs_path, carried_path])
+    if carried_path.is_file() and state != "refused":
+        carried_path.unlink()   # the frames are the described ones again: nothing is carried
     if state == "awaiting":
         raise Awaiting(f"{sentence} Bank them at {fwd(obs_path)} as {{frames: [{{image, sha256, observation}}]}} for "
                        f"the {len(key)} frames in {fwd(packet)}, then run again.")

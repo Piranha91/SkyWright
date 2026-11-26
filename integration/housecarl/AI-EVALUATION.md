@@ -260,3 +260,40 @@ A schema-1 item (no `mediaKind`, no `fingerprintSource`) is therefore unassessed
 (`kind-missing`), never silently accepted. A media file with a plugin or asset suffix (never copied by policy)
 refuses the whole `--media` document by name rather than dropping the item.
 
+
+## 5. Pictures across a rebuild, and the blind observations' comparison
+
+**What the picture stages are bound to.** report-plan, capture and report reuse an accepted result only while the
+programs they start are the same: viewprobe (capture), runcontrol and evalcontrol (all three), each as toolidentity's
+package digest of the folder the stage's child actually runs (the machine file's, else `HOUSECARL_RUNCONTROL` for
+runcontrol, else the build), and the build's `Data` pieces the controllers read (corpus, check registry, severity,
+scene policy, and the layout marker). The build writes no commit stamp into a program (`Directory.Build.props`), so a
+rebuild of the same code in the same build folder is the same digest and the stages are reused; a build of it in
+another folder (another worktree) differs in its debug path and runs them again. Which commit built a program, and
+whether the tree was dirty, is in its `provenance/build.json`, outside the identity ("unknown" when git could not say).
+A program that is missing or unreadable, or a `WB_*` layout override in the environment, is never "unchanged": the
+stage runs again and says why. A program that changes while its stage runs refuses the stage. Results bound the old way
+(a stamped build, or a request bound to viewprobe's apphost) are not reused: the first run after this change captures
+once more.
+
+**Why a redone frame is not byte-equal.** viewprobe renders the captured frames with `--msaa 4`; the GPU driver's
+multisampled blending of surfaces drawn on or over others (water and fog sheets, landscape layers, the highlight
+tint) is not repeatable between processes. Measured 2026-11-26 (`C:/hc-runs/2026-11-26-lab-pictures-reuse/measure/`):
+three renders of nine frames (two lab runs of the same cameras and a third) and six renders of one shot at 1280 px
+differ by one level in at most 54 pixels of 921,600 (0.0059 %), up to three colour channels of a pixel, never alpha;
+the same shot at `--msaa 0` is byte-identical in three processes. The write path is deterministic.
+
+**The comparison.** The image-observations stop keeps the frames the banked observations describe in
+`RUN/image-observations/described/` (each must hash to its banked sha256). A redone capture with the same frames by
+name keeps the banked observations when every frame whose bytes changed is, against its described frame:
+
+- the same size, with every R, G, B and A value within **1 level**;
+- different in at most **0.01 % of its pixels** (92 at 1280×720), 1.7 times the worst measured;
+- rendered with the same recorded arguments (the PNG `viewprobe` text: camera, size, flags), where only the folder of
+  the `--order` file is set aside (it moves with the run folder; its bytes are bound upstream).
+
+A frame above that only costs a fresh description: the stage refuses as before ("observe this packet again"). The
+banked `observations.json` is never rewritten; the stage writes `carried.json` (each frame's banked and new sha256,
+differing pixels and largest level), bound in its receipt. An edited `carried.json` is refused; a removed one is made
+again from the same frames. The comparison is always against the described frames, never an intermediate capture, so
+small changes cannot add up.
