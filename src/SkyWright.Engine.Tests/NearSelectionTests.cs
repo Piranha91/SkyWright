@@ -347,11 +347,14 @@ public sealed class NearSelectionTests : IClassFixture<NearSelectionTests.World>
         Assert.Empty(a.Keys);
     }
 
+    // two rows by a flag, not by the value: xUnit's InlineData compares 0.0 and -0.0 equal and would fold them
     [Theory]
-    [InlineData(0.0)]
-    [InlineData(-0.0)]
-    public void N4b_zero_is_answered(double within)
+    [InlineData(false)]
+    [InlineData(true)]
+    public void N4b_zero_is_answered(bool negativeZero)
     {
+        double within = negativeZero ? -0.0 : 0.0;
+        Assert.Equal(negativeZero, double.IsNegative(within));
         var a = NearReferences.Of(_w.Resolver.Capture(), new[] { World.Seed }, within);
         Assert.True(a.Refusal is null, "refused: " + a.Refusal);
         Assert.Contains(Fid(World.Touching), (IDictionary<string, string>)Matches(a));
