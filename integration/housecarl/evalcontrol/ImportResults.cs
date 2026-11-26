@@ -63,7 +63,7 @@ public static class ImportResults
                 ["program"] = Receipts.Controller, ["kind"] = own.Get("kind"), ["digest"] = own.Get("digest"), ["checked"] = new List<object?> { "preflight" },
             },
         };
-        var ledger = new Ledger(run, plan);
+        var ledger = ImportRows.OverlayLedger(run, plan);
         if (ledger.Refusal() is { } badLedger) { Refuse(badLedger); return null; }
 
         byte[] manifestBytes;

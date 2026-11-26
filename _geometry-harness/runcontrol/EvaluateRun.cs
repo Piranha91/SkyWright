@@ -248,14 +248,9 @@ public static class EvaluateRun
         return true;
     }
 
-    /// <summary>Whether an earlier invocation settled this (check, arm, part): completed or reused, or an accepted
-    /// import that found nothing to judge.</summary>
-    public static bool AlreadyDone(Ledger ledger, object? cid, object? aid, string? part)
-    {
-        var e = ledger.Entry(cid, aid, part);
-        return PyValue.Truthy(e) && (EvalStore.IsTerminalOk(e!.Get("status"))
-                                    || (Ev.Eq(e.Get("status"), "not-applicable") && PyValue.Truthy(e.Get("imported"))));
-    }
+    /// <summary>Whether an earlier invocation settled this (check, arm, part): completed or reused.</summary>
+    public static bool AlreadyDone(Ledger ledger, object? cid, object? aid, string? part) =>
+        EvalStore.IsTerminalOk(ledger.Entry(cid, aid, part)?.Get("status"));
 
     /// <summary>A completed entry kept by this invocation reads reused, naming the invocation that measured it.</summary>
     public static void MarkReused(Ledger ledger, object? cid, object? aid, string? part)

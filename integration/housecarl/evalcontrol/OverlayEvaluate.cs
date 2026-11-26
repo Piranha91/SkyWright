@@ -28,7 +28,7 @@ public static class OverlayEvaluate
         var (changed, measured) = ToolPreflight.Check(run, plan, null, ModuleRows.LaunchKinds, probeBuild);
         if (changed != null) throw new Refusal(changed);
         if (EvalStore.PremiseRefusal(plan) is { } premise) throw new Refusal(premise);
-        var ledger = new Ledger(run, plan);
+        var ledger = ImportRows.OverlayLedger(run, plan);
         if (rebuildLedger) ledger.Rebuild();
         if (ledger.Refusal() is { } bad) throw new Refusal(bad);
 
@@ -60,7 +60,7 @@ public static class OverlayEvaluate
             {
                 var arm = ex.Arm(armRow["armId"]);
                 object? st = armRow["status"];
-                if (EvaluateRun.AlreadyDone(ledger, check["checkId"], arm["armId"], null))
+                if (ImportRows.AlreadyDone(ledger, check["checkId"], arm["armId"]))
                 {
                     // only an import credits an import row, and it stays credited only while its gate still holds on this arm
                     if (!(ImportRows.IsImport(st) && ImportRows.BlockReused(ex, run, plan, check, arm))) EvaluateRun.MarkReused(ledger, check["checkId"], arm["armId"], null);

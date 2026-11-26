@@ -9,6 +9,25 @@ namespace EvalControl;
 /// overlay, each by runcontrol's prerequisite rule.</summary>
 public static class ImportRows
 {
+    /// <summary>The entry keys an import's transitions carry forward (Ledger.MoreCarried).</summary>
+    public static readonly IReadOnlyList<string> Carried = ["imported", "importOrigin"];
+
+    /// <summary>An import receipt's facts on a rebuilt entry (Ledger.MoreReceiptFacts).</summary>
+    public static PyDict? ReceiptFacts(PyDict receipt) => receipt.Get("imported") is PyDict imp
+        ? new PyDict { ["imported"] = true, ["importOrigin"] = imp.Get("origin") } : null;
+
+    /// <summary>An overlay's ledger: runcontrol's, with the import facts.</summary>
+    public static Ledger OverlayLedger(string run, PyDict plan) => new(run, plan) { MoreReceiptFacts = ReceiptFacts, MoreCarried = Carried };
+
+    /// <summary>Whether an earlier invocation settled this row: runcontrol's rule, or an accepted import that found
+    /// nothing to judge.</summary>
+    public static bool AlreadyDone(Ledger ledger, object? cid, object? aid)
+    {
+        var e = ledger.Entry(cid, aid, null);
+        return EvaluateRun.AlreadyDone(ledger, cid, aid, null)
+               || (PyValue.Truthy(e) && Ev.Eq(e!.Get("status"), "not-applicable") && PyValue.Truthy(e.Get("imported")));
+    }
+
     /// <summary>Whether a row's plan status is one an import settles.</summary>
     public static bool IsImport(object? st) => st is "mcp-only" or "live-import";
 

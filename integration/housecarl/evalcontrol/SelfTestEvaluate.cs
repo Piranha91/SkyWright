@@ -41,7 +41,7 @@ public static partial class SelfTest
             int advanced = 0, children = 0;
             var (_, stdout, _) = Clocked(() => Captured(() =>
             {
-                var ledger = new Ledger(t.Root, plan);
+                var ledger = ImportRows.OverlayLedger(t.Root, plan);
                 ledger.OpenInvocation("run", $"run-{n}", null);
                 var ex = new Executor(t.Root, plan, ledger, resume: false) { ParentRunId = $"parent-{n}" };
                 ex.RunJob = _ => throw new InvalidOperationException("a child was started where the recorded run started none");

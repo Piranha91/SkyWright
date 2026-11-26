@@ -15,6 +15,13 @@ public sealed class Ledger
     // What load_json gave: a dict, null when missing or corrupt, or another JSON value (which has no get, as in Python).
     object? _doc;
 
+    /// <summary>A caller's facts read from its own receipts into an entry on rebuild (another program's receipt
+    /// blocks); null adds none. runcontrol's own ledger has none.</summary>
+    public Func<PyDict, PyDict?>? MoreReceiptFacts { get; init; }
+
+    /// <summary>A caller's entry keys a transition carries forward, besides runcontrol's own.</summary>
+    public IReadOnlyList<string> MoreCarried { get; init; } = [];
+
     public Ledger(string run, PyDict plan)
     {
         Run = PyPath.Str(run);
@@ -104,11 +111,7 @@ public sealed class Ledger
         }
         if (r.Get("validation") is PyDict v)
             o["validation"] = new PyDict { ["accepted"] = PyValue.Truthy(v.Get("accepted")), ["rejections"] = Ev.OrList(v.Get("rejections")) };
-        if (r.Get("imported") is PyDict imp)
-        {
-            o["imported"] = true;
-            o["importOrigin"] = imp.Get("origin");
-        }
+        if (MoreReceiptFacts?.Invoke(r) is { } more) o.Update(more);
         return o;
     }
 
@@ -145,7 +148,7 @@ public sealed class Ledger
             ["receiptPath"] = $"receipts/{k}.json", ["runId"] = RunId, ["updatedUtc"] = EvalStore.UtcNow(),
         };
         if (prev != null)
-            foreach (string keep in new[] { "reusedFromRunId", "derivedFrom", "imported", "importOrigin" })
+            foreach (string keep in new[] { "reusedFromRunId", "derivedFrom" }.Concat(MoreCarried))
                 if (prev.ContainsKey(keep) && extra?.Get(keep) == null) rec[keep] = prev[keep];
         if (extra != null) rec.Update(extra);
         Entries[k] = rec;
