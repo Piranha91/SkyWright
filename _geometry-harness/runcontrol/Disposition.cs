@@ -312,7 +312,7 @@ public static class Disposition
                     });
         var families = new HashSet<string>(StringComparer.Ordinal);
         foreach (var c in PyValue.Iter(plan["checks"]).Select(PyValue.Dict))
-            if (Ev.G(c["adapter"], "kind") is "unsupported" or "mcp-only" or "manual") families.Add((string)c["family"]!);
+            if (Ev.G(c["adapter"], "kind") is "unsupported" or "manual") families.Add((string)c["family"]!);
         var unassessed = new PyDict
         {
             ["statesNotExplored"] = notExplored,

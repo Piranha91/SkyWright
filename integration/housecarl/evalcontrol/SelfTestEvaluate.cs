@@ -13,6 +13,19 @@ public static partial class SelfTest
     static void EvaluateCases(PyDict ka)
     {
         foreach (var c in L(ka["execute"]).Select(D)) EvaluateCase(c);
+        // runcontrol's disposition counts only its unsupported and manual checks since the import rows moved; an
+        // overlay's adds its record imports and its media row (OverlayFinalize.Amend)
+        Case("finalize: an overlay's families unsupported or manual add its record imports and its media row", () =>
+        {
+            var plan = D(PyJson.Loads("{\"checks\": ["
+                + "{\"checkId\": \"records.cell-attributes\", \"family\": \"records\", \"adapter\": {\"kind\": \"mcp-only\"}}, "
+                + "{\"checkId\": \"runtime.supplied-observations\", \"family\": \"runtime\", \"adapter\": {\"kind\": \"media\"}}, "
+                + "{\"checkId\": \"patch.discovery-installed\", \"family\": \"patch\", \"adapter\": {\"kind\": \"patchfind\"}}, "
+                + "{\"checkId\": \"runtime.state-switch-flip\", \"family\": \"state\", \"adapter\": {\"kind\": \"live-import\"}}]}"));
+            var fromRuncontrol = D(PyJson.Loads("{\"familiesUnsupportedOrManual\": [\"terrain\", \"environment\"]}"));
+            return SameJson("families", OverlayFinalize.Families(fromRuncontrol, plan), PyJson.Loads("[\"environment\", \"records\", \"runtime\", \"terrain\"]"))
+                   ?? SameJson("with none from runcontrol", OverlayFinalize.Families(new PyDict(), plan), PyJson.Loads("[\"records\", \"runtime\"]"));
+        });
     }
 
     static void EvaluateCase(PyDict c) => Case($"sweep and derived rows: {S(c["name"])}", () =>

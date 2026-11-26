@@ -117,14 +117,22 @@ public static class OverlayFinalize
     public static void Amend(PyDict disposition, string run, PyDict plan, PyDict receipts)
     {
         var un = PyValue.Dict(disposition["unassessed"]);
-        var families = Ev.Items(un.Get("familiesUnsupportedOrManual")).Select(Ev.Str).ToHashSet(StringComparer.Ordinal);
-        foreach (var c in Ev.Items(plan["checks"]).Select(PyValue.Dict))
-            if (Ev.OrEmpty(c["adapter"]).Get("kind") is "media" or "mcp-only") families.Add(Ev.Str(c["family"]));
-        un["familiesUnsupportedOrManual"] = PyOrder.SortedByCodePoint(families).Cast<object?>().ToList();
+        un["familiesUnsupportedOrManual"] = Families(un, plan);
         un["mediaUnassessed"] = MediaSentence;
         un["runtimeObservations"] = LiveScope.RuntimeObservations(receipts);
         disposition["discovery"] = DiscoveryBlock(disposition, run, plan, receipts);
         disposition[OverlayPlan.Key] = plan[OverlayPlan.Key];
+    }
+
+    /// <summary>The families unsupported or manual of an overlay: runcontrol's (its unsupported and manual checks)
+    /// and the families of the rows only this module has, the record imports (mcp-only) and the media row, which no
+    /// command line measures.</summary>
+    public static List<object?> Families(PyDict unassessed, PyDict plan)
+    {
+        var families = Ev.Items(unassessed.Get("familiesUnsupportedOrManual")).Select(Ev.Str).ToHashSet(StringComparer.Ordinal);
+        foreach (var c in Ev.Items(plan["checks"]).Select(PyValue.Dict))
+            if (Ev.OrEmpty(c["adapter"]).Get("kind") is "media" or "mcp-only") families.Add(Ev.Str(c["family"]));
+        return PyOrder.SortedByCodePoint(families).Cast<object?>().ToList();
     }
 
     /// <summary>The overlay's discovery block (moved from runcontrol's disposition with the discovery rows): what the
