@@ -327,7 +327,15 @@ public sealed class SkillCommandLinesTests
         void Program(Line l, string id, List<string> words)
         {
             var o = k.OptionsOf(id);
-            if (o is null) { r.Problems.Add($"line {l.At}: {id} has no option list this check can read (no flagCoverage in its run-coverage row)"); return; }
+            // a program whose row declares no parser has no owner-proven option list: it exists (its row does), its flags
+            // are listed as unproven rather than passed or failed (contactprobe: the tool-index guard finds flags in its parser
+            // that its row does not declare, 2026-11-26)
+            if (o is null)
+            {
+                var given = words.Where(w => w.StartsWith("--") && !Placeholder(w)).Select(w => w.Split('=')[0]).Distinct().ToList();
+                r.Unchecked.Add($"line {l.At}: {id} {string.Join(" ", given)} (no proven option list: its run-coverage row has no flagCoverage)");
+                return;
+            }
             string? verb = null;
             int i = 0;
             if (o.Verbs.Count > 0 && words.Count > 0 && !words[0].StartsWith("--") && !Placeholder(words[0]))
@@ -411,7 +419,10 @@ public sealed class SkillCommandLinesTests
                 var programs = Named(kind => kind == "program");
                 if (programs.Count == 0) { r.Problems.Add($"line {l.At}: the flag `{flag}` names no program in its paragraph or the block above it, so which program takes it cannot be checked"); continue; }
                 var owner = programs.FirstOrDefault(pn => k.OptionsOf(pn) is { } o && (o.Flags(null).Contains(flag) || o.Verbs.Any(v => o.Flags(v).Contains(flag))));
-                if (owner is null) r.Problems.Add($"line {l.At}: none of {string.Join(", ", programs)} takes {flag}");
+                var unproven = programs.Where(pn => k.OptionsOf(pn) is null).ToList();
+                if (owner is null && unproven.Count > 0)
+                    r.Unchecked.Add($"line {l.At}: {flag} of {string.Join(" or ", unproven)} (no proven option list: its run-coverage row has no flagCoverage)");
+                else if (owner is null) r.Problems.Add($"line {l.At}: none of {string.Join(", ", programs)} takes {flag}");
                 else r.Checked.Add($"line {l.At}: {owner} {flag} (attributed by its paragraph or the block above)");
                 continue;
             }

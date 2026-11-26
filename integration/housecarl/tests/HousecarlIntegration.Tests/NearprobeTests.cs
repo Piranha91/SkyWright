@@ -48,7 +48,9 @@ static class Nearprobe
         }
         var on = enabled ?? names;
         File.WriteAllLines(Path.Combine(prof, "modlist.txt"), new[] { "+Fixture" });
-        File.WriteAllLines(Path.Combine(prof, "plugins.txt"), names.Where(on.Contains).Select(n => "*" + n));
+        // every plugin is listed (one left out of plugins.txt but in loadorder.txt is a force-loaded master to MO2); the
+        // enabled ones carry the '*'
+        File.WriteAllLines(Path.Combine(prof, "plugins.txt"), names.Select(n => (on.Contains(n) ? "*" : "") + n));
         File.WriteAllLines(Path.Combine(prof, "loadorder.txt"), names);
         return root;
     }
