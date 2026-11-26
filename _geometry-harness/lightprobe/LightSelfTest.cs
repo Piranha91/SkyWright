@@ -187,6 +187,27 @@ static class LightSelfTest
             static bool Near(Vector3 a, Vector3 b) => Vector3.Distance(a, b) < 1e-3f;
             return Near(o, w[0]) && Near(ex, w[1] - w[0]) && Near(ey, w[2] - w[0]) && Near(ez, w[3] - w[0]);
         });
+        // ---- the --check run's model cache (Gate B, finding 2 of the Gate A review): one cache serves the four arrangements, keyed by the
+        // resolved source, so two arrangements that resolve one mesh path to different files never share an entry
+        Check("model cache: one mesh path from two mod folders is read twice, and each arrangement gets its own file's reading",
+              "the cache keyed by the mesh path (the second arrangement handed the first one's model)", () =>
+        {
+            var a = new PlacementSource("Mod A", AssetKind.Loose, @"X:\lab\mods\Mod A\meshes\clutter\candle.nif", null, @"meshes\clutter\candle.nif");
+            var b = new PlacementSource("Mod B", AssetKind.Loose, @"X:\lab\mods\Mod B\meshes\clutter\candle.nif", null, @"meshes\clutter\candle.nif");
+            var inArchive = new PlacementSource("Skyrim - Meshes0.bsa", AssetKind.Bsa, null, @"X:\game\Data\Skyrim - Meshes0.bsa", @"meshes\clutter\candle.nif");
+            var cache = new LightMeshCache();
+            int reads = 0;
+            string Read(PlacementSource s) { reads++; return s.ProviderName; }
+            var got = new[] { cache.Get("model", a, Read), cache.Get("model", b, Read), cache.Get("model", inArchive, Read), cache.Get("model", a, Read), cache.Get("model", b, Read) };
+            return got.SequenceEqual(new[] { "Mod A", "Mod B", "Skyrim - Meshes0.bsa", "Mod A", "Mod B" }) && reads == 3 && cache.Hits == 2 && cache.Reads == 3;
+        });
+        Check("model cache: a model and its emitting parts are separate entries of one source", "the emitter reading handed the render model's entry", () =>
+        {
+            var a = new PlacementSource("Mod A", AssetKind.Loose, @"X:\lab\mods\Mod A\meshes\x.nif", null, @"meshes\x.nif");
+            var cache = new LightMeshCache();
+            return cache.Get("model", a, _ => "model") == "model" && cache.Get("emitters", a, _ => "emitters") == "emitters" && cache.Reads == 2;
+        });
+
         if (meshesFrom is null)
             Console.WriteLine("NOT RUN  emitter reader cases on vanilla meshes (they need --meshes-from GAME_DATA, the folder holding Skyrim - Meshes0/1.bsa)");
         else
