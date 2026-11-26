@@ -228,8 +228,10 @@ public sealed class DisableTests : IClassFixture<DisableWorld>
         new object[] { "named by a quest alias", DisableWorld.AliasTarget.ToString(), "quest", DisableWorld.Quest.ToString() },
         new object[] { "a package's location", DisableWorld.PackLocTarget.ToString(), "package", DisableWorld.PackLocation.ToString() },
         new object[] { "a package's target", DisableWorld.PackTargetRef.ToString(), "package", DisableWorld.PackTarget.ToString() },
-        new object[] { "a large reference", DisableWorld.LargeRef.ToString(), "large reference", DisableWorld.World.ToString() },
+        new object[] { "a large reference listed only by a copy of its worldspace that does not win", DisableWorld.LargeRef.ToString(), "large reference", DisableWorld.World.ToString() },
         new object[] { "not a placed object", DisableWorld.Actor.ToString(), "actor", "" },
+        new object[] { "named by a script property of an object", DisableWorld.ScriptTarget.ToString(), "script", DisableWorld.ScriptHolder.ToString() },
+        new object[] { "named by a script property of a quest", DisableWorld.QuestScriptTarget.ToString(), "quest", DisableWorld.Quest.ToString() },
     };
 
     [Theory, MemberData(nameof(Kinds))]

@@ -43,8 +43,13 @@ public sealed class DisableWorld : IDisposable
     internal static readonly FormKey Actor = K(0x81F);            // a placed actor, not a placed object
     internal static readonly FormKey Navcut = K(0x820);           // cuts the navmesh (XTRI on a NavmeshObstacle layer): allowed, said
     internal static readonly FormKey MoveTarget = K(0x821);       // a plain reference for the move-and-disable commit
-    internal static readonly FormKey LargeRef = K(0x822);         // on the worldspace's large-reference list
+    internal static readonly FormKey LargeRef = K(0x822);         // on the master copy of the worldspace's large-reference list only (the winning copy lists nothing)
     internal static readonly FormKey PlainExt = K(0x823);         // an exterior reference nothing names
+    internal static readonly FormKey ScriptTarget = K(0x824);     // named by a script property (VMAD) of ScriptHolder
+    internal static readonly FormKey ScriptHolder = K(0x825);
+    internal static readonly FormKey PersistLinker = K(0x826);    // a persistent reference whose linked reference names PersistLinkTarget
+    internal static readonly FormKey PersistLinkTarget = K(0x827);
+    internal static readonly FormKey QuestScriptTarget = K(0x828);// named by a script property of the quest
 
     internal static readonly P3Float PersistentAtMaster = new(100, 0, 0), PersistentAtLater = new(130, -20, 5);
     internal static readonly P3Float PersistentRot = new(0f, -0f, 3.1415927f);   // a negative zero, as Gate A's winner had
@@ -100,6 +105,13 @@ public sealed class DisableWorld : IDisposable
         var navcut = Ref(Navcut, Stat, 1100); navcut.CollisionLayer = 49; navcut.Primitive = new PlacedPrimitive { Type = PlacedPrimitive.TypeEnum.Box, Bounds = new P3Float(50, 50, 50) };
         cell.Temporary.Add(navcut);
         cell.Temporary.Add(Ref(MoveTarget, Stat, 1200));
+        cell.Temporary.Add(Ref(ScriptTarget, Stat, 1300));
+        var holder = Ref(ScriptHolder, Stat, 1310);
+        holder.VirtualMachineAdapter = Vmad("HcWbDisHolderScript", ScriptTarget);
+        cell.Temporary.Add(holder);
+        cell.Temporary.Add(Ref(PersistLinkTarget, Stat, 1400));
+        var plink = Ref(PersistLinker, Stat, 1410); var pl2 = new LinkedReferences(); pl2.Reference.SetTo(PersistLinkTarget); plink.LinkedReferences.Add(pl2); cell.Persistent.Add(plink);
+        cell.Temporary.Add(Ref(QuestScriptTarget, Stat, 1500));
         var far = new SkCell(FarCell, Rel) { EditorID = "HcWbDisFarCell", Flags = SkCell.Flag.IsInteriorCell };
         far.Persistent.Add(LoadDoor(FarDoor, Door, 0));
         var block = new CellBlock { BlockNumber = 2, GroupType = GroupTypeEnum.InteriorCellBlock };
@@ -108,6 +120,10 @@ public sealed class DisableWorld : IDisposable
 
         var q = new Quest(Quest, Rel) { EditorID = "HcWbDisQuest" };
         q.Aliases.Add(new QuestAlias { ID = 0, Name = "Forced", ForcedReference = new FormLinkNullable<IPlacedGetter>(AliasTarget) });
+        q.VirtualMachineAdapter = new QuestAdapter();
+        var qs = new ScriptEntry { Name = "HcWbDisQuestScript" };
+        qs.Properties.Add(new ScriptObjectProperty { Name = "Thing", Object = new FormLink<ISkyrimMajorRecordGetter>(QuestScriptTarget) });
+        q.VirtualMachineAdapter.Scripts.Add(qs);
         m.Quests.Add(q);
         var pl = new Package(PackLocation, Rel) { EditorID = "HcWbDisPackLoc", ScheduleHour = -1 };
         var lt = new LocationTarget(); lt.Link.SetTo(PackLocTarget);
@@ -142,11 +158,23 @@ public sealed class DisableWorld : IDisposable
         var lblock = new CellBlock { BlockNumber = 2, GroupType = GroupTypeEnum.InteriorCellBlock };
         var lsub = new CellSubBlock { BlockNumber = 0, GroupType = GroupTypeEnum.InteriorCellSubBlock };
         lsub.Cells.Add(lcell); lblock.SubBlocks.Add(lsub); later.Cells.Records.Add(lblock);
+        // and its copy of the worldspace wins without the large-reference list (as an eFPS-style override does): the
+        // game still treats LargeRef as large (the union of every copy's list), the winning record names it nowhere
+        later.Worldspaces.Add(new Worldspace(World, Rel) { EditorID = "HcWbDisWorld" });
         later.BeginWrite.ToPath(LaterPath).WithLoadOrder(new ISkyrimModGetter[] { m }).Write();
 
         File.WriteAllText(Path.Combine(profile, "loadorder.txt"), "# header\r\n" + Master.FileName + "\r\n" + Later.FileName + "\r\n");
         File.WriteAllText(Path.Combine(profile, "plugins.txt"), "*" + Master.FileName + "\r\n*" + Later.FileName + "\r\n");
         File.WriteAllText(Path.Combine(profile, "modlist.txt"), "# header\r\n+DisLater\r\n+DisMaster\r\n");
+    }
+
+    static VirtualMachineAdapter Vmad(string script, FormKey target)
+    {
+        var v = new VirtualMachineAdapter();
+        var e = new ScriptEntry { Name = script };
+        e.Properties.Add(new ScriptObjectProperty { Name = "Thing", Object = new FormLink<ISkyrimMajorRecordGetter>(target) });
+        v.Scripts.Add(e);
+        return v;
     }
 
     static PlacedObject LoadDoor(FormKey key, FormKey to, float x)
