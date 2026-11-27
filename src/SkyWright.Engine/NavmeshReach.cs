@@ -18,9 +18,10 @@ namespace SkyWright.Engine;
 
 public readonly record struct NavTriangle(Vector3 A, Vector3 B, Vector3 C, ushort Flags, string Navmesh, int Index);
 
-/// <summary>Status <c>measured</c> or <c>refused</c>. Horizontal and Vertical are the components of the closest pair.</summary>
+/// <summary>Status <c>measured</c> or <c>refused</c>. Horizontal and Vertical are the components of the closest pair;
+/// <paramref name="Near"/> is the pair's point on the navmesh (x, y, z), null when refused.</summary>
 public sealed record NavDistance(string Status, string? Reason, double? Distance, double? Horizontal, double? Vertical,
-                                 string? Navmesh, int? Triangle);
+                                 string? Navmesh, int? Triangle, double[]? Near = null);
 
 public static class NavmeshReach
 {
@@ -30,13 +31,179 @@ public static class NavmeshReach
 
     public static bool IsDeleted(ushort flags) => (flags & (ushort)NavmeshTriangle.Flag.Deleted) != 0;
 
-    public static NavDistance FromPoint(Vector3 point, IReadOnlyList<NavTriangle> triangles)
+    // ---------------- the pruned search (2026-11-26, the stranded check's cost bar) ----------------
+    // The same distances as the brute force below (FromPointBrute, FromSoupBrute, FromPointBandBrute, FromSoupBandBrute,
+    // kept for the tests that hold the two equal), with pairs skipped only when they cannot beat the best so far: the
+    // distance between two axis-aligned boxes is a lower bound of the distance between anything inside them, so a navmesh
+    // triangle (or, for a band, its swept prism) whose box lies farther from the object's box than the best distance, and
+    // an object triangle whose box lies farther from that navmesh box, are never measured. Triangles are visited nearest
+    // box first, so the best distance falls early and the bound prunes most of the scene. Every pair that is measured is
+    // measured by the same function as the brute force, so the distance is the same number; on a tie the triangle named
+    // may differ (it lies at the same distance). A scene with a non-finite coordinate is left to the brute force, so its
+    // refusal names the triangle the brute force names.
+    const double Slack = 1e-6;   // u: room for the boxes' own rounding; a pair is skipped only when its bound exceeds best + Slack
+
+    readonly record struct Box(double X0, double Y0, double Z0, double X1, double Y1, double Z1)
+    {
+        public static Box Of(DV a, DV b, DV c) => new(Math.Min(a.X, Math.Min(b.X, c.X)), Math.Min(a.Y, Math.Min(b.Y, c.Y)), Math.Min(a.Z, Math.Min(b.Z, c.Z)),
+                                                      Math.Max(a.X, Math.Max(b.X, c.X)), Math.Max(a.Y, Math.Max(b.Y, c.Y)), Math.Max(a.Z, Math.Max(b.Z, c.Z)));
+        public Box Union(Box o) => new(Math.Min(X0, o.X0), Math.Min(Y0, o.Y0), Math.Min(Z0, o.Z0), Math.Max(X1, o.X1), Math.Max(Y1, o.Y1), Math.Max(Z1, o.Z1));
+        public Box Raised(double lo, double hi) => new(X0, Y0, Z0 + lo, X1, Y1, Z1 + hi);
+        public bool Holds(DV p) => p.X >= X0 && p.X <= X1 && p.Y >= Y0 && p.Y <= Y1 && p.Z >= Z0 && p.Z <= Z1;
+        public double To(Box o)
+        {
+            double dx = Math.Max(0, Math.Max(o.X0 - X1, X0 - o.X1)), dy = Math.Max(0, Math.Max(o.Y0 - Y1, Y0 - o.Y1)), dz = Math.Max(0, Math.Max(o.Z0 - Z1, Z0 - o.Z1));
+            return Math.Sqrt(dx * dx + dy * dy + dz * dz);
+        }
+    }
+
+    static bool Finite(Vector3 v) => float.IsFinite(v.X) && float.IsFinite(v.Y) && float.IsFinite(v.Z);
+
+    // The live triangles with their boxes (raised by the band when given), or null when a coordinate is not finite.
+    static List<(NavTriangle T, DV A, DV B, DV C, Box Box)>? Live(IReadOnlyList<NavTriangle> triangles, double lo = 0, double hi = 0)
+    {
+        var live = new List<(NavTriangle, DV, DV, DV, Box)>(triangles.Count);
+        foreach (var t in triangles)
+        {
+            if (IsDeleted(t.Flags)) continue;
+            if (!Finite(t.A) || !Finite(t.B) || !Finite(t.C)) return null;
+            var (a, b, c) = (D(t.A), D(t.B), D(t.C));
+            live.Add((t, a, b, c, Box.Of(a, b, c).Raised(lo, hi)));
+        }
+        return live;
+    }
+
+    static NavDistance Refused(IReadOnlyList<NavTriangle> triangles) =>
+        new("refused", triangles.Count == 0 ? "no navmesh triangle in the cells searched" : "every navmesh triangle in the cells searched is flagged deleted",
+            null, null, null, null, null);
+
+    static NavDistance Answer(double best, (DV P, DV Q) bp, NavTriangle tri)
+    {
+        var dv = bp.Q - bp.P;
+        return new("measured", null, best, Math.Sqrt(dv.X * dv.X + dv.Y * dv.Y), Math.Abs(dv.Z), tri.Navmesh, tri.Index, new[] { bp.Q.X, bp.Q.Y, bp.Q.Z });
+    }
+
+    // The object's triangles with their boxes, or null when a coordinate is not finite.
+    static (DV X, DV Y, DV Z, Box Box)[]? Parts(TriangleSoup soup)
+    {
+        var v = soup.Vertices; var ix = soup.Indices;
+        var parts = new (DV, DV, DV, Box)[ix.Length / 3];
+        for (int k = 0, i = 0; k + 2 < ix.Length; k += 3, i++)
+        {
+            if (!Finite(v[ix[k]]) || !Finite(v[ix[k + 1]]) || !Finite(v[ix[k + 2]])) return null;
+            var (x, y, z) = (D(v[ix[k]]), D(v[ix[k + 1]]), D(v[ix[k + 2]]));
+            parts[i] = (x, y, z, Box.Of(x, y, z));
+        }
+        return parts;
+    }
+
+    public static NavDistance FromPoint(Vector3 point, IReadOnlyList<NavTriangle> triangles) => PointSearch(point, triangles, null);
+
+    public static NavDistance FromPointBand(Vector3 point, IReadOnlyList<NavTriangle> triangles, float lo, float hi) => PointSearch(point, triangles, (lo, hi));
+
+    static NavDistance PointSearch(Vector3 point, IReadOnlyList<NavTriangle> triangles, (float Lo, float Hi)? band)
+    {
+        var live = Finite(point) ? Live(triangles, band?.Lo ?? 0, band?.Hi ?? 0) : null;
+        if (live is null) return band is { } b0 ? FromPointBandBrute(point, triangles, b0.Lo, b0.Hi) : FromPointBrute(point, triangles);
+        if (live.Count == 0) return Refused(triangles);
+        var p = D(point); var pb = new Box(p.X, p.Y, p.Z, p.X, p.Y, p.Z);
+        var order = live.Select((x, i) => (Lb: pb.To(x.Box), I: i)).OrderBy(x => x.Lb).ThenBy(x => x.I).ToList();
+        double best = double.MaxValue; (DV P, DV Q) bp = default; NavTriangle bt = default;
+        foreach (var (lb, i) in order)
+        {
+            if (lb > best + Slack) break;
+            var (t, a, b, c, _) = live[i];
+            (DV P, DV Q) pair;
+            if (band is { } bd)
+            {
+                if (InPrism(p, a, b, c, bd.Lo, bd.Hi)) pair = (p, p);
+                else
+                {
+                    pair = default; double pd = double.MaxValue;
+                    foreach (var (x, y, z) in PrismFaces(a, b, c, bd.Lo, bd.Hi))
+                    {
+                        var q = Closest(p, x, y, z); double d0 = (p - q).Len;
+                        if (d0 < pd) { pd = d0; pair = (p, q); }
+                    }
+                }
+            }
+            else pair = (p, Closest(p, a, b, c));
+            double d = (pair.P - pair.Q).Len;
+            if (!double.IsFinite(d)) return band is { } b1 ? FromPointBandBrute(point, triangles, b1.Lo, b1.Hi) : FromPointBrute(point, triangles);
+            if (d < best) { best = d; bp = pair; bt = t; if (d == 0) break; }
+        }
+        return Answer(best, bp, bt);
+    }
+
+    public static NavDistance FromSoup(TriangleSoup soup, IReadOnlyList<NavTriangle> triangles) => SoupSearch(soup, triangles, null);
+
+    public static NavDistance FromSoupBand(TriangleSoup soup, IReadOnlyList<NavTriangle> triangles, float lo, float hi) => SoupSearch(soup, triangles, (lo, hi));
+
+    static NavDistance SoupSearch(TriangleSoup soup, IReadOnlyList<NavTriangle> triangles, (float Lo, float Hi)? band)
+    {
+        NavDistance Brute() => band is { } b0 ? FromSoupBandBrute(soup!, triangles, b0.Lo, b0.Hi) : FromSoupBrute(soup!, triangles);
+        if (soup is null || soup.TriangleCount == 0) return Brute();
+        var parts = Parts(soup);
+        var live = parts is null ? null : Live(triangles, band?.Lo ?? 0, band?.Hi ?? 0);
+        if (parts is null || live is null || soup.Vertices.Any(x => !Finite(x))) return Brute();
+        if (live.Count == 0) return Refused(triangles);
+        var whole = parts[0].Box;
+        foreach (var x in parts) whole = whole.Union(x.Box);
+        var verts = band is null ? null : soup.Vertices.Select(D).ToArray();
+        var order = live.Select((x, i) => (Lb: whole.To(x.Box), I: i)).OrderBy(x => x.Lb).ThenBy(x => x.I).ToList();
+        double best = double.MaxValue; (DV P, DV Q) bp = default; NavTriangle bt = default;
+        var near = new List<(double Lb, int K)>();
+        foreach (var (lb, i) in order)
+        {
+            if (lb > best + Slack) break;
+            var (t, a, b, c, box) = live[i];
+            (DV, DV, DV)[]? faces = null;
+            if (band is { } bd)
+            {
+                // a vertex inside the prism is distance 0, as the brute force reads it first
+                bool inside = false; DV hit = default;
+                foreach (var w in verts!) if (box.Holds(w) && InPrism(w, a, b, c, bd.Lo, bd.Hi)) { inside = true; hit = w; break; }
+                if (inside) { best = 0; bp = (hit, hit); bt = t; break; }
+                faces = PrismFaces(a, b, c, bd.Lo, bd.Hi);
+            }
+            near.Clear();
+            for (int k = 0; k < parts.Length; k++)
+            {
+                double l = parts[k].Box.To(box);
+                if (l <= best + Slack) near.Add((l, k));
+            }
+            near.Sort((u, w) => u.Lb != w.Lb ? u.Lb.CompareTo(w.Lb) : u.K.CompareTo(w.K));
+            foreach (var (l, k) in near)
+            {
+                if (l > best + Slack) break;
+                var (x, y, z, _) = parts[k];
+                if (faces is null)
+                {
+                    var pair = TriTri(x, y, z, a, b, c);
+                    double d = (pair.P - pair.Q).Len;
+                    if (!double.IsFinite(d)) return Brute();
+                    if (d < best) { best = d; bp = pair; bt = t; if (d == 0) return Answer(best, bp, bt); }
+                }
+                else
+                    foreach (var (fa, fb, fc) in faces)
+                    {
+                        var pair = TriTri(x, y, z, fa, fb, fc);
+                        double d = (pair.P - pair.Q).Len;
+                        if (!double.IsFinite(d)) return Brute();
+                        if (d < best) { best = d; bp = pair; bt = t; if (d == 0) return Answer(best, bp, bt); }
+                    }
+            }
+        }
+        return Answer(best, bp, bt);
+    }
+
+    internal static NavDistance FromPointBrute(Vector3 point, IReadOnlyList<NavTriangle> triangles)
     {
         var p = D(point);
         return Best(triangles, t => { var q = Closest(p, D(t.A), D(t.B), D(t.C)); return (p, q); });
     }
 
-    public static NavDistance FromSoup(TriangleSoup soup, IReadOnlyList<NavTriangle> triangles)
+    internal static NavDistance FromSoupBrute(TriangleSoup soup, IReadOnlyList<NavTriangle> triangles)
     {
         if (soup is null || soup.TriangleCount == 0) return new("refused", "the object has no triangles", null, null, null, null, null);
         var v = soup.Vertices; var ix = soup.Indices;
@@ -77,7 +244,7 @@ public static class NavmeshReach
     // otherwise the minimum over its eight face triangles; a soup is 0 when any vertex is inside or any of its
     // triangles meets a face (a triangle crossing a convex solid without a vertex inside crosses its boundary), else the
     // minimum face distance. Exact in double, like the distances above.
-    public static NavDistance FromPointBand(Vector3 point, IReadOnlyList<NavTriangle> triangles, float lo, float hi)
+    internal static NavDistance FromPointBandBrute(Vector3 point, IReadOnlyList<NavTriangle> triangles, float lo, float hi)
     {
         var p = D(point);
         return Best(triangles, t =>
@@ -94,7 +261,7 @@ public static class NavmeshReach
         });
     }
 
-    public static NavDistance FromSoupBand(TriangleSoup soup, IReadOnlyList<NavTriangle> triangles, float lo, float hi)
+    internal static NavDistance FromSoupBandBrute(TriangleSoup soup, IReadOnlyList<NavTriangle> triangles, float lo, float hi)
     {
         if (soup is null || soup.TriangleCount == 0) return new("refused", "the object has no triangles", null, null, null, null, null);
         var v = soup.Vertices; var ix = soup.Indices;
@@ -155,7 +322,7 @@ public static class NavmeshReach
         if (bt is not { } tri) return new("refused", triangles.Count == 0 ? "no navmesh triangle in the cells searched" : "every navmesh triangle in the cells searched is flagged deleted",
                                           null, null, null, null, null);
         var dv = bp.Q - bp.P;
-        return new("measured", null, best, Math.Sqrt(dv.X * dv.X + dv.Y * dv.Y), Math.Abs(dv.Z), tri.Navmesh, tri.Index);
+        return new("measured", null, best, Math.Sqrt(dv.X * dv.X + dv.Y * dv.Y), Math.Abs(dv.Z), tri.Navmesh, tri.Index, new[] { bp.Q.X, bp.Q.Y, bp.Q.Z });
     }
 }
 

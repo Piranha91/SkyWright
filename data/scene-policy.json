@@ -6,6 +6,7 @@
   "types": {"geometry.object-overlap": "overlap", "geometry.object-contact": "contact",
             "geometry.fixture-empty-space": "contact", "records.contested-fields": "record",
             "records.cell-attributes": "cell", "state.conditional-geometry": "state",
-            "geometry.navmesh-ownership": "navmesh", "geometry.placement-contact": "contact"},
+            "geometry.navmesh-ownership": "navmesh", "geometry.placement-contact": "contact",
+            "geometry.stranded-object": "stranded"},
   "otherType": "other"
 }
