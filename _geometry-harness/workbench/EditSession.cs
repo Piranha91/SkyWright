@@ -76,6 +76,16 @@ internal sealed class EditSession
     internal IReadOnlyCollection<FormKey> WrittenNudged => _writtenNudged;
     readonly HashSet<FormKey> _writtenNudged = new();
 
+    /// <summary>The object's edit came from a nudge: its last staged edit is one, or its written edit was.</summary>
+    internal bool IsNudged(FormKey key) => _pending.LastOrDefault(e => e.Ref == key) is { } p ? p.Nudge is not null : _writtenNudged.Contains(key);
+
+    /// <summary>A written edit restored from the session file came from a nudge (Gate C).</summary>
+    internal void MarkWrittenNudged(FormKey key) { if (_written.ContainsKey(key)) _writtenNudged.Add(key); }
+
+    /// <summary>The objects a patch holds by a nudge, for its re-check (contactprobe and the words).</summary>
+    internal IReadOnlyList<string> NudgedIn(string plugin) => _writtenNudged
+        .Where(k => string.Equals(_written[k].Patch, plugin, StringComparison.OrdinalIgnoreCase)).Select(k => k.ToString()).OrderBy(k => k, StringComparer.Ordinal).ToList();
+
     /// <summary>The written edits that are disables ("initially disabled" in their patch), not moves.</summary>
     internal IReadOnlyCollection<FormKey> WrittenDisabled => _writtenDisabled;
 

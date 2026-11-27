@@ -2358,8 +2358,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             IReadOnlyList<string>? disabled = disabledHere.Count > 0 ? disabledHere : null;
             // every object this patch moved by a nudge (Gate C): contactprobe judges what the move left in the air, and the banner
             // says walking routes were not checked
-            var nudgedHere = _session.WrittenNudged.Where(k => string.Equals(_session.Written[k].Patch, plugin, StringComparison.OrdinalIgnoreCase))
-                .Select(k => k.ToString()).OrderBy(k => k, StringComparer.Ordinal).ToList();
+            var nudgedHere = _session.NudgedIn(plugin);
             IReadOnlyList<string>? nudged = nudgedHere.Count > 0 && disabled is null ? nudgedHere : null;
             // The view shows the edited reference where this patch puts it (read back from the patch), never silently
             // where the load order still has it (stage-4 review M-1); the open row's own object, when it is the one this
