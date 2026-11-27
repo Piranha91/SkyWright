@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HarnessShared;
 using HousecarlCore;
 using SkyWright.Engine;
 
