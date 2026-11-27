@@ -20,6 +20,11 @@
       "packetRow": "Loadability/data integrity"
     },
     {
+      "id": "records",
+      "title": "Record semantics",
+      "packetRow": "Record semantics"
+    },
+    {
       "id": "geometry",
       "title": "Effective geometry and placement",
       "packetRow": "Effective geometry and placement"
@@ -123,6 +128,86 @@
         "strength": "record-fact",
         "claim": null,
         "limits": "Held: a scan does not run it unless it is ticked, because it has never found a real clash between two mods; the lab's orders have none, so it has been shown only on made-up cases. The hold lifts when a scan of real mods finds one and a person confirms the plugin was made for another version of the mod it uses. houseCARL's errors sweep reads every record's links over the whole load order; a link is a row only when the record that uses it is in one mod's plugin and the record it names belongs to another mod's plugin that is loaded but does not have it, and either plugin is in the selection. A plugin in the game's Data folder or in MO2's overwrite counts as a mod of its own. No row, counted under its reason: links in or into the game's own files (Bethesda's and Creation Club's), links into the same plugin or another plugin of the same mod, and links into a plugin missing from the load order (the masters check's). Records houseCARL could not read and plugins it could not scan are not judged. A missing master is not this check's."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "records.contested-fields",
+      "family": "records",
+      "title": "Fields one mod changed that another mod's plugin, not made with it, puts back or changes",
+      "required": false,
+      "optIn": true,
+      "heldWhy": "it is held back until a person has read the rows it found on the lab's load order",
+      "applicability": {
+        "trigger": {
+          "masters": true
+        },
+        "note": "A record can only be contested where another plugin defined it, which needs a master. A plugin with no masters adds records nobody else has yet."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "probe-emit",
+        "exe": "recordprobe",
+        "args": [
+          "--check",
+          "records.contested-fields"
+        ],
+        "reverse": false,
+        "output": "conflict-file",
+        "commonFlags": true,
+        "populationFlag": "--population"
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": null,
+        "limits": "Held: a scan does not run it unless it is ticked, until a person has read every row it found on the lab's load order and at most one in ten is a false alarm (record checks ruling R7). houseCARL's record tool, called in process, reads each record a plugin of the selection touches that more than one plugin changes, and what each copy of it changed against what its plugin was made with (the latest of its masters, transitively, that has the record). A row is a field one mod changed whose winning value is another mod's, the two plugins in different mods, neither one of the game's own files (Bethesda's and Creation Club's), and the winner not made with the loser (it does not list it among its masters, transitively); both directions are judged, a selected plugin's change lost to another mod and another mod's change lost to a selected plugin. Values are compared as the game reads them: numbers at four decimals, record flags without the bit that only says how the record is stored, the cell grid flags' unused bytes ignored, the fields data/record-field-scope.json leaves out (file and group bookkeeping, data the game merges at run time, child records), and a reordered list is no change unless the game reads its order, when it is not judged. No row, counted under its reason: a winner made with the loser, two plugins of one mod, a game file on either side, a pair with neither plugin in the selection. A read houseCARL marks incomplete, a line of its comparison SkyWright cannot read, a record without an override depth and a plugin whose masters' headers could not be read are not judged. Each of the two record checks reads the selection's records again in its own process (about half a minute on the lab's order), one process per check so a crash stays in one. Cells are records.cell-attributes'. Navmesh records are left to geometry.navmesh-ownership, and quests, dialogue, form lists, locations, packages and story-manager nodes to the registration and dialogue check (not built yet); both are counted, never rows."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "records.cell-attributes",
+      "family": "records",
+      "title": "Cell settings one mod changed that another mod's plugin, not made with it, puts back or changes: lighting, water height, music, flags, encounter zone",
+      "required": false,
+      "optIn": true,
+      "heldWhy": "it is held back until a person has read the rows it found on the lab's load order",
+      "applicability": {
+        "trigger": {
+          "anyType": [
+            "CELL"
+          ]
+        },
+        "note": "A CELL record in the target is the only way it can restate a cell's own attributes. Placing something in a cell carries the CELL record as a container, so this trigger fires on the container too: the container's own fields are exactly what gets restated by accident."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "probe-emit",
+        "exe": "recordprobe",
+        "args": [
+          "--check",
+          "records.cell-attributes"
+        ],
+        "reverse": false,
+        "output": "conflict-file",
+        "commonFlags": true,
+        "populationFlag": "--population"
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": null,
+        "limits": "Held: a scan does not run it unless it is ticked, until a person has read every row it found on the lab's load order and at most one in ten is a false alarm (record checks ruling R7). houseCARL's record tool, called in process, reads each record a plugin of the selection touches that more than one plugin changes, and what each copy of it changed against what its plugin was made with (the latest of its masters, transitively, that has the record). A row is a field one mod changed whose winning value is another mod's, the two plugins in different mods, neither one of the game's own files (Bethesda's and Creation Club's), and the winner not made with the loser (it does not list it among its masters, transitively); both directions are judged, a selected plugin's change lost to another mod and another mod's change lost to a selected plugin. Values are compared as the game reads them: numbers at four decimals, record flags without the bit that only says how the record is stored, the cell grid flags' unused bytes ignored, the fields data/record-field-scope.json leaves out (file and group bookkeeping, data the game merges at run time, child records), and a reordered list is no change unless the game reads its order, when it is not judged. No row, counted under its reason: a winner made with the loser, two plugins of one mod, a game file on either side, a pair with neither plugin in the selection. A read houseCARL marks incomplete, a line of its comparison SkyWright cannot read, a record without an override depth and a plugin whose masters' headers could not be read are not judged. Each of the two record checks reads the selection's records again in its own process (about half a minute on the lab's order), one process per check so a crash stays in one. The same rule as records.contested-fields, on cell records only."
       },
       "manualDecisionAllowed": false
     },
