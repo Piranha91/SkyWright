@@ -128,8 +128,8 @@ static class CheckMode
                 {
                     run.Advance();
                     var mem = members[s.Id];
-                    if (!notJudged.ContainsKey(s.Id) && mem.FirstOrDefault(m => rd.BosNames(keyOf[m.P.Key])) is { P: not null } bos)
-                        notJudged[s.Id] = $"Not judged: a Base Object Swapper file changes {bos.P.Key} in this scene ({role} arrangement), and this check does not apply Base Object Swapper; look at the scene in game.";
+                    if (!notJudged.ContainsKey(s.Id) && BosRefusal(mem.Select(m => keyOf[m.P.Key]), rd.BosNames, role) is { } bosWhy)
+                        notJudged[s.Id] = bosWhy;
                     var subjects = mem.Where(m => m.Subject).Select(m => m.P.Key).ToHashSet(StringComparer.Ordinal);
                     FormKey cellKey = s.Exterior ? FormKey.Null : keyOf.GetValueOrDefault(s.Space, FormKey.Null);
                     FormKey wsKey = s.Exterior ? keyOf.GetValueOrDefault(s.Space, FormKey.Null) : FormKey.Null;
@@ -209,6 +209,16 @@ static class CheckMode
         Console.WriteLine($"{rows.Count} rows over {scenes.Count} scenes ({notJudged.Count} not judged) -> {jsonPath}; {sw.Elapsed.TotalSeconds:0.0}s; "
                         + $"model reads {cache.Reads:N0}, cache hits {cache.Hits:N0}; peak working set {Process.GetCurrentProcess().PeakWorkingSet64 / 1048576.0:N0} MB");
         return 0;
+    }
+
+    /// <summary>A scene is not judged when a Base Object Swapper file names one of its members or a member's base (decision 7: BOS is
+    /// not applied). The one-sentence reason names the first such member; null when no swap file names any.</summary>
+    public static string? BosRefusal(IEnumerable<FormKey> members, Func<FormKey, bool> named, string role)
+    {
+        foreach (var m in members)
+            if (named(m))
+                return $"Not judged: a Base Object Swapper file changes {m} in this scene ({role} arrangement), and this check does not apply Base Object Swapper; look at the scene in game.";
+        return null;
     }
 
     /// <summary>Every placed reference of an arrangement as the population sees it (touchers and light flags only where asked). keyOf

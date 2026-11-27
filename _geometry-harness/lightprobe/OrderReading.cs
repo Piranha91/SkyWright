@@ -158,10 +158,13 @@ sealed class OrderReading : IDisposable
     }
 
     /// <summary>Does a Base Object Swapper file name this reference or its base (any swap or property line, whatever its filters)?</summary>
-    public bool BosNames(FormKey r)
+    public bool BosNames(FormKey r) => BosNamesIn(Bos, Idx, r);
+
+    /// <summary>The rule behind <see cref="BosNames"/>, over a layer and an index (lightprobe's self-test reads a synthetic _SWAP.ini through it).</summary>
+    public static bool BosNamesIn(BosLayer? layer, OverlapIndex idx, FormKey r)
     {
-        if (Bos is not { } b) return false;
-        var bk = Idx.RefBase.GetValueOrDefault(r);
+        if (layer is not { } b) return false;
+        var bk = idx.RefBase.GetValueOrDefault(r);
         return b.SwapRefs.ContainsKey(r) || b.Properties.ContainsKey(r)
                || (!bk.IsNull && (b.SwapForms.ContainsKey(bk) || b.SwapFormsConditional.ContainsKey(bk) || b.Properties.ContainsKey(bk) || b.PropertiesConditional.ContainsKey(bk)));
     }
