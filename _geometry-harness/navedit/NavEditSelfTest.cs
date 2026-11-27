@@ -981,6 +981,226 @@ static class NavEditSelfTest
                 ? null : $"got {r.Verdict}, open edge {r.OpenEdge?.Distance}: {string.Join(" ", r.Why)}";
         });
 
+        // ---- R7, islands of the navmesh info map (_shared/NavIsland.cs; Gate B C:/hc-runs/2026-11-27-navmesh-repair/r7/GATE-B.md) ----
+        // The square (Square(): 3 x 3 vertices 100 apart at z 0) raised so its surface is z = x / 10 everywhere but vertex 4
+        // (100, 100), raised to 40: a height-only move with an uneven rise. Island vertices and what the rule makes of them:
+        //   (50, 50, 0)     on the diagonal 0-4, where the surface rose (0 + 40) / 2 = 20           -> (50, 50, 20)
+        //   (150, 25, 6)    6 u above triangle 2 (1, 2, 5), weights 0.5, 0.25, 0.25: rose 15        -> (150, 25, 21)
+        //   (250, 100, 3)   50 u east of the navmesh in plan; nearest point is vertex 5, rose 20     -> (250, 100, 23)
+        //   (100, 100, -2)  on vertex 4, which rose 40                                               -> (100, 100, 38)
+        (NavmeshGeometry Before, NavmeshGeometry After) Raised()
+        {
+            var (v, t) = Square();
+            var up = v.Select((p, i) => p with { Z = i == 4 ? 40 : p.X / 10 }).ToList();
+            return (Geom(v, t), Geom(up, t));
+        }
+        var islandV = new[] { new Vec3(50, 50, 0), new Vec3(150, 25, 6), new Vec3(250, 100, 3), new Vec3(100, 100, -2) };
+        var islandWant = new[] { new Vec3(50, 50, 20), new Vec3(150, 25, 21), new Vec3(250, 100, 23), new Vec3(100, 100, 38) };
+        var islandT = new[] { ((short)0, (short)1, (short)3), ((short)1, (short)2, (short)3) };
+        NavIslandData Mesh(Vec3 min, Vec3 max) => new(min, max, islandV, islandT);
+        NavIslandData Empty(Vec3 min, Vec3 max) => new(min, max, Array.Empty<Vec3>(), Array.Empty<(short, short, short)>());
+        static bool Close(IReadOnlyList<Vec3> a, IReadOnlyList<Vec3> b) => a.Count == b.Count && a.Zip(b).All(z => MathF.Abs(z.First.X - z.Second.X) < 1e-3f && MathF.Abs(z.First.Y - z.Second.Y) < 1e-3f && MathF.Abs(z.First.Z - z.Second.Z) < 1e-3f);
+        static string Show(IEnumerable<Vec3> vs) => string.Join(" ", vs.Select(v => FormattableString.Invariant($"({v.X},{v.Y},{v.Z})")));
+        static bool OneSentence(string? s) => s is not null && s.EndsWith('.') && !s.Contains('\n') && s.TrimEnd('.').Split(". ").Length == 1;
+
+        // C2651: the height rule, by its definition (an independent statement of it is in tests/test_navmesh_repair_rules.py,
+        // applied to a written patch). Rejects: a vertex left where it was, moved by the wrong sign, by another point's rise, or
+        // dropped; a vertex off the navmesh not moved by its nearest point's rise.
+        Case("2651 island-height-rule", () =>
+        {
+            var (before, after) = Raised();
+            var got = NavIsland.FollowHeights(islandV, before, after);
+            return Close(got, islandWant) ? null : $"island vertices [{Show(got)}], want [{Show(islandWant)}]";
+        });
+
+        // C2652: the island data each kind of edit leaves (NavIsland.ForEdit). Untouched: as it was. Height-only: the box the
+        // navmesh's rebuilt box, the mesh by the height rule, an empty mesh empty. Plan-changing (vertex 2 moved 60 u east): an
+        // empty mesh keeps empty with the rebuilt box (0,0,0)-(260,200,0); a mesh is refused in one sentence naming the
+        // island and what to try. No island: none.
+        Case("2652 island-edit-kinds", () =>
+        {
+            var (before, after) = Raised();
+            var box0 = (before.Min, before.Max);
+            var (v, t) = Square(); v[2] = v[2] with { X = 260 };
+            var moved = Geom(v, t);
+            var bad = new List<string>();
+            var (u, ur) = NavIsland.ForEdit(K, Mesh(box0.Min, box0.Max), before, before, NavIslandEdit.Untouched);
+            if (ur is not null || u is null || u.Min != box0.Min || u.Max != box0.Max || !u.Vertices.SequenceEqual(islandV)) bad.Add($"untouched: {ur ?? "changed"}");
+            var (h, hr) = NavIsland.ForEdit(K, Mesh(box0.Min, box0.Max), before, after, NavIslandEdit.HeightOnly);
+            if (hr is not null || h is null || h.Min != after.Min || h.Max != after.Max || !Close(h.Vertices, islandWant) || !h.Triangles.SequenceEqual(islandT))
+                bad.Add($"height-only: {hr ?? (h is null ? "none" : $"box {h.Min}-{h.Max} (want {after.Min}-{after.Max}), mesh [{Show(h.Vertices)}]")}");
+            var (he, her) = NavIsland.ForEdit(K, Empty(box0.Min, box0.Max), before, after, NavIslandEdit.HeightOnly);
+            if (her is not null || he is null || !he.EmptyMesh || he.Min != after.Min || he.Max != after.Max) bad.Add($"height-only, empty mesh: {her ?? (he is null ? "none" : $"box {he.Min}-{he.Max}, {he.Vertices.Count} vertices")}");
+            var (pe, per) = NavIsland.ForEdit(K, Empty(box0.Min, box0.Max), before, moved, NavIslandEdit.PlanChanging);
+            if (per is not null || pe is null || !pe.EmptyMesh || pe.Min != new Vec3(0, 0, 0) || pe.Max != new Vec3(260, 200, 0)) bad.Add($"plan-changing, empty mesh: {per ?? (pe is null ? "none" : $"box {pe.Min}-{pe.Max}")}");
+            var (pm, pmr) = NavIsland.ForEdit(K, Mesh(box0.Min, box0.Max), before, moved, NavIslandEdit.PlanChanging);
+            if (pm is not null || !OneSentence(pmr) || !pmr!.Contains(K.ToString()) || !pmr.Contains("island") || !pmr.Contains("height only"))
+                bad.Add($"plan-changing with a mesh: want one sentence refusing it, naming {K} and the island and offering a height-only move; got {(pmr ?? "no refusal")}");
+            var (n, nr) = NavIsland.ForEdit(K, null, before, after, NavIslandEdit.HeightOnly);
+            if (n is not null || nr is not null) bad.Add("no island: given one, or refused");
+            return bad.Count == 0 ? null : string.Join(" | ", bad);
+        });
+
+        // C2653: use_version's island data (NavIsland.ForVersion) is the version plugin's own entry's, whole: flag and data
+        // both ways (island over island, plain over island, island over plain); a version whose plugin states no entry is
+        // refused by name when the entry the game takes is an island, and changes nothing when it is not.
+        Case("2653 island-for-version", () =>
+        {
+            var a = new NavIslandEntry(32, Mesh(new Vec3(0, 0, 0), new Vec3(200, 200, 0)));
+            var b = new NavIslandEntry(32, new NavIslandData(new Vec3(1, 2, 3), new Vec3(4, 5, 6), new[] { new Vec3(1, 2, 3), new Vec3(4, 5, 6), new Vec3(1, 5, 6) }, new[] { ((short)0, (short)1, (short)2) }));
+            var plain = new NavIslandEntry(0, null);
+            var bad = new List<string>();
+            static bool Same(NavIslandEntry x, NavIslandEntry y) => x.Unknown == y.Unknown && (x.Island is null) == (y.Island is null)
+                && (x.Island is null || (x.Island.Min == y.Island!.Min && x.Island.Max == y.Island.Max && x.Island.Vertices.SequenceEqual(y.Island.Vertices) && x.Island.Triangles.SequenceEqual(y.Island.Triangles)));
+            foreach (var (name, taken, version, want) in new[] { ("island over island", a, b, b), ("plain over island", a, plain, plain), ("island over plain", plain, b, b) })
+            {
+                var (after, r) = NavIsland.ForVersion(K, "Ver.esp", taken, version);
+                if (r is not null || !Same(after, want)) bad.Add($"{name}: {r ?? $"flag {after.Unknown}, island {(after.Island is null ? "none" : $"{after.Island.Vertices.Count} vertices")}"}");
+            }
+            var (_, none) = NavIsland.ForVersion(K, "Ver.esp", a, null);
+            if (!OneSentence(none) || !none!.Contains("Ver.esp") || !none.Contains(K.ToString()) || !none.Contains("states no")) bad.Add($"no entry, on an island: want one sentence naming Ver.esp, {K} and that it states no entry; got {none ?? "no refusal"}");
+            var (kept, okr) = NavIsland.ForVersion(K, "Ver.esp", plain, null);
+            if (okr is not null || !Same(kept, plain)) bad.Add($"no entry, not an island: {okr ?? "changed"}");
+            return bad.Count == 0 ? null : string.Join(" | ", bad);
+        });
+
+        // C2670 (review F1): two plain entries stay as the game takes them, whatever their first Unknowns: a version's entry with
+        // 64 over a taken entry with 0 (both exist in the base game, neither an island) changes nothing and emits no op, and
+        // the reverse neither. Rejects: R7 changing a use_version row that plans today.
+        Case("2670 island-plain-over-plain", () =>
+        {
+            var bad = new List<string>();
+            foreach (var (taken, version) in new[] { (new NavIslandEntry(0, null), new NavIslandEntry(64, null)), (new NavIslandEntry(64, null), new NavIslandEntry(0, null)) })
+            {
+                var (after, r) = NavIsland.ForVersion(K, "Ver.esp", taken, version);
+                if (r is not null || after.Unknown != taken.Unknown || after.Island is not null) bad.Add($"{taken.Unknown} taken, {version.Unknown} in the version: {r ?? $"ends {after.Unknown}"}");
+                if (NavIsland.Ops("000C00:SelfTest.esm", 0, taken, after).Count != 0) bad.Add($"{taken.Unknown} taken, {version.Unknown} in the version: an op is emitted");
+            }
+            return bad.Count == 0 ? null : string.Join(" | ", bad);
+        });
+
+        // C2654: the in-place ops (NavIsland.Ops) on entry 3: the island data set whole (one Set of MapInfos[3].Island with its
+        // box and its mesh in order), removed (a Remove with no value), the flag set when it differs, the island first; an
+        // empty mesh as a box with no vertex or triangle; nothing when nothing changes. Rejects: a list rewritten piecewise,
+        // a flag left behind, an op when nothing changed.
+        Case("2654 island-ops", () =>
+        {
+            string nv = new FormKey(new ModKey("SelfTest", ModType.Master), 0xC00).ToString();
+            var a = new NavIslandEntry(32, Mesh(new Vec3(0, 0, 0), new Vec3(200, 200, 0)));
+            var b = new NavIslandEntry(32, new NavIslandData(new Vec3(1.5f, 2, 3), new Vec3(4, 5, 6.25f), new[] { new Vec3(1, 2, 3), new Vec3(4, 5, 6) }, new[] { ((short)0, (short)1, (short)0) }));
+            var e = new NavIslandEntry(32, Empty(new Vec3(0, 0, 0), new Vec3(9, 9, 9)));
+            var plain = new NavIslandEntry(0, null);
+            string Ops(NavIslandEntry x, NavIslandEntry y) => string.Join(" | ", NavIsland.Ops(nv, 3, x, y).Select(o => $"{o.FormId} {o.FieldPath} {o.Op} {o.Key ?? "-"} {o.Value ?? "-"} {o.ComposeNode?.ToJsonString() ?? "-"}"));
+            string Set(NavIslandData d) => $"{nv} MapInfos[3].Island Set - - {NavIsland.Compose(d).ToJsonString()}";
+            var want = new (string Name, string Got, string Want)[]
+            {
+                ("island over island", Ops(a, b), Set(b.Island!)),
+                ("removed", Ops(a, plain), $"{nv} MapInfos[3].Island Remove - - - | {nv} MapInfos[3].Unknown Set - 0 -"),
+                ("set on a plain entry", Ops(plain, b), $"{Set(b.Island!)} | {nv} MapInfos[3].Unknown Set - 32 -"),
+                ("empty mesh", Ops(a, e), Set(e.Island!)),
+                ("unchanged", Ops(a, a), ""),
+            };
+            var bad = want.Where(w => w.Got != w.Want).Select(w => $"{w.Name}: [{w.Got}], want [{w.Want}]").ToList();
+            var ec = NavIsland.Compose(e.Island!);
+            if (ec["sets"] is System.Text.Json.Nodes.JsonArray { Count: > 0 }) bad.Add("an empty mesh composes vertices or triangles");
+            if ((string?)NavIsland.Compose(b.Island!)["fields"]!["Min"] != "1.5,2,3") bad.Add("the box is not written in round-trip form");
+            // review F5: every float's text reads back to its own bits: a negative zero, a value that needs nine digits in
+            // general form (0.1f is 0.100000001 there), the smallest subnormal, and a large world coordinate
+            float[] hard = { -0f, 0.1f, 1.00000012f, float.Epsilon, -131071.99f };
+            var tricky = new NavIslandData(new Vec3(hard[0], hard[1], hard[2]), new Vec3(hard[3], hard[4], 0), new[] { new Vec3(hard[0], hard[1], hard[4]) }, Array.Empty<(short, short, short)>());
+            var tc = NavIsland.Compose(tricky);
+            var texts = new[] { (string)tc["fields"]!["Min"]!, (string)tc["fields"]!["Max"]!, (string)tc["sets"]![0]!["value"]! };
+            var want3 = new[] { new[] { hard[0], hard[1], hard[2] }, new[] { hard[3], hard[4], 0f }, new[] { hard[0], hard[1], hard[4] } };
+            for (int i = 0; i < texts.Length; i++)
+            {
+                var parts = texts[i].Split(',').Select(s => float.Parse(s, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+                if (parts.Length != 3 || Enumerable.Range(0, 3).Any(k => BitConverter.SingleToInt32Bits(parts[k]) != BitConverter.SingleToInt32Bits(want3[i][k])))
+                    bad.Add($"'{texts[i]}' does not read back to its floats' bits");
+            }
+            if (!texts[0].StartsWith("-0,")) bad.Add($"negative zero written as '{texts[0]}'");
+            var back = NavIsland.FromJson(NavIsland.Json(new NavIslandEntry(32, tricky)));
+            if (!NavIsland.Same(back.Island, tricky)) bad.Add("the plan's island text does not read back bit for bit");
+            return bad.Count == 0 ? null : string.Join(" | ", bad);
+        });
+
+        // C2655: the read-back of an island entry (NavIsland.Check), against the navmesh's box (0,0,0)-(200,200,0) and the
+        // expected (32, mesh): it holds as written, and each wrong patch Gate A section 5 names is one sentence: a box one float
+        // step off, the flag without data, data without the flag, a vertex dropped, two vertices swapped, a triangle changed.
+        Case("2655 island-readback-check", () =>
+        {
+            Vec3 mn = new(0, 0, 0), mx = new(200, 200, 0);
+            var want = new NavIslandEntry(32, Mesh(mn, mx));
+            var bad = new List<string>();
+            var ok = NavIsland.Check(K, want, "Patch.esp", mn, mx, want);
+            if (ok.Count > 0) bad.Add("a right entry fails: " + string.Join(" ", ok));
+            var swapped = islandV.ToArray(); (swapped[0], swapped[1]) = (swapped[1], swapped[0]);
+            var wrong = new (string Name, NavIslandEntry Got, string Word)[]
+            {
+                ("box a step off", new NavIslandEntry(32, Mesh(mn, mx with { Z = MathF.BitIncrement(0f) })), "box"),
+                ("flag without data", new NavIslandEntry(32, null), "flag"),
+                ("data without flag", new NavIslandEntry(0, Mesh(mn, mx)), "flag"),
+                ("a vertex dropped", new NavIslandEntry(32, new NavIslandData(mn, mx, islandV.Take(3).ToList(), islandT)), "vert"),
+                ("two vertices swapped", new NavIslandEntry(32, new NavIslandData(mn, mx, swapped, islandT)), "vert"),
+                ("a triangle changed", new NavIslandEntry(32, new NavIslandData(mn, mx, islandV, new[] { ((short)0, (short)1, (short)2), ((short)1, (short)2, (short)3) })), "triangle"),
+            };
+            foreach (var (name, got, word) in wrong)
+            {
+                var d = NavIsland.Check(K, got, "Patch.esp", mn, mx, want);
+                if (d.Count == 0 || !d.Any(x => x.Contains(word)) || d.Any(x => !OneSentence(x))) bad.Add($"{name}: [{string.Join(" | ", d)}], want one sentence each, one naming '{word}'");
+            }
+            return bad.Count == 0 ? null : string.Join(" | ", bad);
+        });
+
+        // C2656: the navmesh info map change for an island (NavRepairNavi.ForIsland, and ForVersion's island): in place on the
+        // NAVI winner's entry (its index), the plan's entry carrying the island data it ends with (NaviJson's "island", what
+        // the read-back holds NAVI to); an entry only an earlier plugin states is added whole WITH the new island data and flag
+        // (Gate A review condition 4), never its old; a whole interior entry is still refused, naming the write engine's gap.
+        Case("2656 navi-island-entry-change", () =>
+        {
+            FormKey nv = new(new ModKey("SelfTest", ModType.Master), 0xC00), other = new(new ModKey("SelfTest", ModType.Master), 0xE09);
+            var oldI = Mesh(new Vec3(0, 0, 0), new Vec3(200, 200, 0));
+            var newE = new NavIslandEntry(32, new NavIslandData(new Vec3(0, 0, 0), new Vec3(260, 200, 0), Array.Empty<Vec3>(), Array.Empty<(short, short, short)>()));
+            Mutagen.Bethesda.Skyrim.NavigationMapInfo Entry(FormKey n, bool island, bool cell)
+            {
+                var e = new Mutagen.Bethesda.Skyrim.NavigationMapInfo { NavigationMesh = new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.INavigationMeshGetter>(n) };
+                if (island)
+                {
+                    e.Unknown = 32;
+                    var d = new Mutagen.Bethesda.Skyrim.IslandData { Min = new Noggog.P3Float(0, 0, 0), Max = new Noggog.P3Float(200, 200, 0) };
+                    foreach (var p in oldI.Vertices) d.Vertices.Add(new Noggog.P3Float(p.X, p.Y, p.Z));
+                    foreach (var (x, y, z) in oldI.Triangles) d.Triangles.Add(new Noggog.P3Int16(x, y, z));
+                    e.Island = d;
+                }
+                e.Parent = cell ? new Mutagen.Bethesda.Skyrim.NavigationMapInfoCellParent { ParentCell = new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.ICellGetter>(new FormKey(new ModKey("SelfTest", ModType.Master), 0xCE1)) }
+                    : new Mutagen.Bethesda.Skyrim.NavigationMapInfoWorldParent { ParentWorldspace = new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.IWorldspaceGetter>(new FormKey(new ModKey("SelfTest", ModType.Master), 0x800)) };
+                return e;
+            }
+            NaviView View(params (string Plugin, Mutagen.Bethesda.Skyrim.NavigationMapInfo[] Infos)[] srcs) => NaviView.Of(srcs.Select(s =>
+            {
+                var map = new Mutagen.Bethesda.Skyrim.NavigationMeshInfoMap(nv, Mutagen.Bethesda.Skyrim.SkyrimRelease.SkyrimSE);
+                map.MapInfos.AddRange(s.Infos);
+                return new NaviSource(s.Plugin, "", map);
+            }).ToList());
+            var bad = new List<string>();
+            var (p1, r1) = NavRepairNavi.ForIsland(K, newE, View(("SelfTest.esm", new[] { Entry(other, false, false), Entry(K, true, false) })));
+            var o1 = p1.Ops.Select(o => $"{o.FieldPath} {o.Op}").ToList();
+            if (r1 is not null || !o1.SequenceEqual(new[] { "MapInfos[1].Island Set" }) || p1.Entries.Count != 1 || p1.Entries[0].WinnerIndex != 1 || p1.Entries[0].IslandAfter != newE
+                || NavRepairNavi.NaviJson(p1)["entries"]![0]!["island"] is null)
+                bad.Add($"in place: refused {r1}, ops [{string.Join(", ", o1)}], entries {p1.Entries.Count}");
+            var (p2, r2) = NavRepairNavi.ForIsland(K, newE, View(("SelfTest.esm", new[] { Entry(K, true, false) }), ("Later.esp", new[] { Entry(other, false, false) })));
+            var whole = p2.Ops.SingleOrDefault();
+            var isl = whole?.ComposeNode?["sets"]?.AsArray().FirstOrDefault(s => (string?)s!["path"] == "Island");
+            if (r2 is not null || whole is null || whole.FieldPath != "MapInfos" || whole.Op != "Add" || (string?)whole.ComposeNode!["fields"]!["Unknown"] != "32"
+                || isl is null || (string?)isl["compose"]!["fields"]!["Max"] != "260,200,0" || isl["compose"]!["sets"] is System.Text.Json.Nodes.JsonArray { Count: > 0 })
+                bad.Add($"added whole: refused {r2}, op {whole?.FieldPath} {whole?.Op}, island {isl?.ToJsonString() ?? "none"}");
+            var (_, r3) = NavRepairNavi.ForIsland(K, newE, View(("SelfTest.esm", new[] { Entry(K, true, true) }), ("Later.esp", new[] { Entry(other, false, false) })));
+            if (r3?.Contains("cannot yet compose a whole interior entry") != true) bad.Add($"whole interior: {r3 ?? "not refused"}");
+            var (p4, r4) = NavRepairNavi.ForVersion(K, Array.Empty<FormKey>(), Array.Empty<FormKey>(), Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(K, true, false) })), newE);
+            if (r4 is not null || !p4.Ops.Any(o => o.FieldPath == "MapInfos[0].Island" && o.Op == "Set") || p4.Entries.SingleOrDefault()?.IslandAfter != newE)
+                bad.Add($"use_version's island: refused {r4}, ops [{string.Join(", ", p4.Ops.Select(o => $"{o.FieldPath} {o.Op}"))}]");
+            return bad.Count == 0 ? null : string.Join(" | ", bad);
+        });
+
         Console.WriteLine(fail == 0 ? "navedit self-test: all cases ok" : $"navedit self-test: {fail} failed");
         return fail == 0 ? 0 : 1;
     }

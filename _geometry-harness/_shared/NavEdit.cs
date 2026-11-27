@@ -19,7 +19,8 @@ namespace HarnessShared;
 //   - a move that makes a moved triangle overlap another triangle of the navmesh in plan at the same level (their height
 //     ranges within LevelGap of each other; a bridge over a floor is not an overlap).
 // What a vertex move does not touch: the triangles, their edge fields and flags, the link table, cover and door
-// triangles, and the NAVI entry (no neighbour changes). An island navmesh is refused by the caller, which owns NAVI.
+// triangles, and the NAVI entry's neighbours. On an island of the navmesh info map the caller (which owns NAVI) asks
+// NavIsland what the island data becomes (_shared/NavIsland.cs).
 
 /// <summary>Move vertex <paramref name="Vertex"/> to <paramref name="To"/>.</summary>
 public sealed record VertexMove(int Vertex, Vec3 To);
@@ -1004,6 +1005,9 @@ public sealed record UseVersionPlan(string? Refuse, IReadOnlyList<string> Why, L
                                     System.Text.Json.Nodes.JsonObject? Row)
 {
     public bool Planned => Refuse is null && Why.Count == 0;
+    /// <summary>The flag and island data the carried navmesh's entry ends with, when either it or the version's is an island
+    /// (R7; what the read-back holds the entry to); null otherwise.</summary>
+    public NavIslandEntry? IslandAfter { get; init; }
 }
 
 /// <summary>THE LOAD-ORDER GLUE AROUND <see cref="NavEdit.UseVersion"/>: its one owner, for navedit's plan and write and for
@@ -1042,11 +1046,28 @@ public static class NavUseVersionPlan
         // become the version's link targets; each neighbour it gains is added both ways (NavRepairNavi.ForVersion; nothing is
         // written where the entry already stands so)
         System.Text.Json.Nodes.JsonObject? naviRow = null;
+        // the island data (R7): the version plugin's own entry's, whole (NavIsland.ForVersion); refused when that plugin states no
+        // entry for an island, or gives its island a box that is not its own navmesh's (review F2)
+        NavIslandEntry? islandArg = null, islandAfter = null;
+        if (why.Count == 0 && navi.Problem is null)
+        {
+            var taken = navi.Effective.TryGetValue(key, out var tk) ? NavIsland.Of(tk.Src.Map.MapInfos[tk.Index]) : new NavIslandEntry(0, null);
+            var ve = navi.Stated(key, Path.GetFileName(fromPath));
+            var verE = ve is null ? null : NavIsland.Of(ve);
+            var (after, islWhy) = NavIsland.ForVersion(key, from, taken, verE);
+            islWhy ??= verE?.Island is { } vi ? NavIsland.VersionBoxRefusal(key, from, vi, version.Min, version.Max) : null;
+            if (islWhy is not null) { why = new[] { islWhy }; ops = new(); }
+            else
+            {
+                if (!NavIsland.Same(taken, after)) islandArg = after;
+                if (taken.Island is not null || after.Island is not null) islandAfter = after;
+            }
+        }
         if (why.Count == 0)
         {
             var doorTable = (r.After!.DoorTriangles ?? Array.Empty<NavDoorTriangle>()).Select(d => d.Door).ToList();
             var targets = (r.After.EdgeLinks ?? Array.Empty<NavEdgeLink>()).Select(l => l.Mesh).Where(m => m != key).Distinct().ToList();
-            var (np, refusedNavi) = NavRepairNavi.ForVersion(key, doorTable, targets, r.Gained, navi);
+            var (np, refusedNavi) = NavRepairNavi.ForVersion(key, doorTable, targets, r.Gained, navi, islandArg);
             if (refusedNavi is not null) { why = new[] { $"The navmesh info map cannot follow the version ({refusedNavi}); keep the winner's version, or give the map an entry the patch can change first." }; ops = new(); }
             else if (np.Entries.Count > 0) { ops.AddRange(np.Ops); naviRow = NavRepairNavi.NaviJson(np); }   // its entries: what the read-back holds NAVI to
         }
@@ -1077,7 +1098,8 @@ public static class NavUseVersionPlan
             ["masters"] = Arr((view.TouchingPlugins(key) ?? Array.Empty<string>())
                 .SkipWhile(n => !string.Equals(n, Path.GetFileName(fromPath), StringComparison.OrdinalIgnoreCase)).Skip(1)),
         };
-        return new UseVersionPlan(null, why, ops, expect, row);
+        if (why.Count == 0 && islandAfter is not null) row["island"] = NavIsland.Json(islandAfter);
+        return new UseVersionPlan(null, why, ops, expect, row) { IslandAfter = why.Count == 0 ? islandAfter : null };
     }
 
     /// <summary>A door as a plan row names it: the door, who places it, its triangle, and where it leads (the partner door
@@ -1117,15 +1139,10 @@ public static class NavUseVersionPlan
         : "other reason";
 
     /// <summary>Why <paramref name="key"/> cannot be edited for the navmesh info map, in one sentence, or null: the map cannot be
-    /// read, or the navmesh is an island in it (the map keeps its own copy of an island's geometry). The rule's one owner,
-    /// for every navedit edit and for navownprobe's use_version rows.</summary>
-    public static string? IslandRefusal(NaviView navi, FormKey key)
-    {
-        if (navi.Problem is { } np) return $"The navmesh info map cannot be read ({np}), so whether {key} is an island is not known.";
-        if (navi.Effective.TryGetValue(key, out var ent) && ent.Src.Map.MapInfos[ent.Index].Island is not null)
-            return $"{key} is an island in the navmesh info map, which keeps its own copy of the geometry; editing islands is not supported yet.";
-        return null;
-    }
+    /// read, so whether the navmesh is an island in it is not known (R7: an island itself is no longer a refusal; NavIsland
+    /// says what its island data becomes). For every navedit edit and navownprobe's use_version rows.</summary>
+    public static string? NaviRefusal(NaviView navi, FormKey key)
+        => navi.Problem is { } np ? $"The navmesh info map cannot be read ({np}), so whether {key} is an island is not known; check the plugins that carry it open in xEdit." : null;
 
     /// <summary>Every navmesh's winning link table on the order: FormKey to (winning plugin path, its links). Read once per
     /// plan, so a triangle edit finds every navmesh whose links name the one it renumbers.</summary>
