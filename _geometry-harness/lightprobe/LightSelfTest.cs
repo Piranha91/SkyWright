@@ -285,6 +285,21 @@ static class LightSelfTest
 
         BosCases();
 
+        Check("BOS: a scene not judged becomes a row a modder sees (class scene-not-judged, its reason, where it opens); a judged scene does not",
+              "a refused scene left only in scenes[] (Gate B review finding 1's second half), or a row for a scene that was judged", () =>
+        {
+            var inner = new LightCheckSceneKey(false, "0A1B2C:Skyrim.esm"); var outer = new LightCheckSceneKey(true, "00003C:Skyrim.esm", -11, 23);
+            var judged = new LightCheckSceneKey(false, "0A1B2D:Skyrim.esm");
+            const string why = "Not judged: a Base Object Swapper file changes 000900:Skyrim.esm in this scene (combined arrangement), and this check does not apply Base Object Swapper; look at the scene in game.";
+            var rows = CheckMode.RefusedSceneRows(new[] { inner, judged, outer }, new Dictionary<string, string> { [inner.Id] = why, [outer.Id] = why },
+                                                  new Dictionary<string, string> { [inner.Id] = "TestHouse", [outer.Id] = "Tamriel cell -11, 23", [judged.Id] = "Judged" });
+            return rows.Count == 2
+                && rows[0]["class"] as string == CheckMode.SceneClass && rows[0]["verdict"] as string == "not judged" && rows[0]["reason"] as string == why
+                && rows[0]["scene"] as string == "TestHouse" && rows[0]["cell"] as string == inner.Space && rows[0]["at"] is null
+                && rows[1]["kind"] as string == "exterior" && rows[1]["x"] is -11 && rows[1]["y"] is 23 && rows[1]["cell"] is null
+                && rows[1]["at"] is float[] at && at[0] == -10.5f * LightCheckSceneIndex.Cell && at[1] == 23.5f * LightCheckSceneIndex.Cell;
+        });
+
         if (meshesFrom is null)
             Console.WriteLine("NOT RUN  emitter reader cases on vanilla meshes (they need --meshes-from GAME_DATA, the folder holding Skyrim - Meshes0/1.bsa)");
         else

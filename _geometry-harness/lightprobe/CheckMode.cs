@@ -170,6 +170,8 @@ static class CheckMode
         var rows = new List<object>();
         var counts = LightCheck.Classes.ToDictionary(k => k, _ => new LightCheckCount());
         var sceneRows = new List<object>();
+        // a scene not judged is a row a modder sees, not only a scenes[] entry (Gate B review finding 1)
+        rows.AddRange(RefusedSceneRows(scenes, notJudged, display));
         LightCheckReading Of(string role, string id) => readings[role].TryGetValue(id, out var x) ? x : new LightCheckReading(Names(role));
         foreach (var s in scenes)
         {
@@ -177,14 +179,6 @@ static class CheckMode
             if (notJudged.TryGetValue(s.Id, out var why))
             {
                 sceneRows.Add(new { scene = name, sceneId = s.Id, kind = s.Exterior ? "exterior" : "interior", judged = false, reason = why });
-                // a scene not judged is a row a modder sees, not only a scenes[] entry (Gate B review finding 1)
-                rows.Add(new
-                {
-                    @class = SceneClass, title = "A scene not judged", verdict = "not judged", scene = name, sceneId = s.Id, kind = s.Exterior ? "exterior" : "interior",
-                    space = s.Space, x = s.Exterior ? s.X : (int?)null, y = s.Exterior ? s.Y : (int?)null, cell = s.Exterior ? null : s.Space,
-                    summary = why, reason = why,
-                    at = s.Exterior ? new[] { (s.X + 0.5f) * LightCheckSceneIndex.Cell, (s.Y + 0.5f) * LightCheckSceneIndex.Cell, 0f } : null,
-                });
                 continue;
             }
             var res = LightCheck.Evaluate(name, s.Exterior, Of("dependencies", s.Id), Of("selection", s.Id), Of("rest", s.Id), Of("combined", s.Id), sides);
@@ -238,6 +232,27 @@ static class CheckMode
         Console.WriteLine($"{rows.Count} rows over {scenes.Count} scenes ({notJudged.Count} not judged) -> {jsonPath}; {sw.Elapsed.TotalSeconds:0.0}s; "
                         + $"model reads {cache.Reads:N0}, cache hits {cache.Hits:N0}; peak working set {Process.GetCurrentProcess().PeakWorkingSet64 / 1048576.0:N0} MB");
         return 0;
+    }
+
+    /// <summary>One row per scene not judged (Gate B review finding 1), in scene order: class scene-not-judged, its one-sentence reason,
+    /// where it opens (an interior's cell; an exterior's worldspace and grid, looking at the centre cell's middle).</summary>
+    public static List<Dictionary<string, object?>> RefusedSceneRows(IEnumerable<LightCheckSceneKey> scenes, IReadOnlyDictionary<string, string> notJudged,
+                                                                    IReadOnlyDictionary<string, string> display)
+    {
+        var o = new List<Dictionary<string, object?>>();
+        foreach (var s in scenes)
+        {
+            if (!notJudged.TryGetValue(s.Id, out var why)) continue;
+            o.Add(new Dictionary<string, object?>
+            {
+                ["class"] = SceneClass, ["title"] = "A scene not judged", ["verdict"] = "not judged", ["scene"] = display.GetValueOrDefault(s.Id, s.Id),
+                ["sceneId"] = s.Id, ["kind"] = s.Exterior ? "exterior" : "interior", ["space"] = s.Space,
+                ["x"] = s.Exterior ? (int?)s.X : null, ["y"] = s.Exterior ? (int?)s.Y : null, ["cell"] = s.Exterior ? null : s.Space,
+                ["summary"] = why, ["reason"] = why,
+                ["at"] = s.Exterior ? new[] { (s.X + 0.5f) * LightCheckSceneIndex.Cell, (s.Y + 0.5f) * LightCheckSceneIndex.Cell, 0f } : null,
+            });
+        }
+        return o;
     }
 
     /// <summary>A scene is not judged when a Base Object Swapper file names one of its members or a member's base (decision 7: BOS is
