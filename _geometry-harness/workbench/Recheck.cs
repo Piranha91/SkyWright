@@ -11,7 +11,7 @@ internal sealed record ProbeRun(string Label, string Emit, string BuildDigest, d
 /// <summary>A re-check's answer for the open conflict row.</summary>
 internal sealed record RecheckResult(RowVerdict Row, IReadOnlyList<RowVerdict> New, string Verdict, IReadOnlyList<string> Lines,
                                      string BuildSentence, double WallSeconds, IReadOnlyList<RowVerdict>? Others = null, string? Disabled = null,
-                                     string? ContactNote = null);
+                                     string? ContactNote = null, string? Nudged = null);
 
 /// <summary>The detector re-run on the touched cell (DESIGN.md section 5, as built in stage 4). The probe that produced the
 /// row runs twice on the population of the patch alone (the run engine's <c>population</c>), with the same build: on the arm's order,

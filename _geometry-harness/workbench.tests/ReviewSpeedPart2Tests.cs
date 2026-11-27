@@ -476,7 +476,7 @@ public sealed class ReviewSpeedPart2Tests : IDisposable
         internal Func<RefPlacementEdit.Pose, IReadOnlyList<string>> ContactsAt = _ => Array.Empty<string>();
         internal TrialLane Make(string? work) => new(work,
             async (e, patch, outPath) => { if (WriteGate is { } wg) await wg.Task; Writes.Add((e, patch, outPath)); return "wrote " + patch; },
-            async (patch, folder, workDir) => { WorkDirs.Add(workDir); if (Gate is { } g) await g.Task; return Answer(WorkDirs.Count); },
+            async (patch, folder, workDir, _, _) => { WorkDirs.Add(workDir); if (Gate is { } g) await g.Task; return Answer(WorkDirs.Count); },
             p => Settle(p), p => ContactsAt(p));
     }
 

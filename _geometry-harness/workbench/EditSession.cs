@@ -9,7 +9,7 @@ namespace Workbench;
 
 /// <summary>One staged edit: the reference and its pose before and after, or (<paramref name="Disable"/>) the reference to be
 /// written "initially disabled" at the pose it has. Nothing is on disk until a commit.</summary>
-internal sealed record PendingEdit(FormKey Ref, RefPlacementEdit.Pose Before, RefPlacementEdit.Pose After, bool Disable = false);
+internal sealed record PendingEdit(FormKey Ref, RefPlacementEdit.Pose Before, RefPlacementEdit.Pose After, bool Disable = false, string? Nudge = null);
 
 /// <summary>The workbench's session state: the selected reference and the ordered list of staged edits. The window and
 /// (stage 5) the MCP state tools both call these methods; nothing keeps a second copy of the state.
@@ -70,6 +70,9 @@ internal sealed class EditSession
     internal IReadOnlyDictionary<FormKey, (string Patch, RefPlacementEdit.Pose Pose)> Written => _written;
     readonly Dictionary<FormKey, (string Patch, RefPlacementEdit.Pose Pose)> _written = new();
     readonly HashSet<FormKey> _writtenDisabled = new();
+
+    /// <summary>The written edits that came from a nudge (Gate C step 2 stub).</summary>
+    internal IReadOnlyCollection<FormKey> WrittenNudged => Array.Empty<FormKey>();
 
     /// <summary>The written edits that are disables ("initially disabled" in their patch), not moves.</summary>
     internal IReadOnlyCollection<FormKey> WrittenDisabled => _writtenDisabled;
@@ -144,7 +147,7 @@ internal sealed class EditSession
     internal RefPlacementEdit.Edit Preview(FormKey key, RefPlacementEdit.Pose pose) => RefPlacementEdit.Apply(RefOf(key), pose);
 
     /// <summary>Stage one edit: re-place the reference and append it to the pending list.</summary>
-    internal PendingEdit Stage(FormKey key, RefPlacementEdit.Pose after)
+    internal PendingEdit Stage(FormKey key, RefPlacementEdit.Pose after, string? nudge = null)
     {
         RefOf(key);
         if (IsDisabled(key))

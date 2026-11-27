@@ -1,0 +1,29 @@
+{
+  "schema": "nudge-refusals/1",
+  "about": "What a nudge refuses to move, by what depends on where the object stands (the owner's answer, 2026-11-26). The owner revises this file; the app reads it each time a nudge is asked for. baseTypes: the base record types refused, with the words the refusal says. facts: the object's own facts refused (marker: the base's Is-Marker flag or 'marker' in its EditorID; primitive: a trigger or other box (XPRM); mapMarker: a map marker (XMRK); largeReference: on a worldspace's large-reference list; leadsSomewhere: a door with a teleport destination). namedBy: how a record names the object, as the one reader of what names it says it (a placed reference's EnableParent, LinkedReferences, ActivateParents, TeleportDestination or VirtualMachineAdapter; another record by its type, Quest, Package, Cell, Location and so on; 'other' for every type not listed): refuse, allow, or refuse-unless-carryable (a base of a carryableBaseTypes type named by nothing else is moved like any item, and the staged line says so).",
+  "baseTypes": {
+    "Activator": "an activator",
+    "Furniture": "furniture",
+    "IdleMarker": "an idle marker",
+    "Door": "a door"
+  },
+  "facts": {
+    "marker": "a marker",
+    "primitive": "a trigger or other primitive",
+    "mapMarker": "a map marker",
+    "largeReference": "a large reference",
+    "leadsSomewhere": "a door that leads somewhere"
+  },
+  "namedBy": {
+    "LinkedReferences": "refuse",
+    "EnableParent": "refuse",
+    "ActivateParents": "refuse",
+    "TeleportDestination": "refuse",
+    "VirtualMachineAdapter": "allow",
+    "Package": "refuse",
+    "Quest": "refuse-unless-carryable",
+    "Cell": "allow",
+    "other": "allow"
+  },
+  "carryableBaseTypes": ["MiscItem", "Weapon", "Armor", "Book", "Ingestible", "Ingredient", "Key", "SoulGem", "Scroll", "Ammunition"]
+}

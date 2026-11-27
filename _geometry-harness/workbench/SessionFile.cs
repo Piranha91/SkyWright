@@ -5,7 +5,7 @@ using ViewProbe;
 namespace Workbench;
 
 /// <summary>A staged edit as saved: the reference and its pose before and after.</summary>
-internal sealed record SavedEdit(string Ref, RefPlacementEdit.Pose Before, RefPlacementEdit.Pose After, bool Disable = false);
+internal sealed record SavedEdit(string Ref, RefPlacementEdit.Pose Before, RefPlacementEdit.Pose After, bool Disable = false, string? Nudge = null);
 
 /// <summary>A written edit as saved: the reference and the patch (and its folder) that holds it.</summary>
 internal sealed record SavedWritten(string Ref, string Patch, string PatchFolder, bool Disable = false);

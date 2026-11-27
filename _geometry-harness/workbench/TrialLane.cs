@@ -124,14 +124,15 @@ internal sealed record TrialPlacement(int N, RefPlacementEdit.Pose Pose, string 
 
 /// <summary>What one trial's re-check gives the lane: the result, the other rows naming the moved reference and their words,
 /// the carried predicates still holding for it, and the population line.</summary>
-internal sealed record TrialRecheck(RecheckResult Result, IReadOnlyList<RowVerdict> OthersOfRef, IReadOnlyList<string> StillHolding, string Population);
+internal sealed record TrialRecheck(RecheckResult Result, IReadOnlyList<RowVerdict> OthersOfRef, IReadOnlyList<string> StillHolding, string Population,
+                                   IReadOnlyList<RowVerdict>? ContactNew = null);
 
 /// <summary>Item 8's trial lane: each candidate written as its own patch under the Work Folder's trials folder from a made-up
 /// net edit (load-order pose to candidate pose), never through the edit session, and judged by the re-check, one at a time.</summary>
 internal sealed class TrialLane
 {
     internal delegate Task<string> WriteTrial(PendingEdit edit, string patch, string outPath);
-    internal delegate Task<TrialRecheck> RecheckTrial(string patch, string patchFolder, string workDir);
+    internal delegate Task<TrialRecheck> RecheckTrial(string patch, string patchFolder, string workDir, bool contact, CancellationToken ct);
 
     /// <summary>The measured cost of one candidate (both runs), in seconds: the low and high of the Gate A probe.</summary>
     internal const double SecondsLow = 67, SecondsHigh = 76;
@@ -206,7 +207,7 @@ internal sealed class TrialLane
                 var outPath = p.PatchFolder!;
                 Directory.CreateDirectory(outPath);
                 await _write(new PendingEdit(key, loadOrder, p.Pose), patch, outPath).ConfigureAwait(false);
-                var rc = await _recheck(patch, outPath, outPath + "-recheck").ConfigureAwait(false);
+                var rc = await _recheck(patch, outPath, outPath + "-recheck", false, CancellationToken.None).ConfigureAwait(false);
                 var verdict = ClearRule.Judge(rc.Result.Row, rc.OthersOfRef, rc.Result.New, rc.StillHolding);
                 if (verdict.Word == "clear" && Crossings(p) is { Count: > 0 } crossed) verdict = verdict with { Sentence = verdict.Sentence + ClearRule.CrossingNote(crossed) };
                 done = p with
@@ -224,6 +225,10 @@ internal sealed class TrialLane
             lock (_lock) _placements = _placements.Select(x => x.N == p.N ? done : x).ToList();
         }
     }
+
+    /// <summary>One nudge candidate written as its own trial patch under the Work Folder and re-checked (Gate C step 2 stub).</summary>
+    internal Task<TrialRecheck> ProveAsync(PendingEdit edit, int n, bool contact, CancellationToken ct)
+        => throw new NotImplementedException("Gate C step 2 stub");
 
     /// <summary>The references a candidate crosses, by its contact read ("X crosses it") and its refused drop ("X crosses …").</summary>
     static IReadOnlyCollection<string> Crossings(TrialPlacement p)

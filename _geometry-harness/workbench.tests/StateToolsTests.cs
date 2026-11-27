@@ -1124,7 +1124,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         _scene.View = new ViewState(_scene.Session, () => Array.Empty<ViewProbe.RefOcclusion>());
         var writes = new List<string>();
         _scene.Trials = new TrialLane(work, (e, patch, outPath) => { writes.Add(outPath); return Task.FromResult("wrote " + patch); },
-            (patch, folder, dir) => Task.FromResult(ReviewSpeedPart2Tests.Recheck("resolved")), p => (p, "lowered it 1 unit onto the terrain"), _ => Array.Empty<string>());
+            (patch, folder, dir, _, _) => Task.FromResult(ReviewSpeedPart2Tests.Recheck("resolved")), p => (p, "lowered it 1 unit onto the terrain"), _ => Array.Empty<string>());
         _scene.PairBoxesValue = (new SkyWright.Engine.Aabb(new SkyWright.Engine.Vec3(990, 10, 0), new SkyWright.Engine.Vec3(1010, 30, 20), false),
                                  new SkyWright.Engine.Aabb(new SkyWright.Engine.Vec3(1000, 0, 0), new SkyWright.Engine.Vec3(1040, 40, 40), false));
         await Ok("workbench_act", A(("verb", "select"), ("conflict", 1)));
@@ -1263,7 +1263,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         };
         _scene.View = new ViewState(_scene.Session, () => Array.Empty<ViewProbe.RefOcclusion>());
         _scene.Trials = new TrialLane(work, (e, patch, outPath) => Task.FromResult("wrote " + patch),
-            (patch, folder, dir) => Task.FromResult(ReviewSpeedPart2Tests.Recheck("resolved")), p => (p, "lowered it 1 unit onto the terrain"), _ => Array.Empty<string>());
+            (patch, folder, dir, _, _) => Task.FromResult(ReviewSpeedPart2Tests.Recheck("resolved")), p => (p, "lowered it 1 unit onto the terrain"), _ => Array.Empty<string>());
         _scene.PairBoxesValue = (new SkyWright.Engine.Aabb(new SkyWright.Engine.Vec3(980, -20, 0), new SkyWright.Engine.Vec3(1020, 20, 40), false),
                                  new SkyWright.Engine.Aabb(new SkyWright.Engine.Vec3(1000, -10, 0), new SkyWright.Engine.Vec3(1060, 30, 60), false));
         await Ok("workbench_act", A(("verb", "select"), ("conflict", 1)));
@@ -1297,7 +1297,7 @@ public sealed class StateToolsTests : IAsyncLifetime
     [Fact]
     public async Task P8x_find_clear_with_no_work_folder_is_refused_naming_set_work_folder()
     {
-        _scene.Trials = new TrialLane(null, (e, p, o) => Task.FromResult(""), (p, f, d) => Task.FromResult(ReviewSpeedPart2Tests.Recheck("resolved")),
+        _scene.Trials = new TrialLane(null, (e, p, o) => Task.FromResult(""), (p, f, d, _, _) => Task.FromResult(ReviewSpeedPart2Tests.Recheck("resolved")),
                                       p => (p, ""), _ => Array.Empty<string>());
         _scene.PairBoxesValue = (new SkyWright.Engine.Aabb(new SkyWright.Engine.Vec3(0, 0, 0), new SkyWright.Engine.Vec3(1, 1, 1), false),
                                  new SkyWright.Engine.Aabb(new SkyWright.Engine.Vec3(0, 0, 0), new SkyWright.Engine.Vec3(2, 2, 2), false));

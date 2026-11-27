@@ -1688,7 +1688,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             _trialsWork = work;
             return _trials = new TrialLane(work,
                 async (edit, patch, outPath) => await (await writer).CommitAsync(new[] { edit }, patch, dryRun: false, outPath: outPath),
-                (patch, folder, dir) => RecheckTrialAsync(writer, patch, folder, dir),
+                (patch, folder, dir, contact, ct) => RecheckTrialAsync(writer, patch, folder, dir),
                 pose => Settle(_trials?.Key ?? _session.Selected ?? key, pose), pose => ContactsAt(_trials?.Key ?? _session.Selected ?? key, pose));
         }
     }
