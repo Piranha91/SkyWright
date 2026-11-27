@@ -161,9 +161,10 @@ static class LostEditCheck
                 else { authored = Lines(row, "deltas"); complete &= Complete(row); }
             }
             var lm = MastersOf(v.Loser);
-            // the instrument is the Python capture's rule, which compared rotations as plain numbers
-            var r = LostEditRule.Judge(v.Type, authored, v.VsWinner, names, scope, complete, defines, lm.Closure, v.Providers, lm.Blind, angles: !ctx.Instrument);
+            // the instrument is the Python capture's rule, which compared rotations and positions as plain numbers and listed derived data
+            var r = LostEditRule.Judge(v.Type, authored, v.VsWinner, names, scope, complete, defines, lm.Closure, v.Providers, lm.Blind, angles: !ctx.Instrument, tolerances: !ctx.Instrument);
             foreach (var (why, n) in r.NotJudged) Add(unjudged, why, n);
+            foreach (var (why, n) in r.SetAside ?? new Dictionary<string, long>()) Add(setAside, why, n);
             if (!complete) continue;
             judged++; fields += r.FieldsJudged;
             foreach (var f in r.Lost) found.Add((v, f));

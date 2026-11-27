@@ -33,7 +33,8 @@ public sealed class RecordFieldScope
     static readonly Regex Number = new(@"-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?", RegexOptions.CultureInvariant);
 
     readonly HashSet<string> _file;
-    readonly Dictionary<string, HashSet<string>> _group, _merged, _generated;
+    readonly Dictionary<string, HashSet<string>> _group, _merged, _generated, _derived;
+    readonly Dictionary<string, double> _tolerance;
     readonly HashSet<string> _mergedRecords, _angles;
     readonly Dictionary<string, Dictionary<string, long>> _masks;
     readonly Dictionary<string, Dictionary<string, Dictionary<string, long>>> _enumNames;
@@ -63,6 +64,9 @@ public sealed class RecordFieldScope
         _group = Map(G("groupBookkeeping")); _merged = Map(G("runtimeMerged")); _generated = Map(G("generatedBookkeeping"));
         _mergedRecords = Set(G("runtimeMergedRecords"));
         _angles = Set(G("anglesRadians"));
+        _derived = Map(G("derivedData"));
+        _tolerance = G("positionTolerance").ValueKind == JsonValueKind.Object
+            ? G("positionTolerance").EnumerateObject().ToDictionary(t => t.Name, t => t.Value.GetDouble(), StringComparer.Ordinal) : new(StringComparer.Ordinal);
         _masks = G("integerMasks").ValueKind == JsonValueKind.Object
             ? G("integerMasks").EnumerateObject().ToDictionary(t => t.Name, t => t.Value.EnumerateObject().ToDictionary(f => f.Name, f => f.Value.GetInt64(), StringComparer.Ordinal), StringComparer.Ordinal)
             : new(StringComparer.Ordinal);
@@ -154,6 +158,22 @@ public sealed class RecordFieldScope
             d = Math.IEEERemainder(d, 2 * Math.PI);
             return Math.Abs(d) < 1e-4;
         });
+    }
+
+    /// <summary>A top-level field of a record type the scope names derived data (derivedData: the editor regenerates it from
+    /// other data), which the shipped rule counts and never lists.</summary>
+    public bool Derived(string rtype, string top) => _derived.TryGetValue(rtype, out var d) && d.Contains(top);
+
+    /// <summary>Two positions of a field the scope gives a tolerance (positionTolerance) that are one position in game: the
+    /// same text between their numbers, as many numbers on each side, and the straight-line distance between them under the
+    /// tolerance. False for any other field.</summary>
+    public bool Near(string field, string? a, string? b)
+    {
+        if (a is null || b is null || !_tolerance.TryGetValue(field, out var tol)) return false;
+        var na = Number.Matches(a).Select(m => double.Parse(m.Value, CultureInfo.InvariantCulture)).ToList();
+        var nb = Number.Matches(b).Select(m => double.Parse(m.Value, CultureInfo.InvariantCulture)).ToList();
+        if (na.Count == 0 || na.Count != nb.Count || Number.Replace(a, "#") != Number.Replace(b, "#")) return false;
+        return Math.Sqrt(na.Zip(nb).Sum(t => (t.First - t.Second) * (t.First - t.Second))) < tol;
     }
 
     /// <summary>Two values as the game reads them: their numbers at four decimals, -0 equal to 0, the text between them

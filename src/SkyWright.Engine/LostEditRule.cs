@@ -23,8 +23,10 @@ namespace SkyWright.Engine;
 /// value the loser was made with ("None" where a part has none; null where the field is one path and has none).</summary>
 public sealed record LostField(string Field, IReadOnlyList<string> Paths, string? Lost, string? Winner, string? MadeWith);
 
-/// <summary>What one version gives: its lost fields, how many authored fields were compared, and what was not judged.</summary>
-public sealed record VersionResult(IReadOnlyList<LostField> Lost, long FieldsJudged, IReadOnlyDictionary<string, long> NotJudged);
+/// <summary>What one version gives: its lost fields, how many authored fields were compared, what was not judged, and the
+/// lost fields set aside by the scope (derived data), counted and never rows.</summary>
+public sealed record VersionResult(IReadOnlyList<LostField> Lost, long FieldsJudged, IReadOnlyDictionary<string, long> NotJudged,
+                                   IReadOnlyDictionary<string, long>? SetAside = null);
 
 /// <summary>Whether a version is judged, and if not, the reason it is set aside or not judged.</summary>
 public sealed record Admission(bool Judge, string? SetAside = null, string? NotJudged = null);
@@ -115,12 +117,15 @@ public static class LostEditRule
     /// every field it holds is its own. <paramref name="masters"/>: the loser's masters (transitively) and
     /// <paramref name="providers"/> the record's tree, which settle whether a field it lacks was removed by it.
     /// <paramref name="complete"/>: false when houseCARL marked a read incomplete; the version is then not judged.
-    /// <paramref name="angles"/>: rotations compared modulo a full turn (false only for the instrument, as the Python capture).</summary>
+    /// <paramref name="angles"/>: rotations compared modulo a full turn (false only for the instrument, as the Python capture).
+    /// <paramref name="tolerances"/>: positions within the scope's positionTolerance are one position, and the scope's derived
+    /// data is counted and never lost (review finding U2-F2; false only for the instrument).</summary>
     public static VersionResult Judge(string rtype, IReadOnlyList<string> authoredLines, IReadOnlyList<string> vsWinnerLines, IReadOnlyList<string> plugins,
         RecordFieldScope scope, bool complete = true, bool defines = false, IReadOnlySet<string>? masters = null,
-        IReadOnlyDictionary<string, (IReadOnlyList<string> Lines, bool Complete)>? providers = null, bool mastersUnread = false, bool angles = true)
+        IReadOnlyDictionary<string, (IReadOnlyList<string> Lines, bool Complete)>? providers = null, bool mastersUnread = false, bool angles = true,
+        bool tolerances = true)
     {
-        bool Same(string field, string? x, string? y) => RecordFieldScope.SameValue(x, y) || (angles && scope.AngleEqual(field, x, y));
+        bool Same(string field, string? x, string? y) => RecordFieldScope.SameValue(x, y) || (angles && scope.AngleEqual(field, x, y)) || (tolerances && scope.Near(field, x, y));
         var unjudged = new Dictionary<string, long>(StringComparer.Ordinal);
         void Count(string why) => unjudged[why] = unjudged.GetValueOrDefault(why) + 1;
         if (!complete) { Count(Incomplete); return new VersionResult(Array.Empty<LostField>(), 0, unjudged); }
@@ -181,8 +186,10 @@ public static class LostEditRule
             parts.Add((field, own, w.OtherValue, prev));
         }
         var lost = new List<LostField>();
+        var aside = new Dictionary<string, long>(StringComparer.Ordinal);
         foreach (var (top, parts) in rows.Items)
         {
+            if (tolerances && scope.Derived(rtype, top)) { aside[Derived] = aside.GetValueOrDefault(Derived) + 1; continue; }
             // a field's parts joined "Leaf=value; Leaf=value" (a placement reads "Position=x,y,z; Rotation=x,y,z"), as the
             // module's record rows join them; a part with no value reads "None"
             string? Joined(Func<(string Field, string? Own, string? Winner, string? Prev), string?> pick) =>
@@ -190,7 +197,7 @@ public static class LostEditRule
                 : string.Join("; ", parts.Select(p => $"{(p.Field.StartsWith(top + ".", StringComparison.Ordinal) ? p.Field[(top.Length + 1)..] : p.Field)}={pick(p) ?? "None"}"));
             lost.Add(new LostField(top, parts.Select(p => p.Field).ToList(), Joined(p => p.Own), Joined(p => p.Winner), Joined(p => p.Prev)));
         }
-        return new VersionResult(lost, judged, unjudged);
+        return new VersionResult(lost, judged, unjudged, aside);
     }
 
     /// <summary>Whether the winner changed a top-level field itself, against what it was made with: yes when it defines the
@@ -206,7 +213,8 @@ public static class LostEditRule
             var p = RecordDelta.Parse(line, plugins);
             if (p is null) { if (line.StartsWith(top, StringComparison.Ordinal)) unsure = true; continue; }
             if (RecordDelta.Top(p.Field) != top || p.Kind == DeltaKind.Order) continue;
-            if (p.Kind == DeltaKind.Value && (RecordFieldScope.SameValue(p.Own, p.OtherValue) || scope.AngleEqual(p.Field, p.Own, p.OtherValue) || scope.MaskedEqual(rtype, p.Field, p.Own, p.OtherValue))) continue;
+            if (p.Kind == DeltaKind.Value && (RecordFieldScope.SameValue(p.Own, p.OtherValue) || scope.AngleEqual(p.Field, p.Own, p.OtherValue)
+                                              || scope.Near(p.Field, p.Own, p.OtherValue) || scope.MaskedEqual(rtype, p.Field, p.Own, p.OtherValue))) continue;
             return true;
         }
         return unsure ? null : false;
