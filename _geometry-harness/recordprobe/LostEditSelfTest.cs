@@ -290,6 +290,25 @@ static class LostEditSelfTest
                    ?? (Paths(shipped).SequenceEqual(new[] { "Placement.Position" }) && Paths(instrument).SequenceEqual(new[] { "Placement.Rotation", "Placement.Position" })
                        ? null : $"paths {string.Join(",", Paths(shipped))} and under the instrument {string.Join(",", Paths(instrument))}, not Placement.Position and Placement.Rotation,Placement.Position");
         }),
+        ("LE26 review U2-F2: two positions 0.157 units apart (the lab's row 119) are one position in game: no row; the instrument, as the Python capture, keeps it", () =>
+        {
+            Fx Nudged() => OneRecord(R1, "PlacedObject", new[] { "Placement.Position=-80589.77,5339.966,-4773.748 (Other.esp -80589.77,5339.966,-4773.591)" },
+                new[] { "Placement.Position=-80589.77,5339.966,-4773.748 (Skyrim.esm -80589.77,5339.966,-4765.8276)" });
+            return Expect(Run(Nudged()), [], [(RecordClashRule.NotSelected, 1)])
+                   ?? Expect(Run(Nudged(), instrument: true), [("Base.esp", "Other.esp", "Placement")], [(RecordClashRule.NotSelected, 1)]);
+        }),
+        ("LE27 review U2-F2: a position lost by 0.72 units (the lab's row 62, the nearest real one) is still a row", () =>
+            Expect(Run(OneRecord(R1, "PlacedObject", new[] { "Placement.Position=23873.617,-45234.43,-28.741133 (Other.esp 23873.617,-45234.43,-29.464401)" },
+                new[] { "Placement.Position=23873.617,-45234.43,-28.741133 (Skyrim.esm 23873.617,-45234.43,-29.464401)" })), [("Base.esp", "Other.esp", "Placement")], [(RecordClashRule.NotSelected, 1)])),
+        ("LE28 review U2-F2: a cell's occlusion data and height map (the lab's rows 420 and 421) are derived data, counted and never a row; the instrument keeps them", () =>
+        {
+            Fx Cell() => OneRecord("000D00:Skyrim.esm", "Cell",
+                new[] { "OcclusionData=0300AB (Other.esp 0300CD)", "MaxHeightData.HeightMap: 1024 vs Other.esp 1024 item(s)", "WaterHeight=10 (Other.esp 0)" },
+                new[] { "OcclusionData=0300AB (Skyrim.esm 0300CD)", "MaxHeightData.HeightMap: 1024 vs Skyrim.esm 1024 item(s)", "WaterHeight=10 (Skyrim.esm 0)" });
+            return Expect(Run(Cell(), cells: true), [("Base.esp", "Other.esp", "WaterHeight")], [(RecordClashRule.NotSelected, 1), (LostEditRule.Derived, 2)])
+                   ?? Expect(Run(Cell(), cells: true, instrument: true),
+                       [("Base.esp", "Other.esp", "OcclusionData"), ("Base.esp", "Other.esp", "MaxHeightData"), ("Base.esp", "Other.esp", "WaterHeight")], [(RecordClashRule.NotSelected, 1)]);
+        }),
         ("LE25 review U2-F1: the setup without the selected mods gives 0 rows and says what it looked at, the selection's plugin and mod folder, neither loaded", () =>
         {
             var r = Run(Without(), sel: BaseSelected);

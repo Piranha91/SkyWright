@@ -39,6 +39,7 @@ public static class LostEditRule
     public const string OrderRead = "a list whose order the game reads, reordered";
     public const string MastersUnread = "a plugin whose masters' headers could not all be read";
     public const string RemovalUnsettled = "a removal whose master's copy could not be settled";
+    public const string Derived = "a field the field scope names derived data (a cell's occlusion data and height map), which the editor regenerates: no change a modder acts on (counted per field)";
 
     /// <summary>Registration and dialogue record types: quests, topics, scenes, form lists, locations, story-manager nodes,
     /// packages (the module's REGISTRATION_TYPES), record checks unit 4's.</summary>
