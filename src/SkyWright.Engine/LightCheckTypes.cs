@@ -109,6 +109,9 @@ public sealed record LightCheckRow(string Class, string Verdict, string Scene, s
     public string? Reason { get; init; }
     /// <summary>Where the view opens (the light, the fixture or the shape's reference).</summary>
     public Vector3 At { get; init; }
+    /// <summary>Where the fixture stood in the subject's own arrangement, when the combination no longer has it there (removed,
+    /// disabled or moved): the view marks that spot, since the scene shows the combination. Null otherwise.</summary>
+    public Vector3? FixtureAt { get; init; }
     public bool? Shadow { get; init; }
     public IReadOnlyDictionary<string, object?> Readings { get; init; } = new Dictionary<string, object?>();
 }

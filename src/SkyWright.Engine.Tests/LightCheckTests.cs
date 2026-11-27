@@ -76,6 +76,7 @@ public sealed class LightCheckTests
         Assert.Equal(new LightCheckMod("Selected Mod", Sel), row.SubjectMod);
         Assert.Equal(new LightCheckMod("Rest Mod B", RestB), Assert.Single(row.OtherMods));
         Assert.Contains("Rest Mod B removes", row.Summary);
+        Assert.Equal(At0, row.FixtureAt);   // the view marks where the removed candle stood
     }
 
     [Fact]
@@ -128,6 +129,7 @@ public sealed class LightCheckTests
         Assert.DoesNotContain("another mod", row.Summary);
         Assert.DoesNotContain("which Rest Mod B moves", row.Summary);
         Assert.Equal("light", row.Readings.GetValueOrDefault("moved"));
+        Assert.Null(row.FixtureAt);   // the candle still stands where it did: no marker for a gone fixture
     }
 
     [Fact]

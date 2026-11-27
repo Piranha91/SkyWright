@@ -400,6 +400,7 @@ public static class LightCheck
                             SubjectEdid = any.Edid, Fixture = rc.Host, FixtureEdid = hostOwn?.Edid, SubjectMod = lightMod,
                             OtherMods = other is null ? Array.Empty<LightCheckMod>() : new[] { other }, Summary = summary,
                             Reason = att == NotJudged ? summary : rc.Label, At = at, Shadow = any.Shadow,
+                            FixtureAt = hostOwn is not null && (hostC is null || !hostC.On || Dist(hostOwn.Pos, hostC.Pos) > Moved) ? hostOwn.Pos : null,
                             Readings = new Dictionary<string, object?> { ["attribution"] = att, ["label"] = rc.Label, ["hostKind"] = rc.HostHow,
                                 ["distanceOwn"] = rc.DistOwn, ["distanceCombined"] = rc.DistHere, ["unknown"] = rc.Unknown, ["moved"] = moved },
                         });
