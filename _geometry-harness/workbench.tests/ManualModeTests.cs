@@ -1028,6 +1028,9 @@ public sealed class ManualWriteTests
             "instance" => w.Instance, "profile" => "Default", "game" => game, "workDir" => work,
             "engine" => RunEngine.OfBuiltIn(TestBuild.Runcontrol), "conflictdiffExe" => TestBuild.Program("conflictdiff"),
             "buildDirs" => Array.Empty<string>(), "localProbesRoot" => harness, "say" => (Action<string>)(_ => { }),
+            "disabled" => null,                                      // the patch disables nothing (Gate B)
+            "moved" => null,                                         // and no edit in it came from a nudge (Gate C)
+            "ct" => CancellationToken.None,
             _ => throw new Xunit.Sdk.XunitException($"Recheck.RunAll has a parameter {p.Name} this test does not know"),
         }).ToArray();
         RecheckResult result;
