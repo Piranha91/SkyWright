@@ -180,7 +180,7 @@ static class ScopeSelfTest
         t.Check("SL-1 the list files give the scope the arguments give: same targets, same also-scanned plugins, same scope.json",
                 byArgs.Exit == 0 && byFile.Exit == 0 && Scanned(byArgs) == "SdDoor.esp,MrACopy.esp" && Scanned(byFile) == Scanned(byArgs)
                 && argsText.Length > 0 && argsText == fileText,
-                $"exit {byArgs.Exit}/{byFile.Exit}; scanned {Scanned(byArgs)} / {Scanned(byFile)}; same file {argsText == fileText}; stderr {string.Join(" / ", byFile.ErrLines)}");
+                $"exit {byArgs.Exit}/{byFile.Exit}; scanned {Scanned(byArgs)} / {Scanned(byFile)}; same file {argsText == fileText} (differing: {ScopeChild.Differing(argsText, fileText)}); stderr {string.Join(" / ", byFile.ErrLines)}");
 
         // SL-2: a list file that is not there: the one sentence, exit 2, no scope.json (a stale one removed), the run log failed.
         string absentList = Path.GetFullPath(Path.Combine(t.Root, "absent", "also-scan.txt"));
@@ -262,13 +262,25 @@ static class ScopeChild
         return status;
     }
 
-    /// <summary>A scope.json as text without the moment it was written, so two runs of the same scope compare equal; "" for none.</summary>
+    /// <summary>A scope.json as text without when it was written and how long it took (generatedUtc, wallSeconds), so two runs
+    /// of the same scope compare equal; "" for none.</summary>
     public static string Comparable(System.Text.Json.JsonDocument? doc)
     {
         if (doc is null) return "";
         var node = System.Text.Json.Nodes.JsonNode.Parse(doc.RootElement.GetRawText())!.AsObject();
         node.Remove("generatedUtc");
+        node.Remove("wallSeconds");
         return node.ToJsonString();
+    }
+
+    /// <summary>The top-level keys whose values differ between two comparable scope.json texts.</summary>
+    public static string Differing(string a, string b)
+    {
+        if (a.Length == 0 || b.Length == 0) return "(a scope.json is missing)";
+        var x = System.Text.Json.Nodes.JsonNode.Parse(a)!.AsObject();
+        var y = System.Text.Json.Nodes.JsonNode.Parse(b)!.AsObject();
+        return string.Join(",", x.Select(kv => kv.Key).Union(y.Select(kv => kv.Key))
+            .Where(k => x[k]?.ToJsonString() != y[k]?.ToJsonString()));
     }
 
     /// <summary>One location's contributors as "plugin:kind,kind | plugin:kind", in the document's order.</summary>
