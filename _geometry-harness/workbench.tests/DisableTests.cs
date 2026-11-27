@@ -242,6 +242,7 @@ public sealed class DisableTests : IClassFixture<DisableWorld>
         new object[] { "named by a linked reference", DisableWorld.LinkTarget.ToString(), "linked reference", DisableWorld.Linker.ToString() },
         new object[] { "named by an activate parent", DisableWorld.ActTarget.ToString(), "activate parent", DisableWorld.ActChild.ToString() },
         new object[] { "a door that leads somewhere", DisableWorld.Door.ToString(), "door", DisableWorld.FarDoor.ToString() },
+        new object[] { "a one-way door nothing names", DisableWorld.OneWayDoor.ToString(), "door", DisableWorld.FarDoor.ToString() },
         new object[] { "named by a quest alias", DisableWorld.AliasTarget.ToString(), "quest", DisableWorld.Quest.ToString() },
         new object[] { "a package's location", DisableWorld.PackLocTarget.ToString(), "package", DisableWorld.PackLocation.ToString() },
         new object[] { "a package's target", DisableWorld.PackTargetRef.ToString(), "package", DisableWorld.PackTarget.ToString() },

@@ -49,6 +49,7 @@ public sealed class DisableWorld : IDisposable
     internal static readonly FormKey ScriptHolder = K(0x825);
     internal static readonly FormKey PersistLinker = K(0x826);    // a persistent reference whose linked reference names PersistLinkTarget
     internal static readonly FormKey PersistLinkTarget = K(0x827);
+    internal static readonly FormKey OneWayDoor = K(0x829);       // a door that leads to FarDoor, which does not lead back: nothing names it
     internal static readonly FormKey QuestScriptTarget = K(0x828);// named by a script property of the quest
 
     internal static readonly P3Float PersistentAtMaster = new(100, 0, 0), PersistentAtLater = new(130, -20, 5);
@@ -112,6 +113,7 @@ public sealed class DisableWorld : IDisposable
         cell.Temporary.Add(Ref(PersistLinkTarget, Stat, 1400));
         var plink = Ref(PersistLinker, Stat, 1410); var pl2 = new LinkedReferences(); pl2.Reference.SetTo(PersistLinkTarget); plink.LinkedReferences.Add(pl2); cell.Persistent.Add(plink);
         cell.Temporary.Add(Ref(QuestScriptTarget, Stat, 1500));
+        cell.Persistent.Add(LoadDoor(OneWayDoor, FarDoor, 1600));
         var far = new SkCell(FarCell, Rel) { EditorID = "HcWbDisFarCell", Flags = SkCell.Flag.IsInteriorCell };
         far.Persistent.Add(LoadDoor(FarDoor, Door, 0));
         var block = new CellBlock { BlockNumber = 2, GroupType = GroupTypeEnum.InteriorCellBlock };
