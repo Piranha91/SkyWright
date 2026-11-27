@@ -49,6 +49,12 @@ internal static class NudgeRule
     internal const string RoutesNotChecked = "walking routes not checked";
     /// <summary>A nudge whose three arms (the row's probe, placement contact, route cut) all held (Gate E).</summary>
     internal const string CheckedAll = "clear of the other object, still supported and no walking route cut";
+
+    /// <summary>What a nudge's words say was checked: all three, or the two and that walking routes were not.</summary>
+    internal static string Words(bool routesHeld) => routesHeld ? CheckedAll : $"{Checked}; {RoutesNotChecked}";
+
+    /// <summary>The same, read back from a staged nudge's note (it is saved with the session).</summary>
+    internal static string WordsOf(string note) => Words(note.Contains(CheckedAll, StringComparison.Ordinal));
     const string Try = "try moving the other object of the conflict, or move this one by hand";
 
     static string Kind(string field) => DisableRule.Tokens(field) is { Length: > 0 } t ? string.Join(", ", t) : field.Split(' ', 2)[0];
@@ -261,6 +267,13 @@ internal static class NudgeProofRule
         var v = ClearRule.Judge(rc.Result.Row, rc.OthersOfRef, rc.Result.New.Concat(rc.ContactNew ?? Array.Empty<RowVerdict>()).ToList(), rc.StillHolding);
         if (v.Word == "resolved here, but" && NotThereBefore(rc) is { } why)
             return new TrialVerdict("not confirmed", $"not confirmed: {v.Sentence.TrimEnd('.')}; and {why}", v.Rows);
+        // the third arm (Gate E): a move that cuts a walking route is rejected; one the route arm cannot show uncut confirms
+        // nothing. "not run" (the scan did not include the route-cut check) leaves the word, and the words say it was not checked.
+        if (v.Word is "clear" or "resolved here, but" && rc.Route is { } route)
+        {
+            if (route.Word == "cut") return new TrialVerdict("route cut", $"route cut: {route.Sentence}", v.Rows);
+            if (route.Word == "not confirmed") return new TrialVerdict("not confirmed", $"not confirmed: {route.Sentence}", v.Rows);
+        }
         return v;
     }
 }
@@ -277,6 +290,11 @@ internal sealed class NudgeLane
     internal delegate Task<TrialRecheck> Prove(PendingEdit edit, int n, CancellationToken ct);
 
     internal const int MaxProofs = 3;
+    /// <summary>The measured cost the sentences say (RESULT-E.md): the search and the judge program, and one proof with its three
+    /// arms (the row's probe, placement contact and route cut, each unpatched and patched).</summary>
+    internal const int JudgeSeconds = 50, ProofSecondsLow = 190, ProofSecondsHigh = 270;
+    /// <summary>The same in words, for the state tools' description (an attribute, so a constant; kept beside the numbers).</summary>
+    internal const string CostWords = "about 50 s for the search and the judge program, then 190-270 s per proof";
 
     readonly Func<RefPlacementEdit.Pose, (RefPlacementEdit.Pose Pose, string Drop)> _settle;
     readonly Judge _judge;
@@ -315,7 +333,7 @@ internal sealed class NudgeLane
         if (settled.Count == 0)
             return Done($"No clear position within {cap} was found for {me}: wherever it was set down, the drop took it past {cap}." + Then,
                         $"nudge {what}: every candidate's drop took it past the cap");
-        Say("judging", $"nudge {what}: the judge program is checking {settled.Count} positions against everything near it (about 30 s)");
+        Say("judging", $"nudge {what}: the judge program is checking {settled.Count} positions against everything near it (about {JudgeSeconds} s)");
         var ans = await _judge(new NudgeRequest(key, otherKey ?? FormKey.Null, home, settled.Select(s => (s.Candidate.N, s.Pose)).ToList()), ct).ConfigureAwait(false);
         if (ans.Refused is { } no) return Done(no, "nudge judge refused: " + no);
         var verdicts = ans.Candidates.ToDictionary(c => c.N);
@@ -330,7 +348,7 @@ internal sealed class NudgeLane
         {
             ct.ThrowIfCancellationRequested();
             tried++;
-            Say($"proving {tried}", FormattableString.Invariant($"nudge {what}: the probes are checking position {tried} of at most {MaxProofs} ({NudgeRule.Move(home, c.Pose)}), about 150-220 s"));
+            Say($"proving {tried}", FormattableString.Invariant($"nudge {what}: the probes are checking position {tried} of at most {MaxProofs} ({NudgeRule.Move(home, c.Pose)}), about {ProofSecondsLow}-{ProofSecondsHigh} s"));
             var clock = System.Diagnostics.Stopwatch.StartNew();
             TrialVerdict v;
             TrialRecheck? rc = null;
@@ -346,6 +364,7 @@ internal sealed class NudgeLane
                 reasons.Add(v.Word switch
                 {
                     "new conflict" => "it would make a new clash or leave something in the air",
+                    "route cut" => "it would block a walking route",
                     "not confirmed" or "unmeasured" or "not checked" => "the probes could not measure all of it",
                     _ => $"it did not clear {them}",
                 });
@@ -355,11 +374,17 @@ internal sealed class NudgeLane
                 .Select(NudgeProofRule.PairOf).Where(p => p is not null).SelectMany(p => p!.Split('|'))
                 .Where(k => !string.Equals(k, key.ToString(), StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             var still = v.Word == "clear" ? "" : $"; still there from before the move, as the probes say it: {v.Sentence.Replace("resolved here, but: ", "").TrimEnd('.')}";
-            var note = FormattableString.Invariant($"moved {NudgeRule.Move(home, c.Pose)} from where the load order places it, {c.Candidate.Rule}; {c.Drop}; the nearest of {clear.Count} clear position(s) the judge found among {settled.Count} within {cap}, confirmed by the probes on try {tried}{still}; {NudgeRule.Checked}; {NudgeRule.RoutesNotChecked}");
+            var route = rc.Route;
+            bool routesHeld = route?.Word == "held";
+            var routeNote = route is null ? "" : $"; route cut: {route.Sentence}";
+            var note = FormattableString.Invariant($"moved {NudgeRule.Move(home, c.Pose)} from where the load order places it, {c.Candidate.Rule}; {c.Drop}; the nearest of {clear.Count} clear position(s) the judge found among {settled.Count} within {cap}, confirmed by the probes on try {tried}{still}{routeNote}; {NudgeRule.Words(routesHeld)}");
             var staged = _stage(c.Pose, note);
             if (staged.StartsWith("nothing is staged", StringComparison.Ordinal)) return Done(staged, staged);
             var touches = stillKeys.Count == 0 ? "" : $", and it still touches {string.Join(" and ", stillKeys.Select(_nameOf))}, as it did before the move";
-            return Done($"Staged a nudge of {me}: {NudgeRule.Move(home, c.Pose)} from where the load order places it. It is clear of {them} and nothing is left in the air{touches}. Walking routes were not checked, and nothing is written until you commit.",
+            var oldCut = route is { Remains.Count: > 0 } ? $"; {string.Join(" and ", route.Remains.Select(_nameOf))} already blocked a walking route before the move and still {(route.Remains.Count == 1 ? "does" : "do")}" : "";
+            return Done(routesHeld
+                    ? $"Staged a nudge of {me}: {NudgeRule.Move(home, c.Pose)} from where the load order places it. It is clear of {them}, nothing is left in the air and no walking route is cut{touches}{oldCut}. Nothing is written until you commit."
+                    : $"Staged a nudge of {me}: {NudgeRule.Move(home, c.Pose)} from where the load order places it. It is clear of {them} and nothing is left in the air{touches}. Walking routes were not checked ({route?.Sentence ?? "the route-cut arm did not run"}), and nothing is written until you commit.",
                         $"nudge {what}: {staged}");
         }
         return Done($"The probes did not confirm any of the {tried} nearest places that looked clear for {me}: {string.Join("; ", reasons.Distinct())}." + Then,

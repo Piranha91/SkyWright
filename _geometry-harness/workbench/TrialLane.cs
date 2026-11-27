@@ -161,6 +161,8 @@ internal sealed class TrialLane
     /// <summary>The reference the last ask was for.</summary>
     internal FormKey? Key { get; private set; }
     internal string? WorkFolder => _work;
+    /// <summary>The edit the running proof is of (Gate E: the route arm judges the object at both its places).</summary>
+    internal PendingEdit? Proving { get; private set; }
 
     /// <summary>Start the trials of <paramref name="key"/> from its load-order pose; returns the cost sentence at once. Each
     /// candidate is snapped to the grid on the axes it moved and settled by the drop on the calling thread; the writes and
@@ -240,6 +242,7 @@ internal sealed class TrialLane
         Directory.CreateDirectory(folder);
         var patch = $"WbNudge{ask}c{n}";
         ct.ThrowIfCancellationRequested();
+        Proving = edit;
         await _write(edit with { Nudge = null }, patch, folder).ConfigureAwait(false);
         return await _recheck(patch, folder, folder + "-recheck", contact, ct).ConfigureAwait(false);
     }

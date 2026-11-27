@@ -252,7 +252,7 @@ internal sealed class EditSession
         string name = baseName ?? e.Ref.ToString();
         if (e.Disable) return $"Disable {name} (written initially disabled)";
         if (e.Nudge is not null)
-            return $"Nudged {name} {NudgeRule.Move(e.Before, e.After)}; {NudgeRule.Checked}; {NudgeRule.RoutesNotChecked}";
+            return $"Nudged {name} {NudgeRule.Move(e.Before, e.After)}; {NudgeRule.WordsOf(e.Nudge)}";
         var d = new Vector3(e.After.Position.X - e.Before.Position.X, e.After.Position.Y - e.Before.Position.Y, e.After.Position.Z - e.Before.Position.Z);
         var parts = new List<string>();
         void Part(float v, string pos, string neg) { if (MathF.Abs(v) >= 0.005f) parts.Add($"{N(MathF.Abs(v))} units {(v > 0 ? pos : neg)}"); }

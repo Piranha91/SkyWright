@@ -1786,10 +1786,11 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var r = await Task.Run(() => Recheck.RunAll(b.Dir, b.Arm, open.Row, plugin, mod, t.Instance, t.Profile, game, work, engine, conflictdiff,
             buildDirs, harness, s => { if (population == "not read" && s.Contains("population", StringComparison.OrdinalIgnoreCase)) population = s.Split('\n')[0].Trim();
                                        _window?.Dispatcher.BeginInvoke(() => Say("trial re-check: " + s)); },
-            moved: contact ? new[] { key } : null, ct: ct), ct);
+            moved: contact ? new[] { key } : null, ct: ct,
+            routeAt: contact && _trials?.Proving is { } pe ? new[] { (key, pe.Before.Position, pe.After.Position) } : null), ct);
         var un = Path.Combine(work, "unpatched.json"); var pa = Path.Combine(work, "patched.json");
         return new TrialRecheck(r, ClearRule.OthersOfRef(un, pa, r.Row.Id, key), ClearRule.StillHolding(pa, key), population, r.ContactNew,
-                                contact ? NudgeProofRule.HeldPairs(un, key) : null);
+                                contact ? NudgeProofRule.HeldPairs(un, key) : null, r.Route);
     }
 
     // ---- Gate C: nudge one object -----------------------------------------------------------------------------------
@@ -1805,7 +1806,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         running = NudgeRunning is { IsCompleted: false }, @ref = _nudgeKey?.ToString(), phase = _nudge?.Phase, judged = _nudge?.Judged, clear = _nudge?.ClearCount,
         proofs = _nudge?.Proofs.Select(p => new { n = p.N, word = p.Word, sentence = p.Sentence, seconds = p.Seconds }).ToList(),
         said = _nudgeSaid, cap = NudgeRule.Cap, maxProofs = NudgeLane.MaxProofs,
-        notChecked = new[] { "walking routes (route cut): not run for a nudge yet", "rotation: not searched", "scripts that find the object at run time, packages that pick furniture by type, and LOD built from it: not read" },
+        notChecked = (Shell.Bundle is { } nb && Recheck.RouteArmMissing(nb.Dir, nb.Arm) is { } rm ? new[] { $"walking routes (route cut): {rm}, so a nudge says walking routes were not checked" } : Array.Empty<string>())
+                     .Concat(new[] { "rotation: not searched", "scripts that find the object at run time, packages that pick furniture by type, and LOD built from it: not read" }).ToArray(),
+        routeArm = "blockprobe --near on the moved object and every object whose walking route its move can reach, before and after the move; a move that cuts one is rejected",
     };
 
     string IWorkbenchScene.AbortNudge() => AbortNudge();
@@ -1870,9 +1873,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 return $"staged: nudge {name ?? key.ToString()} {staged}";
             }),
             s => _window?.Dispatcher.BeginInvoke(() => { Say(s); Shell.SetBanner(s); }),
-            k => FormKey.TryFactory(k, out var fk) ? _session.IsDrawn(fk) is var drawn && drawn
-                     ? $"{_session.RefOf(fk).Ref.BaseEditorId ?? k} ({_session.RefOf(fk).Ref.RefKey.ModKey.FileName})"   // the plugin's name as the scene spells it
-                     : $"{k} ({fk.ModKey.FileName})" : k,
+            NameOf,
             s => _window?.Dispatcher.BeginInvoke(() => Say(s)));
         _nudge = lane; _nudgeStop = stop; _nudgeKey = key; _nudgeSaid = null;
         async Task<string> Go()
@@ -1887,9 +1888,14 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         }
         NudgeRunning = Go();
         NudgeChanged?.Invoke();
-        return FormattableString.Invariant($"nudging {name ?? key.ToString()} ({key}) away from {ok}: the search and the judge take about 30 s, then each proof by the probes 150-220 s, at most {NudgeLane.MaxProofs}; the window stays usable, and Abort stops it. Nothing is written: the position the probes confirm is staged.")
+        return FormattableString.Invariant($"nudging {name ?? key.ToString()} ({key}) away from {ok}: the search and the judge take about {NudgeLane.JudgeSeconds} s, then each proof by the probes {NudgeLane.ProofSecondsLow}-{NudgeLane.ProofSecondsHigh} s, at most {NudgeLane.MaxProofs}; the window stays usable, and Abort stops it. Nothing is written: the position the probes confirm is staged.")
                + (note is null ? "" : " " + note);
     }
+
+    /// <summary>An object in the modder's words: its base's editor ID and its plugin as the scene spells it.</summary>
+    string NameOf(string k) => FormKey.TryFactory(k, out var fk) ? _session.IsDrawn(fk) is var drawn && drawn
+        ? $"{_session.RefOf(fk).Ref.BaseEditorId ?? k} ({_session.RefOf(fk).Ref.RefKey.ModKey.FileName})"   // the plugin's name as the scene spells it
+        : $"{k} ({fk.ModKey.FileName})" : k;
 
     /// <summary>Raised when a nudge starts or ends (the button's label).</summary>
     internal event Action? NudgeChanged;
@@ -2024,7 +2030,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             UpdateStatus(); Invalidate();
         }));
         var nudge = new Button { Content = "Nudge", Margin = new Thickness(4),
-            ToolTip = $"find the smallest move, within {NudgeRule.Cap:0} units, that clears the open conflict for the selected object; the judge chooses, the probes prove it (overlap and what rests on it), and the position is staged, never written. Walking routes are not checked. Press again to abort." };
+            ToolTip = $"find the smallest move, within {NudgeRule.Cap:0} units, that clears the open conflict for the selected object; the judge chooses, the probes prove it (overlap, what rests on it, and walking routes when the scan included the route-cut check), and the position is staged, never written. Press again to abort." };
         nudge.Click += async (_, _) =>
         {
             if (NudgeRunning is { IsCompleted: false }) { var a = AbortNudge(); Say(a); Shell.SetBanner(a); return; }
@@ -2140,7 +2146,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 string text = staged
                     ? EditSession.Sentence(new PendingEdit(k, _session.Pending.First(e => e.Ref == k).Before, _session.Current(k), _session.IsDisabled(k), _session.Pending.Last(e => e.Ref == k).Nudge), _session.RefOf(k).Ref.BaseEditorId)
                     : _session.WrittenDisabled.Contains(k) ? $"written to {_session.Written[k].Patch}: {_session.RefOf(k).Ref.BaseEditorId ?? k.ToString()}, initially disabled (the plugin is not enabled)"
-                    : _session.WrittenNudged.Contains(k) ? $"written to {_session.Written[k].Patch}: {_session.RefOf(k).Ref.BaseEditorId ?? k.ToString()}, nudged ({NudgeRule.Checked}; {NudgeRule.RoutesNotChecked})"
+                    : _session.WrittenNudged.Contains(k) ? $"written to {_session.Written[k].Patch}: {_session.RefOf(k).Ref.BaseEditorId ?? k.ToString()}, nudged (its re-check after the commit says what held: overlap, placement contact and walking routes)"
                     : $"written to {_session.Written[k].Patch}: {_session.RefOf(k).Ref.BaseEditorId ?? k.ToString()}";
                 var revert = new Button { Content = "Revert", Margin = new Thickness(4, 0, 0, 0), ToolTip = staged ? "drop this object's staged edits" : "remove this object's override from its patch" };
                 var key = k;
@@ -2391,10 +2397,13 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             Shell.SetBanner($"re-checking conflict {open.Rank} ({open.Row.Kind}) with {plugin}: the detector runs on the patch's cell, unpatched and patched{(disabled is null ? nudged is null ? "" : ", and placement contact for what the nudge may leave in the air" : ", and placement contact for what rested on the disabled object")}; the window stays usable.");
             UpdateStatus();
             var row = open.Row; var arm = b.Arm; var dir = b.Dir;
+            var routeAt = nudged is null ? null : Recheck.RouteTargets(_session, nudged);
             var r = await Task.Run(() => Recheck.RunAll(dir, arm, row, plugin, mod, t.Instance, t.Profile, game, work, engine, conflictdiff,
-                buildDirs, harness, s => _window?.Dispatcher.BeginInvoke(() => Say("re-check: " + s)), disabled, nudged));
+                buildDirs, harness, s => _window?.Dispatcher.BeginInvoke(() => Say("re-check: " + s)), disabled, nudged, routeAt: routeAt));
             LastRecheck = r;
-            Shell.SetBanner(Recheck.Banner(open.Rank, r));
+            Shell.SetBanner(Recheck.Banner(open.Rank, r, NameOf));
+            Say("re-check: " + r.Verdict);
+            if (r.Route is { } ra) Say($"re-check: route cut: {ra.Word}: {ra.Sentence}");
             Say("re-check: row " + r.Row.Id + ": " + r.Row.Sentence);
             foreach (var n in r.New.Concat(r.ContactNew ?? Array.Empty<RowVerdict>())) Say("re-check: new row " + n.Id + ": " + n.Sentence);
             foreach (var o in r.Others ?? Array.Empty<RowVerdict>()) Say("re-check: other row naming a disabled object " + o.Id + ": " + o.Sentence);
