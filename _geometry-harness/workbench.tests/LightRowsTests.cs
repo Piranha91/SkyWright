@@ -75,7 +75,7 @@ public sealed class LightRowsTests
         // listed as a clash, or a not-judged row (a scene's included) hidden
         var (rows, lines) = Read(Registry());
         // the lights-nothing row is counted, not listed, at the registry's default (the owner's preliminary ruling, 2026-11-26)
-        Assert.Equal(new[] { "LIGHT LIGHT-NO-FIXTURE", "LIGHT LIGHT-BEHIND-WALL", "LIGHT NOT JUDGED", "LIGHT NOT JUDGED" }, rows.Select(r => r.Kind));
+        Assert.Equal(new[] { "A light left with no fixture", "A light behind a wall", "Not judged: a light behind a wall", "A scene not judged" }, rows.Select(r => r.Kind));
         Assert.Contains(lines, l => l.StartsWith("1 light(s) that now reach nothing were left out"));
         Assert.All(rows, r => Assert.Equal(LightRows.CheckId, r.CheckId));
         Assert.Contains(lines, l => l.StartsWith("held: a fixture left with no light (1), not shown as clashes; it waits on: no case of it has been checked in the game yet"));
@@ -110,14 +110,14 @@ public sealed class LightRowsTests
     public void A_row_opens_at_its_light_in_its_cell_with_the_gone_fixture_marked()
     {
         // rejects: a lighting row opened on the fixture key, in no cell, or without the marker for the removed candle
-        var row = Read(Registry()).Rows.First(r => r.Kind == "LIGHT LIGHT-NO-FIXTURE");
+        var row = Read(Registry()).Rows.First(r => r.Light!.Class == "light-no-fixture");
         var t = LightRows.Target(row);
         Assert.Null(t.WhyNot);
         Assert.Equal(Light, t.RefKey);
         Assert.Equal(Cell, t.Cell);
         Assert.Equal(new Vector3(100, 200, 30), t.At);
         Assert.Equal(new Vector3(100, 200, 10), t.FixtureAt);
-        var wall = LightRows.Target(Read(Registry()).Rows.First(r => r.Kind == "LIGHT LIGHT-BEHIND-WALL"));
+        var wall = LightRows.Target(Read(Registry()).Rows.First(r => r.Light!.Class == "light-behind-wall" && r.Light.Verdict == "listed"));
         Assert.Null(wall.FixtureAt);   // nothing gone, nothing marked
     }
 

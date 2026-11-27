@@ -102,7 +102,8 @@ internal static class LightRows
             var detail = new LightDetail(cls, sceneRow ? "A scene not judged" : rule[cls].Title, verdict, S(r, "scene") ?? sceneId, S(r, "kind") ?? "interior",
                 S(r, "space") ?? sceneId, I(r, "x"), I(r, "y"), V(r, "at"), V(r, "fixtureAt"), S(r, "fixture"), S(r, "fixtureEdid"), S(r, "subjectEdid"),
                 subjectMod.Mod, others.Select(o => o.Mod ?? o.Plugin ?? "").ToList(), S(r, "reason")) { Hits = I(Rd(r), "hits") };
-            string kind = verdict == "not judged" ? "LIGHT NOT JUDGED" : "LIGHT " + cls.ToUpperInvariant();
+            // the row label a modder reads: the class title (or "Not judged: <title>"), never the internal class id
+            string kind = sceneRow ? detail.ClassTitle : verdict == "not judged" ? "Not judged: " + detail.ClassTitle.ToLowerInvariant() : detail.ClassTitle;
             string identity = $"{kind}|{sceneId}|{subject}";
             var row = new ConflictRow(identity, CheckId, kind, subjectMod.Plugin ?? "", others.FirstOrDefault().Plugin ?? "", summary ?? "",
                 subject, S(r, "fixture"), null, S(r, "cell"), null, detail.SubjectEdid, null, detail.FixtureEdid, evidenceStrength, null) { Light = detail };
