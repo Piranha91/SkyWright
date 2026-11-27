@@ -59,7 +59,10 @@ POLICY = {
     "types": {"geometry.object-overlap": "overlap", "geometry.object-contact": "contact",
               "geometry.fixture-empty-space": "contact", "records.contested-fields": "record",
               "records.cell-attributes": "cell", "state.conditional-geometry": "state",
-              "geometry.navmesh-ownership": "navmesh", "geometry.placement-contact": "contact"},
+              "geometry.navmesh-ownership": "navmesh", "geometry.placement-contact": "contact",
+              # the app groups the held stranded check's rows as their own type; "stranded" is in no typeOrder, so the reel
+              # and its cards leave such rows out by rule (no reel work for it: the owner's direction, 2026-11-26)
+              "geometry.stranded-object": "stranded"},
     "pictureTypes": ["overlap", "contact", "record", "state", "navmesh"],   # phase 2: placements and world states; navmesh-in-reel
     # R1 (2026-11-13): the checks capture can request, as shipped (C2120 keeps the shipped list equal to the capture rules)
     "captureChecks": ["geometry.navmesh-ownership", "geometry.object-overlap", "records.contested-fields",

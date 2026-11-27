@@ -519,7 +519,11 @@ public sealed class StateToolsTests : IAsyncLifetime
         // the probe list holds probes only (Piranha's note 3); every one is taken, and each check that is not a probe is
         // listed apart, refused in words saying why
         var probes = P(all, "launcher", "probes").EnumerateArray().ToList();
-        Assert.All(probes, p => Assert.True(P(p, "selected").GetBoolean(), P(p, "checkId").GetString()));
+        // "all" is every probe that can run here: one the list greys (its "selectable" false, with the sentence saying why: a
+        // check the registry holds back, a probe this profile cannot feed) is left unticked, by that field and not by its name
+        Assert.All(probes, p => Assert.True(P(p, "selected").GetBoolean() == P(p, "selectable").GetBoolean(), P(p, "checkId").GetString()));
+        Assert.All(probes.Where(p => !P(p, "selectable").GetBoolean()), p => Assert.False(string.IsNullOrWhiteSpace(P(p, "whyNot").GetString()), P(p, "checkId").GetString()));
+        Assert.Contains(probes, p => P(p, "selected").GetBoolean());
         var others = P(all, "launcher", "notProbes").EnumerateArray().ToList();
         Assert.Equal(3, others.Select(o => P(o, "why").GetString()).Distinct().Count());       // one plain reason per kind of non-probe check (derived, manual, unsupported)
         foreach (var o in others.GroupBy(o => P(o, "why").GetString()).Select(g => g.First()))
