@@ -942,7 +942,7 @@ internal sealed class StateTools
             d["pending"] = sc?.Session.Pending.Select(e => new
             {
                 @ref = e.Ref.ToString(), sentence = EditSession.Sentence(e, sc.Session.IsDrawn(e.Ref) ? sc.Session.RefOf(e.Ref).Ref.BaseEditorId : null),
-                disable = e.Disable, before = PoseJson(e.Before), after = PoseJson(e.After),
+                disable = e.Disable, nudge = e.Nudge, before = PoseJson(e.Before), after = PoseJson(e.After),
                 moved = new[] { e.After.Position.X - e.Before.Position.X, e.After.Position.Y - e.Before.Position.Y, e.After.Position.Z - e.Before.Position.Z },
             }).ToList();
             d["written"] = sc?.Session.Written.Select(kv => new { @ref = kv.Key.ToString(), patch = kv.Value.Patch, pose = PoseJson(kv.Value.Pose), disabled = sc.Session.WrittenDisabled.Contains(kv.Key) }).ToList();
