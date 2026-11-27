@@ -407,7 +407,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Which meshes contribute to this winning scene?](#tool-viewprobe.list-meshes) — `viewprobe.list-meshes`
 - [Which navmesh belongs to the storey being inspected?](#tool-viewprobe.nav-z) — `viewprobe.nav-z`
 - [Which numbers and names may a narrator use for each finding?](#tool-evalreport.narrate-packet) — `evalreport.narrate-packet`
-- [Which objects does a load order leave out of reach of walkable ground that their own plugin's navmesh reached?](#tool-strandprobe) — `strandprobe`
+- [Which objects does a load order leave out of reach of walkable ground that the navmesh their own mod was made with reached?](#tool-strandprobe) — `strandprobe`
 - [Which objects stand in front of this object in this view, and over how many of its pixels?](#tool-viewprobe.occluders-of) — `viewprobe.occluders-of`
 - [Which occlusion candidates cover the measured frame geometry?](#tool-viewprobe.planes-report) — `viewprobe.planes-report`
 - [Which occlusion planes will hide a mod's content when it is added to a load order, and which of its planes will hide content already there?](#tool-_geometry-harness-planeassess-predict.py) — `_geometry-harness/planeassess/predict.py`
@@ -6611,13 +6611,13 @@ Modifiers (do not select a separate mode):
 
 ### strandprobe
 
-**Which objects does a load order leave out of reach of walkable ground that their own plugin's navmesh reached?**
+**Which objects does a load order leave out of reach of walkable ground that the navmesh their own mod was made with reached?**
 
-Find objects another mod's navmesh change left where no character or player can reach them (the geometry.stranded-object check, held until a look in game confirms it); --self-test runs its known answers.
+The geometry.stranded-object check (held: a scan does not run it until a look in game confirms it). Indoors, an object more than 150 u from the navmesh that wins and within 150 u of the navmesh its plugin and that plugin's masters give it, touching no solid object of another mod; within 12 u of the reach, a refused distance or an unread model is not judged. No row when the plugin whose navmesh wins lists the object's plugin among its masters, when both are the game's own files, or for an editor marker. --self-test runs its known answers; --write-ks09-emits writes runcontrol's conflictdiff fixture.
 
 Inputs: A load order (profile or --order candidate); optionally an earlier emit (--base) and station Q's primitive table (--primitive-solidity).
 
-Outputs: A conflict file of STRANDED rows: reported (Holds) and not judged (Unmeasured, with the reason), the coverage counts by reason; with --base, the earlier rows re-measured; beside it OUT.json.reach.json with every measured object's distances.
+Outputs: A conflict file of STRANDED rows: reported (Holds, with the object's class) and not judged (Unmeasured, with the reason), and the coverage counts by reason; with --base, the earlier rows re-measured (Holds, Unmeasured, or Gone).; Beside it OUT.json.reach.json: every row's distances, its box and its nearest solid object's body, rendered-triangle bounds and reach region; with --cells, every object without a row and its reason.
 
 Source: [_geometry-harness/strandprobe/Program.cs](../_geometry-harness/strandprobe/Program.cs) — `// strandprobe — objects another mod's navmesh leaves out of reach`
 
@@ -6634,6 +6634,7 @@ Modifiers (do not select a separate mode):
 - `--primitive-solidity` — Station Q's measured primitive table; without it a nearby primitive is a bound only.
 - `--profile` — MO2 profile name (else the harness config, only for its own instance).
 - `--self-test` — Run the known answers on a synthetic order and exit.
+- `--write-ks09-emits` — Write the self-test's KS09 emits (baseline, arm, reverse) into a folder, for runcontrol's self-test, and exit.
 
 <a id="tool-subject-gate"></a>
 
