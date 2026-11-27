@@ -11,7 +11,8 @@ namespace SkyWright.Engine.Tests;
 /// viewprobe's CfLedgeGap fixture (LedgeLinkFixture.GapMeshes), built the same way: 4 x 4 squares of 64 u over x -256..0,
 /// y -128..128, each split along its south-west to north-east diagonal, with the squares x -128..-64, y -64..64 deleted to
 /// make a notch a path must bend round. A taut path bends only at the mesh boundary, so a corner at a vertex the mesh
-/// surrounds on every side is slack.
+/// surrounds on every side is slack. C2740-C2742: a hole whose side A* prefers by centroid costs is the longer taut walk
+/// (HoleCourtyard), so the taut path tries the other side of each hole it bends round.
 /// </summary>
 [Trait("tier", "unit")]
 public sealed class NavGraphFunnelTests
@@ -165,5 +166,96 @@ public sealed class NavGraphFunnelTests
                 if (plainTaut && !channel.SequenceEqual(astar)) bad.Add($"{a} -> {b}: a taut channel was changed");
             }
         Assert.True(bad.Count == 0, string.Join(" | ", bad));
+    }
+
+    // ---- C2740-C2742: the side of a hole (task 2026-11-15-astar-side-of-hole) ----
+    // A hole x 40..60, y -60..10 in a mesh x 0..100, y -70..300, triangulated as a level courtyard would be: the narrow
+    // corridor south of the hole in small triangles, the open ground north of it in four large ones whose centroids lie
+    // far from the hole. A* over centroid distances costs the south side 153.3 u and the north side 462.4 u, so it picks the
+    // south; but the taut walk from (10,0) to (90,0) is 154.2 u round the south side (corners (40,-60), (60,-60)) and
+    // 83.2 u round the north side (corners (40,10), (60,10)). Every corner of either walk is on the hole's edge, so the
+    // interior-vertex re-route has nothing to change.
+    static readonly FormKey HoleMesh = new(Mod, 0x962);
+
+    static Dictionary<NavGraph.TriRef, NavGraph.Node> HoleCourtyard()
+    {
+        // L, o1 .. o4, R on the outside; h1 .. h4 the hole's corners
+        var v = new List<Vec3>
+        {
+            new(0, 10, 0), new(0, -70, 0), new(100, -70, 0), new(100, 300, 0), new(0, 300, 0), new(100, 10, 0),   // 0 L, 1 o1, 2 o2, 3 o3, 4 o4, 5 R
+            new(40, -60, 0), new(60, -60, 0), new(60, 10, 0), new(40, 10, 0),                                  // 6 h1, 7 h2, 8 h3, 9 h4
+        };
+        var tris = new (short A, short B, short C)[]
+        {
+            (0, 6, 9),   // 0 start: L h1 h4
+            (0, 1, 6),   // 1 west:  L o1 h1
+            (1, 7, 6),   // 2 south: o1 h2 h1
+            (1, 2, 7),   // 3 south: o1 o2 h2
+            (5, 7, 2),   // 4 east:  R h2 o2
+            (5, 8, 7),   // 5 goal:  R h3 h2
+            (0, 9, 4),   // 6 north: L h4 o4
+            (4, 9, 3),   // 7 north: o4 h4 o3
+            (3, 9, 8),   // 8 north: o3 h4 h3
+            (3, 8, 5),   // 9 north: o3 h3 R
+        };
+        var byEdge = new Dictionary<(short, short), List<int>>();
+        static (short, short) E(short a, short b) => a < b ? (a, b) : (b, a);
+        for (int t = 0; t < tris.Length; t++)
+            foreach (var e in new[] { E(tris[t].A, tris[t].B), E(tris[t].B, tris[t].C), E(tris[t].C, tris[t].A) })
+            { if (!byEdge.TryGetValue(e, out var l)) byEdge[e] = l = new List<int>(); l.Add(t); }
+        short Other(int t, short a, short b) => byEdge[E(a, b)].Where(x => x != t).Select(x => (short)x).DefaultIfEmpty((short)-1).First();
+        var nt = tris.Select((t, i) => new NavTri(t.A, t.B, t.C, 0, Other(i, t.A, t.B), Other(i, t.B, t.C), Other(i, t.C, t.A))).ToList();
+        var geo = new NavmeshGeometry(HoleMesh, v, nt, new Vec3(0, -70, 0), new Vec3(100, 300, 0), Array.Empty<NavEdgeLink>(), Array.Empty<NavDoorTriangle>());
+        return NavGraph.Build(new Dictionary<FormKey, NavmeshGeometry> { [HoleMesh] = geo }).Nodes;
+    }
+
+    static readonly Vector2 HoleStart = new(10, 0), HoleEnd = new(90, 0);
+    static readonly float NorthWalk = 2 * MathF.Sqrt(30 * 30 + 10 * 10) + 20, SouthWalk = 2 * MathF.Sqrt(30 * 30 + 60 * 60) + 20;
+
+    // C2740: the fixture is what it claims: A* alone picks the south side, and its taut walk is SouthWalk (154.2 u).
+    [Fact]
+    public void C2740_centroid_A_star_picks_the_hole_side_whose_taut_walk_is_longer()
+    {
+        var nodes = HoleCourtyard();
+        var s = NavGraph.TriangleAt(nodes, HoleStart.X, HoleStart.Y, 0f)!.Value.Tri;
+        var g = NavGraph.TriangleAt(nodes, HoleEnd.X, HoleEnd.Y, 0f)!.Value.Tri;
+        Assert.Equal(new NavGraph.TriRef(HoleMesh, 0), s);
+        Assert.Equal(new NavGraph.TriRef(HoleMesh, 5), g);
+        var astar = NavGraph.FindChannel(nodes, s, g)!;
+        Assert.Equal(new[] { 0, 1, 2, 3, 4, 5 }, astar.Select(t => t.Index));
+        Assert.Equal(SouthWalk, Length(NavGraph.Funnel(nodes, astar, HoleStart, HoleEnd)), 2);
+    }
+
+    /// <summary>The check C2741 makes, as a sentence (null when it holds), so its sabotage arm fails on the same words.</summary>
+    static string? NorthSideCheck(NavGraph.Taut t)
+    {
+        float l = Length(t.Corners);
+        if (MathF.Abs(l - NorthWalk) < 0.01f && t.Corners.Count == 4 && t.Corners[1] == new Vector2(40, 10) && t.Corners[2] == new Vector2(60, 10))
+            return null;
+        return $"the taut path round the hole walks {l:0.0} u ({Show(t.Corners)}); the north side's taut walk is {NorthWalk:0.0} u via 40,10 and 60,10";
+    }
+
+    // C2741: the taut path takes the north side: 83.2 u via (40,10) and (60,10), and says one hole was passed on its other side.
+    [Fact]
+    public void C2741_the_taut_path_goes_round_the_side_of_the_hole_whose_walk_is_shorter()
+    {
+        var nodes = HoleCourtyard();
+        var t = NavGraph.TautPath(nodes, new(HoleMesh, 0), new(HoleMesh, 5), HoleStart, HoleEnd)!;
+        var why = NorthSideCheck(t);
+        Assert.True(why is null, why);
+        Assert.Equal(1, t.OtherSides);
+        Assert.Equal(SouthWalk - NorthWalk, t.Saved, 2);
+    }
+
+    // C2742 (sabotage): TautPath with the other-side trial switched off gives the south side, and C2741's check says so on
+    // its own sentence.
+    [Fact]
+    public void C2742_sabotage_without_the_other_side_trial_the_path_walks_the_longer_side()
+    {
+        var nodes = HoleCourtyard();
+        var t = NavGraph.TautPath(nodes, new(HoleMesh, 0), new(HoleMesh, 5), HoleStart, HoleEnd, tryOtherSides: false)!;
+        var why = NorthSideCheck(t);
+        Assert.True(why is not null && why.StartsWith("the taut path round the hole walks 154.2 u", StringComparison.Ordinal), why ?? "the check passed");
+        Assert.Equal(0, t.OtherSides);
     }
 }
