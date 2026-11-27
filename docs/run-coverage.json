@@ -828,12 +828,13 @@
       "path": "_geometry-harness/lightprobe/lightprobe.csproj",
       "adapter": "csharp",
       "stageSource": "counted",
-      "note": "Placed lights of selected interior cells and their light readings. Stages: read plugins (counted per plugin), read bases and light overrides (counted per plugin), measure cells (counted per cell). --self-test is one synthetic stage.",
+      "note": "Placed lights of selected interior cells and their light readings; --check, the lighting check over four arrangements. Stages: read plugins (counted per plugin), read bases and light overrides (counted per plugin), measure cells or scenes (counted per cell or scene), once per arrangement under --check. --self-test is one synthetic stage.",
       "answers": [
         "Which lights does a load order place in an interior cell, with what radius, shadow and portal-strict flags, and are they enabled at load?",
-        "Does a placed light shine through an opaque surface, sit behind a wall or inside a solid, and how many lights reach each drawn shape?"
+        "Does a placed light shine through an opaque surface, sit behind a wall or inside a solid, and how many lights reach each drawn shape?",
+        "Which lighting clashes does the combination of the selected mods with the rest of the load order make that neither makes alone (a light left with no fixture, a fixture left with no light, a light behind a wall, a light that lights nothing, a fixture lit twice, and the over-limit count), interiors and exteriors?"
       ],
-      "useWhen": "Investigate lighting clashes between mods (orphaned, leaking, doubled or over-limit lights) before judging a patch edit on a model-less light.",
+      "useWhen": "Find lighting clashes between the selection and the rest from the load order alone (--check), or investigate one order's lights cell by cell before judging a patch edit on a model-less light.",
       "limits": [
         "Not settled: whether a lighting change reads as broken or merely different. This probe measures placement, radius, flags, light leaking through opaque surfaces and the lights reaching each shape; how the result looks is a judgement made in game (world-edit-compatibility SKILL.md §7)."
       ],
@@ -844,7 +845,8 @@
         }
       ],
       "inputs": [
-        "A load order (profile or --order candidate) and interior cells by editor id."
+        "A load order (profile or --order candidate) and interior cells by editor id.",
+        "--check: four order files (the dependencies, the selection over them, the rest over them, the combination), optionally a scenes file."
       ],
       "flagCoverage": {
         "parser": "csharp-args",
@@ -861,12 +863,20 @@
         "--cells-file": "Interior cell editor ids, one per line ('#' comments).",
         "--geometry": "Read the enabled references' render models and add the light readings (facing, leak, point-in-solid, per-shape counts).",
         "--list-interiors": "List every interior cell of the order with its placed-light counts instead of measuring.",
-        "--max-mb": "Stop with exit 3 when private bytes pass this many MB at a checkpoint (0, the default, is no cap)."
+        "--max-mb": "Stop with exit 3 when private bytes pass this many MB at a checkpoint (0, the default, is no cap).",
+        "--check": "Run the lighting check: read the four arrangements, each as itself, and write the clashes only the combination makes (skywright.light-check/1).",
+        "--dependencies": "--check: the dependencies' order file (what both sides stand on).",
+        "--selection": "--check: the selection's order file (the dependencies plus the selected mods).",
+        "--rest": "--check: the rest's order file (the dependencies plus the rest of the load order).",
+        "--combined": "--check: the combined order file (everything).",
+        "--dump-arrangements": "--check: also write each arrangement's readings of the scenes read, as housecarl.light/1, into this folder.",
+        "--scenes-file": "--check: read these scenes instead of the ones both sides touch (interior editor ids, or WORLDSPACE-FORMKEY@x,y)."
       },
       "outputs": [
         "Per cell: every reference (base, type, editor id, model, pose, load-time enable state, deletion, responsible plugin) and every placed light (radius: base plus the reference's XRDS offset, flags, shadow, portal-strict, fade, colour).",
         "With --geometry, per enabled light: facing (front / back / no first hit over 64 rays), leak (attenuated area lit through an opaque surface, by receiving reference) and point-in-solid; per lit shape whose placed box a light's radius reaches: the lights reaching it (count, shadow, strict; the bound-sphere count beside it); unreadable models named and lights near them labelled incomplete; whether Light Limit Fix is installed in the order's files (identity.llf); per enabled, drawn reference with a model, its placed emitting parts (emissive lighting-shader shapes with their value, self-lit effect shapes, self-lit particle emitter extents) or why its mesh could not be read for them.",
-        "identity.solidPolicy and identity.anchorPolicy: the solid rule (MeshIntersection.PolicyVersion) and the point reading (MeshAnchor.PolicyVersion) when the run wrote at least one point-in-solid row, else \"none\"; identity.pointInSolidRows counts the rows written, refused ones included."
+        "identity.solidPolicy and identity.anchorPolicy: the solid rule (MeshIntersection.PolicyVersion) and the point reading (MeshAnchor.PolicyVersion) when the run wrote at least one point-in-solid row, else \"none\"; identity.pointInSolidRows counts the rows written, refused ones included.",
+        "--check: skywright.light-check/1: the sides and the four arrangements' identities; per scene whether it was judged (Base Object Swapper scenes are not); per class subjects, listed, not the pair, no clash and not judged; every row with its class, verdict (listed, cannot tell, not judged), subject, fixture, the light's mod and the mod whose record did it, the sentence a modder reads and where the view opens; the cost per arrangement and the model cache's reads and hits."
       ]
     },
     {
