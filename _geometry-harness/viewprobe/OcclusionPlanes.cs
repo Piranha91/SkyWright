@@ -75,6 +75,9 @@ sealed record PlaneRender(
     /// <summary>Unit normal of the slab: the ref's local +Y in the world.</summary>
     public Vector3 Normal => PlaneGeometry.Axis(this, Vector3.UnitY);
     public Vector3 Centre => Position;
+    /// <summary>The plane as the Engine's rule and geometry read it.</summary>
+    public OcclusionPrimitive Primitive => new(Kind == PlaneKind.Box ? OcclusionPrimitiveKind.Box : OcclusionPrimitiveKind.PortalBox,
+                                               Bounds, Position, Rotation, Scale);
 }
 
 static class PlanePalette
@@ -191,36 +194,12 @@ sealed class PlaneHistory
 
 static class PlaneGeometry
 {
-    static Vector3 Unit(Vector3 d) => d.LengthSquared() > 1e-12f ? Vector3.Normalize(d) : Vector3.Zero;
+    // Corners, mid-quad and axes are the Engine's (OcclusionPrimitiveGeometry), the geometry the rule reads.
+    public static Vector3[] BoxCorners(PlaneRender p) => OcclusionPrimitiveGeometry.BoxCorners(p.Primitive);
 
-    public static Vector3[] BoxCorners(PlaneRender p)
-    {
-        var r = SpatialOverlap.RefrRotation(p.Rotation);
-        var h = p.Bounds * 0.5f * p.Scale;
-        var c = new Vector3[8];
-        for (int i = 0; i < 8; i++)
-        {
-            var l = new Vector3((i & 1) == 0 ? -h.X : h.X, (i & 2) == 0 ? -h.Y : h.Y, (i & 4) == 0 ? -h.Z : h.Z);
-            c[i] = Vector3.Transform(l, r) + p.Position;
-        }
-        return c;
-    }
+    public static Vector3[] MidQuad(PlaneRender p) => OcclusionPrimitiveGeometry.MidQuad(p.Primitive);
 
-    public static Vector3[] MidQuad(PlaneRender p)
-    {
-        var r = SpatialOverlap.RefrRotation(p.Rotation);
-        var h = p.Bounds * 0.5f * p.Scale;
-        return new[]
-        {
-            Vector3.Transform(new Vector3(-h.X, 0f, -h.Z), r) + p.Position,
-            Vector3.Transform(new Vector3(h.X, 0f, -h.Z), r) + p.Position,
-            Vector3.Transform(new Vector3(h.X, 0f, h.Z), r) + p.Position,
-            Vector3.Transform(new Vector3(-h.X, 0f, h.Z), r) + p.Position,
-        };
-    }
-
-    public static Vector3 Axis(PlaneRender p, Vector3 local)
-        => Unit(Vector3.TransformNormal(local, SpatialOverlap.RefrRotation(p.Rotation)));
+    public static Vector3 Axis(PlaneRender p, Vector3 local) => OcclusionPrimitiveGeometry.Axis(p.Primitive, local);
 
     /// <summary>The box's twelve edges as corner-index pairs.</summary>
     public static readonly (int A, int B)[] BoxEdges =

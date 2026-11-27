@@ -165,6 +165,17 @@ public sealed class Validator
     }
 
     /// <summary>The emit's coverage lines.</summary>
+    /// <summary>A conflict file's coverage that assessed nothing (its first population judged none and could not judge some,
+    /// or every population judged none): the rejection's detail, or null when something was assessed.</summary>
+    public static string? NothingAssessed(IReadOnlyList<object?> coverage)
+    {
+        var first = PyValue.Dict(coverage[0]);
+        bool allZero = coverage.All(c => Judged(c).IsZero);
+        if (!((Judged(first).IsZero && Unjudgeable(first) > 0) || allZero)) return null;
+        return $"population '{Ev.Str(Either(first, "Population", "population"))}' judged {Judged(first)} with {Unjudgeable(first)} "
+               + "unjudgeable: zero findings here is zero assessed subjects";
+    }
+
     public static List<object?> CoverageLines(PyDict doc)
     {
         object? v = PyValue.Truthy(doc.Get("Coverage")) ? doc["Coverage"] : doc.Get("coverage");
@@ -327,16 +338,8 @@ public sealed class Validator
                     coverage = CoverageLines(d);
                     if (coverage.Count == 0)
                         rej.Add(Rejection("coverage-missing", "the emit declares no Coverage: what was judged is unknown"));
-                    else
-                    {
-                        var first = PyValue.Dict(coverage[0]);
-                        bool allZero = coverage.All(c => Judged(c).IsZero);
-                        if ((Judged(first).IsZero && Unjudgeable(first) > 0) || allZero)
-                            rej.Add(Rejection("extraction-failed",
-                                $"population '{Ev.Str(Either(first, "Population", "population"))}' "
-                                + $"judged {Judged(first)} with {Unjudgeable(first)} "
-                                + "unjudgeable: zero findings here is zero assessed subjects"));
-                    }
+                    else if (NothingAssessed(coverage) is { } none)
+                        rej.Add(Rejection("extraction-failed", none));
                     findings = (long)(PyValue.Truthy(d.Get("Conflicts")) ? PyValue.Len(d["Conflicts"]) : 0);
                 }
             }
