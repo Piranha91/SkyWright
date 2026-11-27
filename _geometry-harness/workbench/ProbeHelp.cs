@@ -73,7 +73,7 @@ internal static class ProbeHelp
             """
             A record often uses records of other plugins: a character's race, an item in a container, a door's destination. When a patch or an add-on was made for another version of the mod it uses, a record it relies on can be gone from the version you have, and the game then finds nothing where the patch expects something.
 
-            The check reads every record of your load order with houseCARL's error check and lists a record only when it is in one mod's plugin, the record it uses belongs to another mod's plugin that is loaded but does not have it, and one of the two is in your selection. A plugin in the game's Data folder or in MO2's overwrite counts as a mod of its own.
+            The check reads the links of every record in your load order and lists a record only when it is in one mod's plugin, the record it uses belongs to another mod's plugin that is loaded but does not have it, and one of the two is in your selection. A plugin in the game's Data folder or in MO2's overwrite counts as a mod of its own.
 
             It does not list links in or into the game's own files (Bethesda's and Creation Club's), links within one plugin or one mod, or links into a plugin missing from the load order, which the masters check reports. It has not yet found a real clash between two mods, so a scan does not run it unless you tick it.
             """),
