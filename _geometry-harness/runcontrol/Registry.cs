@@ -223,6 +223,7 @@ public static class Registry
             }
 
             if (check.Get("manualDecisionAllowed") is not bool) problems.Add($"{cid}: manualDecisionAllowed must be true or false");
+            if (check.ContainsKey("classes")) ValidateClasses(cid, check["classes"], problems);
 
             object? optIn = check.ContainsKey("optIn") ? check["optIn"] : false;
             if (optIn is not bool) problems.Add($"{cid}: optIn, when present, must be true or false");
@@ -269,6 +270,30 @@ public static class Registry
             if (!withChecks.Contains(fid)) problems.Add($"family {fid} carries no check — every family must be accounted for");
 
         return problems;
+    }
+
+    /// <summary>A check's classes (the lighting check, 2026-11-26): one row of data per class saying whether the app lists its rows as
+    /// clashes (admitted) or counts them as held, with the reason it waits on and the evidence behind either. A count class (one that
+    /// is never a clash) cannot be admitted.</summary>
+    public static void ValidateClasses(string cid, object? raw, List<string> problems)
+    {
+        if (raw is not List<object?> rows || rows.Count == 0) { problems.Add($"{cid}: classes, when present, must be a non-empty list"); return; }
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < rows.Count; i++)
+        {
+            if (rows[i] is not PyDict c) { problems.Add($"{cid}: classes[{i}] must be an object"); continue; }
+            string at = c.Get("id") is string id && id.Length > 0 ? id : $"classes[{i}]";
+            if (c.Get("id") is not string cls || cls.Length == 0) problems.Add($"{cid}: classes[{i}] has no id");
+            else if (!seen.Add(cls)) problems.Add($"{cid}: class {cls} is listed twice");
+            if (!PyValue.Truthy(c.Get("title"))) problems.Add($"{cid}: class {at} has no title");
+            if (c.Get("admitted") is not bool admitted) { problems.Add($"{cid}: class {at}: admitted must be true or false"); continue; }
+            if (!(c.Get("evidence") is string ev && ev.Length > 0)) problems.Add($"{cid}: class {at} names no evidence");
+            if (!admitted && !(c.Get("held") is string held && held.Length > 0)) problems.Add($"{cid}: class {at} is held and says not what it waits on (held)");
+            if (admitted && c.Get("held") != null) problems.Add($"{cid}: class {at} is admitted, so it cannot also be held");
+            if (admitted && c.Get("count") is true) problems.Add($"{cid}: class {at} is a count, never a clash, so it cannot be admitted");
+            foreach (string flag in new[] { "provisional", "count" })
+                if (c.ContainsKey(flag) && c[flag] is not bool) problems.Add($"{cid}: class {at}: {flag}, when present, must be true or false");
+        }
     }
 
     // How a json or text output is read: the result kind and the three count specs.

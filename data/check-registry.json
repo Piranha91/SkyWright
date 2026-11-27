@@ -795,6 +795,110 @@
       "unsupportedReason": "the Part D result is bounded to its constructed positive; no natural-defect occlusion detector exists to adapt."
     },
     {
+      "id": "environment.lighting",
+      "family": "environment",
+      "title": "Lights and light fixtures one mod leaves broken for another",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "placed": true
+        },
+        "note": "Lights, the fixtures they sit at and the walls they shine on are placed references; a target that places nothing cannot strand, hide or double a light."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "baseline",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "probe-json",
+        "exe": "lightprobe",
+        "args": [
+          "--check",
+          "--dependencies",
+          "{dependencies}",
+          "--selection",
+          "{selection}",
+          "--rest",
+          "{rest}",
+          "--order",
+          "{order}",
+          "--json",
+          "{json}"
+        ],
+        "reverse": false,
+        "output": "json",
+        "result": {
+          "kind": "detector",
+          "findings": "summary.listed",
+          "judged": "summary.judged",
+          "unjudgeable": "summary.notJudged",
+          "unit": "lighting subjects (a light, a fixture or a lit shape, once per class)",
+          "note": "findings counts every listed row of every class, admitted or held (the app shows a held class's rows as held, from classes below); the over-limit count is summary.cannotTell and is never a finding."
+        },
+        "commonFlags": true
+      },
+      "evidence": {
+        "strength": "calibrated-inference",
+        "claim": "LIGHT FIXTURE HOST",
+        "limits": "Read from the load order alone over four arrangements (the dependencies, the selection over them, the rest over them, the combination); a row is listed only when the combination reads positive and no single arrangement does. Base Object Swapper is not applied: a scene in which a _SWAP.ini names a member is not judged. Whether a stranded, hidden or doubled light looks wrong in game is not established (Gate D designs that test). The over-limit reading is a count and never a clash. Load-time state only; interiors and exteriors (a centre cell with its eight neighbours). A radius over 16,384 units, or over 4,096 units outdoors, is not judged."
+      },
+      "classes": [
+        {
+          "id": "light-no-fixture",
+          "title": "A light left with no fixture",
+          "admitted": true,
+          "provisional": true,
+          "held": null,
+          "evidence": "Provisional (Gate A review decision 5): 0 rows on Bethesda's sides of 62 hosted lights (95 % bound 4.7 %); 45 rows on Group 6, every one a light the patch author edited (C:/hc-runs/2026-11-26-lighting-check/GATE-A.md section 6; gate-b/null.txt; gate-b/compare-g6-rows.txt)."
+        },
+        {
+          "id": "fixture-no-light",
+          "title": "A fixture left with no light",
+          "admitted": false,
+          "provisional": false,
+          "held": "no row of this class has been read against a real case yet (none on the development data)",
+          "evidence": "0 of 62 lit fixtures on the Bethesda null (bound 4.7 %); Group 6 lists none (C:/hc-runs/2026-11-26-lighting-check/GATE-A.md section 6)."
+        },
+        {
+          "id": "light-behind-wall",
+          "title": "A light behind a wall",
+          "admitted": true,
+          "provisional": true,
+          "held": null,
+          "evidence": "Provisional (decision 5): 0 of 158 enabled lights on the Bethesda null (bound 1.9 %); Group 6 lists 2, both shadow spotlights, flagged in the row (C:/hc-runs/2026-11-26-lighting-check/GATE-A.md section 6)."
+        },
+        {
+          "id": "light-lights-nothing",
+          "title": "A light that lights nothing",
+          "admitted": true,
+          "provisional": true,
+          "held": null,
+          "evidence": "Provisional (decisions 3 and 5): 0 of 158 on the Bethesda null; 39 rows on Group 6; worded as cleanup, safe to disable (C:/hc-runs/2026-11-26-lighting-check/GATE-A.md section 6)."
+        },
+        {
+          "id": "fixture-lit-twice",
+          "title": "A fixture lit twice",
+          "admitted": false,
+          "provisional": false,
+          "held": "no row of this class has been read against a real case yet (none on the development data), and whether doubling shows in game is not measured",
+          "evidence": "0 of 441 emitting fixtures on the Bethesda null (bound 0.7 %); no development row (C:/hc-runs/2026-11-26-lighting-check/GATE-A.md section 6)."
+        },
+        {
+          "id": "over-light-limit",
+          "title": "Over the light limit",
+          "admitted": false,
+          "provisional": false,
+          "count": true,
+          "held": "a count, never a clash: whether the game drops a light here is not yet known",
+          "evidence": "Shipped exteriors already exceed the reading; 0 of 6,854 shapes listed on Bethesda (C:/hc-runs/2026-11-26-lighting-check/GATE-A.md section 6)."
+        }
+      ],
+      "manualDecisionAllowed": false
+    },
+    {
       "id": "environment.generated-output-regeneration",
       "family": "environment",
       "title": "Generated output that must be rebuilt after this change: Occlusion.esp, DynDOLOD, xLODGen, Synthesis, Reqtificator",
