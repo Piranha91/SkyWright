@@ -261,7 +261,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         string target = _writer?.Target.ToString() ?? (TargetFromEnv()?.ToString() ?? "no write target set");
         string marks = !_marks.Enabled ? "marks off" : _marks.Selected is null ? "" :
             PartnerNote ?? "";
-        string written = _session.Selected is { } wk && _session.Written.TryGetValue(wk, out var wv) ? "\n" + EditSession.WrittenLabel(wk, wv.Patch)
+        string written = _session.Selected is { } dk && _session.IsDisabled(dk)
+                           ? "\nthe view hides " + dk + ": it is " + (_session.WrittenDisabled.Contains(dk) ? $"written initially disabled to {_session.Written[dk].Patch}, not enabled" : "staged to be disabled") + " (hold Space to see it)"
+                       : _session.Selected is { } wk && _session.Written.TryGetValue(wk, out var wv) ? "\n" + EditSession.WrittenLabel(wk, wv.Patch)
                        : _session.Selected is { } bk ? "\nthe view shows " + bk + " where the load order places it" : "";
         string recheck = Rechecking ? "re-checking" : LastRecheck is { } lr ? $"last re-check: {lr.Row.Word}, {lr.New.Count} new" : RecheckRefusal is { } rr ? "re-check refused: " + rr : "";
         if (ReadOnly)
