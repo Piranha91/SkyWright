@@ -196,7 +196,7 @@ public sealed class NudgeTests : IClassFixture<DisableWorld>
         Assert.True(nudged.Contains(DisableWorld.Plain.ToString()), "the restored written edit lost that it came from a nudge");
         var r = new RecheckResult(new RowVerdict("open", "resolved", "repaired", "resolved."), Array.Empty<RowVerdict>(), "verdict", Array.Empty<string>(), "build", 200,
                                   Nudged: nudged.Count > 0 ? string.Join(", ", nudged) : null);
-        Assert.Contains("walking routes not checked", Recheck.Banner(8, r));
+        Assert.Contains("Walking routes were not checked", Recheck.Banner(8, r));
     }
 
     // ---- round 1, C6: what rests on a nudged object is said as the proof judged it ---------------------------------------
@@ -359,11 +359,13 @@ public sealed class NudgeTests : IClassFixture<DisableWorld>
     {
         var resolved = new RecheckResult(new RowVerdict("open", "resolved", "repaired", "resolved: its physical predicate went Holds -> Gone under the patch."),
                                          Array.Empty<RowVerdict>(), "verdict : DIFFERENTIAL-VERIFIED", Array.Empty<string>(), "one build", 140.0, Nudged: "001FBB:JKs Skyrim.esp");
+        // Gate E: the banner after a nudge's commit is plain sentences (RouteArmTests); with neither placement contact nor the
+        // route arm in the result it says both were not checked and does not call it resolved
         var banner = Recheck.Banner(8, resolved);
-        Assert.True(banner.Contains("walking routes not checked", StringComparison.Ordinal) && banner.Contains("clear of the other object and still supported", StringComparison.Ordinal),
+        Assert.True(banner.Contains("Walking routes were not checked", StringComparison.Ordinal) && banner.Contains("not called resolved", StringComparison.Ordinal),
             $"the banner after a nudge does not say what was and was not checked: {banner}");
         var still = Recheck.Banner(8, resolved with { Row = new RowVerdict("open", "still there", "unchanged", "still there: the re-run finds it as before.") });
-        Assert.True(still.Contains("walking routes not checked", StringComparison.Ordinal) && !still.Contains("clear of the other object", StringComparison.Ordinal),
+        Assert.True(still.Contains("not resolved", StringComparison.Ordinal) && !still.Contains("clear of", StringComparison.Ordinal),
             $"a nudge whose row is still there is said wrongly: {still}");
         var edit = new PendingEdit(Subject, Home, P(-8, 0, -1), Nudge: "moved 8.1 units");
         var line = EditSession.Sentence(edit, "MiscSack02SmallFlat");

@@ -89,9 +89,10 @@
       "adapter": "csharp",
       "stageSource": "counted",
       "answers": [
-        "Do placed obstacles cut walkable routes in this plugin or cell?"
+        "Do placed obstacles cut walkable routes in this plugin or cell?",
+        "Does moving one object cut a walking route, its own or one beside it (the verdict of each object its move can reach, before and after)?"
       ],
-      "useWhen": "Investigate a doorway or passage where a placed obstacle may obstruct the navmesh.",
+      "useWhen": "Investigate a doorway or passage where a placed obstacle may obstruct the navmesh; or prove that a move of one object (a nudge's third arm) cuts no walking route, with --near on the unpatched and the patched order.",
       "limits": [
         "Not covered: whether several changes, each passable alone, together cut a route NPCs need between two places. This probe judges one placed obstacle at a time: whether that object's solid cuts the walkable path line through a window around it. The collective check (functional.collective-route-connectivity in the world-edit-compatibility check registry) is unbuilt, and evaluation-reporting's SKILL.md records that the local connectivity engine does not certify NPC access between destinations."
       ],
@@ -120,12 +121,14 @@
         "--geometry": "Set geometry for this invocation; consult the linked parser for accepted values.",
         "--instance": "Refused: blockprobe reads the instance from HOUSECARL_MO2_INSTANCE (or the harness config); the argument exits 2 with that sentence.",
         "--list": "Set list for this invocation; consult the linked parser for accepted values.",
+        "--near": "--near FORMKEY: the per-reference arm (Gate E, a nudge's proof): judge only that reference and every reference held in its cell (and, outdoors, the eight around it) whose route window (its box grown 256 u in plan) reaches it, the navcut boxes there too; the targets name the plugin that places it. The rows file's Judged list gives each one's verdict and Near says what was asked.",
+        "--also-at": "--also-at X,Y,Z (with --near, repeatable): another place of the --near reference the set must cover, so the unpatched and patched runs of a move judge the same references.",
         "--moved-ref-selftest": "Set moved ref selftest for this invocation; consult the linked parser for accepted values.",
         "--order": "Set order for this invocation; consult the linked parser for accepted values.",
-        "--rows": "--rows FILE: also write every listed route-cut row (Blocked, LikelyBlocked, NoLine, Unjudgeable; objects and navcut boxes) to FILE as JSON, uncapped by --list (blockprobe/RouteCutRows.cs); the route-cut check's adapter passes it.",
+        "--rows": "--rows FILE: also write every listed route-cut row (Blocked, LikelyBlocked, NoLine, Unjudgeable; objects and navcut boxes) to FILE as JSON, uncapped by --list (blockprobe/RouteCutRows.cs); the route-cut check's adapter passes it. Since Gate E the file also lists every reference the run judged with its verdict (Judged: the six, NotMeasured or NotJudged with the reason), so a reference judged fine is told from one never tested.",
         "--write-route-cut-fixture": "--write-route-cut-fixture DIR: write the route-cut fixture (_shared/RouteCutFixture.cs) that tests/test_route_cut_rows.py runs the real probe on; test-only.",
         "--profile": "Refused: blockprobe reads the profile from HOUSECARL_MO2_PROFILE (or the harness config); the argument exits 2 with that sentence.",
-        "--self-test": "Run the known-answer self-test over the probe's synthetic fixture; exit 0 when every case passes.",
+        "--self-test": "Run the known-answer self-test over the probe's synthetic fixtures (the per-reference decisions, and --near on RouteCutFixture's near fixture run as a child process); exit 0 when every case passes.",
         "--state": "Set state for this invocation; consult the linked parser for accepted values.",
         "--switch-map": "Set switch map for this invocation; consult the linked parser for accepted values."
       }

@@ -165,12 +165,12 @@ internal static class ContextRead
 
     static string P(Vec3 v) => FormattableString.Invariant($"({v.X:0.##}, {v.Y:0.##}, {v.Z:0.##})");
 
-    /// <summary>The commit's sentence: what moves with the reference and what stays behind.</summary>
     /// <summary>For a nudged object (Gate C): what the drawn shapes show resting on it was judged by the nudge's proof with
     /// placement contact (collision), which left nothing in the air; it is not said to stay in the air.</summary>
     internal static string NudgedResting(IEnumerable<string> keys) =>
         $"What the drawn shapes show resting on it ({string.Join(", ", keys)}) was judged by the nudge's proof with placement contact, which found nothing left in the air.";
 
+    /// <summary>The commit's sentence: what moves with the reference and what stays behind.</summary>
     internal static string StaysBehind(ContextAnswer a, IReadOnlyCollection<string> movingWith, bool nudged = false)
     {
         var moving = new HashSet<string>(movingWith, StringComparer.OrdinalIgnoreCase);
