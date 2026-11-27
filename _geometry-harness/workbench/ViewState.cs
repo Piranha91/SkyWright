@@ -22,6 +22,7 @@ internal sealed class ViewState
     readonly HashSet<GlMesh> _meshesHidden = new();          // every mesh this state switched off, so restore switches back only those
     readonly HashSet<GlMesh> _layerHidden = new();           // meshes the toolbar's layer switches hold off, whatever restore does
     readonly HashSet<GlMesh> _versionHidden = new();         // an object the load-order panel shows as not there without a plugin
+    readonly HashSet<GlMesh> _disabledHidden = new();        // an object with a staged or written disable, while edits are shown
     List<float>? _tint;
 
     /// <summary>Bumped on every change the overlays draw from, so a drawer rebuilds only when it changed.</summary>
@@ -36,7 +37,20 @@ internal sealed class ViewState
         // One rule for every edit path: before anything re-places a reference, the edits go back on screen.
         _session.Replacing += () => { if (ShowingOriginal) ShowOriginal(false); };
         // an edit moves a see-through reference's tint and can add a ghost
-        _session.Changed += _ => { _tint = null; Version++; };
+        _session.Changed += _ => { _tint = null; SyncDisabled(); Version++; };
+    }
+
+    /// <summary>The fourth owner of the host switch: an object with a staged or written disable is hidden while the view
+    /// shows the edits, and drawn again when it shows the originals or the disable is undone. Incremental: only that
+    /// object's meshes change, nothing is rebuilt.</summary>
+    void SyncDisabled()
+    {
+        var want = new HashSet<GlMesh>();
+        if (!ShowingOriginal)
+            foreach (var k in _session.Edited())
+                if (_session.IsDisabled(k)) want.UnionWith(_session.RefOf(k).Meshes);
+        foreach (var m in _disabledHidden.Where(m => !want.Contains(m)).ToList()) { _disabledHidden.Remove(m); Unhide(m); }
+        foreach (var m in want) if (_disabledHidden.Add(m)) m.IsHiddenByHost = true;
     }
 
     void Say(string s) { Version++; Changed?.Invoke(s); }
@@ -52,6 +66,7 @@ internal sealed class ViewState
         _tint = null;                                         // a see-through reference's tint follows what is drawn
         foreach (var k in edited)
             _session.Preview(k, on ? RefPlacementEdit.BakedPose(_session.RefOf(k).Ref) : _session.Current(k));
+        SyncDisabled();
         var said = edited.Count == 0 ? (on ? "nothing is edited, so the originals are what the view shows" : "showing the edits")
                  : on ? $"showing {edited.Count} edited reference(s) where the load order places them; release to see the edits"
                       : $"showing the edits of {edited.Count} reference(s)";
@@ -99,7 +114,7 @@ internal sealed class ViewState
     void HideMeshes(IEnumerable<GlMesh> meshes) { foreach (var m in meshes) if (_meshesHidden.Add(m)) m.IsHiddenByHost = true; }
 
     /// <summary>Show a mesh again unless the other owner of the host switch (a hide here, or a layer switched off) still holds it.</summary>
-    void Unhide(GlMesh m) => m.IsHiddenByHost = _meshesHidden.Contains(m) || _layerHidden.Contains(m) || _versionHidden.Contains(m);
+    void Unhide(GlMesh m) => m.IsHiddenByHost = _meshesHidden.Contains(m) || _layerHidden.Contains(m) || _versionHidden.Contains(m) || _disabledHidden.Contains(m);
 
     /// <summary>The load-order panel's one-object switch: these meshes stay hidden while the object is shown as a load order
     /// without some plugins has it, and that load order does not have it (no plugin left has it, or it is deleted or disabled).</summary>

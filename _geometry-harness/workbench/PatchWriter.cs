@@ -62,13 +62,44 @@ internal sealed class PatchWriter : IAsyncDisposable
     static string F(float v) => v.ToString("R", CultureInfo.InvariantCulture);
     static string V(SkyWright.Engine.Vec3 v) => $"{F(v.X)},{F(v.Y)},{F(v.Z)}";
 
-    /// <summary>The ops one commit writes: Placement.Position and Placement.Rotation per edited reference.</summary>
+    /// <summary>The ops one commit writes: Placement.Position and Placement.Rotation per moved reference, and per disabled
+    /// one the initially-disabled bit ADDED to its record flags (op Add, never a Set: a Set replaces every flag and drops
+    /// the persistent bit 0x400, measured at Gate A).</summary>
     internal static List<Dictionary<string, object?>> Ops(IEnumerable<PendingEdit> edits) =>
-        edits.SelectMany(e => new[]
+        edits.SelectMany(e => e.Disable
+            ? new[] { DisableOp(e.Ref) }
+            : new[]
+            {
+                new Dictionary<string, object?> { ["formid"] = e.Ref.ToString(), ["field_path"] = "Placement.Position", ["value"] = V(e.After.Position) },
+                new Dictionary<string, object?> { ["formid"] = e.Ref.ToString(), ["field_path"] = "Placement.Rotation", ["value"] = V(e.After.Rotation) },
+            }).ToList();
+
+    internal static Dictionary<string, object?> DisableOp(Mutagen.Bethesda.Plugins.FormKey key) =>
+        new() { ["formid"] = key.ToString(), ["field_path"] = "SkyrimMajorRecordFlags", ["op"] = "Add", ["value"] = "InitiallyDisabled" };
+
+    /// <summary>A disabled reference's winner, read before the write: refused when it is already initially disabled or
+    /// deleted (the scene and the load order then differ).</summary>
+    async Task<string?> DisableStateRefusalAsync(Mutagen.Bethesda.Plugins.FormKey key, CancellationToken ct)
+    {
+        var text = await CallAsync("housecarl_records", new Dictionary<string, object?>
         {
-            new Dictionary<string, object?> { ["formid"] = e.Ref.ToString(), ["field_path"] = "Placement.Position", ["value"] = V(e.After.Position) },
-            new Dictionary<string, object?> { ["formid"] = e.Ref.ToString(), ["field_path"] = "Placement.Rotation", ["value"] = V(e.After.Rotation) },
-        }).ToList();
+            ["formids"] = new[] { key.ToString() }, ["format"] = "json",
+            ["project"] = new Dictionary<string, object?> { ["form"] = "fields", ["fields"] = new[] { "MajorRecordFlagsRaw", "IsDeleted" }, ["depth"] = 1 },
+        }, ct);
+        using var doc = JsonDocument.Parse(text);
+        long raw = 0; bool deleted = false;
+        foreach (var el in doc.RootElement.GetProperty("records").EnumerateArray())
+            foreach (var f in el.TryGetProperty("fields", out var fs) ? fs.EnumerateArray() : default)
+            {
+                var path = f.TryGetProperty("path", out var p) ? p.GetString() : null;
+                var value = f.TryGetProperty("value", out var v) ? (v.ValueKind == JsonValueKind.String ? v.GetString() : v.GetRawText()) : null;
+                if (path == "MajorRecordFlagsRaw" && long.TryParse(value, out var n)) raw = n;
+                if (path == "IsDeleted") deleted = value == "True";
+            }
+        if (deleted || (raw & DisableRule.DeletedBit) != 0) return $"{key} is deleted in the load order now, so it is not disabled; reopen the scene, which no longer matches {Target}.";
+        if ((raw & DisableRule.InitiallyDisabled) != 0) return $"{key} is already initially disabled in the load order now, so it is not disabled again; reopen the scene, which no longer matches {Target}.";
+        return null;
+    }
 
     /// <summary>The winner's Placement as the server reads it: (position, rotation), or a refusal.</summary>
     internal async Task<(SkyWright.Engine.Vec3 Pos, SkyWright.Engine.Vec3 Rot)> ReadPlacementAsync(string formKey, string? source = null, CancellationToken ct = default)
@@ -121,11 +152,12 @@ internal sealed class PatchWriter : IAsyncDisposable
     internal async Task<string> CommitAsync(IReadOnlyList<PendingEdit> net, string patchName, bool dryRun, string? into = null,
                                             float tolerance = 0.01f, CancellationToken ct = default, string? outPath = null)
     {
-        if (net.Count == 0) throw new InvalidOperationException("there are no staged edits to write; move or rotate a reference first.");
+        if (net.Count == 0) throw new InvalidOperationException("there are no staged edits to write; move, rotate or disable a reference first.");
         foreach (var e in net)
         {
             var (pos, rot) = await ReadPlacementAsync(e.Ref.ToString(), ct: ct);
             if (Mismatch(e.Ref, pos, rot, e.Before, tolerance) is { } why) throw new InvalidOperationException(why);
+            if (e.Disable && await DisableStateRefusalAsync(e.Ref, ct) is { } no) throw new InvalidOperationException(no);
         }
         var args = new Dictionary<string, object?> { ["ops"] = Ops(net), ["dry_run"] = dryRun };
         if (into is not null) args["into"] = into;
@@ -135,8 +167,19 @@ internal sealed class PatchWriter : IAsyncDisposable
             // a trial patch goes to its own folder (item 8); otherwise manual mode writes under the Output Folder
             if ((outPath ?? Target.Output) is { } o) args["out_path"] = o;
         }
-        Log($"{(dryRun ? "dry run" : "WRITE")} of {net.Count} placement edit(s) to {Target}, {(into is not null ? $"into '{into}'" : $"new patch '{patchName}'")}");
-        return await CallAsync("housecarl_apply", args, ct);
+        Log($"{(dryRun ? "dry run" : "WRITE")} of {net.Count} edit(s) ({net.Count(e => e.Disable)} disable(s)) to {Target}, {(into is not null ? $"into '{into}'" : $"new patch '{patchName}'")}");
+        var answer = await CallAsync("housecarl_apply", args, ct);
+        if (!dryRun && net.Any(e => e.Disable))
+        {
+            // the read-back by a reader that is not the writer: Mutagen, against the winner in the target's load order
+            var plugin = patchName.EndsWith(".esp", StringComparison.OrdinalIgnoreCase) ? patchName : patchName + ".esp";
+            var folder = into ?? Recheck.PatchFolder(outPath ?? Target.PatchRoot, plugin);
+            var file = into is not null ? Directory.EnumerateFiles(into, "*.esp").FirstOrDefault() ?? Path.Combine(into, plugin) : Path.Combine(folder, plugin);
+            var order = HousecarlCore.Mo2LoadOrder.Build(Target.ProfileDir, Target.ModsDir, Target.DataDir).OrderedPaths;
+            foreach (var e in net.Where(e => e.Disable)) DisableReadBack.Check(order, file, e.Ref);
+            answer += $"\nread back by Mutagen from {file}: {net.Count(e => e.Disable)} disable(s), each the winner's flags with 0x800 added, in the winner's group, every other field equal.";
+        }
+        return answer;
     }
 
     /// <summary>One sentence naming the parent records a placement override carries with it (stage-2 review L-b): the
@@ -303,12 +346,20 @@ internal sealed class PatchWriter : IAsyncDisposable
         var text = await CallAsync("housecarl_remove", new Dictionary<string, object?> { ["formids"] = new[] { key.ToString() }, ["into"] = patchFolder }, ct);
         var plugin = Directory.EnumerateFiles(patchFolder, "*.esp").FirstOrDefault();
         int left = -1;
+        var parents = new List<string>();
         if (plugin is not null)
             using (var mod = Mutagen.Bethesda.Skyrim.SkyrimMod.CreateFromBinaryOverlay(plugin, Mutagen.Bethesda.Skyrim.SkyrimRelease.SkyrimSE))
+            {
                 left = mod.EnumerateMajorRecords<Mutagen.Bethesda.Skyrim.IPlacedGetter>().Count();
+                parents.AddRange(mod.EnumerateMajorRecords<Mutagen.Bethesda.Skyrim.ICellGetter>().Select(c => $"cell {c.FormKey}"));
+                parents.AddRange(mod.Worldspaces.Select(w => $"worldspace {w.FormKey}"));
+            }
         var first = text.Split('\n')[0].Trim();
-        return $"removed {key}'s override from {Path.GetFileName(plugin) ?? patchFolder} ({first})"
-               + (left == 0 ? "; the patch now holds no placed reference, and the file is kept (delete it yourself if you no longer want it)." : left > 0 ? $"; {left} placed reference(s) remain in it." : ".");
+        // the whole override goes, so nothing else of the reference stays (an object takes one fix, so no move of it was
+        // in the patch); the copied parent records stay
+        return $"removed {key}'s override from {Path.GetFileName(plugin) ?? patchFolder} ({first}); nothing else went with it"
+               + (left == 0 ? "; the patch now holds no placed reference, and the file is kept (delete it yourself if you no longer want it)" : left > 0 ? $"; {left} placed reference(s) remain in it" : "")
+               + (parents.Count > 0 ? $"; it keeps the copied {string.Join(", ", parents.Distinct())}, which mask later edits to them while it loads last." : ".");
     }
 
     /// <summary>Closes the service, waiting for its calls; never on a window's thread (<see cref="HousecarlLibrary.Dispose"/>).</summary>

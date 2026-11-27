@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using SkyWright.Engine;
@@ -35,9 +36,11 @@ internal sealed class ServerContextSource : IContextSource
 
     static string? S(JsonElement e, string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 
-    async Task<Dictionary<string, string>> Fields(string key, params string[] fields)
+    Task<Dictionary<string, string>> Fields(string key, params string[] fields) => Fields(key, 3, fields);
+
+    async Task<Dictionary<string, string>> Fields(string key, int depth, params string[] fields)
     {
-        var root = await Records(new() { ["formids"] = new[] { key }, ["project"] = new Dictionary<string, object?> { ["form"] = "fields", ["fields"] = fields, ["depth"] = 3 } });
+        var root = await Records(new() { ["formids"] = new[] { key }, ["project"] = new Dictionary<string, object?> { ["form"] = "fields", ["fields"] = fields, ["depth"] = depth } });
         var d = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var r in Rows(root, "records"))
         {
@@ -84,7 +87,7 @@ internal sealed class ServerContextSource : IContextSource
         }).ConfigureAwait(false);
     }
 
-    static readonly string[] NamingFields = { "EnableParent", "LinkedReferences", "ActivateParents", "TeleportDestination" };
+    static readonly string[] NamingFields = { "EnableParent", "LinkedReferences", "ActivateParents", "TeleportDestination", "VirtualMachineAdapter" };
 
     public async Task<IReadOnlyList<(string Key, string Field)>> NamesAsync(FormKey key) => (await NamesCountedAsync(key)).Names;
 
@@ -99,7 +102,9 @@ internal sealed class ServerContextSource : IContextSource
             if (type is "PlacedObject" or "PlacedNpc")
             {
                 // the field of the referencer that holds the key, as the server reads it
-                var f = await Fields(id, NamingFields).ConfigureAwait(false);
+                // depth 6 reaches a list element's link (ActivateParents.Parents[0].Reference at 4, a script property's
+                // object, VirtualMachineAdapter.Scripts[0].Properties[0].Object, at 5); depth 3 stops at the element
+                var f = await Fields(id, 6, NamingFields).ConfigureAwait(false);
                 // the field's name without its element index (LinkedReferences[0].Reference names it as LinkedReferences)
                 var hit = f.Where(kv => kv.Value.Contains(key.ToString(), StringComparison.OrdinalIgnoreCase))
                            .Select(kv => kv.Key.Split('.')[0].Split('[')[0]).Distinct().ToList();
@@ -133,6 +138,74 @@ internal sealed class ServerContextSource : IContextSource
     {
         var f = await Fields(key.ToString(), "EnableParent").ConfigureAwait(false);
         return f.TryGetValue("EnableParent.Reference", out var r) ? r : f.TryGetValue("EnableParent", out var e) ? e : null;
+    }
+
+    /// <summary>The reference's own record as the server reads it (type, flags, enable parent, the door it leads to, its
+    /// collision layer and whether that layer cuts the navmesh), and whether it is a large reference by the viewer's and the
+    /// probes' rule (<see cref="LargeReferenceLists"/> over the write target's plugins).</summary>
+    public async Task<DisableFacts> DisableFactsAsync(FormKey key)
+    {
+        var root = await Records(new() { ["formids"] = new[] { key.ToString() }, ["project"] = new Dictionary<string, object?>
+            { ["form"] = "fields", ["fields"] = new[] { "MajorRecordFlagsRaw", "IsDeleted", "EnableParent", "TeleportDestination", "CollisionLayer" }, ["depth"] = 3 } }).ConfigureAwait(false);
+        string? type = null; var d = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var r in Rows(root, "records"))
+        {
+            if (S(r, "error") is { } err) throw new InvalidOperationException($"houseCARL could not read {key}: {err}");
+            type = S(r, "type");
+            foreach (var f in Rows(r, "fields"))
+                if (S(f, "path") is { } p && f.TryGetProperty("value", out var v)) d[p] = v.ValueKind == JsonValueKind.String ? v.GetString()! : v.GetRawText();
+        }
+        if (type is null) throw new InvalidOperationException($"houseCARL's answer had no record for {key}; reopen the scene to read it again.");
+        long raw = d.TryGetValue("MajorRecordFlagsRaw", out var rf) && long.TryParse(rf, out var n) ? n : 0;
+        bool navcut = false;
+        if (d.TryGetValue("CollisionLayer", out var cl) && uint.TryParse(cl, out var index))
+        {
+            // XTRI is the collision layer's Index, not a link: the COLL record with that index says whether it cuts the navmesh
+            var coll = await Records(new() { ["types"] = new[] { "COLL" }, ["where"] = new[] { $"Index = {index}" },
+                ["project"] = new Dictionary<string, object?> { ["form"] = "fields", ["fields"] = new[] { "Flags" } } }).ConfigureAwait(false);
+            navcut = Rows(coll, "matches").SelectMany(r => Rows(r, "fields")).Any(f => S(f, "path") == "Flags" && (S(f, "value") ?? "").Contains("NavmeshObstacle", StringComparison.Ordinal));
+        }
+        return new DisableFacts(key.ToString(), type, raw, d.TryGetValue("IsDeleted", out var del) && del == "True",
+            d.TryGetValue("EnableParent.Reference", out var ep) ? ep : null,
+            d.TryGetValue("TeleportDestination.Door", out var door) ? door : null,
+            navcut, await LargeInAsync(key).ConfigureAwait(false), Array.Empty<(string, string)>(), 0);
+    }
+
+    (IReadOnlyList<(string Path, DateTime Stamp)> Plugins, Dictionary<FormKey, LargeReferenceLists> Lists)? _large;
+
+    /// <summary>The worldspace whose large-reference lists list the reference, by the owner's selection rule (a root
+    /// worldspace: the union of every plugin's copy; a child: its own copies' union), read from the write target's plugins
+    /// in load order and kept until a plugin or the order changes.</summary>
+    async Task<string?> LargeInAsync(FormKey key)
+    {
+        var t = (await _writer.ConfigureAwait(false)).Target;
+        return await Task.Run(() =>
+        {
+            var paths = HousecarlCore.Mo2LoadOrder.Build(t.ProfileDir, t.ModsDir, t.DataDir).OrderedPaths;
+            var stamps = paths.Select(p => (p, File.GetLastWriteTimeUtc(p))).ToList();
+            Dictionary<FormKey, LargeReferenceLists> lists;
+            lock (this)
+            {
+                if (_large is { } c && c.Plugins.SequenceEqual(stamps)) lists = c.Lists;
+                else
+                {
+                    lists = new();
+                    foreach (var p in paths)
+                    {
+                        using var mod = Mutagen.Bethesda.Skyrim.SkyrimMod.CreateFromBinaryOverlay(p, Mutagen.Bethesda.Skyrim.SkyrimRelease.SkyrimSE);
+                        foreach (var ws in mod.Worldspaces)
+                        {
+                            if (!lists.TryGetValue(ws.FormKey, out var l)) lists[ws.FormKey] = l = new LargeReferenceLists();
+                            l.Observe(Path.GetFileName(p), ws);
+                        }
+                    }
+                    _large = (stamps, lists);
+                }
+            }
+            foreach (var (ws, l) in lists)
+                if (l.Selected(FloorFeed.ReachChildUnion, RingReach.RootUsesUnion).Contains(key)) return ws.ToString();
+            return null;
+        }).ConfigureAwait(false);
     }
 
     public async Task<string?> MismatchAsync(FormKey key)

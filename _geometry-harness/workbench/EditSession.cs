@@ -69,13 +69,21 @@ internal sealed class EditSession
     /// <summary>Edits written to a patch that is not enabled: what the view shows for them and which patch holds them.</summary>
     internal IReadOnlyDictionary<FormKey, (string Patch, RefPlacementEdit.Pose Pose)> Written => _written;
     readonly Dictionary<FormKey, (string Patch, RefPlacementEdit.Pose Pose)> _written = new();
+    readonly HashSet<FormKey> _writtenDisabled = new();
+
+    /// <summary>The written edits that are disables ("initially disabled" in their patch), not moves.</summary>
+    internal IReadOnlyCollection<FormKey> WrittenDisabled => _writtenDisabled;
 
     /// <summary>After a write: the staged edits become written ones (stage-4 review M-1).</summary>
     internal void MarkWritten(string patch)
     {
         Replacing?.Invoke();
         var net = Net();
-        foreach (var e in net) _written[e.Ref] = (patch, e.After);
+        foreach (var e in net)
+        {
+            _written[e.Ref] = (patch, e.After);
+            if (e.Disable) _writtenDisabled.Add(e.Ref); else _writtenDisabled.Remove(e.Ref);
+        }
         _pending.Clear();
         Changed?.Invoke($"{net.Count} edit(s) written to {patch}; the view keeps them where the patch puts them (the patch is not enabled)");
     }
@@ -86,7 +94,19 @@ internal sealed class EditSession
         Replacing?.Invoke();
         RefPlacementEdit.Apply(RefOf(key), pose);
         _written[key] = (patch, pose);
+        _writtenDisabled.Remove(key);
         Changed?.Invoke($"{key} drawn as {patch} places it ({Describe(pose)})");
+    }
+
+    /// <summary>A reference a patch holds initially disabled (read back from it): recorded as a written disable, and the
+    /// view hides it as it hides a staged one.</summary>
+    internal void ShowWrittenDisabled(FormKey key, RefPlacementEdit.Pose pose, string patch)
+    {
+        Replacing?.Invoke();
+        RefPlacementEdit.Apply(RefOf(key), pose);
+        _written[key] = (patch, pose);
+        _writtenDisabled.Add(key);
+        Changed?.Invoke($"{key} is initially disabled in {patch} (not enabled)");
     }
 
     /// <summary>After a written edit's override is removed from its patch: forget it and draw the reference where its
@@ -96,6 +116,7 @@ internal sealed class EditSession
         if (!_written.ContainsKey(key)) return;
         Replacing?.Invoke();
         _written.Remove(key);
+        _writtenDisabled.Remove(key);
         RefPlacementEdit.Apply(RefOf(key), Current(key));
         Changed?.Invoke($"{key}'s written edit is gone; the view shows it where the load order places it");
     }
@@ -126,6 +147,8 @@ internal sealed class EditSession
     internal PendingEdit Stage(FormKey key, RefPlacementEdit.Pose after)
     {
         RefOf(key);
+        if (IsDisabled(key))
+            throw new InvalidOperationException($"{key} is {(_pending.Any(e => e.Ref == key && e.Disable) ? "staged to be disabled" : $"written disabled to {_written[key].Patch}")}, and an object takes one fix, a move or a disable; undo the disable first to move it.");
         Replacing?.Invoke();
         var before = Current(key);
         var applied = RefPlacementEdit.Apply(RefOf(key), after);
@@ -136,11 +159,27 @@ internal sealed class EditSession
         return e;
     }
 
-    /// <summary>Stage "disable this object" (Gate B; not built yet).</summary>
-    internal PendingEdit? StageDisable(FormKey key) => null;
+    /// <summary>Stage "disable this object": the reference is to be written initially disabled at the pose it has, and the
+    /// view hides it (<see cref="ViewState"/>). An object takes one fix: a reference with a staged or written move, or
+    /// already disabled here, is refused in one sentence. Whether the records allow a disable is <see cref="DisableRule"/>'s,
+    /// asked before this (<see cref="DisableAction"/>).</summary>
+    internal PendingEdit StageDisable(FormKey key)
+    {
+        RefOf(key);
+        if (IsDisabled(key))
+            throw new InvalidOperationException($"{key} is already {(_pending.Any(e => e.Ref == key && e.Disable) ? "staged to be disabled" : $"written disabled to {_written[key].Patch}")}; there is nothing more to stage.");
+        if (_pending.Any(e => e.Ref == key) || _written.ContainsKey(key))
+            throw new InvalidOperationException($"{key} has a move {(_pending.Any(e => e.Ref == key) ? "staged" : $"written to {_written[key].Patch}")}, and an object takes one fix, a move or a disable; undo or revert the move first to disable it.");
+        Replacing?.Invoke();
+        var pose = Current(key);
+        var e = new PendingEdit(key, pose, pose, Disable: true);
+        _pending.Add(e);
+        Changed?.Invoke($"staged: disable {key} (it is written initially disabled; nothing is written until commit)");
+        return e;
+    }
 
-    /// <summary>The reference has a staged or written disable (Gate B; not built yet).</summary>
-    internal bool IsDisabled(FormKey key) => false;
+    /// <summary>The reference has a staged or written disable.</summary>
+    internal bool IsDisabled(FormKey key) => _writtenDisabled.Contains(key) || _pending.Any(e => e.Ref == key && e.Disable);
 
     /// <summary>Move by <paramref name="delta"/> (Skyrim units) and turn by <paramref name="radians"/> about world
     /// <paramref name="axis"/>, composed with the current rotation.</summary>
@@ -159,7 +198,7 @@ internal sealed class EditSession
         var last = _pending[^1];
         _pending.RemoveAt(_pending.Count - 1);
         RefPlacementEdit.Apply(RefOf(last.Ref), last.Before);
-        Changed?.Invoke($"undid {last.Ref}: back at {Describe(last.Before)}");
+        Changed?.Invoke(last.Disable ? $"undid the disable of {last.Ref}: it is shown again" : $"undid {last.Ref}: back at {Describe(last.Before)}");
         return last;
     }
 
@@ -172,8 +211,8 @@ internal sealed class EditSession
         Replacing?.Invoke();
         _pending.RemoveAll(e => e.Ref == key);
         RefPlacementEdit.Apply(RefOf(key), mine[0].Before);
-        Changed?.Invoke($"reverted {key}: back at {Describe(mine[0].Before)}");
-        return new PendingEdit(key, mine[0].Before, mine[^1].After);
+        Changed?.Invoke(mine.Any(e => e.Disable) ? $"reverted the disable of {key}: it is shown again" : $"reverted {key}: back at {Describe(mine[0].Before)}");
+        return new PendingEdit(key, mine[0].Before, mine[^1].After, mine.Any(e => e.Disable));
     }
 
     /// <summary>The edits a commit writes: one per reference, its latest pose, in first-edited order.</summary>
@@ -181,7 +220,7 @@ internal sealed class EditSession
     {
         var order = new List<FormKey>();
         foreach (var e in _pending) if (!order.Contains(e.Ref)) order.Add(e.Ref);
-        return order.Select(k => new PendingEdit(k, RefPlacementEdit.BakedPose(RefOf(k).Ref), Current(k))).ToList();
+        return order.Select(k => new PendingEdit(k, RefPlacementEdit.BakedPose(RefOf(k).Ref), Current(k), _pending.Any(e => e.Ref == k && e.Disable))).ToList();
     }
 
     static string N(float v) => v.ToString("0.##", CultureInfo.InvariantCulture);
@@ -192,6 +231,7 @@ internal sealed class EditSession
     internal static string Sentence(PendingEdit e, string? baseName)
     {
         string name = baseName ?? e.Ref.ToString();
+        if (e.Disable) return $"Disable {name} (written initially disabled)";
         var d = new Vector3(e.After.Position.X - e.Before.Position.X, e.After.Position.Y - e.Before.Position.Y, e.After.Position.Z - e.Before.Position.Z);
         var parts = new List<string>();
         void Part(float v, string pos, string neg) { if (MathF.Abs(v) >= 0.005f) parts.Add($"{N(MathF.Abs(v))} units {(v > 0 ? pos : neg)}"); }
