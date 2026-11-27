@@ -1,0 +1,380 @@
+{
+ "Probe": "contactprobe",
+ "Instance": "X:\\Skyrim Conflict Lab",
+ "GeneratedUtc": "2026-11-27 00:12:18Z",
+ "Conflicts": [
+  {
+   "Kind": "CONTACT",
+   "A": "Ultimate Markarth Expanded.esp",
+   "B": "JKs Skyrim.esp",
+   "Summary": "Stranded: Static SphereCenturionStatic <SphereCenturionStatic.nif> Supported on Static MrkBlockStatueA01 <MrkBlockStatueA01.nif> which JKs Skyrim.esp Moved; nearest thing now 4.1u  057F0E:Ultimate Markarth Expanded.esp / 0BAD1F:Skyrim.esm in MarkarthKeep (ext)",
+   "Necessary": [
+    {
+     "FormKey": "057F0E:Ultimate Markarth Expanded.esp",
+     "Role": "placed-ref",
+     "Label": "MarkarthKeep (ext)",
+     "Physical": "Holds",
+     "PhysicalDetail": "touches nothing within 4u (nearest 4.1u)"
+    }
+   ],
+   "Alternative": [
+    {
+     "FormKey": "0BAD1F:Skyrim.esm",
+     "Role": "placed-ref"
+    }
+   ]
+  }
+ ],
+ "Coverage": [
+  {
+   "Population": "enable chains (winner arm)",
+   "Judged": 923566,
+   "Unjudgeable": {},
+   "SetAside": {
+    "NotPresentAtLoad": 35974
+   },
+   "Note": "population load-time / state baseline"
+  },
+  {
+   "Population": "plugins",
+   "Judged": 14,
+   "Unjudgeable": {
+    "UnreadablePlugin": 0
+   }
+  },
+  {
+   "Population": "moved hosts",
+   "Judged": 4722,
+   "Unjudgeable": {
+    "NoGeometry": 0,
+    "EnableChainUnresolved": 0
+   },
+   "SetAside": {
+    "NoSolidCollision": 302,
+    "VolumeScale": 62,
+    "TooSmallToHost": 626,
+    "RuntimeDisabledInArm": 366
+   }
+  },
+  {
+   "Population": "dependent snaps hashed",
+   "Judged": 390987,
+   "Unjudgeable": {
+    "NoGeometry": 2
+   },
+   "SetAside": {
+    "OverDependentSize": 420653
+   }
+  },
+  {
+   "Population": "winner-arm physical refs",
+   "Judged": 607338,
+   "Unjudgeable": {
+    "EnableChainUnresolved": 0
+   },
+   "SetAside": {
+    "RuntimeDisabled": 19311
+   }
+  },
+  {
+   "Population": "dependent-host pairs",
+   "Judged": 436,
+   "Unjudgeable": {
+    "RuntimeDisabled": 178,
+    "DepthExceedsObject": 5,
+    "DepEnableChainUnresolved": 0
+   },
+   "SetAside": {
+    "BoxesApart": 3215,
+    "DepIntroducedByMover": 2163,
+    "DepOtherSpace": 0,
+    "DepAbsentInArm": 27
+   },
+   "Note": "relationships 436, class 2"
+  },
+  {
+   "Population": "mesh responsibility",
+   "Judged": 0,
+   "Unjudgeable": {},
+   "SetAside": {
+    "HostNoSolidCollision": 0,
+    "HostVolumeScale": 0,
+    "HostTooSmall": 0,
+    "HostRuntimeDisabled": 0,
+    "MeshEqualsReplaced": 0,
+    "NewMeshNoFallback": 0,
+    "SeenNotTested": 0,
+    "SeenFolderRows": 0
+   },
+   "Note": "credited: the population's folders (C:/hc-runs/2026-11-26-repair-disable-nudge/gateb-step1\\d1\\out\\houseCARL - GateBDisabled1); reshaped hosts 0 and dependents 0 judged; relationships 0, class 0"
+  },
+  {
+   "Population": "population scope",
+   "Judged": 663,
+   "Unjudgeable": {},
+   "SetAside": {
+    "HostOutsidePopulation": 4059,
+    "RowOutsidePopulation": 19
+   },
+   "Note": "hosts judged only where a host or a dependent is in the plan's population; population 8217cdd6d606 (C:\\hc-runs\\2026-11-26-repair-disable-nudge\\gateb-step1\\d1\\population.json): 1 plugin(s), 1 mod folder(s); 1 delta references, 1 cells, 2 other records, 2 mod files; seeds 1 (S1 delta plugin record 1)"
+  }
+ ],
+ "Population": "load-time+population:8217cdd6d606",
+ "State": "baseline",
+ "Configuration": {
+  "SchemaVersion": 1,
+  "Fingerprint": "fc143980955cd8e7f30832510e90311c19ddda72dc26340729261d3d7aace305",
+  "Source": "candidate:order-unpatched.json",
+  "Plugins": [
+   {
+    "Name": "Skyrim.esm",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\Skyrim.esm",
+    "Sha256": "e198c3b85e5e48e0c92a6580d8f66e644256b68d812ee32b61735cf9b753df73",
+    "Bytes": 249752131,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": []
+   },
+   {
+    "Name": "Update.esm",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\Update.esm",
+    "Sha256": "b298b0f65fa0127fd13c1f5ef6bb30eaf9d21fd19f5e6f8f91f829c9007d3280",
+    "Bytes": 19121864,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm"
+    ]
+   },
+   {
+    "Name": "Dawnguard.esm",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\Dawnguard.esm",
+    "Sha256": "fc8f92cb7ed55217046ee96b84caa54c058c12f7c408ac2a71da880a7bd3eab7",
+    "Bytes": 25884488,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm"
+    ]
+   },
+   {
+    "Name": "HearthFires.esm",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\HearthFires.esm",
+    "Sha256": "0f681496771e6d1983c6c1c9dd6602964068837f015bfa21e69a149c3b050047",
+    "Bytes": 3979105,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm"
+    ]
+   },
+   {
+    "Name": "Dragonborn.esm",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\Dragonborn.esm",
+    "Sha256": "635f21a938a17b8677f524cf41210933afc7f23820f2e210ab3bb6d3cd837046",
+    "Bytes": 64664159,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm"
+    ]
+   },
+   {
+    "Name": "ccbgssse001-fish.esm",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\ccbgssse001-fish.esm",
+    "Sha256": "0036c3bb38754d1681529f6f828987506efbecc97fe6008753ac05e7c6738fff",
+    "Bytes": 1425176,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "Dawnguard.esm",
+     "HearthFires.esm",
+     "Dragonborn.esm"
+    ]
+   },
+   {
+    "Name": "ccqdrsse001-survivalmode.esl",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\ccqdrsse001-survivalmode.esl",
+    "Sha256": "0aeb0734128137f77fed4c2c329fd4ce71a4d043a2093871886ad84e5821ac47",
+    "Bytes": 240724,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": true,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "Dawnguard.esm",
+     "HearthFires.esm",
+     "Dragonborn.esm"
+    ]
+   },
+   {
+    "Name": "ccbgssse037-curios.esl",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\ccBGSSSE037-Curios.esl",
+    "Sha256": "75209dbb177ea27f3abd164b6ecf07670ecdc3858cc01e4a3db8d1e2443136fe",
+    "Bytes": 37476,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": true,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "Dawnguard.esm",
+     "HearthFires.esm",
+     "Dragonborn.esm"
+    ]
+   },
+   {
+    "Name": "ccbgssse025-advdsgs.esm",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\ccbgssse025-advdsgs.esm",
+    "Sha256": "070784062525ac872b98503cf60918bcd7e7b8aede7fcedd86839a57467add5b",
+    "Bytes": 812873,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "Dawnguard.esm",
+     "HearthFires.esm",
+     "Dragonborn.esm"
+    ]
+   },
+   {
+    "Name": "_ResourcePack.esl",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\_ResourcePack.esl",
+    "Sha256": "3479f3aa9002e28d206a1e7366d613e52d7ba93fc6b96c207a1fcf89051a67db",
+    "Bytes": 78483,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": true,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "HearthFires.esm"
+    ]
+   },
+   {
+    "Name": "Unofficial Skyrim Special Edition Patch.esp",
+    "Path": "X:\\Skyrim Conflict Lab\\mods\\R2 SUP - Dependencies - USSEP\\unofficial skyrim special edition patch.esp",
+    "Sha256": "2df73db3622005e04470e3603f804e2fd855ae932a9847073f386bd8013e9d98",
+    "Bytes": 21106651,
+    "Provider": "R2 SUP - Dependencies - USSEP",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "Dawnguard.esm",
+     "HearthFires.esm",
+     "Dragonborn.esm",
+     "ccbgssse001-fish.esm",
+     "ccqdrsse001-survivalmode.esl",
+     "ccbgssse037-curios.esl",
+     "ccbgssse025-advdsgs.esm",
+     "_ResourcePack.esl"
+    ]
+   },
+   {
+    "Name": "Ultimate Markarth.esp",
+    "Path": "X:\\Skyrim Conflict Lab\\mods\\Ultimate Markarth\\Ultimate Markarth.esp",
+    "Sha256": "cf8b17b7daf7637712bdbedad5f09faba38a1924812a134dde0feaa73e436cb7",
+    "Bytes": 1063827,
+    "Provider": "Ultimate Markarth",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "HearthFires.esm",
+     "Dragonborn.esm",
+     "Unofficial Skyrim Special Edition Patch.esp"
+    ]
+   },
+   {
+    "Name": "Ultimate Markarth Expanded.esp",
+    "Path": "X:\\Skyrim Conflict Lab\\mods\\Ultimate Markarth Expanded\\Ultimate Markarth Expanded.esp",
+    "Sha256": "cf5844cba8f1aeb6a783fc4fb14a4a7bf140fd179c7767493a4fab0995a03e0d",
+    "Bytes": 2466610,
+    "Provider": "Ultimate Markarth Expanded",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "Dawnguard.esm",
+     "HearthFires.esm",
+     "Dragonborn.esm",
+     "Ultimate Markarth.esp"
+    ]
+   },
+   {
+    "Name": "JKs Skyrim.esp",
+    "Path": "X:\\Skyrim Conflict Lab\\mods\\JK's Skyrim\\JKs Skyrim.esp",
+    "Sha256": "6f0e2551017806ad9ab7acb074003a81457fa9606ab5e7b2833a862ce393f646",
+    "Bytes": 3157818,
+    "Provider": "JK's Skyrim",
+    "MasterFlag": false,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "Dawnguard.esm",
+     "HearthFires.esm",
+     "Dragonborn.esm"
+    ]
+   }
+  ],
+  "Providers": [
+   {
+    "Name": "overwrite",
+    "Kind": "overwrite"
+   },
+   {
+    "Name": "JK's Skyrim",
+    "Kind": "mod"
+   },
+   {
+    "Name": "Ultimate Markarth Expanded",
+    "Kind": "mod"
+   },
+   {
+    "Name": "Ultimate Markarth",
+    "Kind": "mod"
+   },
+   {
+    "Name": "R2 SUP - Dependencies - USSEP",
+    "Kind": "mod"
+   },
+   {
+    "Name": "Data",
+    "Kind": "data"
+   }
+  ],
+  "Overlays": [],
+  "Population": "load-time+population:8217cdd6d606",
+  "State": "baseline",
+  "Limits": [],
+  "Unknown": {
+   "installerChoices": "not modelled: MO2 keeps no per-mod record of the FOMOD options taken; the installed files are the evidence",
+   "gameBuild": "not read: the executable version and SKSE/plugin set are not part of a records run",
+   "distributors": "not read: SPID / KID / SkyPatcher layers are not scanned; only BOS ini files are listed as overlays",
+   "saveState": "not applicable: a records run judges a fresh load, never a save"
+  },
+  "Short": "fc143980955c (14 plugins, 6 providers, load-time+population:8217cdd6d606/baseline, candidate:order-unpatched.json)"
+ },
+ "MeasurementPolicy": "placement_contact_v3|eps 4|reach 128|radius on|bos on|all-rows off|force-enable none",
+ "PopulationIdentity": "load-time+population:8217cdd6d606 / state baseline",
+ "_trimmed": "trimmed from gateb-step1/d1/contactprobe-unpatched.json: its first row"
+}

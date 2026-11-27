@@ -2186,9 +2186,14 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             var t = _writer?.Target ?? TargetFromEnv() ?? throw new InvalidOperationException("no write target is set, so the patch cannot be found.");
             var plugin = patchName.EndsWith(".esp", StringComparison.OrdinalIgnoreCase) ? patchName : patchName + ".esp";
             var mod = Recheck.PatchFolder(t.PatchRoot, plugin);
+            // the object this patch disables, if it disables one: the open row's own object or its other first
+            var disabledHere = _session.WrittenDisabled.Where(k => string.Equals(_session.Written[k].Patch, plugin, StringComparison.OrdinalIgnoreCase)).ToList();
+            string? disabled = disabledHere.Select(k => k.ToString())
+                .OrderBy(k => string.Equals(k, open.Row.RefKey, StringComparison.OrdinalIgnoreCase) || string.Equals(k, open.Row.OtherKey, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .FirstOrDefault();
             // The view shows the edited reference where this patch puts it (read back from the patch), never silently
-            // where the load order still has it (stage-4 review M-1).
-            if (FormKey.TryFactory(open.Row.RefKey, out var rk) && _session.IsDrawn(rk)
+            // where the load order still has it (stage-4 review M-1). A patch that only disables has no new place to show.
+            if (disabled is null && FormKey.TryFactory(open.Row.RefKey, out var rk) && _session.IsDrawn(rk)
                 && !(_session.Written.TryGetValue(rk, out var wr) && string.Equals(wr.Patch, plugin, StringComparison.OrdinalIgnoreCase)))
             {
                 var wtr = await WriterAsync();
@@ -2204,16 +2209,20 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             var game = Path.GetDirectoryName(Path.GetFullPath(t.DataDir.TrimEnd('\\', '/')))!;
             var work = Path.Combine(_outDir, "recheck-" + DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss"));
             Rechecking = true; RecheckRefusal = null;
-            Shell.SetBanner($"re-checking conflict {open.Rank} ({open.Row.Kind}) with {plugin}: the detector runs on the patch's cell, unpatched and patched; the window stays usable.");
+            Shell.SetBanner($"re-checking conflict {open.Rank} ({open.Row.Kind}) with {plugin}: the detector runs on the patch's cell, unpatched and patched{(disabled is null ? "" : ", and placement contact for what rested on the disabled object")}; the window stays usable.");
             UpdateStatus();
             var row = open.Row; var arm = b.Arm; var dir = b.Dir;
             var r = await Task.Run(() => Recheck.RunAll(dir, arm, row, plugin, mod, t.Instance, t.Profile, game, work, engine, conflictdiff,
-                buildDirs, harness, s => _window?.Dispatcher.BeginInvoke(() => Say("re-check: " + s))));
+                buildDirs, harness, s => _window?.Dispatcher.BeginInvoke(() => Say("re-check: " + s)), disabled));
             LastRecheck = r;
-            string news = r.New.Count == 0 ? "no new conflict involving the moved reference" : $"{r.New.Count} new conflict(s) involving the moved reference: " + string.Join("; ", r.New.Select(n => n.Id));
+            string what = disabled is null ? "the moved reference" : "the disabled object (overlap and placement contact)";
+            string news = r.New.Count == 0 ? $"no new conflict involving {what}" : $"{r.New.Count} new conflict(s) involving {what}: " + string.Join("; ", r.New.Select(n => n.Id));
+            if (r.Others is { Count: > 0 } others)
+                news += $". The {others.Count} other row(s) naming {disabled}: " + string.Join(", ", others.GroupBy(o => o.Word).Select(g => $"{g.Count()} {g.Key}"));
             Shell.SetBanner(FormattableString.Invariant($"re-check of conflict {open.Rank}: {r.Row.Word}. {news}. ({r.Verdict}; {r.WallSeconds:0.0} s)"));
             Say("re-check: row " + r.Row.Id + ": " + r.Row.Sentence);
             foreach (var n in r.New) Say("re-check: new row " + n.Id + ": " + n.Sentence);
+            foreach (var o in r.Others ?? Array.Empty<RowVerdict>()) Say("re-check: other row naming " + disabled + " " + o.Id + ": " + o.Sentence);
             Say("re-check: " + r.BuildSentence);
             Say(FormattableString.Invariant($"re-check: wall time {r.WallSeconds:0.0} s; conflictdiff's lines in {Path.Combine(work, "conflictdiff.txt")}"));
             return r.Row.Word;

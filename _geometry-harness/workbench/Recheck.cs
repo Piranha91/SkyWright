@@ -10,7 +10,7 @@ internal sealed record ProbeRun(string Label, string Emit, string BuildDigest, d
 
 /// <summary>A re-check's answer for the open conflict row.</summary>
 internal sealed record RecheckResult(RowVerdict Row, IReadOnlyList<RowVerdict> New, string Verdict, IReadOnlyList<string> Lines,
-                                     string BuildSentence, double WallSeconds);
+                                     string BuildSentence, double WallSeconds, IReadOnlyList<RowVerdict>? Others = null, string? Disabled = null);
 
 /// <summary>The detector re-run on the touched cell (DESIGN.md section 5, as built in stage 4). The probe that produced the
 /// row runs twice on the population of the patch alone (the run engine's <c>population</c>), with the same build: on the arm's order,
@@ -167,7 +167,7 @@ internal static class Recheck
     /// <summary>The whole re-check, off the UI thread. <paramref name="say"/> gets one line per step.</summary>
     internal static RecheckResult RunAll(string bundleDir, string arm, ConflictRow row, string patchPlugin, string patchFolder,
         string instance, string profile, string game, string workDir, RunEngine engine, string conflictdiffExe,
-        IEnumerable<string> buildDirs, string? localProbesRoot, Action<string> say)
+        IEnumerable<string> buildDirs, string? localProbesRoot, Action<string> say, string? disabled = null)
     {
         var clock = Stopwatch.StartNew();
         Directory.CreateDirectory(workDir);
@@ -183,34 +183,57 @@ internal static class Recheck
         if (pe != 0) throw new InvalidOperationException($"{engine.Controller} population refused the patch: " + pt.Trim());
         say(pt.Trim());
 
-        var bundleDigest = BundleDigest(bundleDir, probe);
-        var candidates = buildDirs.Select(d => Path.Combine(d, probe)).ToList();
-        if (BundleLocator(bundleDir, probe) is { } loc) candidates.Add(loc);
-        var local = localProbesRoot is null ? null : HarnessShared.CheckoutLayout.ProgramFolder(localProbesRoot, probe);
-        var (folder, digest, buildSentence) = ChooseBuild(probe, bundleDigest, candidates, local, f => engine.PackageDigest(f, workDir));
-        say(buildSentence);
-        if (folder is null) throw new InvalidOperationException(buildSentence);
-        var exe = Path.Combine(folder, probe + ".exe");
-
         var (unOrder, paOrder) = Orders(candidate, profile, patchPlugin, patchMod, workDir);
-        ProbeRun Go(string label, string order, string? baseEmit)
+        // one probe, both arms, one build (H2): its emits and the sentence naming the build
+        (ProbeRun Un, ProbeRun Pa, string Build) Arms(string probe, JsonElement adapter, string prefix)
         {
-            var emit = Path.Combine(workDir, $"{label}.json");
-            var args = Args(adapter, order, emit, baseEmit, workDir, label, population, instance, profile, game);
-            var sw = Stopwatch.StartNew();
-            var (x, _) = Run(exe, args, Path.Combine(workDir, $"{label}.log"));
-            sw.Stop();
-            say(FormattableString.Invariant($"{probe} {label}: exit {x}, {sw.Elapsed.TotalSeconds:0.0} s"));
-            if (x != 0 || !File.Exists(emit)) throw new InvalidOperationException($"{probe} {label} exited {x} without an emit; see {Path.Combine(workDir, label + ".log")}.");
-            // The build that made it, read again after the run: a folder rebuilt mid-run is not the build chosen.
-            var after = engine.PackageDigest(folder, workDir) ?? "";
-            return new ProbeRun(label, emit, after, sw.Elapsed.TotalSeconds, x, Path.Combine(workDir, $"{label}.log"));
+            var bundleDigest = BundleDigest(bundleDir, probe);
+            var candidates = buildDirs.Select(d => Path.Combine(d, probe)).ToList();
+            if (BundleLocator(bundleDir, probe) is { } loc) candidates.Add(loc);
+            var local = localProbesRoot is null ? null : HarnessShared.CheckoutLayout.ProgramFolder(localProbesRoot, probe);
+            var (folder, digest, buildSentence) = ChooseBuild(probe, bundleDigest, candidates, local, f => engine.PackageDigest(f, workDir));
+            say(buildSentence);
+            if (folder is null) throw new InvalidOperationException(buildSentence);
+            var exe = Path.Combine(folder, probe + ".exe");
+            ProbeRun Go(string label, string order, string? baseEmit)
+            {
+                var emit = Path.Combine(workDir, $"{prefix}{label}.json");
+                var args = Args(adapter, order, emit, baseEmit, workDir, label, population, instance, profile, game);
+                var sw = Stopwatch.StartNew();
+                var (x, _) = Run(exe, args, Path.Combine(workDir, $"{prefix}{label}.log"));
+                sw.Stop();
+                say(FormattableString.Invariant($"{probe} {label}: exit {x}, {sw.Elapsed.TotalSeconds:0.0} s"));
+                if (x != 0 || !File.Exists(emit)) throw new InvalidOperationException($"{probe} {label} exited {x} without an emit; see {Path.Combine(workDir, prefix + label + ".log")}.");
+                // The build that made it, read again after the run: a folder rebuilt mid-run is not the build chosen.
+                var after = engine.PackageDigest(folder, workDir) ?? "";
+                return new ProbeRun(label, emit, after, sw.Elapsed.TotalSeconds, x, Path.Combine(workDir, $"{prefix}{label}.log"));
+            }
+            var u = Go("unpatched", unOrder, null);
+            return (u, Go("patched", paOrder, u.Emit), buildSentence);
         }
-        var un = Go("unpatched", unOrder, null);
-        var pa = Go("patched", paOrder, un.Emit);
+        var (un, pa, buildSentence) = Arms(probe, adapter, "");
         var (rv, news, verdict, lines) = Compare(un, pa, row.Identity, conflictdiffExe);
         File.WriteAllLines(Path.Combine(workDir, "conflictdiff.txt"), lines);
+        if (disabled is null)
+        {
+            clock.Stop();
+            return new RecheckResult(rv, news, verdict, lines, buildSentence, clock.Elapsed.TotalSeconds);
+        }
+        // A disable also re-runs contactprobe (Gate B step 1): what rested on the disabled object is judged there, and
+        // whatever it strands is a created row, shown as new. Every word is the frozen rule's (DisableRecheck).
+        DifferentialRows.Credited? contact = null;
+        if (probe != "contactprobe")
+        {
+            var (cadapter, _) = FromBundle(bundleDir, "geometry.placement-contact", arm);
+            var (cu, cp, cbuild) = Arms("contactprobe", cadapter, "contact-");
+            var (_, _, cverdict, clines) = Compare(cu, cp, row.Identity, conflictdiffExe);
+            File.WriteAllLines(Path.Combine(workDir, "contact-conflictdiff.txt"), clines);
+            contact = DifferentialRows.Credit(ConflictIo.Read(cu.Emit), ConflictIo.Read(cp.Emit));
+            buildSentence += " " + cbuild;
+            verdict += "; contactprobe " + cverdict;
+        }
+        var d = DisableRecheck.Of(DifferentialRows.Credit(ConflictIo.Read(un.Emit), ConflictIo.Read(pa.Emit)), contact, disabled, row.Identity);
         clock.Stop();
-        return new RecheckResult(rv, news, verdict, lines, buildSentence, clock.Elapsed.TotalSeconds);
+        return new RecheckResult(d.Row, d.New, verdict, lines, buildSentence, clock.Elapsed.TotalSeconds, d.Others, disabled);
     }
 }

@@ -932,6 +932,7 @@ internal sealed class StateTools
                 running = sc.Rechecking, refused = sc.RecheckRefusal,
                 row = sc.LastRecheck is { } lr ? V(lr.Row) : null,
                 created = sc.LastRecheck?.New.Select(V).ToList(),
+                disabled = sc.LastRecheck?.Disabled, othersNamingDisabled = sc.LastRecheck?.Others?.Select(V).ToList(),
                 verdict = sc.LastRecheck?.Verdict, build = sc.LastRecheck?.BuildSentence, wallSeconds = sc.LastRecheck?.WallSeconds,
             };
         }

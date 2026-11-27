@@ -18,6 +18,8 @@
   <ItemGroup>
     <!-- dispositions real runs wrote, for the end sentence (RunTallyTests, LauncherDoneLineTests) -->
     <None Include="fixtures\dispositions\*.json" CopyToOutputDirectory="PreserveNewest" LinkBase="fixtures\dispositions" />
+    <!-- trimmed copies of a real disable's re-check emits (Gate B step 1), for DisableTests -->
+    <None Include="fixtures\disable-recheck\*.json" CopyToOutputDirectory="PreserveNewest" LinkBase="fixtures\disable-recheck" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="System.IO" />

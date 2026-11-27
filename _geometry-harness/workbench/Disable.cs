@@ -201,11 +201,23 @@ internal static class DisableReadBack
     }
 }
 
-/// <summary>What a re-check says after a disable (Gate B; written after step 1's measurement).</summary>
+/// <summary>What a re-check says after a disable: the open row, every other row naming the disabled object, and every row
+/// the patch created (in the row's own probe and in contactprobe, which judges what rested on the object).</summary>
 internal sealed record DisableRecheckResult(RowVerdict Row, IReadOnlyList<RowVerdict> Others, IReadOnlyList<RowVerdict> New);
 
+/// <summary>The re-check's words after a disable, every one from the frozen rule (<see cref="RecheckRule"/>): a row reads
+/// "resolved" only when its predicate was re-measured Gone under the patch (step 1 measured that a disabled object's rows
+/// carry "Gone: a ref is disabled at runtime under this state"); a row merely absent from the patched run is not credited.
+/// Anything the disable strands is a created contact row, shown as new, never hidden.</summary>
 internal static class DisableRecheck
 {
-    internal static DisableRecheckResult Of(DifferentialRows.Credited overlap, DifferentialRows.Credited? contact, string key, string openId) =>
-        new(new RowVerdict(openId, "not in either run", "absent", ""), Array.Empty<RowVerdict>(), Array.Empty<RowVerdict>());
+    internal static DisableRecheckResult Of(DifferentialRows.Credited overlap, DifferentialRows.Credited? contact, string key, string openId)
+    {
+        bool Names(DifferentialRows.Row r) => string.Equals(r.FormKey, key, StringComparison.OrdinalIgnoreCase) || string.Equals(r.Other, key, StringComparison.OrdinalIgnoreCase);
+        var others = overlap.Outcome.Keys
+            .Where(id => id != openId && ((overlap.Before.TryGetValue(id, out var b) && Names(b)) || (overlap.After.TryGetValue(id, out var a) && Names(a))))
+            .OrderBy(id => id, StringComparer.Ordinal).Select(id => RecheckRule.Of(overlap, id)).ToList();
+        var news = RecheckRule.NewRows(overlap).Concat(contact is null ? Array.Empty<RowVerdict>() : RecheckRule.NewRows(contact)).ToList();
+        return new DisableRecheckResult(RecheckRule.Of(overlap, openId), others, news);
+    }
 }

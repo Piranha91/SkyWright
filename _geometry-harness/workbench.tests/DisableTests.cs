@@ -276,41 +276,30 @@ public sealed class DisableTests : IClassFixture<DisableWorld>
 
     // ---- what a re-check may say after a disable ---------------------------------------------------------------------
 
-    const string Pop = "load-time+population:000000000000", State = "baseline";
+    static string Fixture(string name) => Path.Combine(AppContext.BaseDirectory, "fixtures", "disable-recheck", name);
 
-    static Conflict Overlap(int a, int b, PhysicalState ph) =>
-        new("OVERLAP", "Base.esm", "Subject.esp", "synthetic",
-            new[] { new ConflictRecord($"{a:X6}:Base.esm", "placed-ref", null, ph) },
-            new[] { new ConflictRecord($"{b:X6}:Base.esm", "placed-ref", null) });
+    static string Id(string necessary) =>
+        ConflictIo.RowIdentity("OVERLAP", necessary, "000848:Ultimate Markarth.esp", "Ultimate Markarth Expanded.esp", null);
 
-    static string Id(int a, int b) => ConflictIo.RowIdentity("OVERLAP", $"{a:X6}:Base.esm", $"{b:X6}:Base.esm", "Base.esm", null);
-
+    /// <summary>Step 1's measurement (GATE-B-RED.md): on the lab, a disable of 000848:Ultimate Markarth.esp re-measured
+    /// every one of the 36 overlap rows naming it Gone ("a ref is disabled at runtime under this state"), conflictdiff
+    /// "repaired 36", and contactprobe created no row. The fixtures are trimmed copies of those emits (each file says what
+    /// was kept); one row's carried predicate is left out on purpose, and the contact re-run gains one created row in the
+    /// real row's shape, because the real disable stranded nothing.</summary>
     [Fact]
     public void After_a_disable_resolved_is_said_only_where_the_row_was_re_measured_gone_and_what_it_strands_is_new()
     {
-        var cov = new[] { new CoverageLine("placed references", 10) };
-        // the disabled object is 000801: the open row (801/901) and a second row naming it (801/902); a third row (803/903) does not
-        var b = new ConflictFile("overlapprobe", "synthetic", "2026-11-26T00:00:00Z",
-            new[] { Overlap(0x801, 0x901, PhysicalState.Holds), Overlap(0x801, 0x902, PhysicalState.Holds), Overlap(0x803, 0x903, PhysicalState.Holds) },
-            cov, Population: Pop, State: State);
-        var c = new ConflictFile("overlapprobe", "synthetic", "2026-11-26T00:00:01Z",
-            new[] { Overlap(0x803, 0x903, PhysicalState.Holds) }, cov,
-            // the open row re-measured under the patch; the second row merely absent from the patched run, no predicate carried
-            Predicates: new[] { new Predicate("OVERLAP", "Base.esm", "Subject.esp", "000801:Base.esm", "000901:Base.esm", PhysicalState.Gone, "a ref is disabled at runtime under this state") },
-            Population: Pop, State: State);
-        // the contact re-run: a fixture that rested on the disabled object, left in the air
-        var cb = new ConflictFile("contactprobe", "synthetic", "2026-11-26T00:00:00Z", Array.Empty<Conflict>(), cov, Population: Pop, State: State);
-        var cc = new ConflictFile("contactprobe", "synthetic", "2026-11-26T00:00:01Z",
-            new[] { new Conflict("CONTACT", "Base.esm", "Patch.esp", "Stranded: on a host the patch disabled",
-                new[] { new ConflictRecord("000880:Base.esm", "placed-ref", null, PhysicalState.Holds) }, new[] { new ConflictRecord("000801:Base.esm", "placed-ref", null) }) },
-            cov, Population: Pop, State: State);
-        var said = DisableRecheck.Of(DifferentialRows.Credit(b, c), DifferentialRows.Credit(cb, cc), "000801:Base.esm", Id(0x801, 0x901));
-        Assert.Equal("resolved", said.Row.Word);
-        var second = said.Others.SingleOrDefault(o => o.Id == Id(0x801, 0x902));
-        Assert.True(second is not null, "the second row naming the disabled object is not reported");
-        Assert.True(second!.Word != "resolved", $"a row merely absent from the patched run was credited: {second.Sentence}");
-        Assert.DoesNotContain(said.Others, o => o.Id == Id(0x803, 0x903));
-        Assert.True(said.New.Any(n => n.Word == "new" && n.Id.Contains("000880", StringComparison.OrdinalIgnoreCase)),
+        var overlap = DifferentialRows.Credit(ConflictIo.Read(Fixture("overlap-unpatched.json")), ConflictIo.Read(Fixture("overlap-patched.json")));
+        var contact = DifferentialRows.Credit(ConflictIo.Read(Fixture("contact-unpatched.json")), ConflictIo.Read(Fixture("contact-patched.json")));
+        var said = DisableRecheck.Of(overlap, contact, "000848:Ultimate Markarth.esp", Id("001FBB:JKs Skyrim.esp"));
+        Assert.Equal("resolved", said.Row.Word);                                                  // as measured: Holds -> Gone
+        var other = said.Others.SingleOrDefault(o => o.Id == Id("001FBC:JKs Skyrim.esp"));
+        Assert.True(other is { Word: "resolved" }, $"the other row naming the disabled object, re-measured Gone, does not read resolved: {other?.Sentence ?? "not reported"}");
+        var absent = said.Others.SingleOrDefault(o => o.Id == Id("001FC7:JKs Skyrim.esp"));
+        Assert.True(absent is not null, "the row naming the disabled object with no carried predicate is not reported");
+        Assert.True(absent!.Word != "resolved", $"a row merely absent from the patched run was credited: {absent.Sentence}");
+        Assert.DoesNotContain(said.Others, o => o.Id.Contains("001fe3", StringComparison.OrdinalIgnoreCase));   // a row not naming it
+        Assert.True(said.New.Any(n => n.Word == "new" && n.Id.Contains("001fbb", StringComparison.OrdinalIgnoreCase)),
             "the fixture the disable left in the air is not shown as new: " + string.Join("; ", said.New.Select(n => n.Id)));
     }
 
