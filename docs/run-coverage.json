@@ -674,6 +674,45 @@
       }
     },
     {
+      "id": "strandprobe",
+      "kind": "csharp-exe",
+      "path": "_geometry-harness/strandprobe/strandprobe.csproj",
+      "adapter": "csharp",
+      "stageSource": "counted",
+      "answers": [
+        "Which objects does a load order leave out of reach of walkable ground that their own plugin's navmesh reached?"
+      ],
+      "useWhen": "Find objects another mod's navmesh change left where no character or player can reach them (the geometry.stranded-object check, held until a look in game confirms it); --self-test runs its known answers.",
+      "evidence": [
+        {
+          "path": "_geometry-harness/strandprobe/Program.cs",
+          "anchor": "// strandprobe — objects another mod's navmesh leaves out of reach"
+        }
+      ],
+      "inputs": [
+        "A load order (profile or --order candidate); optionally an earlier emit (--base) and station Q's primitive table (--primitive-solidity)."
+      ],
+      "outputs": [
+        "A conflict file of STRANDED rows: reported (Holds) and not judged (Unmeasured, with the reason), the coverage counts by reason; with --base, the earlier rows re-measured; beside it OUT.json.reach.json with every measured object's distances."
+      ],
+      "flagCoverage": {
+        "parser": "csharp-args",
+        "path": "_geometry-harness/strandprobe/Program.cs"
+      },
+      "modifiers": {
+        "--instance": "MO2 instance directory (else HOUSECARL_MO2_INSTANCE; never the harness config: refused instance-not-explicit).",
+        "--game": "Game directory (else the harness config, only for its own instance).",
+        "--profile": "MO2 profile name (else the harness config, only for its own instance).",
+        "--order": "Walk this candidate configuration (CandidateFile) instead of the profile's order.",
+        "--emit": "Write the conflict file here (required); OUT.json.reach.json beside it.",
+        "--base": "An earlier strandprobe emit: each of its rows re-measured under this order (Predicates).",
+        "--primitive-solidity": "Station Q's measured primitive table; without it a nearby primitive is a bound only.",
+        "--cells": "Only these cells (editor ids or FormKeys, comma-separated): an instrument run.",
+        "--no-mirror": "An instrument flag: also judge rows the winning navmesh's own author had in the editor (measuring the reach rule alone).",
+        "--self-test": "Run the known answers on a synthetic order and exit."
+      }
+    },
+    {
       "id": "floorprobe",
       "kind": "csharp-exe",
       "path": "_geometry-harness/floorprobe/floorprobe.csproj",
