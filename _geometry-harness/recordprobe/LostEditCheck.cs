@@ -224,7 +224,8 @@ static class LostEditCheck
         int colon = formId.IndexOf(':');
         string id = colon > 0 ? $"{formId[..colon]} in {formId[(colon + 1)..]}" : formId;
         string what = edid is { Length: > 0 } ? $"the {TypeWords(type)} {edid} ({id})" : $"the {TypeWords(type)} {id}";
-        bool say = Sayable(f.Lost) is not null && Sayable(f.Winner) is not null;
+        // the two values only when they read differently: a list houseCARL compares by content is shown as its item count
+        bool say = Sayable(f.Lost) is not null && Sayable(f.Winner) is not null && f.Lost != f.Winner;
         string to = say ? $" to {f.Lost}" : "", with = say ? $" with {f.Winner}" : "";
         string whose = instrument ? "" : winnerChanged switch
         {
