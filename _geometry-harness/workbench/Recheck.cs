@@ -11,7 +11,7 @@ internal sealed record ProbeRun(string Label, string Emit, string BuildDigest, d
 /// <summary>A re-check's answer for the open conflict row.</summary>
 internal sealed record RecheckResult(RowVerdict Row, IReadOnlyList<RowVerdict> New, string Verdict, IReadOnlyList<string> Lines,
                                      string BuildSentence, double WallSeconds, IReadOnlyList<RowVerdict>? Others = null, string? Disabled = null,
-                                     string? ContactNote = null, string? Nudged = null);
+                                     string? ContactNote = null, string? Nudged = null, IReadOnlyList<RowVerdict>? ContactNew = null);
 
 /// <summary>The detector re-run on the touched cell (DESIGN.md section 5, as built in stage 4). The probe that produced the
 /// row runs twice on the population of the patch alone (the run engine's <c>population</c>), with the same build: on the arm's order,
@@ -53,10 +53,11 @@ internal static class Recheck
 
     /// <summary>Compare the two runs: conflictdiff's lines and verdict (a refusal by its gates is the re-check's refusal), then
     /// the row's outcome and every created row by the frozen rule.</summary>
-    internal static (RowVerdict Row, IReadOnlyList<RowVerdict> New, string Verdict, List<string> Lines) Compare(ProbeRun unpatched, ProbeRun patched, string rowId, string conflictdiffExe)
+    internal static (RowVerdict Row, IReadOnlyList<RowVerdict> New, string Verdict, List<string> Lines) Compare(ProbeRun unpatched, ProbeRun patched, string rowId, string conflictdiffExe,
+        CancellationToken ct = default)
     {
         SameBuildOrRefuse(unpatched, patched);
-        var (exit, text) = Run(conflictdiffExe, new[] { unpatched.Emit, patched.Emit }, null);
+        var (exit, text) = Run(conflictdiffExe, new[] { unpatched.Emit, patched.Emit }, null, ct);
         var lines = text.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0).ToList();
         if (exit != 0)
             throw new InvalidOperationException($"conflictdiff refused the comparison (exit {exit}): " + (lines.FirstOrDefault(l => l.Contains("REFUSED") || l.Contains("! ")) ?? lines.LastOrDefault() ?? "no output").Trim());
@@ -127,20 +128,24 @@ internal static class Recheck
         return args;
     }
 
-    internal static (int Exit, string Text) Run(string exe, IEnumerable<string> args, string? logPath)
+    internal static (int Exit, string Text) Run(string exe, IEnumerable<string> args, string? logPath, CancellationToken ct = default)
     {
         var psi = new ProcessStartInfo(exe) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
         foreach (var a in args) psi.ArgumentList.Add(a);
-        return Run(psi, logPath);
+        return Run(psi, logPath, ct);
     }
 
     /// <summary>Run a prepared command to its end: its exit code and everything it printed.</summary>
-    internal static (int Exit, string Text) Run(ProcessStartInfo psi, string? logPath)
+    internal static (int Exit, string Text) Run(ProcessStartInfo psi, string? logPath, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         var exe = psi.FileName; var args = psi.ArgumentList;
         using var p = Process.Start(psi)!;
+        // Abort (a nudge's): the running probe is stopped, its process tree with it, and the step says so
+        using var stop = ct.Register(() => { try { p.Kill(entireProcessTree: true); } catch (InvalidOperationException) { } });
         var o = p.StandardOutput.ReadToEndAsync(); var e = p.StandardError.ReadToEndAsync();
         p.WaitForExit();
+        ct.ThrowIfCancellationRequested();
         var text = o.Result + e.Result;
         if (logPath is not null) File.WriteAllText(logPath, "$ " + exe + " " + string.Join(" ", args) + "\n" + text);
         return (p.ExitCode, text);
@@ -168,7 +173,8 @@ internal static class Recheck
     /// <summary>The whole re-check, off the UI thread. <paramref name="say"/> gets one line per step.</summary>
     internal static RecheckResult RunAll(string bundleDir, string arm, ConflictRow row, string patchPlugin, string patchFolder,
         string instance, string profile, string game, string workDir, RunEngine engine, string conflictdiffExe,
-        IEnumerable<string> buildDirs, string? localProbesRoot, Action<string> say, IReadOnlyList<string>? disabled = null)
+        IEnumerable<string> buildDirs, string? localProbesRoot, Action<string> say, IReadOnlyList<string>? disabled = null,
+        IReadOnlyList<string>? moved = null, CancellationToken ct = default)
     {
         var clock = Stopwatch.StartNew();
         Directory.CreateDirectory(workDir);
@@ -180,7 +186,7 @@ internal static class Recheck
         // the probes' view entry for the patch: its folder's name when it is a mod folder of the instance, else its full path (D1 a)
         var patchMod = ModsEntry(patchFolder, instance);
         var population = Path.Combine(workDir, "population.json");
-        var (pe, pt) = Run(engine.Population(pluginPath, patchMod, instance, population), Path.Combine(workDir, "population.log"));
+        var (pe, pt) = Run(engine.Population(pluginPath, patchMod, instance, population), Path.Combine(workDir, "population.log"), ct);
         if (pe != 0) throw new InvalidOperationException($"{engine.Controller} population refused the patch: " + pt.Trim());
         say(pt.Trim());
 
@@ -201,7 +207,7 @@ internal static class Recheck
                 var emit = Path.Combine(workDir, $"{prefix}{label}.json");
                 var args = Args(adapter, order, emit, baseEmit, workDir, label, population, instance, profile, game);
                 var sw = Stopwatch.StartNew();
-                var (x, _) = Run(exe, args, Path.Combine(workDir, $"{prefix}{label}.log"));
+                var (x, _) = Run(exe, args, Path.Combine(workDir, $"{prefix}{label}.log"), ct);
                 sw.Stop();
                 say(FormattableString.Invariant($"{probe} {label}: exit {x}, {sw.Elapsed.TotalSeconds:0.0} s"));
                 if (x != 0 || !File.Exists(emit)) throw new InvalidOperationException($"{probe} {label} exited {x} without an emit; see {Path.Combine(workDir, prefix + label + ".log")}.");
@@ -213,8 +219,28 @@ internal static class Recheck
             return (u, Go("patched", paOrder, u.Emit), buildSentence);
         }
         var (un, pa, buildSentence) = Arms(probe, adapter, "");
-        var (rv, news, verdict, lines) = Compare(un, pa, row.Identity, conflictdiffExe);
+        var (rv, news, verdict, lines) = Compare(un, pa, row.Identity, conflictdiffExe, ct);
         File.WriteAllLines(Path.Combine(workDir, "conflictdiff.txt"), lines);
+        if (disabled is null && moved is { Count: > 0 } && probe != "contactprobe")
+        {
+            // A nudge (Gate C) also re-runs contactprobe: whatever the move leaves in the air is a created placement-contact
+            // row, kept apart (ContactNew) so the proof's word and the banner both see it.
+            var (madapter, mwhy) = ContactArm(bundleDir, arm, moved);
+            IReadOnlyList<RowVerdict>? cnew = null;
+            if (mwhy is not null) say(mwhy);
+            else
+            {
+                var (cu, cp, cbuild) = Arms("contactprobe", madapter!.Value, "contact-");
+                var (_, _, cverdict, clines) = Compare(cu, cp, row.Identity, conflictdiffExe, ct);
+                File.WriteAllLines(Path.Combine(workDir, "contact-conflictdiff.txt"), clines);
+                cnew = RecheckRule.NewRows(DifferentialRows.Credit(ConflictIo.Read(cu.Emit), ConflictIo.Read(cp.Emit)));
+                buildSentence += " " + cbuild;
+                verdict += "; contactprobe " + cverdict;
+                lines = lines.Concat(clines.Where(l => l.Contains("! REFUSED", StringComparison.Ordinal)).Select(l => "contactprobe " + l.Trim())).ToList();
+            }
+            clock.Stop();
+            return new RecheckResult(rv, news, verdict, lines, buildSentence, clock.Elapsed.TotalSeconds, null, null, mwhy, string.Join(", ", moved), cnew ?? Array.Empty<RowVerdict>());
+        }
         if (disabled is null)
         {
             clock.Stop();
@@ -229,7 +255,7 @@ internal static class Recheck
         else if (cadapterOrNull is { } cadapter)
         {
             var (cu, cp, cbuild) = Arms("contactprobe", cadapter, "contact-");
-            var (_, _, cverdict, clines) = Compare(cu, cp, row.Identity, conflictdiffExe);
+            var (_, _, cverdict, clines) = Compare(cu, cp, row.Identity, conflictdiffExe, ct);
             File.WriteAllLines(Path.Combine(workDir, "contact-conflictdiff.txt"), clines);
             contact = DifferentialRows.Credit(ConflictIo.Read(cu.Emit), ConflictIo.Read(cp.Emit));
             buildSentence += " " + cbuild;
@@ -256,9 +282,15 @@ internal static class Recheck
     /// disabled object and, beside the word, the sentence when what rested on it was not judged.</summary>
     internal static string Banner(int rank, RecheckResult r)
     {
-        string what = r.Disabled is null ? "the moved reference" : $"the disabled object(s) {r.Disabled}";
-        string news = r.New.Count == 0 ? $"no new conflict involving {what}" : $"{r.New.Count} new conflict(s) involving {what}: " + string.Join("; ", r.New.Select(n => n.Id));
+        string what = r.Disabled is not null ? $"the disabled object(s) {r.Disabled}" : r.Nudged is not null ? $"the nudged object(s) {r.Nudged}" : "the moved reference";
+        var created = r.New.Concat(r.ContactNew ?? Array.Empty<RowVerdict>()).ToList();
+        string news = created.Count == 0 ? $"no new conflict involving {what}" : $"{created.Count} new conflict(s) involving {what}: " + string.Join("; ", created.Select(n => n.Id));
         string word = r.ContactNote is { } note ? $"{r.Row.Word} as an overlap, but {note}" : r.Row.Word;
+        // a nudge's words (Gate C): beside the frozen rule's word, what was checked and what was not; never "resolved" alone
+        if (r.Nudged is not null)
+            word = r.Row.Word == "resolved" && r.ContactNote is null && created.Count == 0
+                ? $"resolved ({NudgeRule.Checked}); {NudgeRule.RoutesNotChecked}"
+                : $"{word}; {NudgeRule.RoutesNotChecked}";
         if (r.Others is { Count: > 0 } others)
             news += $". The {others.Count} other row(s) naming them: " + string.Join(", ", others.GroupBy(o => o.Word).Select(g => $"{g.Count()} {g.Key}"));
         return FormattableString.Invariant($"re-check of conflict {rank}: {word}. {news}. ({r.Verdict}; {r.WallSeconds:0.0} s)");

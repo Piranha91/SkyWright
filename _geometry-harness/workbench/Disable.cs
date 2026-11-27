@@ -10,7 +10,19 @@ namespace Workbench;
 /// <c>references=</c>); whether it is a large reference from <see cref="LargeReferenceLists"/>, the probes' and the
 /// viewer's own rule (the union of every copy of the worldspace's list).</summary>
 internal sealed record DisableFacts(string Key, string? RecordType, long RawFlags, bool Deleted, string? EnableParent, string? LeadsTo,
-                                    bool Navcut, string? LargeIn, IReadOnlyList<(string Key, string Field)> NamedBy, int NamedNotListed);
+                                    bool Navcut, string? LargeIn, IReadOnlyList<(string Key, string Field)> NamedBy, int NamedNotListed)
+{
+    /// <summary>The base record's type (Static, Activator, Furniture, IdleMarker, Door, MiscItem...), as the same read gives it;
+    /// the nudge's refusals read it (<see cref="NudgeRule"/>), the disable's do not.</summary>
+    public string? BaseType { get; init; }
+    public string? BaseEditorId { get; init; }
+    /// <summary>The base carries the Is-Marker header flag (0x00800000).</summary>
+    public bool BaseMarkerFlag { get; init; }
+    /// <summary>The reference is a trigger or other primitive box (XPRM).</summary>
+    public bool Primitive { get; init; }
+    /// <summary>The reference is a map marker (XMRK).</summary>
+    public bool MapMarker { get; init; }
+}
 
 /// <summary>Whether a reference may be disabled, and the one sentence when not: what depends on it, named (with a count when
 /// many), and what to try. Gate B refuses; there is no "disable anyway". A reference that cuts the navmesh is allowed, and
@@ -29,7 +41,7 @@ internal static class DisableRule
 
     const string Try = "try moving it instead, or fix the conflict on the other object";
 
-    static string List(IReadOnlyList<string> items, int notListed)
+    internal static string List(IReadOnlyList<string> items, int notListed)
     {
         int n = items.Count + notListed;
         var shown = items.Take(5).ToList();
@@ -43,7 +55,7 @@ internal static class DisableRule
     /// placed referrer whose field the read did not find.</summary>
     static readonly string[] PlacedFields = { "EnableParent", "LinkedReferences", "ActivateParents", "TeleportDestination", "VirtualMachineAdapter" };
 
-    static string[] Tokens(string field)
+    internal static string[] Tokens(string field)
     {
         var t = field.Split(", ", StringSplitOptions.RemoveEmptyEntries);
         return t.Length > 0 && t.All(x => PlacedFields.Contains(x)) ? t : Array.Empty<string>();

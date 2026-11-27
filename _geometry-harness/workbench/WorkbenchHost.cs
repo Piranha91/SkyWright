@@ -1688,7 +1688,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             _trialsWork = work;
             return _trials = new TrialLane(work,
                 async (edit, patch, outPath) => await (await writer).CommitAsync(new[] { edit }, patch, dryRun: false, outPath: outPath),
-                (patch, folder, dir, contact, ct) => RecheckTrialAsync(writer, patch, folder, dir),
+                (patch, folder, dir, contact, ct) => RecheckTrialAsync(writer, patch, folder, dir, contact, ct),
                 pose => Settle(_trials?.Key ?? _session.Selected ?? key, pose), pose => ContactsAt(_trials?.Key ?? _session.Selected ?? key, pose));
         }
     }
@@ -1702,27 +1702,57 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         return g.Refs.TryGetValue(key.ToString(), out var a) && g.Refs.TryGetValue(ok.ToString(), out var b) && a.I.Count > 0 && b.I.Count > 0 ? (a.Box, b.Box) : null;
     }
 
-    /// <summary>The live geometry near <paramref name="pose"/> with <paramref name="key"/> placed at it (its baked vertices carried there).</summary>
-    CaptureViews.Geometry GeometryWith(FormKey key, RefPlacementEdit.Pose pose, float margin = 600f)
+    /// <summary>A drawn shape as the drop and the contact read take it: its key, name, world vertices (viewer Y-up) and bounds.</summary>
+    internal sealed record GeoShape(bool Terrain, string Key, string Name, Vector3[] Verts, int[] Tris, Vector3 Min, Vector3 Max);
+
+    /// <summary>The geometry near <paramref name="pose"/> with the reference placed at it: its baked vertices carried there by
+    /// <paramref name="m"/>, and every other shape within <paramref name="margin"/> of the pose.</summary>
+    static CaptureViews.Geometry Compose(string key, IEnumerable<GeoShape> others, IEnumerable<(string Name, Vector3[] Baked, int[] Tris)> subject,
+                                         Matrix4x4 m, Vector3 at, float margin)
     {
-        var at = TexturedScene.YUp(ToV(pose.Position));
         var lo = at - new Vector3(margin); var hi = at + new Vector3(margin);
         var g = new CaptureViews.Geometry();
-        var baked = RefPlacementEdit.BakedPose(_session.RefOf(key).Ref);
-        var m = RefPlacementEdit.DeltaYUp(baked, pose);
-        foreach (var s in _opt.PickShapes)
-        {
-            if (s.Kind == PickKind.Ref && s.Ref.RefKey == key)
-                g.Add(key.ToString(), s.Ref.BaseEditorId ?? key.ToString(), RefPlacementEdit.BakedVerts(s).Select(v => Vector3.Transform(v, m)).ToArray(), s.Tris);
-            else if ((s.Kind == PickKind.Ref || s.Kind == PickKind.Terrain) && s.Max.X >= lo.X && s.Min.X <= hi.X && s.Max.Y >= lo.Y && s.Min.Y <= hi.Y && s.Max.Z >= lo.Z && s.Min.Z <= hi.Z)
-                g.Add(s.Kind == PickKind.Terrain ? CaptureViews.TerrainKey : s.Ref.RefKey.ToString(), s.Kind == PickKind.Terrain ? CaptureViews.TerrainKey : s.Ref.BaseEditorId ?? s.Ref.RefKey.ToString(), s.Verts, s.Tris);
-        }
+        foreach (var (name, baked, tris) in subject) g.Add(key, name, baked.Select(v => Vector3.Transform(v, m)).ToArray(), tris);
+        foreach (var s in others)
+            if (s.Max.X >= lo.X && s.Min.X <= hi.X && s.Max.Y >= lo.Y && s.Min.Y <= hi.Y && s.Max.Z >= lo.Z && s.Min.Z <= hi.Z)
+                g.Add(s.Terrain ? CaptureViews.TerrainKey : s.Key, s.Terrain ? CaptureViews.TerrainKey : s.Name, s.Verts, s.Tris);
         return g;
     }
+
+    IEnumerable<GeoShape> OthersOf(FormKey key, bool copy) => _opt.PickShapes
+        .Where(s => (s.Kind == PickKind.Ref && s.Ref.RefKey != key) || s.Kind == PickKind.Terrain)
+        .Select(s => new GeoShape(s.Kind == PickKind.Terrain, s.Kind == PickKind.Terrain ? CaptureViews.TerrainKey : s.Ref.RefKey.ToString(),
+                                  s.Kind == PickKind.Terrain ? CaptureViews.TerrainKey : s.Ref.BaseEditorId ?? s.Ref.RefKey.ToString(),
+                                  copy ? s.Verts.ToArray() : s.Verts, copy ? s.Tris.ToArray() : s.Tris, s.Min, s.Max));
+
+    IEnumerable<(string Name, Vector3[] Baked, int[] Tris)> SubjectOf(FormKey key, bool copy) => _opt.PickShapes
+        .Where(s => s.Kind == PickKind.Ref && s.Ref.RefKey == key)
+        .Select(s => (s.Ref.BaseEditorId ?? key.ToString(), copy ? RefPlacementEdit.BakedVerts(s).ToArray() : RefPlacementEdit.BakedVerts(s), copy ? s.Tris.ToArray() : s.Tris));
+
+    /// <summary>The live geometry near <paramref name="pose"/> with <paramref name="key"/> placed at it (its baked vertices carried there).</summary>
+    CaptureViews.Geometry GeometryWith(FormKey key, RefPlacementEdit.Pose pose, float margin = 600f)
+        => Compose(key.ToString(), OthersOf(key, false), SubjectOf(key, false),
+                   RefPlacementEdit.DeltaYUp(RefPlacementEdit.BakedPose(_session.RefOf(key).Ref), pose), TexturedScene.YUp(ToV(pose.Position)), margin);
 
     /// <summary>A candidate raised 20 units and dropped onto what is below it; a refused drop keeps it at its own height and says why.</summary>
     (RefPlacementEdit.Pose Pose, string Drop) Settle(FormKey key, RefPlacementEdit.Pose target)
         => TrialLane.SettleBy(target, p => CaptureViews.Drop(GeometryWith(key, p), key.ToString()));
+
+    /// <summary>Gate C: the same settle, over a copy of the scene's shapes near the object taken now on the UI thread, so the
+    /// nudge settles its candidates in the background while the window stays usable (and an edit made meanwhile changes nothing).</summary>
+    Func<RefPlacementEdit.Pose, (RefPlacementEdit.Pose Pose, string Drop)> SettleSnapshot(FormKey key, RefPlacementEdit.Pose home)
+    {
+        const float margin = 600f;
+        var at = TexturedScene.YUp(ToV(home.Position));
+        var reach = new Vector3(margin + NudgeRule.Cap + 40f);
+        var others = OthersOf(key, false).Where(s => s.Max.X >= at.X - reach.X && s.Min.X <= at.X + reach.X && s.Max.Y >= at.Y - reach.Y && s.Min.Y <= at.Y + reach.Y
+                                                     && s.Max.Z >= at.Z - reach.Z && s.Min.Z <= at.Z + reach.Z)
+                                         .Select(s => s with { Verts = s.Verts.ToArray(), Tris = s.Tris.ToArray() }).ToList();
+        var subject = SubjectOf(key, true).ToList();
+        var baked = RefPlacementEdit.BakedPose(_session.RefOf(key).Ref);
+        string k = key.ToString();
+        return target => TrialLane.SettleBy(target, p => CaptureViews.Drop(Compose(k, others, subject, RefPlacementEdit.DeltaYUp(baked, p), TexturedScene.YUp(ToV(p.Position)), margin), k));
+    }
 
     /// <summary>What the contact owner says the reference touches or crosses at a candidate pose: a fact beside the drop sentence.</summary>
     IReadOnlyList<string> ContactsAt(FormKey key, RefPlacementEdit.Pose pose)
@@ -1734,8 +1764,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     }
 
     /// <summary>One trial's re-check: the open row's probe on the trial patch, unpatched and patched (<see cref="Recheck.RunAll"/>),
-    /// then the other rows of the moved reference and its carried predicates still holding.</summary>
-    async Task<TrialRecheck> RecheckTrialAsync(Task<PatchWriter> writer, string patch, string outPath, string work)
+    /// with contactprobe too for a nudge's proof (<paramref name="contact"/>), then the other rows of the moved reference and its
+    /// carried predicates still holding.</summary>
+    async Task<TrialRecheck> RecheckTrialAsync(Task<PatchWriter> writer, string patch, string outPath, string work, bool contact = false, CancellationToken ct = default)
     {
         var w = await writer;
         var open = Shell.CurrentRow ?? throw new InvalidOperationException("no conflict row is open, so the trial cannot be re-checked.");
@@ -1750,12 +1781,130 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var buildDirs = (Environment.GetEnvironmentVariable("WB_PROBE_DIRS") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries);
         var game = Path.GetDirectoryName(Path.GetFullPath(t.DataDir.TrimEnd('\\', '/')))!;
         string population = "not read";
+        var key = _trials?.Key?.ToString() ?? open.Row.RefKey;
         var r = await Task.Run(() => Recheck.RunAll(b.Dir, b.Arm, open.Row, plugin, mod, t.Instance, t.Profile, game, work, engine, conflictdiff,
             buildDirs, harness, s => { if (population == "not read" && s.Contains("population", StringComparison.OrdinalIgnoreCase)) population = s.Split('\n')[0].Trim();
-                                       _window?.Dispatcher.BeginInvoke(() => Say("trial re-check: " + s)); }));
+                                       _window?.Dispatcher.BeginInvoke(() => Say("trial re-check: " + s)); },
+            moved: contact ? new[] { key } : null, ct: ct), ct);
         var un = Path.Combine(work, "unpatched.json"); var pa = Path.Combine(work, "patched.json");
-        var key = _trials?.Key?.ToString() ?? open.Row.RefKey;
-        return new TrialRecheck(r, ClearRule.OthersOfRef(un, pa, r.Row.Id, key), ClearRule.StillHolding(pa, key), population);
+        return new TrialRecheck(r, ClearRule.OthersOfRef(un, pa, r.Row.Id, key), ClearRule.StillHolding(pa, key), population, r.ContactNew);
+    }
+
+    // ---- Gate C: nudge one object -----------------------------------------------------------------------------------
+    NudgeLane? _nudge;
+    CancellationTokenSource? _nudgeStop;
+    string? _nudgeSaid;
+    FormKey? _nudgeKey;
+    Task<string>? IWorkbenchScene.NudgeRunning => NudgeRunning;
+    internal Task<string>? NudgeRunning { get; private set; }
+
+    object? IWorkbenchScene.NudgeState => new
+    {
+        running = NudgeRunning is { IsCompleted: false }, @ref = _nudgeKey?.ToString(), phase = _nudge?.Phase, judged = _nudge?.Judged, clear = _nudge?.ClearCount,
+        proofs = _nudge?.Proofs.Select(p => new { n = p.N, word = p.Word, sentence = p.Sentence, seconds = p.Seconds }).ToList(),
+        said = _nudgeSaid, cap = NudgeRule.Cap, maxProofs = NudgeLane.MaxProofs,
+        notChecked = new[] { "walking routes (route cut): not run for a nudge yet", "rotation: not searched", "scripts that find the object at run time, packages that pick furniture by type, and LOD built from it: not read" },
+    };
+
+    string IWorkbenchScene.AbortNudge() => AbortNudge();
+    internal string AbortNudge()
+    {
+        if (NudgeRunning is not { IsCompleted: false }) return "no nudge is running.";
+        _nudgeStop?.Cancel();
+        return $"stopping the nudge of {_nudgeKey}: the running probe is stopped and nothing is staged.";
+    }
+
+    Task<string> IWorkbenchScene.NudgeAsync(FormKey key) => NudgeAsync(key);
+
+    /// <summary>The Nudge button's and the <c>nudge</c> verb's one path: every refusal first, in one sentence each, then the lane in
+    /// the background. Returns the sentence that it started.</summary>
+    internal async Task<string> NudgeAsync(FormKey key)
+    {
+        if (ReadOnly) throw new InvalidOperationException(ReadOnlyWhy);
+        if (NudgeRunning is { IsCompleted: false }) throw new InvalidOperationException($"a nudge of {_nudgeKey} is already running; wait for it or abort it.");
+        if (_trials?.Running is { IsCompleted: false }) throw new InvalidOperationException("a find_clear is running; wait for it before nudging.");
+        if (!_session.IsDrawn(key)) throw new InvalidOperationException($"{key} is not a drawn reference in this scene; select one the window shows.");
+        var open = Shell.CurrentRow ?? throw new InvalidOperationException("a nudge clears the open conflict, and none is open; open one from the Conflicts tab.");
+        if (open.Row.CheckId != "geometry.object-overlap")
+            throw new InvalidOperationException($"a nudge clears an object overlap, and the open conflict is a {open.Row.CheckId} row; open an overlap, or move the object by hand.");
+        var otherKey = string.Equals(open.Row.RefKey, key.ToString(), StringComparison.OrdinalIgnoreCase) ? open.Row.OtherKey
+                     : string.Equals(open.Row.OtherKey, key.ToString(), StringComparison.OrdinalIgnoreCase) ? open.Row.RefKey : null;
+        if (otherKey is null || !FormKey.TryFactory(otherKey, out var ok))
+            throw new InvalidOperationException($"{key} is not one of the open conflict's two objects; select one of them to nudge.");
+        if (NudgeRule.OneFix(_session, key) is { } oneFix) throw new InvalidOperationException(oneFix);
+        var b = Shell.Bundle ?? throw new InvalidOperationException("no bundle is open, so a nudge has no probe command to prove a position with.");
+        if (Recheck.ContactArm(b.Dir, b.Arm, new[] { key.ToString() }).Why is not null)
+            throw new InvalidOperationException("this scan did not include placement contact, so a nudge cannot prove that nothing is left in the air; scan again with the placement-contact check ticked, or move the object by hand.");
+        if (((IWorkbenchScene)this).Trials is not { } trials || trials.WorkFolder is null)
+            throw new InvalidOperationException("with no Work Folder, a nudge's trial patches have nowhere to go; choose one outside the instance and the game folder (workbench_act verb set_work_folder).");
+        var harness = Shell.Launcher.Engine.HarnessDir();
+        var judgeExe = HarnessShared.CheckoutLayout.ProgramExe(harness, "overlapprobe");
+        if (!File.Exists(judgeExe)) throw new InvalidOperationException($"overlapprobe is not built at {judgeExe}, so the nudge's judge cannot run; build SkyWright (scripts\\build.ps1).");
+        var src = ((IWorkbenchScene)this).ContextSource ?? throw new InvalidOperationException("this scene has no write target to read what depends on the object from; open it from the launcher's profile.");
+        if (await src.MismatchAsync(key) is { } why) throw new InvalidOperationException(why);
+        var (refusal, note) = NudgeRule.Refusal(await DisableRule.ReadAsync(src, key), NudgeKinds.Load(NudgeKinds.DefaultPath()));
+        if (refusal is not null) throw new InvalidOperationException(refusal);
+        var boxes = ((IWorkbenchScene)this).PairBoxes(key) ?? throw new InvalidOperationException($"{key} or {ok} is not drawn in this scene, so no candidate can be made.");
+        var home = RefPlacementEdit.BakedPose(_session.RefOf(key).Ref);
+        var name = _session.RefOf(key).Ref.BaseEditorId;
+        var w = await WriterAsync();
+        var t = w.Target;
+        var game = Path.GetDirectoryName(Path.GetFullPath(t.DataDir.TrimEnd('\\', '/')))!;
+        var dir = Path.Combine(trials.WorkFolder, "nudge-" + DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture));
+        Directory.CreateDirectory(dir);
+        var candidate = Recheck.FromBundle(b.Dir, open.Row.CheckId, b.Arm).Candidate;
+        var stop = new CancellationTokenSource();
+        var settle = SettleSnapshot(key, home);
+        var lane = new NudgeLane(settle,
+            (req, ct) => Task.Run(() => RunJudge(judgeExe, req, dir, candidate, t, game, ct), ct),
+            (edit, n, ct) => trials.ProveAsync(edit, n, contact: true, ct),
+            (pose, staged) => _window!.Dispatcher.Invoke(() =>
+            {
+                // the object may have been edited while the nudge ran: then nothing is staged
+                if (NudgeRule.OneFix(_session, key) is { } changed) return "nothing is staged: " + changed;
+                _session.Stage(key, pose, staged);
+                AfterStage();
+                return $"staged: nudge {name ?? key.ToString()} {staged}" + (note is null ? "" : " " + note);
+            }),
+            s => _window?.Dispatcher.BeginInvoke(() => { Say(s); Shell.SetBanner(s); }));
+        _nudge = lane; _nudgeStop = stop; _nudgeKey = key; _nudgeSaid = null;
+        async Task<string> Go()
+        {
+            string said;
+            try { said = await lane.RunAsync(key, name, home, boxes.Subject, boxes.Other, stop.Token, ok); }
+            catch (OperationCanceledException) { said = $"the nudge of {key} was stopped; nothing is staged."; }
+            catch (Exception ex) { said = "the nudge could not finish: " + (ex is AggregateException ae ? ae.GetBaseException() : ex).Message; }
+            _nudgeSaid = said;
+            _window?.Dispatcher.BeginInvoke(() => { Say(said); Shell.SetBanner(said); UpdateStatus(); NudgeChanged?.Invoke(); });
+            return said;
+        }
+        NudgeRunning = Go();
+        NudgeChanged?.Invoke();
+        return FormattableString.Invariant($"nudging {name ?? key.ToString()} ({key}) away from {ok}: the search and the judge take about 30 s, then each proof by the probes 150-220 s, at most {NudgeLane.MaxProofs}; the window stays usable, and Abort stops it. Nothing is written: the position the probes confirm is staged.")
+               + (note is null ? "" : " " + note);
+    }
+
+    /// <summary>Raised when a nudge starts or ends (the button's label).</summary>
+    internal event Action? NudgeChanged;
+
+    /// <summary>The judge program: overlapprobe --nudge on the bundle arm's order rewritten for the scene's profile.</summary>
+    static NudgeJudgeAnswer RunJudge(string exe, NudgeRequest req, string dir, string candidate, WriteTarget t, string game, CancellationToken ct)
+    {
+        var order = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(candidate))!.AsObject();
+        order["BaseProfile"] = t.Profile;
+        var orderPath = Path.Combine(dir, "order.json");
+        File.WriteAllText(orderPath, order.ToJsonString());
+        var reqPath = Path.Combine(dir, "request.json"); var ansPath = Path.Combine(dir, "answer.json");
+        static float[] V(Vec3 v) => new[] { v.X, v.Y, v.Z };
+        File.WriteAllText(reqPath, JsonSerializer.Serialize(new
+        {
+            schema = "nudge-request/1", subject = req.Subject.ToString(), other = req.Other.ToString(), home = V(req.Home.Position), reach = NudgeRule.Cap + 30f,
+            candidates = req.Candidates.Select(c => new { n = c.N, position = V(c.Pose.Position) }).ToList(),
+        }));
+        var (x, text) = Recheck.Run(exe, new[] { "--order", orderPath, "--instance", t.Instance, "--profile", t.Profile, "--game", game, "--nudge", reqPath, "--nudge-out", ansPath },
+                                    Path.Combine(dir, "judge.log"), ct);
+        if (File.Exists(ansPath)) return NudgeJudgeAnswer.Read(ansPath);
+        throw new InvalidOperationException($"the nudge's judge (overlapprobe --nudge) exited {x} without an answer: {text.Trim().Split('\n').LastOrDefault()?.Trim()}; see {Path.Combine(dir, "judge.log")}.");
     }
 
     IReadOnlyList<string>? IWorkbenchScene.DependencyRows(string key)
@@ -1867,6 +2016,18 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             catch (InvalidOperationException ex) { Say("disable refused: " + ex.Message); Shell.SetBanner(ex.Message); }
             UpdateStatus(); Invalidate();
         }));
+        var nudge = new Button { Content = "Nudge", Margin = new Thickness(4),
+            ToolTip = $"find the smallest move, within {NudgeRule.Cap:0} units, that clears the open conflict for the selected object; the judge chooses, the probes prove it (overlap and what rests on it), and the position is staged, never written. Walking routes are not checked. Press again to abort." };
+        nudge.Click += async (_, _) =>
+        {
+            if (NudgeRunning is { IsCompleted: false }) { var a = AbortNudge(); Say(a); Shell.SetBanner(a); return; }
+            if (_session.Selected is not { } k) { Shell.SetBanner("select an object first"); return; }
+            try { var s = await NudgeAsync(k); Say(s); Shell.SetBanner(s); }
+            catch (InvalidOperationException ex) { Say("nudge refused: " + ex.Message); Shell.SetBanner(ex.Message); }
+            UpdateStatus(); Invalidate();
+        };
+        NudgeChanged += () => nudge.Content = NudgeRunning is { IsCompleted: false } ? "Abort nudge" : "Nudge";
+        row.Children.Add(nudge);
         var snap = new ComboBox { Margin = new Thickness(4), ToolTip = "snap moves to a grid and turns to a step", ItemsSource = new[] { "no snap", "grid 1", "grid 8", "grid 32", "grid 128", "turn 5°", "turn 15°", "turn 45°" }, SelectedIndex = 0 };
         snap.SelectionChanged += (_, _) =>
         {
@@ -1968,8 +2129,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 var line = new DockPanel { Margin = new Thickness(6, 1, 6, 1) };
                 bool staged = _session.Pending.Any(e => e.Ref == k);
                 string text = staged
-                    ? EditSession.Sentence(new PendingEdit(k, _session.Pending.First(e => e.Ref == k).Before, _session.Current(k), _session.IsDisabled(k)), _session.RefOf(k).Ref.BaseEditorId)
+                    ? EditSession.Sentence(new PendingEdit(k, _session.Pending.First(e => e.Ref == k).Before, _session.Current(k), _session.IsDisabled(k), _session.Pending.Last(e => e.Ref == k).Nudge), _session.RefOf(k).Ref.BaseEditorId)
                     : _session.WrittenDisabled.Contains(k) ? $"written to {_session.Written[k].Patch}: {_session.RefOf(k).Ref.BaseEditorId ?? k.ToString()}, initially disabled (the plugin is not enabled)"
+                    : _session.WrittenNudged.Contains(k) ? $"written to {_session.Written[k].Patch}: {_session.RefOf(k).Ref.BaseEditorId ?? k.ToString()}, nudged ({NudgeRule.Checked}; {NudgeRule.RoutesNotChecked})"
                     : $"written to {_session.Written[k].Patch}: {_session.RefOf(k).Ref.BaseEditorId ?? k.ToString()}";
                 var revert = new Button { Content = "Revert", Margin = new Thickness(4, 0, 0, 0), ToolTip = staged ? "drop this object's staged edits" : "remove this object's override from its patch" };
                 var key = k;
@@ -2194,6 +2356,11 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 .OrderBy(k => string.Equals(k, open.Row.RefKey, StringComparison.OrdinalIgnoreCase) || string.Equals(k, open.Row.OtherKey, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
                 .ThenBy(k => k, StringComparer.Ordinal).ToList();
             IReadOnlyList<string>? disabled = disabledHere.Count > 0 ? disabledHere : null;
+            // every object this patch moved by a nudge (Gate C): contactprobe judges what the move left in the air, and the banner
+            // says walking routes were not checked
+            var nudgedHere = _session.WrittenNudged.Where(k => string.Equals(_session.Written[k].Patch, plugin, StringComparison.OrdinalIgnoreCase))
+                .Select(k => k.ToString()).OrderBy(k => k, StringComparer.Ordinal).ToList();
+            IReadOnlyList<string>? nudged = nudgedHere.Count > 0 && disabled is null ? nudgedHere : null;
             // The view shows the edited reference where this patch puts it (read back from the patch), never silently
             // where the load order still has it (stage-4 review M-1); the open row's own object, when it is the one this
             // patch disables, has no new place to show.
@@ -2213,15 +2380,15 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             var game = Path.GetDirectoryName(Path.GetFullPath(t.DataDir.TrimEnd('\\', '/')))!;
             var work = Path.Combine(_outDir, "recheck-" + DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss"));
             Rechecking = true; RecheckRefusal = null;
-            Shell.SetBanner($"re-checking conflict {open.Rank} ({open.Row.Kind}) with {plugin}: the detector runs on the patch's cell, unpatched and patched{(disabled is null ? "" : ", and placement contact for what rested on the disabled object")}; the window stays usable.");
+            Shell.SetBanner($"re-checking conflict {open.Rank} ({open.Row.Kind}) with {plugin}: the detector runs on the patch's cell, unpatched and patched{(disabled is null ? nudged is null ? "" : ", and placement contact for what the nudge may leave in the air" : ", and placement contact for what rested on the disabled object")}; the window stays usable.");
             UpdateStatus();
             var row = open.Row; var arm = b.Arm; var dir = b.Dir;
             var r = await Task.Run(() => Recheck.RunAll(dir, arm, row, plugin, mod, t.Instance, t.Profile, game, work, engine, conflictdiff,
-                buildDirs, harness, s => _window?.Dispatcher.BeginInvoke(() => Say("re-check: " + s)), disabled));
+                buildDirs, harness, s => _window?.Dispatcher.BeginInvoke(() => Say("re-check: " + s)), disabled, nudged));
             LastRecheck = r;
             Shell.SetBanner(Recheck.Banner(open.Rank, r));
             Say("re-check: row " + r.Row.Id + ": " + r.Row.Sentence);
-            foreach (var n in r.New) Say("re-check: new row " + n.Id + ": " + n.Sentence);
+            foreach (var n in r.New.Concat(r.ContactNew ?? Array.Empty<RowVerdict>())) Say("re-check: new row " + n.Id + ": " + n.Sentence);
             foreach (var o in r.Others ?? Array.Empty<RowVerdict>()) Say("re-check: other row naming a disabled object " + o.Id + ": " + o.Sentence);
             if (r.ContactNote is { } cn) Say("re-check: " + cn);
             Say("re-check: " + r.BuildSentence);

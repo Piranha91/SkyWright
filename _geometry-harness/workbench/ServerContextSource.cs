@@ -146,7 +146,7 @@ internal sealed class ServerContextSource : IContextSource
     public async Task<DisableFacts> DisableFactsAsync(FormKey key)
     {
         var root = await Records(new() { ["formids"] = new[] { key.ToString() }, ["project"] = new Dictionary<string, object?>
-            { ["form"] = "fields", ["fields"] = new[] { "MajorRecordFlagsRaw", "IsDeleted", "EnableParent", "TeleportDestination", "CollisionLayer" }, ["depth"] = 3 } }).ConfigureAwait(false);
+            { ["form"] = "fields", ["fields"] = new[] { "MajorRecordFlagsRaw", "IsDeleted", "EnableParent", "TeleportDestination", "CollisionLayer", "Base", "Primitive", "MapMarker" }, ["depth"] = 3 } }).ConfigureAwait(false);
         string? type = null; var d = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var r in Rows(root, "records"))
         {
@@ -165,10 +165,33 @@ internal sealed class ServerContextSource : IContextSource
                 ["project"] = new Dictionary<string, object?> { ["form"] = "fields", ["fields"] = new[] { "Flags" } } }).ConfigureAwait(false);
             navcut = Rows(coll, "matches").SelectMany(r => Rows(r, "fields")).Any(f => S(f, "path") == "Flags" && (S(f, "value") ?? "").Contains("NavmeshObstacle", StringComparison.Ordinal));
         }
+        // the base record: its type, EditorID and flags (the Is-Marker flag), by the same reader
+        string? baseType = null, baseEdid = null; long baseRaw = 0;
+        if (d.TryGetValue("Base", out var bv) && System.Text.RegularExpressions.Regex.Match(bv, @"[0-9A-Fa-f]{6}:[^\s\)\]]+\.es[mpl]") is { Success: true } bm)
+        {
+            var b = await Records(new() { ["formids"] = new[] { bm.Value }, ["project"] = new Dictionary<string, object?>
+                { ["form"] = "fields", ["fields"] = new[] { "EditorID", "MajorRecordFlagsRaw" }, ["depth"] = 1 } }).ConfigureAwait(false);
+            foreach (var r in Rows(b, "records"))
+            {
+                baseType = S(r, "type");
+                foreach (var f in Rows(r, "fields"))
+                {
+                    if (S(f, "path") is not { } p || !f.TryGetProperty("value", out var v)) continue;
+                    var text = v.ValueKind == JsonValueKind.String ? v.GetString()! : v.GetRawText();
+                    if (p == "EditorID") baseEdid = text; else if (p == "MajorRecordFlagsRaw" && long.TryParse(text, out var n2)) baseRaw = n2;
+                }
+            }
+        }
+        static bool Present(Dictionary<string, string> d, string field) =>
+            d.Any(kv => (kv.Key == field || kv.Key.StartsWith(field + ".", StringComparison.Ordinal)) && kv.Value is not ("(absent)" or "" or "null"));
         return new DisableFacts(key.ToString(), type, raw, d.TryGetValue("IsDeleted", out var del) && del == "True",
             d.TryGetValue("EnableParent.Reference", out var ep) ? ep : null,
             d.TryGetValue("TeleportDestination.Door", out var door) ? door : null,
-            navcut, await LargeInAsync(key).ConfigureAwait(false), Array.Empty<(string, string)>(), 0);
+            navcut, await LargeInAsync(key).ConfigureAwait(false), Array.Empty<(string, string)>(), 0)
+        {
+            BaseType = baseType, BaseEditorId = baseEdid, BaseMarkerFlag = (baseRaw & 0x00800000) != 0,
+            Primitive = Present(d, "Primitive"), MapMarker = Present(d, "MapMarker"),
+        };
     }
 
     (IReadOnlyList<(string Path, DateTime Stamp)> Plugins, Dictionary<FormKey, LargeReferenceLists> Lists)? _large;

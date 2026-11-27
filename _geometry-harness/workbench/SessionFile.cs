@@ -50,7 +50,7 @@ internal static class SessionFile
     {
         if (s.PlanId is not { } plan || s.Arm is not { } arm) return null;
         var sc = s.Scene;
-        var staged = sc?.Session.Pending.Select(e => new SavedEdit(e.Ref.ToString(), e.Before, e.After, e.Disable)).ToList() ?? new List<SavedEdit>();
+        var staged = sc?.Session.Pending.Select(e => new SavedEdit(e.Ref.ToString(), e.Before, e.After, e.Disable, e.Nudge)).ToList() ?? new List<SavedEdit>();
         var written = sc is null ? new List<SavedWritten>()
             : sc.Session.Written.Select(kv => new SavedWritten(kv.Key.ToString(), kv.Value.Patch, sc.PatchFolderOf(kv.Value.Patch) ?? "", sc.Session.WrittenDisabled.Contains(kv.Key))).ToList();
         return new SessionData(plan, arm, sc?.Session.Selected?.ToString(), s.OpenRow?.Rank, sc?.Camera, staged, written, sc?.Cell);
@@ -111,7 +111,7 @@ internal static class SessionFile
                 stale.Add(e.Ref);
                 continue;
             }
-            if (e.Disable) session.StageDisable(k); else session.Stage(k, e.After);
+            if (e.Disable) session.StageDisable(k); else session.Stage(k, e.After, e.Nudge);
         }
         if (data.Selected is { } sel && FormKey.TryFactory(sel, out var sk) && session.IsDrawn(sk)) session.Select(sk);
         return notes;
