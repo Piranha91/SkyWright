@@ -540,7 +540,23 @@ internal static class Shell
         Ranked.Select(r => r.Row).FirstOrDefault(r => string.Equals(r.RefKey, refKey, StringComparison.OrdinalIgnoreCase))?.Cell;
 
     /// <summary>A click on a Conflicts row: land on the row's reference (its Necessary record, the one a fix touches).</summary>
-    internal static void OpenRow(RankedRow r) { WorkbenchHost.Say($"open conflict {r.Rank}: {r.Row.Identity}"); CurrentRow = r; OpenRef(r.Row.RefKey, r.Row.Cell); }
+    internal static void OpenRow(RankedRow r)
+    {
+        WorkbenchHost.Say($"open conflict {r.Rank}: {r.Row.Identity}"); CurrentRow = r;
+        if (r.Row.Light is not null)
+        {
+            // a lighting row: land on the light (or fixture) in its cell, and mark where a gone fixture stood (LightRows.Target)
+            var t = LightRows.Target(r.Row);
+            if (t.WhyNot is { } why) { SetBanner(why); LastLanding = "refused: " + why; return; }
+            PendingPoint = t.FixtureAt is { } fa ? (fa, $"the magenta diamond marks where {r.Row.Light.FixtureEdid ?? r.Row.OtherKey ?? "the fixture"} stood in its own setup") : null;
+            OpenRef(t.RefKey!, t.Cell);
+            return;
+        }
+        OpenRef(r.Row.RefKey, r.Row.Cell);
+    }
+
+    /// <summary>A second place to mark when the next landing happens (a lighting row's gone fixture), and what it marks.</summary>
+    internal static (System.Numerics.Vector3 At, string What)? PendingPoint;
 
     /// <summary>Land on a reference: here if this scene draws it, else rebuild the scene for its cell.</summary>
     internal static void OpenRef(string refKey, string? cell)

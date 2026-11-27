@@ -36,6 +36,9 @@ internal sealed class ConflictMarks : IRenderOverlay
     internal bool StandInShaded;
     const float StandInAlpha = 0.5f;
     internal string? StandInFor;
+    /// <summary>A second marked place (a lighting row's gone fixture): a shaded magenta diamond, and what it marks.</summary>
+    internal List<float> PointTris = new();
+    internal string? PointFor;
     internal bool Enabled = Environment.GetEnvironmentVariable("WB_MARKS") != "off";
     /// <summary>The bar's "Outlines": each object's outline and the crossing line through anything in front. Off by default.</summary>
     internal bool Outlines;
@@ -326,7 +329,7 @@ internal sealed class ConflictMarks : IRenderOverlay
 
     public void Draw(GlRenderer renderer, in OverlayContext context)
     {
-        if (!Enabled || (Selected is null && Partner is null && StandIn.Count == 0)) return;
+        if (!Enabled || (Selected is null && Partner is null && StandIn.Count == 0 && PointTris.Count == 0)) return;
         if (!ReferenceEquals(Selected, _builtSel) || !ReferenceEquals(Partner, _builtPartner)) Rebuild();
         // the solid tints, on the objects' own visible surfaces
         if (renderer.BeginOverlaySurfacePass(context, out var st))
@@ -334,6 +337,7 @@ internal sealed class ConflictMarks : IRenderOverlay
             var none = Array.Empty<(int, int, GlVec3)>();
             if (_partnerTris.Count >= 18) renderer.DrawOverlayTranslucentTint(_partnerTris, PartnerColour, TintAlpha, none);
             if (_selTris.Count >= 18) renderer.DrawOverlayTranslucentTint(_selTris, SelectedColour, TintAlpha, none);
+            if (PointTris.Count >= 18) renderer.DrawOverlayTranslucentTint(PointTris, PartnerColour, StandInAlpha, none);
             if (StandInTris.Count >= 18)
             {
                 // a plane is one flat sheet: unlit, so it reads as the same cyan from either side and at any angle to the light
