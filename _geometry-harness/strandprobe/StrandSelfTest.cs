@@ -26,7 +26,10 @@ static class StrandSelfTest
         P = new("SfP", ModType.Plugin);
     static FormKey K(ModKey m, uint id) => new(m, id);
     static readonly FormKey Light = K(M, 0x800), Stat = K(M, 0x801), Missing = K(M, 0x802), Idle = K(M, 0x803), Bk = K(M, 0x804), Act = K(M, 0x805),
-        Trig = K(M, 0x806), Cm = K(M, 0x807), Rm = K(M, 0x808), Unk = K(M, 0x809), Marker = K(M, 0x80A), AThing = K(A, 0xA00), BThing = K(B, 0xB00);
+        Trig = K(M, 0x806), Cm = K(M, 0x807), Rm = K(M, 0x808), Unk = K(M, 0x809), Marker = K(M, 0x80A), XMarker = K(M, 0x80B), AThing = K(A, 0xA00), BThing = K(B, 0xB00);
+    // KS30: the game's own files (by name, BaseGamePlugins.IsBaseGame), in an order of their own
+    static readonly ModKey GS = new("Skyrim", ModType.Master), GD = new("Dawnguard", ModType.Master), GB = new("Dragonborn", ModType.Master),
+        G3 = new("SfB3", ModType.Plugin), GC = new("SfC2", ModType.Plugin);
     static FormKey CellKey(int n) => K(M, 0x900u + (uint)n);
     static FormKey NavKey(int n) => K(M, 0xC00u + (uint)n);
 
@@ -109,6 +112,7 @@ static class StrandSelfTest
         m.Mod.Statics.Add(new Static(Rm, Rel) { EditorID = "SfRoomMarker" });
         m.Mod.Statics.Add(new Static(Unk, Rel) { EditorID = "SfUnmeasured" });
         m.Mod.Statics.Add(new Static(Marker, Rel) { EditorID = "SfEnableMarker" });
+        m.Mod.Statics.Add(new Static(XMarker, Rel) { EditorID = "SfXMarkerHeading", MajorRecordFlagsRaw = (int)EnableState.IsMarkerFlag });
         a.Mod.Statics.Add(new Static(AThing, Rel) { EditorID = "SfAThing" });
         b.Mod.Statics.Add(new Static(BThing, Rel) { EditorID = "SfBThing" });
         var box64 = new P3Float(64, 64, 64);
@@ -197,6 +201,7 @@ static class StrandSelfTest
         p.Cell(33).Temporary.Add(Ref(s27, Light, 0, 0, 360));
         ex.Add(new("KS27", "the same patch moves it within reach: no row", s27, StrandedState.NoRow));
         ex.Add(new("KS28", "a static whose model cannot be read: not judged, its shape", Stranded(34, Missing), StrandedState.NotJudged, "shape could not be read"));
+        ex.Add(new("KS29", "an editor marker (Is Marker flag) stranded otherwise: no row, counted", Stranded(35, XMarker), StrandedState.NoRow, "editor marker"));
 
         // write the order
         var written = new Dictionary<ModKey, string>();
@@ -244,7 +249,8 @@ static class StrandSelfTest
         // KS09: the scan's two setups. Without SfA the light is absent; re-measured there with the full order's emit as --base,
         // its row reads Gone (not stranded without the ticked mod), so the differential credits it new with the ticked mod.
         var fullFile = StrandEmit.File(res, null, null, "self-test", null, true);
-        var without = Scan(new[] { M, D, B, C }.Select(k => written[k]).ToList());
+        var withoutPaths = new[] { M, D, B, C }.Select(k => written[k]).ToList();
+        var without = Scan(withoutPaths);
         var pred09 = StrandEmit.Predicates(fullFile, without).FirstOrDefault(x => x.FormKey == s01.ToString());
         Line("KS09", "absent from the setup without SfA: reported with it, its row Gone without it",
              !rows.TryGetValue(s01, out var r09) || r09.Verdict.State != StrandedState.Reported ? "not reported in the full order"
@@ -255,6 +261,32 @@ static class StrandSelfTest
         Line("KS27b", "without the patch it is reported; with the patch, --base reads its row Gone",
              noPatch.Rows.FirstOrDefault(x => x.Ref == s27)?.Verdict.State != StrandedState.Reported ? "not reported without the patch"
              : pred27 is null ? "no predicate for its row" : pred27.Physical != PhysicalState.Gone ? $"predicate {pred27.Physical}" : null);
+        // KS30: a Dawnguard.esm light under Dragonborn.esm's raised navmesh (neither masters the other): no row, both the game's
+        // own files; guard KS30g: the same light under SfB3.esp's raised navmesh: reported
+        var gs = new Build(GS); var gd = new Build(GD); var gb = new Build(GB); var g3 = new Build(G3); var gc = new Build(GC);
+        var gLight = K(GS, 0x800); var gCm = K(GS, 0x801);
+        gs.Mod.Lights.Add(new Light(gLight, Rel) { EditorID = "SfGameLight" });
+        gs.Mod.Statics.Add(new Static(gCm, Rel) { EditorID = "SfGameCollisionMarker" });
+        FormKey GCell(int n) => K(GS, 0x900u + (uint)n);
+        SkCell GRoom(Build pb, int n) => pb.Cells.TryGetValue(GCell(n), out var cc) ? cc : pb.Cells[GCell(n)] = new SkCell(GCell(n), Rel) { EditorID = $"SfGameRoom{n}", Flags = SkCell.Flag.IsInteriorCell };
+        foreach (var n in new[] { 1, 2 })
+        {
+            GRoom(gs, n).NavigationMeshes.Add(Floor(K(GS, 0xC00u + (uint)n), GCell(n), 0));
+            GRoom(gc, n).Temporary.Add(Ref(gc.New(), gCm, 0, 450, 100, box64));
+        }
+        var s30 = gd.New(); GRoom(gd, 1).Temporary.Add(Ref(s30, gLight, 0, 0, 100));
+        var s30g = gd.New(); GRoom(gd, 2).Temporary.Add(Ref(s30g, gLight, 0, 0, 100));
+        GRoom(gb, 1).NavigationMeshes.Add(Floor(K(GS, 0xC01), GCell(1), 400));
+        GRoom(g3, 2).NavigationMeshes.Add(Floor(K(GS, 0xC02), GCell(2), 400));
+        Save(gs); Save(gd, GS); Save(gb, GS); Save(g3, GS); Save(gc, GS);
+        var gtable = new List<PrimitiveMeasurement> { new("base", gCm.ToString(), "none", "solid", new[] { "player", "items" }, "self-test fixture") };
+        var game = StrandScan.Run(new ScanInput(new[] { GS, GD, GB, G3, GC }.Select(k => written[k]).ToList(), StrandFamily.ByName, _ => null, gtable,
+                                                Mirror: true, Cells: null, KeepAll: true));
+        string Got(FormKey k) => game.All.TryGetValue(k, out var gg) ? $"{gg.State}: {gg.Reason}" : "not seen";
+        Line("KS30", "a Dawnguard.esm object under Dragonborn.esm's navmesh: no row, both the game's own files",
+             game.All.TryGetValue(s30, out var g30) && g30.State == StrandedState.NoRow && g30.Reason.Contains("game's own files", StringComparison.Ordinal) ? null : $"got {Got(s30)}");
+        Line("KS30g", "guard: the same object under a mod's navmesh: reported",
+             game.All.TryGetValue(s30g, out var g30g) && g30g.State == StrandedState.Reported ? null : $"got {Got(s30g)}");
         Console.WriteLine($"   identity cut: {res.Population} interior objects there at load, {res.LeftByCut} left to measure");
         Console.WriteLine($"strandprobe --self-test: {pass} passed, {fail} failed");
         return fail == 0 ? 0 : 1;

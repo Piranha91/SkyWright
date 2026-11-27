@@ -38,7 +38,7 @@ sealed class ScanResult
 
 static class StrandScan
 {
-    sealed record BaseInfo(string Type, string? Edid, string? Model, Vec3? ObMin, Vec3? ObMax);
+    sealed record BaseInfo(string Type, string? Edid, string? Model, Vec3? ObMin, Vec3? ObMax, bool MarkerFlag);
     sealed record NavObs(int Plugin, FormKey Cell, IReadOnlyList<NavmeshGeometry> Navs, IReadOnlyList<DeletedNavmesh> Dels);
     sealed record View(Dictionary<string, int> Map, Dictionary<string, NavmeshGeometry> Geo, Dictionary<string, int> RemovedBy, List<NavTriangle> Tris);
     sealed record Blocker(string Family, Aabb? Body, Aabb? Bound, string Name);
@@ -75,7 +75,8 @@ static class StrandScan
                         Vec3? lo = null, hi = null;
                         if (rec is IObjectBoundedGetter ob && ob.ObjectBounds is { } b)
                         { lo = new Vec3(b.First.X, b.First.Y, b.First.Z); hi = new Vec3(b.Second.X, b.Second.Y, b.Second.Z); }
-                        bases[rec.FormKey] = new BaseInfo(rec.GetType().Name.Replace("BinaryOverlay", ""), rec.EditorID, model, lo, hi);
+                        bases[rec.FormKey] = new BaseInfo(rec.GetType().Name.Replace("BinaryOverlay", ""), rec.EditorID, model, lo, hi,
+                                                          (rec.MajorRecordFlagsRaw & EnableState.IsMarkerFlag) != 0);
                         if (rec is ICollisionLayerGetter cl) layers[cl.Index] = cl.EditorID ?? cl.FormKey.ToString();
                     }
                     foreach (var cp in LastSighting.Cells(mod))
@@ -178,7 +179,12 @@ static class StrandScan
             var (interior, cedid) = cellInfo.GetValueOrDefault(cell);
             if (input.Cells is { } want && !(want.Contains(cell.ToString()) || (cedid is not null && want.Contains(cedid)))) continue;
             if (r.Deleted) continue;
-            if (StrandedRule.OutOfPopulation(interior, present(k)) is { } outside)
+            // an editor marker: the base's Is Marker flag (DetectorModel.ClassifyHost's marker rule); furniture and idle markers
+            // are where characters go (AI markers, C19) and stay judged
+            BaseInfo? b0 = r.Base is { } bk0 && bases.TryGetValue(bk0, out var f0) ? f0 : null;
+            bool editorMarker = b0 is not null && b0.Type is not ("IdleMarker" or "Furniture")
+                                && DetectorModel.ClassifyHost(b0.Type, b0.Edid, b0.MarkerFlag) == HostClass.Marker;
+            if (StrandedRule.OutOfPopulation(interior, present(k), editorMarker) is { } outside)
             { res.Count(outside); if (input.KeepAll) res.All[k] = (StrandedState.NoRow, outside); continue; }
             res.Population++;
             int placer = winner[k];
@@ -191,6 +197,9 @@ static class StrandScan
             var differ = new HashSet<int>();
             foreach (var (key, p) in win.Map) if (!mine.Map.TryGetValue(key, out var q) || q != p) differ.Add(p);
             foreach (var key in mine.Map.Keys) if (!win.Map.ContainsKey(key) && win.RemovedBy.TryGetValue(key, out var rp)) differ.Add(rp);
+            bool placerShipped = BaseGamePlugins.IsBaseGame(names[placer]);
+            if (differ.Count > 0 && differ.All(d => StrandedRule.ShippedBoth(placerShipped, BaseGamePlugins.IsBaseGame(names[d]))))
+            { res.Count(StrandedRule.ShippedTogether); if (input.KeepAll) res.All[k] = (StrandedState.NoRow, StrandedRule.ShippedTogether); continue; }
             if (input.Mirror && differ.Count > 0 && differ.All(d => StrandedRule.AuthorHad(closure[d], placer)))
             { res.Count(StrandedRule.AuthorHadIt); if (input.KeepAll) res.All[k] = (StrandedState.NoRow, StrandedRule.AuthorHadIt); continue; }
             res.LeftByCut++;
@@ -207,6 +216,8 @@ static class StrandScan
             // the other mod: the plugin whose navmesh holds the nearest winning triangle, when it is not in the own view;
             // else the latest plugin that makes the views differ
             int? nav = dw.Navmesh is { } nm && win.Map.TryGetValue(nm, out var np) && !own.Contains(np) ? np : differ.Count > 0 ? differ.Max() : null;
+            if (nav is { } nv1 && StrandedRule.ShippedBoth(placerShipped, BaseGamePlugins.IsBaseGame(names[nv1])))
+            { res.Count(StrandedRule.ShippedTogether); if (input.KeepAll) res.All[k] = (StrandedState.NoRow, StrandedRule.ShippedTogether); continue; }
             if (input.Mirror && nav is { } nv0 && StrandedRule.AuthorHad(closure[nv0], placer))
             { res.Count(StrandedRule.AuthorHadIt); if (input.KeepAll) res.All[k] = (StrandedState.NoRow, StrandedRule.AuthorHadIt); continue; }
 
@@ -235,7 +246,7 @@ static class StrandScan
             if (v.State == StrandedState.NoRow) { res.Count(v.Reason); continue; }
             res.Rows.Add(new ScanRow(k, cell, cedid, names[placer], nav is { } n2 ? names[n2] : null, bi?.Type, bi?.Edid, shape.Geometry, trigger,
                                      dw.Distance, dow.Distance, nearest, nearestName, v));
-            res.Count(v.State == StrandedState.Reported ? "reported" : "not judged: " + v.Reason.Split(':')[0]);
+            res.Count(v.State == StrandedState.Reported ? "reported" : "not judged: " + StrandedRule.ReasonKey(v.Reason));
         }
         return res;
     }

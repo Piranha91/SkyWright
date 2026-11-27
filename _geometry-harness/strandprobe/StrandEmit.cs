@@ -17,7 +17,7 @@ static class StrandEmit
     static PhysicalState Physical(StrandedState s) => s == StrandedState.Reported ? PhysicalState.Holds : PhysicalState.Unmeasured;
 
     static string Summary(ScanRow r) => r.Verdict.State == StrandedState.Reported
-        ? $"{r.BaseType ?? "object"} {r.BaseEdid} from {r.Placer} in {r.CellEdid ?? r.Cell.ToString()}: {r.Winning:0.0} u from walkable ground with {r.NavPlugin}'s navmesh, {r.Own:0.0} u with its own; {r.Verdict.Class}"
+        ? $"{r.BaseType ?? "object"} {r.BaseEdid} from {r.Placer} in {r.CellEdid ?? r.Cell.ToString()}: {r.Winning:0.0} u from walkable ground with {r.NavPlugin}'s navmesh, {r.Own:0.0} u with the navmesh its mod was made with; {r.Verdict.Class}"
         : $"{r.BaseType ?? "object"} {r.BaseEdid} from {r.Placer} in {r.CellEdid ?? r.Cell.ToString()}: not judged, {r.Verdict.Reason}";
 
     /// <summary>Each row of <paramref name="baseFile"/> re-measured under this order: Holds (reported here), Unmeasured (not
@@ -45,7 +45,7 @@ static class StrandEmit
         var coverage = new List<CoverageLine>
         {
             new("interior objects there at load (stranded)", res.Rows.Count(r => r.Verdict.State == StrandedState.Reported),
-                res.Rows.Where(r => r.Verdict.State == StrandedState.NotJudged).GroupBy(r => r.Verdict.Reason.Split(':')[0]).ToDictionary(g => g.Key, g => (long)g.Count()),
+                res.Rows.Where(r => r.Verdict.State == StrandedState.NotJudged).GroupBy(r => StrandedRule.ReasonKey(r.Verdict.Reason)).ToDictionary(g => g.Key, g => (long)g.Count()),
                 res.Coverage.Where(kv => kv.Key != "reported" && !kv.Key.StartsWith("not judged", StringComparison.Ordinal)).ToDictionary(kv => kv.Key, kv => kv.Value),
                 $"population {res.Population}, measured after the identity cut {res.LeftByCut}" + (mirror ? "" : "; instrument run: --no-mirror")),
         };

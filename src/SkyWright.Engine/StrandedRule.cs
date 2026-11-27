@@ -52,7 +52,17 @@ public static class StrandedRule
     public const string OutOfReachAlone = "out of reach with its own plugin's navmesh too";
     public const string RefusedNoForm = "a distance could not be measured, and the one measured does not meet the form";
 
-    public static string? OutOfPopulation(bool interior, bool enabledAtLoad) => !interior ? Outdoors : !enabledAtLoad ? DisabledAtLoad : null;
+    public const string EditorMarker = "an editor marker: the game draws nothing there for a player to reach";
+    public const string ShippedTogether = "the object and the navmesh are both the game's own files, which Bethesda ships to load together";
+
+    /// <summary>Why a placed reference is outside the population (a no-row reason), or null when it is judged. An editor
+    /// marker (ruling B, 2026-11-26) is decided by the caller from the base's Is Marker flag.</summary>
+    public static string? OutOfPopulation(bool interior, bool enabledAtLoad, bool editorMarker) =>
+        !interior ? Outdoors : !enabledAtLoad ? DisabledAtLoad : editorMarker ? EditorMarker : null;
+
+    /// <summary>True when the object's plugin and the plugin whose navmesh wins are both the game's own files (ruling D,
+    /// 2026-11-26: the official files gave 0 reported of 12,269 measured): no row.</summary>
+    public static bool ShippedBoth(bool placerIsGameFile, bool navmeshIsGameFile) => placerIsGameFile && navmeshIsGameFile;
 
     public static bool IsTrigger(string? baseType, bool hasModel, string? primitiveType) =>
         baseType == "Activator" && !hasModel && string.Equals(primitiveType, "Box", StringComparison.OrdinalIgnoreCase);
@@ -89,6 +99,16 @@ public static class StrandedRule
         return $"object ({baseType ?? "unknown type"})";
     }
 
+    /// <summary>A not-judged reason without its numbers and names (the part before the first ':' or ' ('), for counting.</summary>
+    public static string ReasonKey(string reason)
+    {
+        if (reason.StartsWith("it touches ", StringComparison.Ordinal)) return "it touches another mod's object";
+        if (reason.StartsWith("the shape of ", StringComparison.Ordinal)) return "the shape of another mod's object near it could not be settled";
+        int cut = reason.Length;
+        foreach (var sep in new[] { ":", " (", ", so" }) { int i = reason.IndexOf(sep, StringComparison.Ordinal); if (i > 0 && i < cut) cut = i; }
+        return reason[..cut];
+    }
+
     static double? D(NavDistance d) => d.Status == "measured" && d.Distance is { } x ? x : null;
 
     public static StrandedVerdict Decide(StrandedFacts f)
@@ -98,10 +118,10 @@ public static class StrandedRule
         double? dw = D(f.Winning), dow = D(f.Own);
         if (dw is null || dow is null)
         {
-            string why = dw is null ? $"with the winning navmesh, {f.Winning.Reason}" : $"with its own plugin's navmesh, {f.Own.Reason}";
-            if (f.Trigger) return new(StrandedState.NotJudged, $"its distance could not be measured: {why}");
+            string why = dw is null ? $"with the navmesh that wins, {f.Winning.Reason}" : $"with the navmesh its mod was made with, {f.Own.Reason}";
+            if (f.Trigger) return new(StrandedState.NotJudged, $"its distance from walkable ground could not be measured: {why}");
             bool form = (dw is null || dw > R) && (dow is null || dow <= R);
-            return form ? new(StrandedState.NotJudged, $"its distance could not be measured: {why}") : new(StrandedState.NoRow, RefusedNoForm);
+            return form ? new(StrandedState.NotJudged, $"its distance from walkable ground could not be measured: {why}") : new(StrandedState.NoRow, RefusedNoForm);
         }
         if (!(dw > R)) return new(StrandedState.NoRow, WithinReach);
         if (!(dow <= R)) return new(StrandedState.NoRow, OutOfReachAlone);
@@ -111,7 +131,7 @@ public static class StrandedRule
         if (c.UnreadNearest is { } un && (c.Nearest is null || un < c.Nearest))
             return new(StrandedState.NotJudged, $"the shape of {c.UnreadName} near it could not be settled, so whether it touches it is not known");
         if (dw - R <= T || (R > 0 && R - dow <= T))
-            return new(StrandedState.NotJudged, $"within 12 u of the {(f.Trigger ? "walkable band" : "150 u reach")} (winning {dw:0.0} u, own {dow:0.0} u): closer than the navmesh can be told from the floor");
+            return new(StrandedState.NotJudged, $"within 12 u of the {(f.Trigger ? "walkable band" : "150 u reach")} ({dw:0} u with the navmesh that wins, {dow:0} u with the navmesh its mod was made with): closer than the navmesh can be told from the floor");
         return new(StrandedState.Reported, $"{dw:0.0} u from walkable ground, {dow:0.0} u with its own plugin's navmesh",
                    ClassOf(f.BaseType, f.BaseEditorId, f.Scripted));
     }
