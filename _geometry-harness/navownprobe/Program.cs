@@ -82,7 +82,7 @@ if (args.Length >= 1 && args[0] == "--navrepair-selftest") return NavRepairSelfT
 if (args.Length >= 3 && args[0] == "--navgrid-oracle") return NavGridOracle.Run(args[1], args[2..]);
 if (args.Length is 1 or 2 && args[0] == "--navgrid-selftest") return NavGridSelfTest.Run(args.Length == 2 ? args[1] : null);
 if (args.Length >= 2 && args[0] == "--write-navi-master-fixture") { Console.WriteLine(NavRepairFixture.WriteNaviMasterCase(args[1])); return 0; }
-if (args.Length >= 2 && args[0] == "--write-mover-fixture") { Console.WriteLine(NavRepairFixture.WriteMoverCase(args[1], doors: args.Skip(2).Contains("doors"), neighbour: args.Skip(2).Contains("neighbour"))); return 0; }
+if (args.Length >= 2 && args[0] == "--write-mover-fixture") { Console.WriteLine(NavRepairFixture.WriteMoverCase(args[1], doors: args.Skip(2).Contains("doors"), neighbour: args.Skip(2).Contains("neighbour"), island: args.Skip(2).FirstOrDefault(a => a.StartsWith("island-", StringComparison.Ordinal)))); return 0; }
 if (args.Length >= 2 && args[0] == "--write-navrepair-fixture") { Console.WriteLine(string.Join(Environment.NewLine, NavRepairFixture.Write(args[1]))); return 0; }
 
 // The command line (NavownArgs.cs): an argument it does not know is refused by name, before anything is read.
@@ -1168,9 +1168,10 @@ if (emitPath is not null)
             .Where(pi => lowerGeom.ContainsKey((nv, pi))).Select(pi => (pluginKey[pi].FileName.String, lowerGeom[(nv, pi)])).ToList());
         var relinkPlan = NavRepair.Relink(winGeom, brokenRows, edgeTol, wideTol, scope, lower: lower);
         // the coarse map: every relink that joins a new pair of navmeshes adds it to both NAVI entries (NavRepairNavi.cs); an
-        // island there (its own copy of the geometry) is never followed to the ground, by the island test navedit uses
+        // island there has its island data follow the ground with it (NavIsland's height rule)
         var (naviView, naviOpen) = NaviView.Read(paths);
-        var islands = naviView.Effective.Where(kv => kv.Value.Src.Map.MapInfos[kv.Value.Index].Island is not null).Select(kv => kv.Key).ToHashSet();
+        var islands = naviView.Effective.Select(kv => (kv.Key, NavIsland.Of(kv.Value.Src.Map.MapInfos[kv.Value.Index]).Island))
+            .Where(x => x.Island is not null).ToDictionary(x => x.Key, x => x.Island!);
         // the ground mover's own version of a row's navmesh, where it ships one that a later plugin overrides, is the repair's
         // source instead of the winner's navmesh draped over the new ground (NavGround.ChooseMover says when; The Great City of
         // Winterhold's 100F4B, 2026-11-22: a first test of its vertices against LAND missed it, because its streets are not LAND)
@@ -1200,6 +1201,16 @@ if (emitPath is not null)
         try
         {
             naviPlan = NavRepairNavi.Plan(relinkPlan, winGeom, naviView);
+            // the ground rows on islands (R7): each entry's new island data joins the plan's one NAVI change, beside the relinks';
+            // one whose entry a relink changes too is refused by name (Gate A review condition 5)
+            var groundIslands = groundPlan.Plans.Where(p => p.Status == "planned" && p.IslandAfter is not null && naviView.Effective.ContainsKey(p.Nav))
+                .ToDictionary(p => p.Nav, p => new NavIslandEntry(naviView.Effective[p.Nav].Src.Map.MapInfos[naviView.Effective[p.Nav].Index].Unknown, p.IslandAfter!));
+            if (groundIslands.Count > 0)
+            {
+                var (gi, gref) = NavRepairNavi.ForGroundIslands(groundIslands, naviView, naviPlan);
+                if (gref.Count > 0) NavRepair.Refuse(groundPlan, gref);
+                naviPlan.Entries.AddRange(gi.Entries); naviPlan.Ops.AddRange(gi.Ops); naviPlan.Why.AddRange(gi.Why);
+            }
             // USE_VERSION ROWS (houseCARL 2026-11-22): where the ground plan refused in favour of a mover's re-cut, the plan of
             // carrying that re-cut, by navedit's own code (NavUseVersionPlan). One patch carries it with the other rows, so a
             // navmesh another planned row (or an earlier use_version) changes, or a NAVI change beside the relinks' own, is
@@ -1220,7 +1231,7 @@ if (emitPath is not null)
                 if (scope is not null && !scope.Contains(r.Nav)) continue;
                 if (MoverOf(r) is not { } mv || !winGeom.TryGetValue(r.Nav, out var wgeom)) continue;
                 var moverIx = Array.FindIndex(pluginKey, k => string.Equals(k.FileName.String, mv.Mover, StringComparison.OrdinalIgnoreCase));
-                string? refused = NavUseVersionPlan.IslandRefusal(naviView, r.Nav);   // navedit's own rule for every edit
+                string? refused = NavUseVersionPlan.NaviRefusal(naviView, r.Nav);   // navedit's own rule for every edit
                 var u = refused is null ? NavUseVersionPlan.Plan(uvView, naviView, paths, r.Nav, wgeom.Geom, mv.Winner, mv.Mover, () => inbound ??= NavUseVersionPlan.InboundIndex(paths)) : null;
                 refused ??= u!.Refuse;
                 if (refused is null && u!.Planned)

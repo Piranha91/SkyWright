@@ -61,6 +61,16 @@
     2588  marker check: a navmesh whose record box is stale is still found (the box comes from its vertices)
     2589  marker check: a link naming a triangle the linked navmesh does not have is an open edge
     2602  use_version: every refusal is classified as the kind its cause is (the repair plan counts reasons by kind)
+    2674  use_version: a version linking into a neighbour whose matching edge does not link back is refused by name (a
+          one-way border); the same with the neighbour linking back plans
+    2651-2656  R7, islands of the navmesh info map (_shared/NavIsland.cs): the height rule (2651); the island data each kind
+          of edit leaves, and the refusal of a plan-changing edit on an island with a mesh (2652); use_version's island data
+          is the version plugin's own entry's, refused by name when it states none (2653); the in-place ops (2654); the
+          read-back's island check (2655); the navmesh info map change for an island, in place and added whole (2656)
+    2657  no source says the navmesh info map keeps its own copy of an island's geometry (it does not)
+    2670  use_version over two plain entries changes nothing, whatever their first Unknowns (review of Gate B, F1)
+    2669  real data: the box rule and the flag rule hold on every entry of the base game's five files, by the raw-bytes
+          reader tests/navi_floor.py (skipped by name when the game's Data is absent; HC_GAME_DATA names another)
 
 The real-data check (plan and write on a lab profile, read back, byte-compared with the in-game-tested patch) is in the
 2026-11-21 run folder; it needs a game and an MO2 instance, so it is not a test here.
@@ -188,6 +198,44 @@ def ms_marker_known_answer():
         assert s["verdict"] == "inside" and s["standing"]["navmesh"] == south, (profile, s)
 
 
+def c2657_no_false_sentence():
+    """Rejects: the refusal sentence that says the navmesh info map "keeps its own copy of the geometry" of an island, which
+    is false (an island's mesh is a simplified outline, its vertices byte-identical to the navmesh's in 14 of 8,664
+    Skyrim.esm islands; Gate A section 3), left anywhere in the probes' sources."""
+    hits = []
+    for p in sorted(HARNESS.rglob("*.cs")):
+        if "bin" in p.parts or "obj" in p.parts:
+            continue
+        for i, line in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            if "own copy of the geometry" in line or "own copy of an island" in line:
+                hits.append(f"{p.relative_to(HARNESS)}:{i}")
+    assert not hits, f"the false sentence stands at {', '.join(hits)}"
+
+
+# THE VANILLA FLOOR (R7, Gate A review condition 1), measured by the raw-bytes reader (tests/navi_floor.py), entry by entry on
+# the base game's five files: every island entry's box is its navmesh's stored box bit for bit, and the first Unknown is 32
+# exactly when the entry holds island data. Counts are this reader's own, printed by navi_floor.py on 2026-11-27.
+GAME_DATA = Path(os.environ.get("HC_GAME_DATA") or "C:/Games/Steam/steamapps/common/Skyrim Special Edition/Data")
+# file: (entries, islands, empty-mesh islands), as navi_floor.py printed them (C:/hc-runs/2026-11-27-navmesh-repair/r7/run1/floor.log)
+FLOOR = {"Skyrim.esm": (15462, 8664, 1224), "Update.esm": (313, 170, 18), "Dawnguard.esm": (1873, 1070, 110),
+         "HearthFires.esm": (132, 83, 4), "Dragonborn.esm": (1732, 694, 101)}
+
+
+def c2669_vanilla_island_floor():
+    import navi_floor
+    rows = {r["file"]: r for r in navi_floor.floor(GAME_DATA)}
+    bad = []
+    for name, r in rows.items():
+        if r["boxMiss"] or r["noNavmesh"] or r["boxExact"] != r["islands"]:
+            bad.append(f"{name}: box exact {r['boxExact']} of {r['islands']} islands, misses {r['boxMiss'][:5]}, no navmesh {r['noNavmesh']}")
+        if r["flagAgrees"] != r["entries"]:
+            bad.append(f"{name}: the flag rule holds on {r['flagAgrees']} of {r['entries']} entries (islands without 32 {r['islandWithout32'][:5]}, 32 without island {r['flag32WithoutIsland'][:5]})")
+        got = (r["entries"], r["islands"], r["emptyMesh"])
+        if FLOOR.get(name) != got:
+            bad.append(f"{name}: (entries, islands, empty meshes) {got}, recorded {FLOOR.get(name)}")
+    assert not bad, " | ".join(bad)
+
+
 CASES = [
     ("core write drift: the copied core code is unchanged", core_write_drift),
     ("compose drift: the copied server compose mapping is unchanged", mcp_compose_drift),
@@ -249,11 +297,26 @@ CASES = [
     ("2588 stale record bounds do not hide a navmesh", lambda: selftest("2588")),
     ("2589 a link to a missing triangle is open", lambda: selftest("2589")),
     ("2602 every use_version refusal has its kind", lambda: selftest("2602")),
-] + ([("MS marker known answer on the lab (real data)", ms_marker_known_answer)] if str(LAB) not in ("", ".") else [])
+    ("2674 use_version refuses a border the neighbour does not return", lambda: selftest("2674")),
+    ("2651 island height rule", lambda: selftest("2651")),
+    ("2652 island data per kind of edit", lambda: selftest("2652")),
+    ("2653 use_version's island data is the version's own", lambda: selftest("2653")),
+    ("2654 island ops in place", lambda: selftest("2654")),
+    ("2655 island read-back check", lambda: selftest("2655")),
+    ("2656 navmesh info map change for an island", lambda: selftest("2656")),
+    ("2670 two plain entries stay as they are under use_version", lambda: selftest("2670")),
+    ("2657 no refusal says the map keeps its own copy of the geometry", c2657_no_false_sentence),
+] + ([("MS marker known answer on the lab (real data)", ms_marker_known_answer)] if str(LAB) not in ("", ".") else []) \
+  + ([("2669 vanilla island floor: box and flag rules per entry (real data)", c2669_vanilla_island_floor)]
+     if all((GAME_DATA / f).exists() for f in ("Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm"))
+     else [("2669 vanilla island floor SKIPPED: the game's Data is not at " + str(GAME_DATA).replace(" ", "_"), lambda: None)])
 
 if __name__ == "__main__":
     for name, fn in CASES:
         if ONLY and name.split()[0] not in ONLY:
+            continue
+        if " SKIPPED" in name:
+            print(f"skip  {name}")
             continue
         try:
             fn()

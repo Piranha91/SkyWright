@@ -19,7 +19,8 @@ namespace HarnessShared;
 //   - a move that makes a moved triangle overlap another triangle of the navmesh in plan at the same level (their height
 //     ranges within LevelGap of each other; a bridge over a floor is not an overlap).
 // What a vertex move does not touch: the triangles, their edge fields and flags, the link table, cover and door
-// triangles, and the NAVI entry (no neighbour changes). An island navmesh is refused by the caller, which owns NAVI.
+// triangles, and the NAVI entry's neighbours. On an island of the navmesh info map the caller (which owns NAVI) asks
+// NavIsland what the island data becomes (_shared/NavIsland.cs).
 
 /// <summary>Move vertex <paramref name="Vertex"/> to <paramref name="To"/>.</summary>
 public sealed record VertexMove(int Vertex, Vec3 To);
@@ -754,7 +755,8 @@ public static class NavEdit
     /// it (Lost), and the same change makes the entry's neighbour lists the version's link targets.</item>
     /// </list></summary>
     public static UseVersionResult UseVersion(NavmeshGeometry winner, NavmeshGeometry version, string fromPlugin,
-                                              IReadOnlyDictionary<FormKey, NavmeshGeometry> near, EdgeTolerance tol)
+                                              IReadOnlyDictionary<FormKey, NavmeshGeometry> near, EdgeTolerance tol,
+                                              Func<FormKey, string?>? winnerOf = null)
     {
         var key = winner.FormKey; var why = new List<string>();
         var V = version; var links = (V.EdgeLinks ?? Array.Empty<NavEdgeLink>()).ToList();
@@ -786,6 +788,7 @@ public static class NavEdit
 
         // the version's own links, matched again on this order's neighbours
         var assigned = new Dictionary<int, short>();
+        var oneWay = new Dictionary<FormKey, List<(int T, int N)>>();   // per neighbour: the version's triangles it does not return
         int matched = 0, ledges = 0;
         for (int t = 0; t < V.Triangles.Count; t++)
             for (int e = 0; e < 3; e++)
@@ -809,7 +812,28 @@ public static class NavEdit
                 if (hit.Count != 1) { why.Add($"{fromPlugin}'s triangle {t} edge {Where(V.Vertices[pa], V.Vertices[pb])} links into {m}, but {(hit.Count == 0 ? "no edge of its winning version lies along it" : $"{hit.Count} of its triangles lie along it ({string.Join(", ", hit.Take(4))})")}; relink it by hand or use another version."); continue; }
                 if (assigned.TryGetValue(k, out var prev) && prev != hit[0]) { why.Add($"{fromPlugin}'s link entry {k} serves two edges that now meet different triangles of {m} ({prev} and {hit[0]}); that table cannot be kept as it is."); continue; }
                 assigned[k] = (short)hit[0]; matched++;
+                // the neighbour's edge there must link back into this navmesh, or the carried link is one-way (the review of R7,
+                // 2026-11-27: USSEP's 10925F on CV-clockwork); its link back is never written here
+                if (!LinksBack(n, hit[0], V.Vertices[pa], V.Vertices[pb])) (oneWay.TryGetValue(m, out var ow) ? ow : oneWay[m] = new()).Add((t, hit[0]));
             }
+        // one sentence per neighbour that does not return the version's links
+        foreach (var (m, pairs) in oneWay.OrderBy(kv => kv.Key.ToString(), StringComparer.Ordinal))
+            why.Add($"{fromPlugin}'s version of {key} links {string.Join(", ", pairs.Select(p => $"triangle {p.T}"))} into {m} "
+                    + $"{string.Join(", ", pairs.Select(p => $"triangle {p.N}"))}{(winnerOf?.Invoke(m) is { } wp ? $" ({wp}'s version, the one the game takes)" : "")}, "
+                    + $"whose edge there does not link back to {key}, so carrying it would make that border one-way; keep the winner's version, or carry {m}'s version with it once sets of navmeshes are supported.");
+        bool LinksBack(NavmeshGeometry n, int tri, Vec3 a, Vec3 b)
+        {
+            var nt = n.Triangles[tri]; var nl = n.EdgeLinks ?? Array.Empty<NavEdgeLink>();
+            for (int f = 0; f < 3; f++)
+            {
+                if (!Open(nt, f)) continue;
+                var (i, j) = NavBorderMatch.EdgeVerts(nt, f);
+                if (!NavBorderMatch.Gap(a, b, n.Vertices[i], n.Vertices[j]).Within(tol)) continue;
+                int x = Field(nt, f);
+                if (Linked(nt, f) && x >= 0 && x < nl.Count && nl[x].Mesh == key) return true;
+            }
+            return false;
+        }
         int changed = 0;
         foreach (var (k, to) in assigned) if (links[k].TriangleIndex != to) { links[k] = links[k] with { TriangleIndex = to }; changed++; }
 
@@ -1004,6 +1028,9 @@ public sealed record UseVersionPlan(string? Refuse, IReadOnlyList<string> Why, L
                                     System.Text.Json.Nodes.JsonObject? Row)
 {
     public bool Planned => Refuse is null && Why.Count == 0;
+    /// <summary>The flag and island data the carried navmesh's entry ends with, when either it or the version's is an island
+    /// (R7; what the read-back holds the entry to); null otherwise.</summary>
+    public NavIslandEntry? IslandAfter { get; init; }
 }
 
 /// <summary>THE LOAD-ORDER GLUE AROUND <see cref="NavEdit.UseVersion"/>: its one owner, for navedit's plan and write and for
@@ -1033,7 +1060,7 @@ public static class NavUseVersionPlan
             if (m != key && view.ResolveWinner(m) is { } mw && order.FirstOrDefault(p => string.Equals(Path.GetFileName(p), mw.WinnerPlugin, StringComparison.OrdinalIgnoreCase)) is { } mp && Winning(mp, m) is { } mg) near[m] = mg;
         foreach (var (fk, (p, links)) in inboundIndex)
             if (fk != key && !near.ContainsKey(fk) && links.Any(l => l.Mesh == key) && Winning(p, fk) is { } og) near[fk] = og;
-        var r = NavEdit.UseVersion(geom, version, Path.GetFileName(fromPath), near, NavRuleDefaults.Edge);
+        var r = NavEdit.UseVersion(geom, version, Path.GetFileName(fromPath), near, NavRuleDefaults.Edge, m => view.ResolveWinner(m)?.WinnerPlugin);
         IReadOnlyList<string> why = r.Why; var ops = r.Ops.ToList();
         // each door's reference must resolve in this order
         var badDoors = r.Doors.Where(d => view.ResolveWinner(d) is null).ToList();
@@ -1042,11 +1069,28 @@ public static class NavUseVersionPlan
         // become the version's link targets; each neighbour it gains is added both ways (NavRepairNavi.ForVersion; nothing is
         // written where the entry already stands so)
         System.Text.Json.Nodes.JsonObject? naviRow = null;
+        // the island data (R7): the version plugin's own entry's, whole (NavIsland.ForVersion); refused when that plugin states no
+        // entry for an island, or gives its island a box that is not its own navmesh's (review F2)
+        NavIslandEntry? islandArg = null, islandAfter = null;
+        if (why.Count == 0 && navi.Problem is null)
+        {
+            var taken = navi.Effective.TryGetValue(key, out var tk) ? NavIsland.Of(tk.Src.Map.MapInfos[tk.Index]) : new NavIslandEntry(0, null);
+            var ve = navi.Stated(key, Path.GetFileName(fromPath));
+            var verE = ve is null ? null : NavIsland.Of(ve);
+            var (after, islWhy) = NavIsland.ForVersion(key, from, taken, verE);
+            islWhy ??= verE?.Island is { } vi ? NavIsland.VersionBoxRefusal(key, from, vi, version.Min, version.Max) : null;
+            if (islWhy is not null) { why = new[] { islWhy }; ops = new(); }
+            else
+            {
+                if (!NavIsland.Same(taken, after)) islandArg = after;
+                if (taken.Island is not null || after.Island is not null) islandAfter = after;
+            }
+        }
         if (why.Count == 0)
         {
             var doorTable = (r.After!.DoorTriangles ?? Array.Empty<NavDoorTriangle>()).Select(d => d.Door).ToList();
             var targets = (r.After.EdgeLinks ?? Array.Empty<NavEdgeLink>()).Select(l => l.Mesh).Where(m => m != key).Distinct().ToList();
-            var (np, refusedNavi) = NavRepairNavi.ForVersion(key, doorTable, targets, r.Gained, navi);
+            var (np, refusedNavi) = NavRepairNavi.ForVersion(key, doorTable, targets, r.Gained, navi, islandArg);
             if (refusedNavi is not null) { why = new[] { $"The navmesh info map cannot follow the version ({refusedNavi}); keep the winner's version, or give the map an entry the patch can change first." }; ops = new(); }
             else if (np.Entries.Count > 0) { ops.AddRange(np.Ops); naviRow = NavRepairNavi.NaviJson(np); }   // its entries: what the read-back holds NAVI to
         }
@@ -1077,7 +1121,8 @@ public static class NavUseVersionPlan
             ["masters"] = Arr((view.TouchingPlugins(key) ?? Array.Empty<string>())
                 .SkipWhile(n => !string.Equals(n, Path.GetFileName(fromPath), StringComparison.OrdinalIgnoreCase)).Skip(1)),
         };
-        return new UseVersionPlan(null, why, ops, expect, row);
+        if (why.Count == 0 && islandAfter is not null) row["island"] = NavIsland.Json(islandAfter);
+        return new UseVersionPlan(null, why, ops, expect, row) { IslandAfter = why.Count == 0 ? islandAfter : null };
     }
 
     /// <summary>A door as a plan row names it: the door, who places it, its triangle, and where it leads (the partner door
@@ -1110,22 +1155,18 @@ public static class NavUseVersionPlan
     /// are no longer reasons: both are carried. A repair plan names the kinds of a refused row in its one sentence, so a
     /// reader sees every cause, not only the first (the master's condition, 2026-11-22).</summary>
     public static string ReasonKind(string why) =>
-        why.Contains("no edge of its winning version lies along it") || why.Contains(" of its triangles lie along it") ? "border link meeting no edge"
+        why.Contains("whose edge there does not link back to") ? "border link the neighbour does not return"
+        : why.Contains("no edge of its winning version lies along it") || why.Contains(" of its triangles lie along it") ? "border link meeting no edge"
         : why.Contains("lies along it") || why.Contains("triangles of ") && why.Contains("'s version lie along it") || why.Contains("cannot be re-pointed") ? "neighbour link into it that cannot be re-pointed"
         : why.Contains("The navmesh info map cannot follow the version") ? "navmesh info map entry that cannot follow"
         : why.Contains("so carrying it would leave a one-way border") ? "neighbour that still links in, dropped"
         : "other reason";
 
     /// <summary>Why <paramref name="key"/> cannot be edited for the navmesh info map, in one sentence, or null: the map cannot be
-    /// read, or the navmesh is an island in it (the map keeps its own copy of an island's geometry). The rule's one owner,
-    /// for every navedit edit and for navownprobe's use_version rows.</summary>
-    public static string? IslandRefusal(NaviView navi, FormKey key)
-    {
-        if (navi.Problem is { } np) return $"The navmesh info map cannot be read ({np}), so whether {key} is an island is not known.";
-        if (navi.Effective.TryGetValue(key, out var ent) && ent.Src.Map.MapInfos[ent.Index].Island is not null)
-            return $"{key} is an island in the navmesh info map, which keeps its own copy of the geometry; editing islands is not supported yet.";
-        return null;
-    }
+    /// read, so whether the navmesh is an island in it is not known (R7: an island itself is no longer a refusal; NavIsland
+    /// says what its island data becomes). For every navedit edit and navownprobe's use_version rows.</summary>
+    public static string? NaviRefusal(NaviView navi, FormKey key)
+        => navi.Problem is { } np ? $"The navmesh info map cannot be read ({np}), so whether {key} is an island is not known; check the plugins that carry it open in xEdit." : null;
 
     /// <summary>Every navmesh's winning link table on the order: FormKey to (winning plugin path, its links). Read once per
     /// plan, so a triangle edit finds every navmesh whose links name the one it renumbers.</summary>

@@ -19,6 +19,9 @@ static class NavRepairSelfTest
         return new WinningNav(g, "wrld:000800:SelfTest.esm", (0, 0), FormKey.Null);
     }
 
+    /// <summary>Island data with the navmesh's box and an empty mesh.</summary>
+    static NavIslandData BoxOnly(NavmeshGeometry g) => new(g.Min, g.Max, Array.Empty<Vec3>(), Array.Empty<(short, short, short)>());
+
     public static int Run()
     {
         int fail = 0;
@@ -430,17 +433,19 @@ static class NavRepairSelfTest
                 ? null : "a lower version linking back from beyond the band was taken as authored: " + Show(beyond);
         });
 
-        // C2593: a follow-the-ground plan on an island of the navmesh info map is refused by name (NAVI keeps its own copy
-        // of an island's geometry), where the same rows plan when the navmesh is not an island (houseCARL's sweep, 0DEEFB).
-        Case("2593 ground-refuses-island", () =>
+        // C2593: a follow-the-ground plan on an island of the navmesh info map makes the same navmesh edits as on a plain one
+        // (houseCARL's sweep, 0DEEFB). CORRECTED 2026-11-27 (R7): this expected the island refused, the behaviour before island
+        // support; the island data's own change is the plan's NAVI change, held by 2658.
+        Case("2593 ground-on-island-same-edits", () =>
         {
             var (nav, g, h) = Pair();
             var rows = new[] { Moved(g, 4, 200), Moved(h, 3, 200) };
             var plain = NavRepair.Ground(nav, rows, 38, Tol).Plans.Single(x => x.Nav == g);
-            var island = NavRepair.Ground(nav, rows, 38, Tol, islands: new HashSet<FormKey> { g }).Plans.Single(x => x.Nav == g);
+            var island = NavRepair.Ground(nav, rows, 38, Tol, islands: new Dictionary<FormKey, NavIslandData> { [g] = BoxOnly(nav[g].Geom) }).Plans.Single(x => x.Nav == g);
             if (plain.Status != "planned") return $"without the island the row should plan, got {plain.Status}: {string.Join("; ", plain.Why)}";
-            return island.Status == "refused" && island.Edits.Count == 0 && island.Why.Any(w => w.Contains("is an island") && w.Contains("R7"))
-                ? null : $"on an island: status {island.Status}, edits {island.Edits.Count}: {string.Join("; ", island.Why)}";
+            string Ops(NavPlan p) => string.Join(" | ", p.Edits.Select(o => $"{o.FieldPath} {o.Op} {o.Key} {o.Value}"));
+            return island.Status == "planned" && Ops(island) == Ops(plain) && island.IslandAfter is not null && plain.IslandAfter is null
+                ? null : $"on an island: status {island.Status}, edits [{Ops(island)}] against [{Ops(plain)}]: {string.Join("; ", island.Why)}";
         });
 
         // C2594: a one-way row whose far triangle's matching edge joins one of its own triangles is refused naming that
@@ -509,21 +514,74 @@ static class NavRepairSelfTest
             return bad.Count == 0 ? null : string.Join("; ", bad);
         });
 
-        // C2597: the refusals keep their order (an island is named as an island even with a mover's re-cut); the refusal names
-        // the other movers when there are some, and claims no CLOBBERED row when the detector gave none.
+        // C2597: the refusals keep their order: a mover's re-cut refuses following the ground on an island as on any navmesh
+        // (the island is no refusal of its own since R7), naming use_version; the refusal names the other movers when there are
+        // some, and claims no CLOBBERED row when the detector gave none. CORRECTED 2026-11-27 (R7): the island half expected
+        // the island named first and use_version not offered, the order while islands were refused.
         Case("2597 ground-mover-refusal-order", () =>
         {
             var (nav, g, h) = Pair();
             var mv = new MoverVersion("City.esp", "Revert.esp", 297, 465, null, new[] { "Walls.esp" });
             var rows = new[] { Moved(g, 4, 200) with { Mover = mv }, Moved(h, 3, 0.5f) };
-            var island = NavRepair.Ground(nav, rows, 38, Tol, islands: new HashSet<FormKey> { g }).Plans.Single(x => x.Nav == g);
-            if (!(island.Status == "refused" && island.Why.Any(w => w.Contains("is an island")) && !island.Why.Any(w => w.Contains("use_version"))))
+            var island = NavRepair.Ground(nav, rows, 38, Tol, islands: new Dictionary<FormKey, NavIslandData> { [g] = BoxOnly(nav[g].Geom) }).Plans.Single(x => x.Nav == g);
+            if (!(island.Status == "refused" && island.Why.Any(w => w.Contains("use_version")) && !island.Why.Any(w => w.Contains("is an island")) && island.IslandAfter is null))
                 return $"island with a mover: {island.Status}: {string.Join("; ", island.Why)}";
             var plan = NavRepair.Ground(nav, rows, 38, Tol);
             var pg = plan.Plans.Single(x => x.Nav == g);
             if (!pg.Why.Any(w => w.Contains("Walls.esp also moved ground under it") && !w.Contains("CLOBBERED")))
                 return "the other mover is not named (or a CLOBBERED row was claimed with none): " + string.Join("; ", pg.Why);
             return null;
+        });
+
+        // C2658 (R7): following the ground on an island of the navmesh info map plans, and the plan says what the island data
+        // becomes: the box the navmesh's own (its z recomputed), each island vertex raised by what the surface under it rose
+        // (G and H both rise 200 u, so every island vertex rises 200 u: on G at (50,25), at (25,75) 4 u below it, and at
+        // (120,50), 20 u east of G in plan, whose nearest point of G is (100,50)); H's island, an empty mesh, keeps it empty
+        // with its box risen. Rejects: an island refused (the behaviour before R7), a box or vertex left behind, a mesh given
+        // to an empty island.
+        Case("2658 ground-on-island-plans", () =>
+        {
+            var (nav, g, h) = Pair();
+            var gi = new NavIslandData(new Vec3(0, 0, 0), new Vec3(100, 100, 0), new[] { new Vec3(50, 25, 0), new Vec3(120, 50, 3), new Vec3(25, 75, -4) }, new[] { ((short)0, (short)1, (short)2) });
+            var islands = new Dictionary<FormKey, NavIslandData> { [g] = gi, [h] = BoxOnly(nav[h].Geom) };
+            var plan = NavRepair.Ground(nav, new[] { Moved(g, 4, 200), Moved(h, 3, 200) }, 38, Tol, islands: islands);
+            var pg = plan.Plans.Single(x => x.Nav == g); var ph = plan.Plans.Single(x => x.Nav == h);
+            if (pg.Status != "planned" || ph.Status != "planned") return $"G {pg.Status}: {string.Join("; ", pg.Why)}; H {ph.Status}: {string.Join("; ", ph.Why)}";
+            if (pg.IslandAfter is not { } ga) return "G's plan says nothing of its island data";
+            if (ga.Min != new Vec3(0, 0, 200) || ga.Max != new Vec3(100, 100, 200) || ga.Min != pg.Change.Min || ga.Max != pg.Change.Max)
+                return $"G's island box {ga.Min}-{ga.Max}, want the navmesh's (0,0,200)-(100,100,200)";
+            var want = new[] { new Vec3(50, 25, 200), new Vec3(120, 50, 203), new Vec3(25, 75, 196) };
+            if (!ga.Vertices.SequenceEqual(want) || !ga.Triangles.SequenceEqual(gi.Triangles)) return $"G's island mesh [{string.Join(" ", ga.Vertices)}], want [{string.Join(" ", want)}], triangles kept";
+            if (ph.IslandAfter is not { } ha || !ha.EmptyMesh || ha.Min != new Vec3(100, 0, 200) || ha.Max != new Vec3(200, 100, 200))
+                return $"H's island data {(ph.IslandAfter is { } x ? $"{x.Min}-{x.Max}, {x.Vertices.Count} vertices" : "none")}, want an empty mesh in (100,0,200)-(200,100,200)";
+            return null;
+        });
+
+        // C2659 (R7, Gate A review condition 5): two changes to one navmesh info map entry in one patch are refused by name. A
+        // repair plan's relinks change navmesh A's entry (MergedTo gains C); its ground rows change the island data of A and B.
+        // A's island change is refused, naming A and the relink; B's is planned in place on the winner's entry 1.
+        Case("2659 ground-island-beside-a-relink", () =>
+        {
+            FormKey a = K(0xA91), b = K(0xA92), c = K(0xA93);
+            var map = new Mutagen.Bethesda.Skyrim.NavigationMeshInfoMap(K(0xC00), Mutagen.Bethesda.Skyrim.SkyrimRelease.SkyrimSE);
+            foreach (var n in new[] { a, b })
+                map.MapInfos.Add(new Mutagen.Bethesda.Skyrim.NavigationMapInfo
+                {
+                    NavigationMesh = new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.INavigationMeshGetter>(n), Unknown = NavIsland.IslandFlag,
+                    Island = new Mutagen.Bethesda.Skyrim.IslandData { Min = new Noggog.P3Float(0, 0, 0), Max = new Noggog.P3Float(100, 100, 0) },
+                    Parent = new Mutagen.Bethesda.Skyrim.NavigationMapInfoWorldParent { ParentWorldspace = new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.IWorldspaceGetter>(K(0x800)) },
+                });
+            var view = NaviView.Of(new[] { new NaviSource("SelfTest.esm", "", map) });
+            var relinks = new NaviPlan { Record = view.Record, WinnerPlugin = "SelfTest.esm", WinnerPath = "" };
+            relinks.Entries.Add(new NaviEntryChange(a, "SelfTest.esm", "", 0, 0, new[] { c }, Array.Empty<FormKey>(), Array.Empty<FormKey>()));
+            relinks.Ops.Add(new RepairOp(K(0xC00).ToString(), "MapInfos[0].MergedTo", "Add", Value: c.ToString()));
+            var raised = new NavIslandEntry(NavIsland.IslandFlag, new NavIslandData(new Vec3(0, 0, 200), new Vec3(100, 100, 200), Array.Empty<Vec3>(), Array.Empty<(short, short, short)>()));
+            var (np, refused) = NavRepairNavi.ForGroundIslands(new Dictionary<FormKey, NavIslandEntry> { [a] = raised, [b] = raised }, view, relinks);
+            if (!refused.TryGetValue(a, out var why) || !why.Contains(a.ToString()) || !why.Contains("relink")) return $"A's island change beside its relink was not refused by name: [{string.Join(" | ", refused.Select(kv => $"{kv.Key}: {kv.Value}"))}]";
+            if (refused.ContainsKey(b)) return $"B was refused: {refused[b]}";
+            var ops = np.Ops.Select(o => $"{o.FieldPath} {o.Op}").ToList();
+            return np.Entries.Count == 1 && np.Entries[0].Nav == b && np.Entries[0].WinnerIndex == 1 && ops.SequenceEqual(new[] { "MapInfos[1].Island Set" })
+                ? null : $"B's change: entries [{string.Join(",", np.Entries.Select(e => e.Nav))}], ops [{string.Join(", ", ops)}]";
         });
 
         Console.WriteLine($"{(fail == 0 ? "all" : $"{fail} failed of")} navrepair self-test cases");
