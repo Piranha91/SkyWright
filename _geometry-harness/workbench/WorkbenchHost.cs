@@ -1870,7 +1870,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 return $"staged: nudge {name ?? key.ToString()} {staged}";
             }),
             s => _window?.Dispatcher.BeginInvoke(() => { Say(s); Shell.SetBanner(s); }),
-            k => FormKey.TryFactory(k, out var fk) ? $"{(_session.IsDrawn(fk) ? _session.RefOf(fk).Ref.BaseEditorId ?? k : k)} ({fk.ModKey.FileName})" : k,
+            k => FormKey.TryFactory(k, out var fk) ? _session.IsDrawn(fk) is var drawn && drawn
+                     ? $"{_session.RefOf(fk).Ref.BaseEditorId ?? k} ({_session.RefOf(fk).Ref.RefKey.ModKey.FileName})"   // the plugin's name as the scene spells it
+                     : $"{k} ({fk.ModKey.FileName})" : k,
             s => _window?.Dispatcher.BeginInvoke(() => Say(s)));
         _nudge = lane; _nudgeStop = stop; _nudgeKey = key; _nudgeSaid = null;
         async Task<string> Go()
