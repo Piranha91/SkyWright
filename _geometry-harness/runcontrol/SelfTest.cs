@@ -165,6 +165,7 @@ public static partial class SelfTest
         SelfTestStranded.Run(Case, Skip);
         SelfTestDangling.Run(Case, Skip);
         SelfTestLostEdits.Run(Case, Skip);
+        SelfTestMissingAssets.Run(Case, Skip);
 
         Console.WriteLine($"{_green} green, {_red} red, {_skipped} skipped");
         return _red == 0 ? 0 : 1;
