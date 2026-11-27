@@ -11,7 +11,8 @@ internal sealed record ProbeRun(string Label, string Emit, string BuildDigest, d
 /// <summary>A re-check's answer for the open conflict row.</summary>
 internal sealed record RecheckResult(RowVerdict Row, IReadOnlyList<RowVerdict> New, string Verdict, IReadOnlyList<string> Lines,
                                      string BuildSentence, double WallSeconds, IReadOnlyList<RowVerdict>? Others = null, string? Disabled = null,
-                                     string? ContactNote = null, string? Nudged = null, IReadOnlyList<RowVerdict>? ContactNew = null);
+                                     string? ContactNote = null, string? Nudged = null, IReadOnlyList<RowVerdict>? ContactNew = null,
+                                     RouteArmResult? Route = null);
 
 /// <summary>The detector re-run on the touched cell (DESIGN.md section 5, as built in stage 4). The probe that produced the
 /// row runs twice on the population of the patch alone (the run engine's <c>population</c>), with the same build: on the arm's order,
@@ -265,6 +266,11 @@ internal static class Recheck
         clock.Stop();
         return new RecheckResult(d.Row, d.New, verdict, lines, buildSentence, clock.Elapsed.TotalSeconds, d.Others, string.Join(", ", disabled), contactNote);
     }
+
+    /// <summary>For each nudged object, where the load order places it and where the patch puts it: the two places the route arm
+    /// judges it at (STUB).</summary>
+    internal static IReadOnlyList<(string Key, SkyWright.Engine.Vec3 Home, SkyWright.Engine.Vec3 At)> RouteTargets(EditSession s, IReadOnlyList<string> keys)
+        => Array.Empty<(string, SkyWright.Engine.Vec3, SkyWright.Engine.Vec3)>();
 
     /// <summary>The placement-contact arm a disable's re-check adds: the bundle's receipt for that check, or, when the scan
     /// did not include it, no adapter and the one sentence the re-check says instead.</summary>

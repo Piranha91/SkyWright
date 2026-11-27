@@ -47,6 +47,8 @@ internal static class NudgeRule
     internal const float Cap = 107f;
     internal const string Checked = "clear of the other object and still supported";
     internal const string RoutesNotChecked = "walking routes not checked";
+    /// <summary>A nudge whose three arms (the row's probe, placement contact, route cut) all held (Gate E).</summary>
+    internal const string CheckedAll = "clear of the other object, still supported and no walking route cut";
     const string Try = "try moving the other object of the conflict, or move this one by hand";
 
     static string Kind(string field) => DisableRule.Tokens(field) is { Length: > 0 } t ? string.Join(", ", t) : field.Split(' ', 2)[0];
