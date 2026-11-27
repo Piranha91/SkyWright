@@ -27,7 +27,7 @@ static class LostEditCheck
     public static CheckResult Cells(RecordContext ctx) => Run(ctx, cells: true);
 
     /// <summary>One record tool call in JSON; refuses an error, a non-JSON answer, or an answer cut short.</summary>
-    static JsonElement Ask(RecordContext ctx, Dictionary<string, object?> args, string what)
+    internal static JsonElement Ask(RecordContext ctx, Dictionary<string, object?> args, string what)
     {
         args["format"] = "json"; args["limit"] = 1_000_000; args["max_chars"] = 200_000_000;
         string answer = ctx.Call(ToolNames.Records, args);

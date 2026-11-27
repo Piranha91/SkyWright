@@ -12,6 +12,11 @@ namespace SkyWright.Engine;
 //   lost edits       a field one mod changed whose winning value is another mod's (LostEditRule): a row only between two
 //                    mods, judged when either plugin is in the selection (C5), neither a game file, the winner not made
 //                    with the loser (its masters, transitively: Masters).
+//   missing assets   a file a winning record names that the game does not find although a mod the record's plugin is
+//                    made with (or its own mod) ships it, because another mod's archive of the same name wins (MissingAsset):
+//                    judged when the record's plugin, the mod that ships the file or the mod whose archive wins is in the
+//                    selection; not a row when the record is the game's own, or when no such mod ships it (one mod's own
+//                    defect, or a mod it needs is not installed; an archive of its own mod that hides the file reads so).
 
 /// <summary>One end of a record link: the plugin, its mod, whether it is one of the game's own files, whether it is in the
 /// selection the scan judges, and whether it is in the load order at all.</summary>
@@ -71,6 +76,18 @@ public static class RecordClashRule
         if (winnerMadeWithLoser) return new(false, MadeWith);
         return new(true, BetweenMods);
     }
+
+    public const string AssetNamedByGameFile = "named by a record of the game's own files: the game's version";
+    public const string AssetOwnDefect = "no mod the record's plugin is made with ships the file, nor its own mod: one mod's own defect, or a mod it needs is not installed";
+    public const string AssetCannotTell = "the file is missing for a reason that cannot be told apart from one mod's own defect";
+
+    /// <summary>A file a winning record of <paramref name="needer"/> names that the game does not find, although
+    /// <paramref name="shipper"/> (the needer's own mod or a mod of a plugin it is made with; null when none of them ships it)
+    /// has it in an archive whose name another layer's archive, <paramref name="hider"/>'s, wins (null when that cannot be
+    /// read). A row only between two mods: judged when any of the three is in the selection; not a row when the record is the
+    /// game's own, or when no mod it is made with ships the file (its own mod's archive hiding the file reads so too, since its
+    /// own mod is one of them); counted as not told apart when the archive that wins cannot be named as a third mod's.</summary>
+    public static RecordVerdict MissingAsset(LinkEnd needer, LinkEnd? shipper, LinkEnd? hider) => new(true, BetweenMods);   // STUB: the red point
 
     /// <summary>A plugin's masters, transitively, from each plugin's header (<paramref name="direct"/>: its masters, or null
     /// when its header could not be read or it is not in the order). Blind when any header on the way could not be read.</summary>

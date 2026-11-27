@@ -15,7 +15,18 @@ sealed class CheckRefused(string message) : Exception(message);
 /// names them, null when the header could not be read). <paramref name="Instrument"/>: the lost-edit checks' known-answer
 /// mode (LostEditCheck), never a scan.</summary>
 sealed record RecordContext(Func<string, IReadOnlyDictionary<string, object?>, string> Call, IReadOnlyList<OrderPlugin> Order, bool Instrument = false,
-                            Selection? Selection = null);
+                            Selection? Selection = null)
+{
+    /// <summary>The asset files the winning copy of a record names (houseCARL's AssetLinkHarvest over the record as its
+    /// winning plugin holds it), by the record and that plugin; null when the record could not be read. The missing-assets
+    /// check's only record read; null in a context that has none.</summary>
+    public Func<string, string, IReadOnlyList<string>?>? AssetLinks { get; init; }
+    /// <summary>houseCARL's tools over the same load order with only the given mod folders enabled (highest priority
+    /// first): what the game would find if only those mods shipped files. Null in a context that has none.</summary>
+    public Func<IReadOnlyList<string>, Func<string, IReadOnlyDictionary<string, object?>, string>>? OwnView { get; init; }
+    /// <summary>The enabled mod folders, highest priority first, as the order's asset view has them.</summary>
+    public IReadOnlyList<string> EnabledMods { get; init; } = Array.Empty<string>();
+}
 
 /// <summary>The plan's selection as the population file names it: its plugins and its mod folders (null when no population
 /// file was given and every plugin of the order is in the selection).</summary>
@@ -35,6 +46,7 @@ static class RecordChecks
             [DanglingCheck.Id] = DanglingCheck.Run,
             [LostEditCheck.FieldsId] = LostEditCheck.Fields,
             [LostEditCheck.CellsId] = LostEditCheck.Cells,
+            [MissingAssetCheck.Id] = MissingAssetCheck.Run,
         };
 
     /// <summary>A plugin is one of the game's own files: Bethesda's or Creation Club's (BaseGamePlugins owns the names).</summary>
