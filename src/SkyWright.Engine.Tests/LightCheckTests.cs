@@ -150,6 +150,52 @@ public sealed class LightCheckTests
     }
 
     [Fact]
+    public void KF4_a_stranded_light_that_lights_nothing_carries_the_fixture_fact_on_its_lights_nothing_row_and_is_counted()
+    {
+        // Gate B review finding 4: one light, one row (the app merges by the registry's data); rejects: the lights-nothing row without the
+        // fixture fact, the stranded row not marked, or the light missing from the stranded class's count
+        string candle = K(0x801, Base), room = K(0x803, Base), light = K(0x802, Sel);
+        var gone = new[] { Base, RestB };
+        var d = D().Add(Candle(candle, At0)).Add(Solid(room, At0));
+        var s = Light(S().Add(Candle(candle, At0)).Add(Solid(room, At0)), light, Above, litBy: new Dictionary<string, double> { [room] = 100 });
+        var r = R().Add(Candle(candle, At0, deleted: true, touchers: gone)).Add(Solid(room, At0, on: false, touchers: gone));
+        var c = Light(C().Add(Candle(candle, At0, deleted: true, touchers: gone)).Add(Solid(room, At0, on: false, touchers: gone)), light, Above,
+                      facing: new FacingResult(64, 0, 0, 64), lit: 0);
+        var res = Eval(d, s, r, c);
+        var stranded = Assert.Single(Rows(res, LightCheck.LightNoFixture));
+        Assert.Equal(true, stranded.Readings.GetValueOrDefault("alsoLightsNothing"));
+        var nothing = Assert.Single(Rows(res, LightCheck.LightLightsNothing));
+        Assert.Equal(candle, nothing.Fixture);
+        Assert.Equal(At0, nothing.FixtureAt);
+        var merged = Assert.IsType<string>(nothing.Readings.GetValueOrDefault("strandedSummary"));
+        Assert.Contains("CandleHornTable01, which Rest Mod B removes", merged);
+        Assert.Contains("lights nothing", merged);
+        Assert.Contains("safe to disable", merged);
+        Assert.Equal(1, res.Counts[LightCheck.LightNoFixture].Listed);
+        Assert.Equal(1, res.Counts[LightCheck.LightNoFixture].AlsoLightsNothing);
+    }
+
+    [Fact]
+    public void KF4_a_stranded_light_that_reaches_surfaces_says_how_many_checks_hit_and_no_more()
+    {
+        // Gate B review finding 4; rejects: a sentence claiming the light still lights the room, or one with no measured hit count
+        string candle = K(0x801, Base), light = K(0x802, Sel);
+        var d = D().Add(Candle(candle, At0));
+        var s = Light(S().Add(Candle(candle, At0)), light, Above);
+        var r = R().Add(Candle(candle, At0, deleted: true, touchers: new[] { Base, RestB }));
+        var c = Light(C().Add(Candle(candle, At0, deleted: true, touchers: new[] { Base, RestB })), light, Above);
+        var row = Assert.Single(Rows(Eval(d, s, r, c), LightCheck.LightNoFixture));
+        Assert.Contains("60 of 64 checks from the light hit a surface", row.Summary);
+        Assert.DoesNotContain("lights the room", row.Summary);
+        Assert.DoesNotContain("very little", row.Summary);
+        Assert.Equal(60, row.Readings.GetValueOrDefault("hits"));
+        Assert.Null(row.Readings.GetValueOrDefault("alsoLightsNothing"));
+        var few = Light(C().Add(Candle(candle, At0, deleted: true, touchers: new[] { Base, RestB })), light, Above, facing: new FacingResult(64, 3, 0, 61));
+        var fewRow = Assert.Single(Rows(Eval(d, s, r, few), LightCheck.LightNoFixture));
+        Assert.Contains("3 of 64 checks from the light hit a surface; it reaches very little", fewRow.Summary);
+    }
+
+    [Fact]
     public void KP1_a_replacement_candle_at_the_spot_keeps_the_light_hosted()
     {
         // finding 1; rejects: "stranded" from the original host alone, when the other mod put its own burning candle in the same place

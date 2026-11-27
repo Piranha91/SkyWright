@@ -216,7 +216,7 @@ static class CheckMode
             },
             classes = LightCheck.Classes.Select(c => new { id = c, title = LightCheck.ClassTitles[c] }).ToList(),
             counts = LightCheck.Classes.ToDictionary(c => c, c => new { subjects = counts[c].Subjects, listed = counts[c].Listed, notThePair = counts[c].NotThePair,
-                                                                        noClash = counts[c].NoClash, notJudged = counts[c].NotJudged }),
+                                                                        noClash = counts[c].NoClash, notJudged = counts[c].NotJudged, alsoLightsNothing = counts[c].AlsoLightsNothing }),
             // the totals runcontrol reads through the registry's adapter.result (every class, admitted or held: admission is the app's)
             summary = new
             {

@@ -124,7 +124,10 @@ public sealed class LightCheckCount
     public int NotThePair { get; set; }
     public int NoClash { get; set; }
     public int NotJudged { get; set; }
-    public void Add(LightCheckCount o) { Subjects += o.Subjects; Listed += o.Listed; NotThePair += o.NotThePair; NoClash += o.NoClash; NotJudged += o.NotJudged; }
+    /// <summary>Of <see cref="Listed"/>: the lights that also read "lights nothing" (finding 4: the app may list them once, in that class,
+    /// as the registry's class entry says). A fact of the reading; counted here so the class's subjects still add up.</summary>
+    public int AlsoLightsNothing { get; set; }
+    public void Add(LightCheckCount o) { Subjects += o.Subjects; Listed += o.Listed; NotThePair += o.NotThePair; NoClash += o.NoClash; NotJudged += o.NotJudged; AlsoLightsNothing += o.AlsoLightsNothing; }
 }
 
 public sealed record LightCheckSceneResult(string Scene, IReadOnlyList<LightCheckRow> Rows, IReadOnlyDictionary<string, LightCheckCount> Counts);

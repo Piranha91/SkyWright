@@ -362,12 +362,13 @@ public static class LightCheck
                         // reference the other side's record changed (the fixture's, else the light's); with no such record it names no mover
                         LightCheckMod? other;
                         string? moved = null;
-                        string listed;
+                        string listed, clause;
                         if (hostC is null || !hostC.On)
                         {
                             other = ModOrNull(ChangedBy(hostC, own));
                             string what = hostC is null || hostC.Deleted ? "removes" : "disables";
                             listed = $"{who} sits at {fx}, which {Name(other)} {what}; the light now glows where nothing burns.";
+                            clause = $"{who} sat at {fx}, which {Name(other)} {what}";
                         }
                         else
                         {
@@ -378,18 +379,25 @@ public static class LightCheck
                             {
                                 other = Mod(fixMover); moved = "fixture";
                                 listed = $"{who} sits at {fx}, which {other.Mod} moves {rc.DistHere:N0} units away; the light now glows where nothing burns.";
+                                clause = $"{who} sat at {fx}, which {other.Mod} moves {rc.DistHere:N0} units away";
                             }
                             else if (lightMover is not null)
                             {
                                 other = Mod(lightMover); moved = "light";
                                 listed = $"{who} sits at {fx} in its own setup, and {other.Mod} moves the light {rc.DistHere:N0} units away from it; the light now glows where nothing burns.";
+                                clause = $"{who} sat at {fx} in its own setup, and {other.Mod} moves the light {rc.DistHere:N0} units away from it";
                             }
                             else
                             {
                                 other = null;
                                 listed = $"{who} sits at {fx} in its own setup, but with both sides installed the two stand {rc.DistHere:N0} units apart and no record of either says why; the light now glows where nothing burns.";
+                                clause = $"{who} sat at {fx} in its own setup, and with both sides installed the two stand {rc.DistHere:N0} units apart";
                             }
                         }
+                        // finding 4: what was measured of the light's reach, and no more (never "it still lights the room")
+                        int? lhits = lc.Facing is { } lf ? lf.Front + lf.Back : null;
+                        if (lhits is int nh)
+                            listed = listed.TrimEnd('.') + $"; {nh} of {lc.Facing!.Rays} checks from the light hit a surface" + (nh < MinFacingHits ? "; it reaches very little." : ".");
                         string summary = att == NotJudged
                             ? refusal ?? (rc.Unknown.Count > 0
                                 ? $"Not judged: a model within {o.HostRadius:0} units of {who} could not be read ({string.Join(", ", rc.Unknown)}), so whether it sits at a fixture is unknown; check that the mesh is installed and readable."
@@ -402,7 +410,8 @@ public static class LightCheck
                             Reason = att == NotJudged ? summary : rc.Label, At = at, Shadow = any.Shadow,
                             FixtureAt = hostOwn is not null && (hostC is null || !hostC.On || Dist(hostOwn.Pos, hostC.Pos) > Moved) ? hostOwn.Pos : null,
                             Readings = new Dictionary<string, object?> { ["attribution"] = att, ["label"] = rc.Label, ["hostKind"] = rc.HostHow,
-                                ["distanceOwn"] = rc.DistOwn, ["distanceCombined"] = rc.DistHere, ["unknown"] = rc.Unknown, ["moved"] = moved },
+                                ["distanceOwn"] = rc.DistOwn, ["distanceCombined"] = rc.DistHere, ["unknown"] = rc.Unknown, ["moved"] = moved,
+                                ["hits"] = lhits, ["fixtureClause"] = att == NeedsBoth ? clause : null },
                         });
                     }
                 }
@@ -451,11 +460,24 @@ public static class LightCheck
                         if (ChangedBy(c.Refs.GetValueOrDefault(owner), own) is { } p) { other = Mod(p); break; }
                 other ??= ModOrNull(ChangedBy(c.Refs.GetValueOrDefault(k), own));
                 string summary = $"{who} lights nothing with {Name(other)} installed: no surface is in its reach. Harmless to look at; safe to disable.";
+                var nothingReadings = new Dictionary<string, object?> { ["attribution"] = attV, ["facing"] = facing, ["lit"] = lc.Lit, ["leak"] = lc.Leak };
+                // finding 4: the same light listed as left with no fixture: its stranded row is marked, counted, and this row carries the
+                // fixture fact, so the app can list the light once (the registry's class entry says whether it does)
+                int ix = rows.FindLastIndex(x => x.Class == LightNoFixture && x.Subject == k && x.Verdict == "listed");
+                LightCheckRow? strandedRow = ix >= 0 ? rows[ix] : null;
+                if (strandedRow is not null)
+                {
+                    rows[ix] = strandedRow with { Readings = new Dictionary<string, object?>(strandedRow.Readings) { ["alsoLightsNothing"] = true } };
+                    counts[LightNoFixture].AlsoLightsNothing++;
+                    nothingReadings["strandedSummary"] = $"{strandedRow.Readings.GetValueOrDefault("fixtureClause")}; with {Name(other)} installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.";
+                    nothingReadings["strandedOtherMods"] = strandedRow.OtherMods;
+                }
                 rows.Add(new LightCheckRow(LightLightsNothing, "listed", scene, k)
                 {
                     SubjectEdid = lc.Edid, SubjectMod = lightMod, OtherMods = other is null ? Array.Empty<LightCheckMod>() : new[] { other },
                     Summary = summary, At = lc.Pos, Shadow = lc.Shadow,
-                    Readings = new Dictionary<string, object?> { ["attribution"] = attV, ["facing"] = facing, ["lit"] = lc.Lit, ["leak"] = lc.Leak },
+                    Fixture = strandedRow?.Fixture, FixtureEdid = strandedRow?.FixtureEdid, FixtureAt = strandedRow?.FixtureAt,
+                    Readings = nothingReadings,
                 });
             }
         }
