@@ -78,6 +78,24 @@ internal static class ProbeHelp
             It does not list links in or into the game's own files (Bethesda's and Creation Club's), links within one plugin or one mod, or links into a plugin missing from the load order, which the masters check reports. It has not yet found a real clash between two mods, so a scan does not run it unless you tick it.
             """),
 
+        ["records.contested-fields"] = new(
+            "Finds changes one mod made to a record, such as an object's position or a character's outfit, that a later mod in your load order puts back or changes again without having been made with the first mod.",
+            """
+            When two mods change the same record, the game uses only the version of the mod lower in the load order (the one with the higher priority). Every field of that version wins, including the fields it never meant to change: a mod made without the other simply carries the value it was made with, and the other mod's change is gone in game.
+
+            The check reads every record a mod of your selection changes that another mod's plugin also changes. For each copy that does not win, it compares the copy with what its own plugin was made with, to find what that mod really changed, and then with the copy that wins. A field is listed when one mod changed it, the winning value is different in game, the two plugins are in different mods, and the winning plugin was not made with the other one (it does not list it among its masters). It looks both ways: your mod's change lost to another mod, and another mod's change lost to your mod. Each row says whether the winning mod changed the field itself or only carries an older value.
+
+            Values are compared as the game reads them: numbers to four decimals, a record's flags without the one that only says how it is stored, and a list in another order only where the game reads the order. It does not list changes within one mod, the game's own files (Bethesda's and Creation Club's), a winner made with the mod it overrides, cells (the cell check's), navmesh (the navmesh check's), or quests, dialogue, form lists and the like (not built yet). It is held: a scan does not run it unless you tick it, until a person has read the rows it found on a test load order.
+            """),
+
+        ["records.cell-attributes"] = new(
+            "Finds cell settings one mod changed, such as lighting, water height, music or encounter zone, that a later mod in your load order puts back or changes again without having been made with the first mod.",
+            """
+            A cell's own record holds its lighting, water, music, flags and encounter zone. When two mods change the same cell, the game uses only the version of the mod lower in the load order, so a mod made without the other carries the cell's settings it was made with and undoes the other mod's.
+
+            The check is the same as the check for changed fields, on cells: it lists a setting one mod changed whose winning value is another mod's, when the two plugins are in different mods and the winning plugin was not made with the other one. It looks both ways, says whether the winning mod changed the setting itself, compares values as the game reads them, and does not list changes within one mod or in the game's own files. It is held: a scan does not run it unless you tick it, until a person has read the rows it found on a test load order.
+            """),
+
         ["geometry.stranded-object"] = new(
             "Finds objects left out of reach after another mod moved the walkable ground away from them, such as lights and decorations left behind when a mod rebuilds a room somewhere else.",
             """
