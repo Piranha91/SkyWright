@@ -67,6 +67,18 @@ internal sealed class BundleConflicts
         return by;
     }
 
+    /// <summary>A receipt the AI-side evaluation imported (its adapter kind is mcp-import), or false when it cannot be read.</summary>
+    static bool ImportedReceipt(string path)
+    {
+        try
+        {
+            using var d = JsonDocument.Parse(File.ReadAllText(path));
+            return d.RootElement.TryGetProperty("adapter", out var a) && a.ValueKind == JsonValueKind.Object
+                   && a.TryGetProperty("kind", out var k) && k.ValueKind == JsonValueKind.String && k.GetString() == "mcp-import";
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { return false; }
+    }
+
     internal static readonly string[] PlacedChecks = { "geometry.object-overlap", "geometry.placement-contact", "geometry.fixture-empty-space", "geometry.stranded-object" };
 
     internal required string Dir { get; init; }
@@ -267,6 +279,11 @@ internal sealed class BundleConflicts
         // a receipt of a check this SkyWright's registry does not list (an AI-side evaluation's row, in a bundle made before
         // those rows left the registry, or by the integration module) is not read: the bundle opens and one note says so
         var listed = Launcher.Registry().Select(c => c.Id).ToHashSet(StringComparer.Ordinal);
+        // a receipt the AI-side evaluation imported (adapter kind mcp-import) of an id this SkyWright now runs itself (the
+        // record checks, 2026-11-27) is that evaluation's too: not read as the app's check
+        var imported = Directory.EnumerateFiles(Path.Combine(dir, "receipts"), "*.json").Where(ImportedReceipt)
+            .Select(f => Path.GetFileNameWithoutExtension(f).Split("__")[0]).ToHashSet(StringComparer.Ordinal);
+        listed.ExceptWith(imported);
         var unlisted = Directory.EnumerateFiles(Path.Combine(dir, "receipts"), "*.json")
             .Select(f => Path.GetFileNameWithoutExtension(f).Split("__")[0]).Where(id => !listed.Contains(id)).ToList();
         if (unlisted.Count > 0)
