@@ -9,6 +9,9 @@ namespace SkyWright.Engine;
 //   dangling links   a link into a record its plugin does not have is a row only between two mods: judged when either
 //                    plugin is in the selection (Gate A review finding 1); not a row into a plugin missing from the order
 //                    (the masters check's), in the game's own files or into them, into its own plugin or its own mod.
+//   lost edits       a field one mod changed whose winning value is another mod's (LostEditRule): a row only between two
+//                    mods, judged when either plugin is in the selection (C5), neither a game file, the winner not made
+//                    with the loser (its masters, transitively: Masters).
 
 /// <summary>One end of a record link: the plugin, its mod, whether it is one of the game's own files, whether it is in the
 /// selection the scan judges, and whether it is in the load order at all.</summary>
@@ -57,13 +60,34 @@ public static class RecordClashRule
     public const string SameModEdit = "both are plugins of one mod: one mod's own business";
     public const string MadeWith = "the winner was made with the plugin it overrides, so its value is the later one by design";
 
-    /// <summary>STUB (unit 2, the red point): every pair is between two mods.</summary>
-    public static RecordVerdict LostEdit(LinkEnd loser, LinkEnd winner, bool winnerMadeWithLoser) => new(true, BetweenMods);
+    /// <summary>A lost edit, the <paramref name="loser"/>'s change under the <paramref name="winner"/>'s value: a row only
+    /// between two mods. Judged when either plugin is in the selection (C5); not a row when either is one of the game's own
+    /// files, when both are in one mod, or when the winner was made with the loser (lists it among its masters, transitively).</summary>
+    public static RecordVerdict LostEdit(LinkEnd loser, LinkEnd winner, bool winnerMadeWithLoser)
+    {
+        if (!loser.Selected && !winner.Selected) return new(false, NotSelected);
+        if (loser.GameFile || winner.GameFile) return new(false, GameFileSide);
+        if (string.Equals(loser.Mod, winner.Mod, StringComparison.OrdinalIgnoreCase)) return new(false, SameModEdit);
+        if (winnerMadeWithLoser) return new(false, MadeWith);
+        return new(true, BetweenMods);
+    }
 
-    /// <summary>STUB (unit 2, the red point): the direct masters only.</summary>
+    /// <summary>A plugin's masters, transitively, from each plugin's header (<paramref name="direct"/>: its masters, or null
+    /// when its header could not be read or it is not in the order). Blind when any header on the way could not be read.</summary>
     public static (IReadOnlySet<string> Closure, bool Blind) Masters(string plugin, Func<string, IReadOnlyList<string>?> direct)
     {
-        var d = direct(plugin);
-        return (new HashSet<string>(d ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase), false);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var first = direct(plugin);
+        bool blind = first is null;
+        var stack = new Stack<string>(first ?? Array.Empty<string>());
+        while (stack.Count > 0)
+        {
+            var m = stack.Pop();
+            if (!seen.Add(m)) continue;
+            var next = direct(m);
+            if (next is null) blind = true;
+            else foreach (var n in next) stack.Push(n);
+        }
+        return (seen, blind);
     }
 }

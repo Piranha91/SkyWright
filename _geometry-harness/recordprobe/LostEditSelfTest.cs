@@ -155,68 +155,73 @@ static class LostEditSelfTest
     public static readonly (string Name, Func<string?> Check)[] Cases =
     {
         ("LE1 a winner made with the plugin whose change it overrides gives 0 rows, counted as made with it", () =>
-            Expect(Run(Moved("Patch.esp", "Base.esp")), [], [(RecordClashRule.MadeWith, 1)])),
+            Expect(Run(Moved("Patch.esp", "Base.esp")), [], [(RecordClashRule.MadeWith, 1), (RecordClashRule.NotSelected, 1)])),
         ("LE2 made with, through another master: Hub.esp masters Patch.esp, which masters Base.esp, so 0 rows, counted as made with it", () =>
-            Expect(Run(Moved("Hub.esp", "Base.esp")), [], [(RecordClashRule.MadeWith, 1)])),
+            Expect(Run(Moved("Hub.esp", "Base.esp")), [], [(RecordClashRule.MadeWith, 1), (RecordClashRule.NotSelected, 1)])),
         ("LE3 a winner of another mod not made with the plugin is exactly 1 row, its field", () =>
-            Expect(Run(Moved("Other.esp", "Base.esp")), [("Base.esp", "Other.esp", "Placement")], None)),
+            Expect(Run(Moved("Other.esp", "Base.esp")), [("Base.esp", "Other.esp", "Placement")], [(RecordClashRule.NotSelected, 1)])),
         ("LE4 R5: a plugin that restates what it was made with has not changed the field (0 rows; the other version outside the selection)", () =>
-            Expect(Run(Restated("Late.esp")), [], [(RecordClashRule.NotSelected, 1)])),
+            Expect(Run(Restated("Late.esp")), [], [(RecordClashRule.NotSelected, 2)])),
         ("LE5 R5: the same fixture IS a row under the instrument's previous provider (the plugin beneath it)", () =>
-            Expect(Run(Restated("Late.esp"), instrument: true), [("Late.esp", "Other.esp", "Scale")], [(RecordClashRule.NotSelected, 1)])),
+            Expect(Run(Restated("Late.esp"), instrument: true), [("Late.esp", "Other.esp", "Scale")], [(RecordClashRule.NotSelected, 2)])),
         ("LE6 a record stored compressed is no change in game: only the Scale changed is a row", () =>
             Expect(Run(OneRecord(R1, "PlacedObject", new[] { "SkyrimMajorRecordFlags=Compressed (Other.esp 0)", "Scale=2 (Other.esp 1)" },
-                                 new[] { "SkyrimMajorRecordFlags=Compressed (Skyrim.esm 0)", "Scale=2 (Skyrim.esm 1)" })), [("Base.esp", "Other.esp", "Scale")], None)),
+                                 new[] { "SkyrimMajorRecordFlags=Compressed (Skyrim.esm 0)", "Scale=2 (Skyrim.esm 1)" })), [("Base.esp", "Other.esp", "Scale")], [(RecordClashRule.NotSelected, 1)])),
         ("LE7 numbers at four decimals and -0 equal to 0: a Scale written 1.34 for 1.3399999 is no change, a rotation equal in game is not lost", () =>
         {
             var r = Run(OneRecord(R1, "PlacedObject",
                 new[] { "Scale=1.34 (Other.esp 1.2)", "Placement.Position=5,0,0 (Other.esp 1,0,0)", "Placement.Rotation=0,1,2 (Other.esp -0,1,2.00001)" },
                 new[] { "Scale=1.34 (Skyrim.esm 1.3399999)", "Placement.Position=5,0,0 (Skyrim.esm 1,0,0)", "Placement.Rotation=0,1,2 (Skyrim.esm 0,1,1)" }));
-            return Expect(r, [("Base.esp", "Other.esp", "Placement")], None)
+            return Expect(r, [("Base.esp", "Other.esp", "Placement")], [(RecordClashRule.NotSelected, 1)])
                    ?? (r.Rows[0].Necessary[0].PhysicalDetail == "its Placement field" && PathsOf(r, 0).SequenceEqual(new[] { "Placement.Position" })
                        ? null : "the row's paths are not exactly Placement.Position");
         }),
         ("LE8 a cell's grid flags outside the byte the game reads are no change: only the water height is a row", () =>
             Expect(Run(OneRecord("000D00:Skyrim.esm", "Cell", new[] { "Grid.Flags=256 (Other.esp 0)", "WaterHeight=10 (Other.esp 0)" },
                                  new[] { "Grid.Flags=256 (Skyrim.esm Quad1)", "WaterHeight=10 (Skyrim.esm 0)" }), cells: true),
-                   [("Base.esp", "Other.esp", "WaterHeight")], None)),
+                   [("Base.esp", "Other.esp", "WaterHeight")], [(RecordClashRule.NotSelected, 1)])),
         ("LE9 a list only reordered is no change where the game does not read its order, and not judged where it does", () =>
         {
             var fx = OneRecord("000802:Skyrim.esm", "Container", new[] { "Items: same 3 item(s), ORDER DIFFERS from Other.esp" }, new[] { "Items: same 3 item(s), ORDER DIFFERS from Skyrim.esm" });
             fx.Recs.Add(new Rec("000803:Skyrim.esm", "Npc", new[] { "Skyrim.esm", "Base.esp", "Other.esp" }, new() { ["Base.esp"] = new[] { "Packages: same 2 item(s), ORDER DIFFERS from Other.esp" } }));
             fx.Auth[("Base.esp", "Skyrim.esm", "000803:Skyrim.esm")] = new[] { "Packages: same 2 item(s), ORDER DIFFERS from Skyrim.esm" };
-            return Expect(Run(fx), [], None, [(LostEditRule.OrderRead, 1)]);
+            return Expect(Run(fx), [], [(RecordClashRule.NotSelected, 2)], [(LostEditRule.OrderRead, 1)]);
         }),
         ("LE10 R6: a navmesh record is set aside, counted as the navmesh check's", () =>
-            Expect(Run(OneRecord("000804:Skyrim.esm", "NavigationMesh", new[] { "Data.Vertices=1 (Other.esp 2)" }, new[] { "Data.Vertices=1 (Skyrim.esm 0)" })), [], [(LostEditRule.Navmesh, 1)])),
+            Expect(Run(OneRecord("000804:Skyrim.esm", "NavigationMesh", new[] { "Data.Vertices=1 (Other.esp 2)" }, new[] { "Data.Vertices=1 (Skyrim.esm 0)" })), [], [(LostEditRule.Navmesh, 2)])),
         ("LE11 the instrument keeps navmesh records, as the Python capture did", () =>
             Expect(Run(OneRecord("000804:Skyrim.esm", "NavigationMesh", new[] { "Data.Vertices=1 (Other.esp 2)" }, new[] { "Data.Vertices=1 (Skyrim.esm 0)" }), instrument: true),
-                   [("Base.esp", "Other.esp", "Data")], None)),
+                   [("Base.esp", "Other.esp", "Data")], [(RecordClashRule.NotSelected, 1)])),
         ("LE12 a form list is set aside for the registration and dialogue check (unit 4)", () =>
-            Expect(Run(OneRecord("000805:Skyrim.esm", "FormList", new[] { "Items: 3 vs Other.esp 4 item(s)" }, new[] { "Items: 3 vs Skyrim.esm 2 item(s)" })), [], [(LostEditRule.Registration, 1)])),
+            Expect(Run(OneRecord("000805:Skyrim.esm", "FormList", new[] { "Items: 3 vs Other.esp 4 item(s)" }, new[] { "Items: 3 vs Skyrim.esm 2 item(s)" })), [], [(LostEditRule.Registration, 2)])),
         ("LE13 a pair with neither plugin in the selection is 0 rows, counted as outside the selection", () =>
-            Expect(Run(Moved("Other.esp", "Mid.esp")), [], [(RecordClashRule.NotSelected, 1)])),
+        {
+            // Mid.esp, selected, has the record too, so the record is read; Base.esp's change lost to Other.esp involves neither
+            var fx = Moved("Other.esp", "Mid.esp");
+            fx.Recs[0] = fx.Recs[0] with { Touchers = new[] { "Skyrim.esm", "Base.esp", "Mid.esp", "Other.esp" } };
+            return Expect(Run(fx), [], [(RecordClashRule.NotSelected, 2)]);
+        }),
         ("LE14 C5, the other direction: another mod's change lost to a selected plugin is 1 row", () =>
-            Expect(Run(Moved("Other.esp", "Other.esp")), [("Base.esp", "Other.esp", "Placement")], None)),
+            Expect(Run(Moved("Other.esp", "Other.esp")), [("Base.esp", "Other.esp", "Placement")], [(RecordClashRule.GameFileSide, 1)])),
         ("LE15 a delta line SkyWright cannot read is counted as not judged, and the rest of the version is still judged", () =>
         {
             var fx = Moved("Other.esp", "Base.esp");
             fx.Auth[("Base.esp", "Skyrim.esm", R1)] = new[] { "Placement.Position=1,2,3 (Skyrim.esm 0,0,0)", "Wiggle~ a line of no known shape" };
-            return Expect(Run(fx), [("Base.esp", "Other.esp", "Placement")], None, [(LostEditRule.Unreadable, 1)]);
+            return Expect(Run(fx), [("Base.esp", "Other.esp", "Placement")], [(RecordClashRule.NotSelected, 1)], [(LostEditRule.Unreadable, 1)]);
         }),
         ("LE16 a read houseCARL marks incomplete is not judged, never a clean result", () =>
         {
             var fx = Moved("Other.esp", "Base.esp");
             fx.Recs[0] = fx.Recs[0] with { Incomplete = new() { "Base.esp" } };
-            return Expect(Run(fx), [], None, [(LostEditRule.Incomplete, 1)]);
+            return Expect(Run(fx), [], [(RecordClashRule.NotSelected, 1)], [(LostEditRule.Incomplete, 1)]);
         }),
         ("LE17 two plugins of one mod are 0 rows, counted as one mod's own business", () =>
-            Expect(Run(Moved("Base - Extra.esp", "Base.esp")), [], [(RecordClashRule.SameModEdit, 1)])),
+            Expect(Run(Moved("Base - Extra.esp", "Base.esp")), [], [(RecordClashRule.SameModEdit, 1), (RecordClashRule.NotSelected, 1)])),
         ("LE18 a game file's version lost to a mod is 0 rows, counted as the game's own file", () =>
         {
             var fx = new Fx { Order = Order("Other.esp"), Recs = { new Rec(R1, "PlacedObject", new[] { "Skyrim.esm", "Update.esm", "Other.esp" }, new() { ["Update.esm"] = new[] { "Scale=2 (Other.esp 1)" } }) } };
             fx.Auth[("Update.esm", "Skyrim.esm", R1)] = new[] { "Scale=2 (Skyrim.esm 1)" };
-            return Expect(Run(fx), [], [(RecordClashRule.GameFileSide, 1)]);
+            return Expect(Run(fx), [], [(RecordClashRule.GameFileSide, 2)]);
         }),
         ("LE19 a plugin that defines the record authored every field it holds: its value lost is a row with nothing it was made with", () =>
         {
@@ -227,12 +232,12 @@ static class LostEditSelfTest
         }),
         ("LE20 a field the plugin removed from what it was made with, restored by the winner, is a row", () =>
             Expect(Run(OneRecord(R1, "PlacedObject", new[] { "LocationReference: ABSENT here (Other.esp has 00085A:Skyrim.esm)" },
-                                 new[] { "LocationReference: ABSENT here (Skyrim.esm has 00085A:Skyrim.esm)" })), [("Base.esp", "Other.esp", "LocationReference")], None)),
+                                 new[] { "LocationReference: ABSENT here (Skyrim.esm has 00085A:Skyrim.esm)" })), [("Base.esp", "Other.esp", "LocationReference")], [(RecordClashRule.NotSelected, 1)])),
         ("LE21 a plugin whose masters' header could not be read is not judged", () =>
         {
             var fx = Moved("Other.esp", "Base.esp");
             fx.Order = fx.Order.Select(p => p.Name == "Base.esp" ? p with { Masters = null } : p).ToList();
-            return Expect(Run(fx), [], None, [(LostEditRule.MastersUnread, 1)]);
+            return Expect(Run(fx), [], [(RecordClashRule.NotSelected, 1)], [(LostEditRule.MastersUnread, 1)]);
         }),
         ("LE22 the row says it in a modder's words: the plugins and their mods, what wins and that the winner was not made with the loser, one sentence", () =>
         {
@@ -271,7 +276,7 @@ static class LostEditSelfTest
             var shipped = Run(Turned());
             var instrument = Run(Turned(), instrument: true);
             IReadOnlyList<string> Paths(CheckResult r) => r.Detail is { Count: 1 } ? PathsOf(r, 0) : Array.Empty<string>();
-            return Expect(shipped, [("Base.esp", "Other.esp", "Placement")], None)
+            return Expect(shipped, [("Base.esp", "Other.esp", "Placement")], [(RecordClashRule.NotSelected, 1)])
                    ?? (Paths(shipped).SequenceEqual(new[] { "Placement.Position" }) && Paths(instrument).SequenceEqual(new[] { "Placement.Rotation", "Placement.Position" })
                        ? null : $"paths {string.Join(",", Paths(shipped))} and under the instrument {string.Join(",", Paths(instrument))}, not Placement.Position and Placement.Rotation,Placement.Position");
         }),
