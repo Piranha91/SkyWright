@@ -19,11 +19,11 @@
     "EnableParent": "refuse",
     "ActivateParents": "refuse",
     "TeleportDestination": "refuse",
-    "VirtualMachineAdapter": "allow",
+    "VirtualMachineAdapter": "refuse",
     "Package": "refuse",
     "Quest": "refuse-unless-carryable",
-    "Cell": "allow",
-    "other": "allow"
+    "Cell": "refuse",
+    "other": "refuse"
   },
   "carryableBaseTypes": ["MiscItem", "Weapon", "Armor", "Book", "Ingestible", "Ingredient", "Key", "SoulGem", "Scroll", "Ammunition"]
 }

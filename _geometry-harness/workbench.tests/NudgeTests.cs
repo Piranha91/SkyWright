@@ -201,6 +201,7 @@ public sealed class NudgeTests : IClassFixture<DisableWorld>
         new object[] { "a package's location", DisableWorld.PackLocTarget.ToString(), "package", DisableWorld.PackLocation.ToString() },
         new object[] { "a package's target", DisableWorld.PackTargetRef.ToString(), "package", DisableWorld.PackTarget.ToString() },
         new object[] { "named by a quest alias", DisableWorld.AliasTarget.ToString(), "quest", DisableWorld.Quest.ToString() },
+        new object[] { "named by a script property of an object", DisableWorld.ScriptTarget.ToString(), "script", DisableWorld.ScriptHolder.ToString() },
     };
 
     [Theory, MemberData(nameof(Kinds))]
