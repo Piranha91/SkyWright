@@ -89,6 +89,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does houseCARL's server program, from the module's build, write navownprobe's navmesh repair plan into one patch that reads back as the winner plus the plan (its carried cell forwarded from its winner, its NAVI changed only where planned), and does the re-check credit relinked, cut and refused links truly?](#tool-integration-housecarl-tests-test_navmesh_repair_write.py) — `integration/housecarl/tests/test_navmesh_repair_write.py`
 - [Does mask deduplication preserve exact output bytes and distinguish different masks?](#tool-_geometry-harness-tests-test_mask_evidence.py) — `_geometry-harness/tests/test_mask_evidence.py`
 - [Does miss diagnosis cluster edits and preserve unknown reasons correctly?](#tool-_geometry-harness-tests-test_missdiag.py) — `_geometry-harness/tests/test_missdiag.py`
+- [Does moving one object cut a walking route, its own or one beside it (the verdict of each object its move can reach, before and after)?](#tool-blockprobe) — `blockprobe`
 - [Does narration preparation enforce its contracts without model weights or network access?](#tool-integration-housecarl-tests-test_evalspeech.py) — `integration/housecarl/tests/test_evalspeech.py`
 - [Does navedit plan, refuse and write navmesh edits, markers and repairs as its known answers say?](#tool-_geometry-harness-tests-test_navedit.py) — `_geometry-harness/tests/test_navedit.py`
 - [Does navownprobe count a link into a deleted navmesh, emit mod deletions, judge border links by their geometry (no matching edge, no link back, ambiguous candidates), find navmesh left on ground a later LAND moved, and plan a relink that refuses an ambiguous match?](#tool-_geometry-harness-tests-test_navmesh_repair_rules.py) — `_geometry-harness/tests/test_navmesh_repair_rules.py`
@@ -1859,7 +1860,9 @@ Modifiers (do not select a separate mode):
 
 **Do placed obstacles cut walkable routes in this plugin or cell?**
 
-Investigate a doorway or passage where a placed obstacle may obstruct the navmesh.
+**Does moving one object cut a walking route, its own or one beside it (the verdict of each object its move can reach, before and after)?**
+
+Investigate a doorway or passage where a placed obstacle may obstruct the navmesh; or prove that a move of one object (a nudge's third arm) cuts no walking route, with --near on the unpatched and the patched order.
 
 Inputs: One or more target plugins, positionally (judged as one set, each listed row naming its target), optionally a --order candidate, the winning navmesh and placed obstacle geometry.
 
@@ -1872,6 +1875,7 @@ Source: [_geometry-harness/blockprobe/Program.cs](../_geometry-harness/blockprob
 
 Modifiers (do not select a separate mode):
 
+- `--also-at` — --also-at X,Y,Z (with --near, repeatable): another place of the --near reference the set must cover, so the unpatched and patched runs of a move judge the same references.
 - `--band` — Set band for this invocation; consult the linked parser for accepted values.
 - `--bos` — Set bos for this invocation; consult the linked parser for accepted values.
 - `--exclude` — Set exclude for this invocation; consult the linked parser for accepted values.
@@ -1881,10 +1885,11 @@ Modifiers (do not select a separate mode):
 - `--instance` — Refused: blockprobe reads the instance from HOUSECARL_MO2_INSTANCE (or the harness config); the argument exits 2 with that sentence.
 - `--list` — Set list for this invocation; consult the linked parser for accepted values.
 - `--moved-ref-selftest` — Set moved ref selftest for this invocation; consult the linked parser for accepted values.
+- `--near` — --near FORMKEY: the per-reference arm (Gate E, a nudge's proof): judge only that reference and every reference held in its cell (and, outdoors, the eight around it) whose route window (its box grown 256 u in plan) reaches it, the navcut boxes there too; the targets name the plugin that places it. The rows file's Judged list gives each one's verdict and Near says what was asked.
 - `--order` — Set order for this invocation; consult the linked parser for accepted values.
 - `--profile` — Refused: blockprobe reads the profile from HOUSECARL_MO2_PROFILE (or the harness config); the argument exits 2 with that sentence.
-- `--rows` — --rows FILE: also write every listed route-cut row (Blocked, LikelyBlocked, NoLine, Unjudgeable; objects and navcut boxes) to FILE as JSON, uncapped by --list (blockprobe/RouteCutRows.cs); the route-cut check's adapter passes it.
-- `--self-test` — Run the known-answer self-test over the probe's synthetic fixture; exit 0 when every case passes.
+- `--rows` — --rows FILE: also write every listed route-cut row (Blocked, LikelyBlocked, NoLine, Unjudgeable; objects and navcut boxes) to FILE as JSON, uncapped by --list (blockprobe/RouteCutRows.cs); the route-cut check's adapter passes it. Since Gate E the file also lists every reference the run judged with its verdict (Judged: the six, NotMeasured or NotJudged with the reason), so a reference judged fine is told from one never tested.
+- `--self-test` — Run the known-answer self-test over the probe's synthetic fixtures (the per-reference decisions, and --near on RouteCutFixture's near fixture run as a child process); exit 0 when every case passes.
 - `--state` — Set state for this invocation; consult the linked parser for accepted values.
 - `--switch-map` — Set switch map for this invocation; consult the linked parser for accepted values.
 - `--write-route-cut-fixture` — --write-route-cut-fixture DIR: write the route-cut fixture (_shared/RouteCutFixture.cs) that tests/test_route_cut_rows.py runs the real probe on; test-only.

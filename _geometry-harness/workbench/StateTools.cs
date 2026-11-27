@@ -121,7 +121,7 @@ internal sealed class StateTools
                  "reference; or select a drawn reference with `ref`, or ref \"none\"); stage (move and/or turn a reference: relative with `delta` " +
                  "and `turn_degrees`, or absolute with `position` and `rotation_degrees`; the selected reference unless `ref` names one); " +
                  "disable (stage the selected reference, or `ref`, to be written initially disabled in the patch plugin, never deleted: refused in one sentence when another record depends on it, such as an enable parent, a linked reference, an activate parent, a door's far side, a quest, a package, a script property, or a large-reference list; an object takes one fix, a move or a disable. " + DisableRule.Limits + "); " +
-                 "nudge (find the smallest move, within 107 units including the drop, that clears the open overlap for the selected reference or `ref`: refused in one sentence when something depends on where it stands (data/nudge-refusals.json) or it already has a fix; runs in the background, about 30 s for the judge program and 150-220 s per proof by the open row's probe and contactprobe, at most 3; the first position the probes confirm is staged, never written, and says that walking routes were not checked; `op` abort stops it; read with workbench_state project [\"nudge\"]); " +
+                 "nudge (find the smallest move, within 107 units including the drop, that clears the open overlap for the selected reference or `ref`: refused in one sentence when something depends on where it stands (data/nudge-refusals.json) or it already has a fix; runs in the background, " + NudgeLane.CostWords + " by the open row's probe, contactprobe and blockprobe's route cut, at most 3; a position that blocks a walking route is rejected; the first position the probes confirm is staged, never written, and says whether walking routes were checked (not when the scan did not include the route-cut check); `op` abort stops it; read with workbench_state project [\"nudge\"]); " +
                  "undo (the last staged edit, a disable too); commit (write the staged edits to the new patch plugin `patch`: `dry_run` true, the default, " +
                  "previews the values and masters and writes nothing; false writes, and then re-checks the open conflict in the background, " +
                  "about 70-80 s, read with workbench_state wait_seconds); recheck (re-check the open conflict against the written patch `patch`). " +
@@ -354,6 +354,12 @@ internal sealed class StateTools
         try { var said = await DisableAction.StageAsync(sc, k); return Answer(new { said, state = Project(s, DefaultParts, 20, 0, null) }); }
         catch (InvalidOperationException ex) { return Refuse(ex.Message); }
     }
+
+    /// <summary>How long a re-check takes, in words: a nudge's runs three arms (measured, NudgeLane.RecheckSeconds).</summary>
+    static string RecheckAbout(IWorkbenchScene sc, string patch) =>
+        sc.Session.NudgedIn(WorkbenchHost.PluginName(patch)).Count > 0
+            ? $"about {NudgeLane.RecheckSeconds} s for a nudge: the row's probe, placement contact and route cut, each before and after the move"
+            : "about 70-80 s";
 
     /// <summary>The <c>nudge</c> verb: the window's Nudge button, by the same path; <c>op</c> abort stops a running one.</summary>
     static async Task<CallToolResult> NudgeOnUi(IWorkbenchSurface s, string? refKey, string? op)
@@ -790,7 +796,7 @@ internal sealed class StateTools
                     text += behind;
                     said = dryRun ? "dry run, nothing written: " + text
                         : "written: " + text + (sc.Rechecking
-                            ? $" The re-check of conflict {s.OpenRow?.Rank} is running (about 70-80 s); read workbench_state with wait_seconds 150 for its result."
+                            ? $" The re-check of conflict {s.OpenRow?.Rank} is running ({RecheckAbout(sc, patch.Trim())}); read workbench_state with wait_seconds 150 for its result."
                             : sc.RecheckRefusal is { } rr ? " The re-check was refused: " + rr
                             : s.OpenRow is null ? " No conflict is open, so nothing was re-checked." : "");
                     break;
@@ -802,7 +808,7 @@ internal sealed class StateTools
                     if (sc.Rechecking) return Refuse("a re-check is already running; read workbench_state with wait_seconds for its result.");
                     var t = sc.StartRecheck(patch.Trim());
                     if (t.IsCompleted && sc.RecheckRefusal is { } rr) return Refuse("the re-check was refused: " + rr);
-                    said = $"re-checking conflict {s.OpenRow?.Rank} against {patch.Trim()} (about 70-80 s); read workbench_state with wait_seconds 150 for its result.";
+                    said = $"re-checking conflict {s.OpenRow?.Rank} against {patch.Trim()} ({RecheckAbout(sc, patch.Trim())}); read workbench_state with wait_seconds 150 for its result.";
                     break;
                 }
                 default:

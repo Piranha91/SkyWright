@@ -34,14 +34,25 @@ sealed class BlockWalk
     public readonly Dictionary<FormKey, CellPlacements> CellMeta = new();
     public readonly Dictionary<FormKey, string> DefinedBy = new();     // ref -> the first plugin that placed it, for the {NAVCUT by …} line
 
-    public BlockWalk(Dictionary<FormKey, CellPlacements> targetCells)
+    /// <summary>--near (Gate E): the exterior grid whose eight neighbours are judged too; their cells are admitted as the walk
+    /// meets them (with no references of the targets' own: the caller judges the near set there), and the floor is filed for
+    /// their own 3x3, so out to two cells from it.</summary>
+    readonly (FormKey Ws, int X, int Y)? _around;
+
+    public BlockWalk(Dictionary<FormKey, CellPlacements> targetCells, (FormKey Ws, int X, int Y)? around = null)
     {
         TargetCells = targetCells;
+        _around = around;
+        int reach = around is null ? 1 : 2;
         foreach (var tc in targetCells.Values)
             if (!tc.Interior && tc.Grid is { } tg)
-                for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++) FloorGrids.Add((tc.Worldspace, tg.X + dx, tg.Y + dy));
+                for (int dx = -reach; dx <= reach; dx++) for (int dy = -reach; dy <= reach; dy++) FloorGrids.Add((tc.Worldspace, tg.X + dx, tg.Y + dy));
         Floor = new FloorFeed.FloorIndex((ws, g) => FloorGrids.Contains((ws, g.X, g.Y)));
     }
+
+    /// <summary>A cell the walk admits as a target cell because it borders the --near grid.</summary>
+    bool Admits(CellPlacements cp) => _around is { } a && !cp.Interior && cp.Grid is { } g && cp.Worldspace == a.Ws
+                                      && Math.Abs(g.X - a.X) <= 1 && Math.Abs(g.Y - a.Y) <= 1;
 
     /// <summary>Open one plugin of the order, or throw PluginUnreadableException (refused, never skipped).</summary>
     public static ISkyrimModGetter? Open(string path) => PluginOpen.Open(path, "blockprobe's walk of the load order");
@@ -58,6 +69,8 @@ sealed class BlockWalk
         {
             perCell(cp);
             Floor.Observe(cp, name);
+            if (!TargetCells.ContainsKey(cp.Cell) && Admits(cp))
+                TargetCells[cp.Cell] = cp with { Refs = new List<PlacedRef>(), Navmeshes = new List<NavmeshGeometry>() };
             bool targetCell = TargetCells.ContainsKey(cp.Cell);
             _win.Observe(cp, (c, _) => targetCell);
             foreach (var k in _navs.Observe(cp, (_, _) => targetCell))
