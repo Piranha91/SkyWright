@@ -127,17 +127,21 @@ public sealed class StaleProgramFolderTests : IDisposable
         Assert.Equal(before, Left());
     }
 
-    /// <summary>Sabotage: the same step without its removal (its one RemoveDir taken out) fails the first case's check,
-    /// on that check's own sentence, naming the three stale folders.</summary>
+    /// <summary>Sabotage: the same step with its removal taken out, and the guard that fails the build when a stale folder
+    /// is still there taken out with it (a step that silently removes nothing), fails the first case's check on that
+    /// check's own sentence, naming the three stale folders. Each line is asserted to occur exactly once.</summary>
     [Fact]
     public void Sabotage_the_step_without_its_removal_leaves_the_stale_folders_and_the_check_says_so()
     {
-        var text = File.ReadAllText(RealStep);
-        const string removal = "<RemoveDir Directories=\"@(_SwStale)\" ContinueOnError=\"WarnAndContinue\" />";
-        int count = (text.Length - text.Replace(removal, "").Length) / removal.Length;
-        Assert.True(count == 1, $"the sabotage expects the step's removal exactly once, found {count}");
+        var lines = File.ReadAllLines(RealStep).ToList();
+        foreach (var mark in new[] { "<RemoveDir Directories=\"@(_SwStale)\"", "and that old folder could not be removed" })
+        {
+            int n = lines.Count(l => l.Contains(mark, StringComparison.Ordinal));
+            Assert.True(n == 1, $"the sabotage expects the line with '{mark}' exactly once, found {n}");
+            lines.RemoveAll(l => l.Contains(mark, StringComparison.Ordinal));
+        }
         var sabotaged = Path.Combine(_tmp, "after.sabotaged.targets");
-        File.WriteAllText(sabotaged, text.Replace(removal, ""));
+        File.WriteAllLines(sabotaged, lines);
         var why = StaleCheck(sabotaged);
         Assert.True(why is not null && why.StartsWith("after the solution built, 6 entries no project builds were left", StringComparison.Ordinal)
             && why.Contains("Probes/movedprobe") && why.Contains("Tools/oldtool") && why.Contains("Tests/oldtests"),
