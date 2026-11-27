@@ -1,4 +1,5 @@
 using System.Numerics;
+using HarnessShared;
 using HousecarlCore;
 using SkyWright.Engine;
 
@@ -92,6 +93,71 @@ static class LightSelfTest
         Check("particle emitters: a mesh emitter the reach model refuses (it moves) still has a stored-pose extent", "a whole-system refusal on reach grounds",
               () => ParticleReach.EmitterExtents(Vanilla(data, @"furniture\alchemyworkbench.nif")) is var es
                     && es.Any(e => e.SystemName == "PArray_OuterArmsSparks" && e.Refusal is null && !e.Box.IsEmpty && e.Moving));
+    }
+
+    /// <summary>--check's Base Object Swapper rule (decision 7; Gate B review finding 1): a synthetic plugin (LpBos.esp: a candle base
+    /// 0x801 placed as 0x802 in cell LpBosCell, a table base 0x803 placed as 0x804 in cell LpBosOther) and a synthetic _SWAP.ini read
+    /// through the reader --check uses (BosHook.Load over the loose roots, OrderReading.BosNamesIn, CheckMode.BosRefusal).</summary>
+    static void BosCases()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "lightprobe-selftest-bos-" + Environment.ProcessId);
+        try
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+            Directory.CreateDirectory(root);
+            var rel = Mutagen.Bethesda.Skyrim.SkyrimRelease.SkyrimSE;
+            var key = new Mutagen.Bethesda.Plugins.ModKey("LpBos", Mutagen.Bethesda.Plugins.ModType.Plugin);
+            Mutagen.Bethesda.Plugins.FormKey F(uint id) => new(key, id);
+            var mod = new Mutagen.Bethesda.Skyrim.SkyrimMod(key, rel);
+            mod.Statics.Add(new Mutagen.Bethesda.Skyrim.Static(F(0x801), rel) { EditorID = "LpCandle" });
+            mod.Statics.Add(new Mutagen.Bethesda.Skyrim.Static(F(0x803), rel) { EditorID = "LpTable" });
+            void Place(uint cellId, string edid, uint refId, uint baseId)
+            {
+                var r = new Mutagen.Bethesda.Skyrim.PlacedObject(F(refId), rel) { Placement = new Mutagen.Bethesda.Skyrim.Placement() };
+                r.Base.SetTo(F(baseId));
+                var cell = new Mutagen.Bethesda.Skyrim.Cell(F(cellId), rel) { EditorID = edid, Flags = Mutagen.Bethesda.Skyrim.Cell.Flag.IsInteriorCell };
+                cell.Temporary.Add(r);
+                int blockN = (int)(cellId % 10), subN = (int)(cellId / 10 % 10);
+                var block = mod.Cells.Records.FirstOrDefault(b => b.BlockNumber == blockN);
+                if (block is null) { block = new Mutagen.Bethesda.Skyrim.CellBlock { BlockNumber = blockN, GroupType = Mutagen.Bethesda.Skyrim.GroupTypeEnum.InteriorCellBlock }; mod.Cells.Records.Add(block); }
+                var sub = block.SubBlocks.FirstOrDefault(x => x.BlockNumber == subN);
+                if (sub is null) { sub = new Mutagen.Bethesda.Skyrim.CellSubBlock { BlockNumber = subN, GroupType = Mutagen.Bethesda.Skyrim.GroupTypeEnum.InteriorCellSubBlock }; block.SubBlocks.Add(sub); }
+                sub.Cells.Add(cell);
+            }
+            Place(0x810, "LpBosCell", 0x802, 0x801);
+            Place(0x821, "LpBosOther", 0x804, 0x803);
+            var path = Path.Combine(root, "LpBos.esp");
+            mod.BeginWrite.ToPath(path).WithLoadOrder(Array.Empty<Mutagen.Bethesda.Skyrim.ISkyrimModGetter>()).Write();
+
+            // the scene LpBosCell: its one member, the candle reference
+            var scene = new[] { F(0x802) };
+            string? Refusal(string ini)
+            {
+                var swapDir = Path.Combine(root, "mods", "SwapMod-" + Math.Abs(ini.GetHashCode()));
+                Directory.CreateDirectory(swapDir);
+                File.WriteAllText(Path.Combine(swapDir, "LpBos_SWAP.ini"), ini);
+                var idx = new OverlapIndex { Bos = new BosFormIndex() };
+                using (var ov = Mutagen.Bethesda.Skyrim.SkyrimMod.CreateFromBinaryOverlay(path, rel))
+                {
+                    idx.Ingest(0, ov);
+                    idx.Bos.SetLoadOrder(new[] { (ov.ModKey, BosHook.IsLight(ov)) });
+                }
+                var layer = BosHook.Load(new[] { ("SwapMod", swapDir) }, idx.Bos);
+                return CheckMode.BosRefusal(scene, k => OrderReading.BosNamesIn(layer, idx, k), "combined");
+            }
+            Check("BOS: a _SWAP.ini swapping the base of a scene member leaves the scene not judged, in one sentence naming the member",
+                  "a scene with a swapped base judged as if Base Object Swapper did nothing (the rule untested, Gate B review finding 1)", () =>
+                  Refusal("[Forms]\n0x801~LpBos.esp|0x803~LpBos.esp\n") is { } why && why.StartsWith("Not judged: ") && why.Contains("000802:LpBos.esp")
+                  && why.Contains("Base Object Swapper") && why.Count(ch => ch == '.') == 2 /* LpBos.esp and the full stop */ && why.EndsWith("game."));
+            Check("BOS: a _SWAP.ini swapping a scene member by its reference leaves the scene not judged",
+                  "only [Forms] lines read (a [References] swap of the member missed)", () =>
+                  Refusal("[References]\n0x802~LpBos.esp|0x803~LpBos.esp\n") is { } why && why.Contains("000802:LpBos.esp"));
+            Check("BOS: a _SWAP.ini naming only a reference in another cell leaves the scene judged",
+                  "every scene refused once any swap file is installed", () => Refusal("[References]\n0x804~LpBos.esp|0x801~LpBos.esp\n") is null);
+            Check("BOS: a _SWAP.ini naming only another base leaves the scene judged",
+                  "a swap of any base read as touching the scene", () => Refusal("[Forms]\n0x803~LpBos.esp|0x801~LpBos.esp\n") is null);
+        }
+        finally { try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
     }
 
     public static int Run(string[] args)
@@ -215,6 +281,23 @@ static class LightSelfTest
             var srcs = Enumerable.Range(0, 5).Select(i => new PlacementSource("Mod " + i, AssetKind.Loose, $@"X:\lab\mods\Mod {i}\meshes\x.nif", null, @"meshes\x.nif")).ToList();
             var got = srcs.Concat(srcs).Select(s => cache.Get("model", s, x => x.ProviderName, _ => 400)).ToList();
             return got.SequenceEqual(srcs.Concat(srcs).Select(s => s.ProviderName)) && cache.Evictions > 0 && cache.PeakBytes <= 1000 && cache.Reads == 10;
+        });
+
+        BosCases();
+
+        Check("BOS: a scene not judged becomes a row a modder sees (class scene-not-judged, its reason, where it opens); a judged scene does not",
+              "a refused scene left only in scenes[] (Gate B review finding 1's second half), or a row for a scene that was judged", () =>
+        {
+            var inner = new LightCheckSceneKey(false, "0A1B2C:Skyrim.esm"); var outer = new LightCheckSceneKey(true, "00003C:Skyrim.esm", -11, 23);
+            var judged = new LightCheckSceneKey(false, "0A1B2D:Skyrim.esm");
+            const string why = "Not judged: a Base Object Swapper file changes 000900:Skyrim.esm in this scene (combined arrangement), and this check does not apply Base Object Swapper; look at the scene in game.";
+            var rows = CheckMode.RefusedSceneRows(new[] { inner, judged, outer }, new Dictionary<string, string> { [inner.Id] = why, [outer.Id] = why },
+                                                  new Dictionary<string, string> { [inner.Id] = "TestHouse", [outer.Id] = "Tamriel cell -11, 23", [judged.Id] = "Judged" });
+            return rows.Count == 2
+                && rows[0]["class"] as string == CheckMode.SceneClass && rows[0]["verdict"] as string == "not judged" && rows[0]["reason"] as string == why
+                && rows[0]["scene"] as string == "TestHouse" && rows[0]["cell"] as string == inner.Space && rows[0]["at"] is null
+                && rows[1]["kind"] as string == "exterior" && rows[1]["x"] is -11 && rows[1]["y"] is 23 && rows[1]["cell"] is null
+                && rows[1]["at"] is float[] at && at[0] == -10.5f * LightCheckSceneIndex.Cell && at[1] == 23.5f * LightCheckSceneIndex.Cell;
         });
 
         if (meshesFrom is null)

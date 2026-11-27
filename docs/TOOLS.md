@@ -318,6 +318,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [What character appearance and runtime outfit occupy this pose?](#tool-viewprobe.npc) — `viewprobe.npc`
 - [What does Base Object Swapper change in this scene?](#tool-viewprobe.bos) — `viewprobe.bos`
 - [What does a lower storey look like with upper geometry sliced away?](#tool-viewprobe.cull-above) — `viewprobe.cull-above`
+- [What does an app scan list as a lighting clash (the lighting check behind the registry's environment.lighting row)?](#tool-lightprobe) — `lightprobe`
 - [What does each candidate mod touch, which edit kinds does it and its key patches make, and which assets does it override?](#tool-modcensus.run) — `modcensus.run`
 - [What does each edited plane hide, by owner, in each rendered view of a plane-patch group?](#tool-planeassess.score) — `planeassess.score`
 - [What does the game do when this block's switch flips run under one lock?](#tool-switchflip.batch) — `switchflip.batch`
@@ -4441,11 +4442,13 @@ Source: [_geometry-harness/leftbehindprobe/Program.cs](../_geometry-harness/left
 
 **Which lighting clashes does the combination of the selected mods with the rest of the load order make that neither makes alone (a light left with no fixture, a fixture left with no light, a light behind a wall, a light that lights nothing, a fixture lit twice, and the over-limit count), interiors and exteriors?**
 
+**What does an app scan list as a lighting clash (the lighting check behind the registry's environment.lighting row)?**
+
 Find lighting clashes between the selection and the rest from the load order alone (--check), or investigate one order's lights cell by cell before judging a patch edit on a model-less light.
 
 Inputs: A load order (profile or --order candidate) and interior cells by editor id.; --check: four order files (the dependencies, the selection over them, the rest over them, the combination), optionally a scenes file.
 
-Outputs: Per cell: every reference (base, type, editor id, model, pose, load-time enable state, deletion, responsible plugin) and every placed light (radius: base plus the reference's XRDS offset, flags, shadow, portal-strict, fade, colour).; With --geometry, per enabled light: facing (front / back / no first hit over 64 rays), leak (attenuated area lit through an opaque surface, by receiving reference) and point-in-solid; per lit shape whose placed box a light's radius reaches: the lights reaching it (count, shadow, strict; the bound-sphere count beside it); unreadable models named and lights near them labelled incomplete; whether Light Limit Fix is installed in the order's files (identity.llf); per enabled, drawn reference with a model, its placed emitting parts (emissive lighting-shader shapes with their value, self-lit effect shapes, self-lit particle emitter extents) or why its mesh could not be read for them.; identity.solidPolicy and identity.anchorPolicy: the solid rule (MeshIntersection.PolicyVersion) and the point reading (MeshAnchor.PolicyVersion) when the run wrote at least one point-in-solid row, else "none"; identity.pointInSolidRows counts the rows written, refused ones included.; --check: skywright.light-check/1: the sides and the four arrangements' identities; per scene whether it was judged (Base Object Swapper scenes are not); per class subjects, listed, not the pair, no clash and not judged; every row with its class, verdict (listed, cannot tell, not judged), subject, fixture, the light's mod and the mod whose record did it, the sentence a modder reads and where the view opens; the cost per arrangement and the model cache's reads and hits.
+Outputs: Per cell: every reference (base, type, editor id, model, pose, load-time enable state, deletion, responsible plugin) and every placed light (radius: base plus the reference's XRDS offset, flags, shadow, portal-strict, fade, colour).; With --geometry, per enabled light: facing (front / back / no first hit over 64 rays), leak (attenuated area lit through an opaque surface, by receiving reference) and point-in-solid; per lit shape whose placed box a light's radius reaches: the lights reaching it (count, shadow, strict; the bound-sphere count beside it); unreadable models named and lights near them labelled incomplete; whether Light Limit Fix is installed in the order's files (identity.llf); per enabled, drawn reference with a model, its placed emitting parts (emissive lighting-shader shapes with their value, self-lit effect shapes, self-lit particle emitter extents) or why its mesh could not be read for them.; identity.solidPolicy and identity.anchorPolicy: the solid rule (MeshIntersection.PolicyVersion) and the point reading (MeshAnchor.PolicyVersion) when the run wrote at least one point-in-solid row, else "none"; identity.pointInSolidRows counts the rows written, refused ones included.; --check: skywright.light-check/1: the sides and the four arrangements' identities; per scene whether it was judged (Base Object Swapper scenes are not); per class subjects, listed, not the pair, no clash and not judged; every row with its class, verdict (listed, cannot tell, not judged), subject, fixture, the light's mod and the mod whose record did it, the sentence a modder reads and where the view opens; the cost per arrangement and the model cache's reads and hits; a summary block (listed, cannot tell, judged, not judged, scenes not judged) the registry's environment.lighting row reads; a row for each scene not judged; each row's cell (or worldspace and grid) and where a gone fixture stood; one progress line per scene read.
 
 Limit: Not settled: whether a lighting change reads as broken or merely different. This probe measures placement, radius, flags, light leaking through opaque surfaces and the lights reaching each shape; how the result looks is a judgement made in game (world-edit-compatibility SKILL.md §7).
 
@@ -4457,7 +4460,7 @@ Modifiers (do not select a separate mode):
 - `--cell` — An interior cell by editor id; repeatable.
 - `--cells-file` — Interior cell editor ids, one per line ('#' comments).
 - `--check` — Run the lighting check: read the four arrangements, each as itself, and write the clashes only the combination makes (skywright.light-check/1).
-- `--combined` — --check: the combined order file (everything).
+- `--combined` — --check: the combined order file (everything); --order names it too.
 - `--dependencies` — --check: the dependencies' order file (what both sides stand on).
 - `--dump-arrangements` — --check: also write each arrangement's readings of the scenes read, as housecarl.light/1, into this folder.
 - `--game` — Game directory (else the harness config).
@@ -4466,7 +4469,7 @@ Modifiers (do not select a separate mode):
 - `--json` — Write the per-cell references, lights and readings to this path (required).
 - `--list-interiors` — List every interior cell of the order with its placed-light counts instead of measuring.
 - `--max-mb` — Stop with exit 3 when private bytes pass this many MB at a checkpoint (0, the default, is no cap).
-- `--order` — Walk this candidate configuration (CandidateFile) instead of the profile's order.
+- `--order` — Walk this candidate configuration (CandidateFile) instead of the profile's order; under --check it names the combined arrangement (runcontrol hands it so).
 - `--profile` — MO2 profile name (else the harness config).
 - `--rest` — --check: the rest's order file (the dependencies plus the rest of the load order).
 - `--scenes-file` — --check: read these scenes instead of the ones both sides touch (interior editor ids, or WORLDSPACE-FORMKEY@x,y).

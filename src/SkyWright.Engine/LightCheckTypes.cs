@@ -109,6 +109,9 @@ public sealed record LightCheckRow(string Class, string Verdict, string Scene, s
     public string? Reason { get; init; }
     /// <summary>Where the view opens (the light, the fixture or the shape's reference).</summary>
     public Vector3 At { get; init; }
+    /// <summary>Where the fixture stood in the subject's own arrangement, when the combination no longer has it there (removed,
+    /// disabled or moved): the view marks that spot, since the scene shows the combination. Null otherwise.</summary>
+    public Vector3? FixtureAt { get; init; }
     public bool? Shadow { get; init; }
     public IReadOnlyDictionary<string, object?> Readings { get; init; } = new Dictionary<string, object?>();
 }
@@ -121,7 +124,10 @@ public sealed class LightCheckCount
     public int NotThePair { get; set; }
     public int NoClash { get; set; }
     public int NotJudged { get; set; }
-    public void Add(LightCheckCount o) { Subjects += o.Subjects; Listed += o.Listed; NotThePair += o.NotThePair; NoClash += o.NoClash; NotJudged += o.NotJudged; }
+    /// <summary>Of <see cref="Listed"/>: the lights that also read "lights nothing" (finding 4: the app may list them once, in that class,
+    /// as the registry's class entry says). A fact of the reading; counted here so the class's subjects still add up.</summary>
+    public int AlsoLightsNothing { get; set; }
+    public void Add(LightCheckCount o) { Subjects += o.Subjects; Listed += o.Listed; NotThePair += o.NotThePair; NoClash += o.NoClash; NotJudged += o.NotJudged; AlsoLightsNothing += o.AlsoLightsNothing; }
 }
 
 public sealed record LightCheckSceneResult(string Scene, IReadOnlyList<LightCheckRow> Rows, IReadOnlyDictionary<string, LightCheckCount> Counts);

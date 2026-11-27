@@ -159,6 +159,7 @@ public static partial class SelfTest
         SelfTestFinalize.RunRows(Case);
         EntryCopyCases();
         SelfTestFinalize.RunOwnCases(Case);
+        SelfTestLighting.Run(Case);
         BoundaryCases(Skip);
         LiveCases();
         SelfTestStranded.Run(Case, Skip);
