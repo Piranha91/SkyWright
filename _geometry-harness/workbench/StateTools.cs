@@ -355,6 +355,12 @@ internal sealed class StateTools
         catch (InvalidOperationException ex) { return Refuse(ex.Message); }
     }
 
+    /// <summary>How long a re-check takes, in words: a nudge's runs three arms (measured, NudgeLane.RecheckSeconds).</summary>
+    static string RecheckAbout(IWorkbenchScene sc, string patch) =>
+        sc.Session.NudgedIn(WorkbenchHost.PluginName(patch)).Count > 0
+            ? $"about {NudgeLane.RecheckSeconds} s for a nudge: the row's probe, placement contact and route cut, each before and after the move"
+            : "about 70-80 s";
+
     /// <summary>The <c>nudge</c> verb: the window's Nudge button, by the same path; <c>op</c> abort stops a running one.</summary>
     static async Task<CallToolResult> NudgeOnUi(IWorkbenchSurface s, string? refKey, string? op)
     {
@@ -790,7 +796,7 @@ internal sealed class StateTools
                     text += behind;
                     said = dryRun ? "dry run, nothing written: " + text
                         : "written: " + text + (sc.Rechecking
-                            ? $" The re-check of conflict {s.OpenRow?.Rank} is running (about 70-80 s); read workbench_state with wait_seconds 150 for its result."
+                            ? $" The re-check of conflict {s.OpenRow?.Rank} is running ({RecheckAbout(sc, patch.Trim())}); read workbench_state with wait_seconds 150 for its result."
                             : sc.RecheckRefusal is { } rr ? " The re-check was refused: " + rr
                             : s.OpenRow is null ? " No conflict is open, so nothing was re-checked." : "");
                     break;
@@ -802,7 +808,7 @@ internal sealed class StateTools
                     if (sc.Rechecking) return Refuse("a re-check is already running; read workbench_state with wait_seconds for its result.");
                     var t = sc.StartRecheck(patch.Trim());
                     if (t.IsCompleted && sc.RecheckRefusal is { } rr) return Refuse("the re-check was refused: " + rr);
-                    said = $"re-checking conflict {s.OpenRow?.Rank} against {patch.Trim()} (about 70-80 s); read workbench_state with wait_seconds 150 for its result.";
+                    said = $"re-checking conflict {s.OpenRow?.Rank} against {patch.Trim()} ({RecheckAbout(sc, patch.Trim())}); read workbench_state with wait_seconds 150 for its result.";
                     break;
                 }
                 default:

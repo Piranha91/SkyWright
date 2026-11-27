@@ -292,7 +292,7 @@ internal sealed class NudgeLane
     internal const int MaxProofs = 3;
     /// <summary>The measured cost the sentences say (RESULT-E.md): the search and the judge program, and one proof with its three
     /// arms (the row's probe, placement contact and route cut, each unpatched and patched).</summary>
-    internal const int JudgeSeconds = 50, ProofSecondsLow = 190, ProofSecondsHigh = 270;
+    internal const int JudgeSeconds = 50, ProofSecondsLow = 190, ProofSecondsHigh = 270, RecheckSeconds = 245;
     /// <summary>The same in words, for the state tools' description (an attribute, so a constant; kept beside the numbers).</summary>
     internal const string CostWords = "about 50 s for the search and the judge program, then 190-270 s per proof";
 
