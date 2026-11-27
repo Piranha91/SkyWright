@@ -59,6 +59,32 @@ internal static class CheckStatusWords
 
 internal sealed class BundleConflicts
 {
+    /// <summary>Each row's own sentence by its identity (DifferentialRows' keying): two rows on one record, such as two
+    /// fields of one record a mod's change lost, each keep theirs. The first row of an identity gives it.</summary>
+    internal static Dictionary<string, string> SummariesById(ConflictFile file)
+    {
+        var by = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in file.Conflicts)
+        {
+            string? other = c.Alternative is { Count: > 0 } alt ? alt[0].FormKey : null;
+            int? part = c.Alternative is { Count: > 0 } alt2 ? alt2[0].Triangle : null;
+            foreach (var r in c.Necessary) by.TryAdd(ConflictIo.RowIdentity(c.Kind, r.FormKey, other, c.A, part), c.Summary);
+        }
+        return by;
+    }
+
+    /// <summary>A receipt the AI-side evaluation imported (its adapter kind is mcp-import), or false when it cannot be read.</summary>
+    static bool ImportedReceipt(string path)
+    {
+        try
+        {
+            using var d = JsonDocument.Parse(File.ReadAllText(path));
+            return d.RootElement.TryGetProperty("adapter", out var a) && a.ValueKind == JsonValueKind.Object
+                   && a.TryGetProperty("kind", out var k) && k.ValueKind == JsonValueKind.String && k.GetString() == "mcp-import";
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { return false; }
+    }
+
     internal static readonly string[] PlacedChecks = { "geometry.object-overlap", "geometry.placement-contact", "geometry.fixture-empty-space", "geometry.stranded-object", LightRows.CheckId };
 
     internal required string Dir { get; init; }
@@ -276,6 +302,11 @@ internal sealed class BundleConflicts
         // a receipt of a check this SkyWright's registry does not list (an AI-side evaluation's row, in a bundle made before
         // those rows left the registry, or by the integration module) is not read: the bundle opens and one note says so
         var listed = Launcher.Registry().Select(c => c.Id).ToHashSet(StringComparer.Ordinal);
+        // a receipt the AI-side evaluation imported (adapter kind mcp-import) of an id this SkyWright now runs itself (the
+        // record checks, 2026-11-27) is that evaluation's too: not read as the app's check
+        var imported = Directory.EnumerateFiles(Path.Combine(dir, "receipts"), "*.json").Where(ImportedReceipt)
+            .Select(f => Path.GetFileNameWithoutExtension(f).Split("__")[0]).ToHashSet(StringComparer.Ordinal);
+        listed.ExceptWith(imported);
         var unlisted = Directory.EnumerateFiles(Path.Combine(dir, "receipts"), "*.json")
             .Select(f => Path.GetFileNameWithoutExtension(f).Split("__")[0]).Where(id => !listed.Contains(id)).ToList();
         if (unlisted.Count > 0)
@@ -304,11 +335,12 @@ internal sealed class BundleConflicts
                 {
                     var file = ConflictIo.Read(full);
                     if (baseFile is { } bf) before = DifferentialRows.Of(ConflictIo.Read(bf)).Select(x => x.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    var summaries = SummariesById(file);
                     got = DifferentialRows.Of(file).GroupBy(x => x.Id).Select(g => g.First()).Select(x =>
                     {
                         var rn = names?.Ref(x.FormKey);
                         string? why = rn is null ? "the names read did not reach this reference, so its cell is not known" : rn.Value.Cell is null ? "the bundle records no cell for this reference" : null;
-                        var summary = file.Conflicts.FirstOrDefault(cf => cf.Kind == x.Kind && cf.A == x.A && cf.Necessary.Any(n => n.FormKey == x.FormKey))?.Summary ?? x.Kind;
+                        var summary = summaries.GetValueOrDefault(x.Id) ?? x.Kind;
                         return new FindingRow(check, x.Kind, x.A ?? "", x.B ?? "", summary, x.FormKey, rn?.Cell, why, "finding", x.Id, x.Physical) { BaseType = rn?.BaseType };
                     }).ToList();
                 }
@@ -343,7 +375,9 @@ internal sealed class BundleConflicts
                          : exec.StartsWith("blocked") ? "blocked" : exec.Length == 0 ? "no result" : exec;
             int before = manual ? rows.Count(x => x.CheckId == check && x.NewOnArm == false) + findings.Count(x => x.CheckId == check && x.NewOnArm == false) : 0;
             int count = rows.Count(x => x.CheckId == check) + findings.Count(x => x.CheckId == check && x.Role != "counted, not a clash") - before;
-            checks.Add(new CheckStatus(check, state, state == "ran" ? count : null, state == "ran" ? null : why, state == "ran" && manual && !checkLines.ContainsKey(check) ? before : null)
+            // "new with the selected mods" only when every row of the check was compared with the setup without them
+            bool compared = !rows.Any(x => x.CheckId == check && x.NewOnArm is null) && !findings.Any(x => x.CheckId == check && x.NewOnArm is null && x.Role != "counted, not a clash");
+            checks.Add(new CheckStatus(check, state, state == "ran" ? count : null, state == "ran" ? null : why, state == "ran" && manual && compared && !checkLines.ContainsKey(check) ? before : null)
                        { Lines = state == "ran" ? checkLines.GetValueOrDefault(check) ?? new List<string>() : new List<string>() });
         }
         // a reference filed in its worldspace's persistent cell has no cell of its own to build; a Findings row names one

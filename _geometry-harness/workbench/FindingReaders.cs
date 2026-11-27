@@ -153,6 +153,18 @@ internal static class SessionCells
 /// <summary>A ranked Findings row.</summary>
 internal sealed record RankedFinding(int Rank, FindingRow Row, bool InvolvesTarget, string NewLabel, int Severity);
 
+/// <summary>A Findings row's line on the Findings list, for every check: its own sentence first, so the part a narrow list
+/// shows says what the row is (record checks review finding U2-F1), then whether it is new, its role and its check. In a
+/// manual run's bundle opened on its review arm, "new on this arm" reads "new with the selected mods", which is what that arm is.</summary>
+internal static class FindingWords
+{
+    internal static string Line(RankedFinding f, bool manual)
+    {
+        string isNew = manual && f.Row.NewOnArm == true ? "new with the selected mods" : f.NewLabel;
+        return $"{f.Rank}. {f.Row.Summary}   ({isNew}; {f.Row.Role}; {f.Row.CheckId})" + (f.Row.Clickable ? "" : "   (does not open the viewer)");
+    }
+}
+
 /// <summary>'s Findings ranking, first difference wins: 1 names a target; 2 new on the review arm before
 /// not new before not compared; 3 the check's evidence grade; 4 physical half holds before unmeasured before anything
 /// else (conflict rows); 5 severity by the reference's base type; 6 checkId, then identity.</summary>

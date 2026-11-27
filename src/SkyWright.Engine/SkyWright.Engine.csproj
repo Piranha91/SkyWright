@@ -17,6 +17,8 @@
     <PackageReference Include="Mutagen.Bethesda.Skyrim" Version="0.54.4" />
     <PackageReference Include="Nifly" Version="1.1.0-housecarl.4" />
     <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
+    <!-- the lost-edit checks' field scope, SkyWright's data/record-field-scope.json, built in (RecordFieldScope.Shipped) -->
+    <EmbeddedResource Include="..\..\data\record-field-scope.json" LogicalName="record-field-scope.json" />
   </ItemGroup>
 
   <ItemGroup>
