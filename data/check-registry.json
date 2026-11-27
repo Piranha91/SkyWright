@@ -272,6 +272,54 @@
       "manualDecisionAllowed": false
     },
     {
+      "id": "geometry.stranded-object",
+      "family": "geometry",
+      "title": "Objects left out of reach of walkable ground after another mod moved the navmesh away from them",
+      "required": false,
+      "optIn": true,
+      "applicability": {
+        "trigger": {
+          "anyOf": [
+            {
+              "navmesh": true
+            },
+            {
+              "placed": true
+            }
+          ]
+        },
+        "note": "A target that edits navmesh can move walkable ground away from another plugin's objects; a target that only places objects can have them stranded by a later plugin's navmesh. Either footprint needs the check."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "ordersweep-probe",
+        "exe": "strandprobe",
+        "args": [
+          "--order",
+          "{order}",
+          "--emit",
+          "{emit}",
+          "--base",
+          "{base}"
+        ],
+        "reverse": true,
+        "output": "conflict-file",
+        "commonFlags": true
+      },
+      "evidence": {
+        "strength": "calibrated-inference",
+        "claim": "STRANDED BY THE OTHER MOD",
+        "limits": "Held: a scan does not run it until a look in game confirms it; no stranded object has been looked at in game. Indoors only. An object is stranded when it lies more than 150 u (the activation reach) from the navmesh that wins and within 150 u of the navmesh its own plugin was made with (that plugin and its masters), and touches no solid object of another mod. Within 12 u of the reach on either side (the measured spread between navmesh and floor) it is not judged, nor when a distance cannot be measured (also when both cannot, where houseCARL's lane S gave no row), when its model cannot be read, or when another mod's object near it has a shape that cannot be settled. A trigger is judged by contact with the walkable band, 0-128 u over the navmesh. No row when the navmesh that wins is the one its own plugin was made with, when the plugin whose navmesh wins lists the object's plugin among its masters, when both are the game's own files, or for an editor marker. The navmesh is where characters walk, not every place a player can stand. Quest aliases and AI packages that point at an object are not read."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
       "id": "geometry.terrain-support",
       "family": "geometry",
       "title": "Placed references left floating or buried after another mod reshaped the terrain under them",
