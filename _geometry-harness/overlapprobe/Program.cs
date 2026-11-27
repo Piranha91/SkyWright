@@ -1911,6 +1911,7 @@ if (emitPath is not null)
     };
     if (PopulationScopeLine() is { } scopeLine) coverage.Add(scopeLine);
     coverage.Add(meshRule.Coverage());
+    Console.WriteLine($"   mesh responsibility timings: readmission {meshRule.ReadmitSeconds:0.0}s, counterfactuals {meshRule.JudgeSeconds:0.0}s");
     var identity = cfg.Identity(populationIdentity, pop.StateName);
     ReportTimer("reconciliation", reconcileTimer, null);
     __run.ReviseTotal(reconciliationPredicates, "the current class and optional base emit established the exact predicate count");

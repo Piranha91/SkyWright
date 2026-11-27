@@ -7,6 +7,8 @@ test_population_scope.py does), with the REAL overlapprobe, whole-order and with
   - baseline B on the "with" order; candidate C on the "without" order with --base B;
   - the full reverse: the "with" order with --base C; the --reverse-of reverse: the same, plus --reverse-of B;
   - the two reverse emits must be equal in every field but GeneratedUtc, row for row and in order;
+  - no coverage note in any of the four emits carries a wall-clock time (a timing made the two reverse emits differ on a
+    busy machine; timings are printed, never written into the emit);
   - a baseline emit that is not this run's own must be refused by name, for each check: another configuration (the other
     order's emit, and B with its fingerprint changed), another population, another policy, another instance, an emit that
     was itself run with --base, a sweep-independent coverage line that differs, other pair limits (recorded, and a run
@@ -20,6 +22,7 @@ another build folder (the sabotage run points it at a build whose refusal checks
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -235,6 +238,31 @@ def fallback_equals_full_reverse():
     assert next(c for c in g["Coverage"] if c["Population"].startswith("base records"))["Judged"] == bases["Judged"] + 1,         "the full reverse's base-record count is not the baseline's plus RfOther: the fallback was not needed here"
 
 
+TIMING = re.compile(r"\b\d+\.\d+ ?s\b")
+
+
+def timing_in(doc):
+    """The coverage notes of an emit that carry a wall-clock figure (seconds), as 'population: note'."""
+    return [f"{c['Population']}: {c['Note']}" for c in doc.get("Coverage") or [] if TIMING.search(c.get("Note") or "")]
+
+
+def no_timing_in_coverage(scope):
+    """Rejects: a coverage note that carries a wall-clock time. Two runs of the same order then differ whenever the machine
+    is busy (1 of 10 comparisons under 16 spinning processes on 2026-11-27: 'readmission 0.0s' vs '0.1s'), so the
+    --reverse-of emit cannot be held equal to the full reverse's. A sabotage arm first shows the check sees such a note."""
+    def t():
+        planted = {"Coverage": [{"Population": "mesh responsibility", "Note": "7 model path(s); readmission 0.1s, counterfactuals 0.0s"}]}
+        assert len(timing_in(planted)) == 1, "sabotage: the check did not see a planted timing note"
+        L = lab()
+        found = []
+        for k in ("baseline", "candidate", "full", "fast"):
+            assert L.runs[(scope, k)].returncode == 0, f"{scope} {k}: exit {L.runs[(scope, k)].returncode}"
+        for p in L.runs[(scope, "paths")][:4]:
+            found += [f"{Path(p).name} {x}" for x in timing_in(load(p))]
+        assert not found, f"{len(found)} coverage note(s) carry a wall-clock time: " + " | ".join(found)[:900]
+    return t
+
+
 def fp(doc):
     doc["Configuration"]["Fingerprint"] = "0" * 64
 
@@ -249,6 +277,7 @@ def coverage_line(name):
 
 for scope in ("whole", "scoped"):
     check(f"{scope}: the --reverse-of emit equals the full reverse's in every field but GeneratedUtc", same_as_full_reverse(scope))
+    check(f"{scope}: no coverage note in any emit carries a wall-clock time", no_timing_in_coverage(scope))
     check(f"{scope}: a baseline with another fingerprint is refused, naming the configuration", refused(scope, fp, "measured on configuration"))
     check(f"{scope}: another order's emit is refused, naming the configuration", other_order_refused(scope))
     check(f"{scope}: another population is refused", refused(scope, lambda d: d.__setitem__("Population", "flags"), "judged population"))
