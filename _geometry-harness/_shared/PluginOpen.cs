@@ -42,7 +42,7 @@ public static class PluginOpen
 
     /// <summary>The one sentence for a <c>--plugin</c> that <see cref="Locate"/> found nowhere; the caller exits 2 with it.</summary>
     public static string NotLocated(string name, string dataDir) =>
-        $"{name} is neither in {dataDir} nor in the profile's load order; check the plugin's file name, or name the MO2 profile that enables its mod.";
+        $"{name} is neither in {Path.GetFullPath(dataDir)} nor in the profile's load order; check the plugin's file name, or name the MO2 profile that enables its mod.";
 
     /// <summary>Open one plugin of a walk, or throw <see cref="PluginUnreadableException"/>.</summary>
     public static ISkyrimModGetter Open(string path, string walk)
