@@ -68,6 +68,16 @@ internal static class ProbeHelp
             Supports it cannot read are counted as not judged. Outdoors the ground itself is not treated as a support here, so it may point at an object that is really standing on the ground.
             """),
 
+        ["loadability.dangling-references"] = new(
+            "Finds records that use a record of another mod which the version of that mod you have installed does not have, such as a patch made for an older version of the mod it patches.",
+            """
+            A record often uses records of other plugins: a character's race, an item in a container, a door's destination. When a patch or an add-on was made for another version of the mod it uses, a record it relies on can be gone from the version you have, and the game then finds nothing where the patch expects something.
+
+            The check reads the links of every record in your load order and lists a record only when it is in one mod's plugin, the record it uses belongs to another mod's plugin that is loaded but does not have it, and one of the two is in your selection. A plugin in the game's Data folder or in MO2's overwrite counts as a mod of its own.
+
+            It does not list links in or into the game's own files (Bethesda's and Creation Club's), links within one plugin or one mod, or links into a plugin missing from the load order, which the masters check reports. It has not yet found a real clash between two mods, so a scan does not run it unless you tick it.
+            """),
+
         ["geometry.stranded-object"] = new(
             "Finds objects left out of reach after another mod moved the walkable ground away from them, such as lights and decorations left behind when a mod rebuilds a room somewhere else.",
             """
@@ -76,6 +86,16 @@ internal static class ProbeHelp
             For each object indoors, the probe measures how far it lies from the walkable ground that wins in your load order, and how far it lay from the walkable ground its own mod was made with. An object more than 150 units away now (the distance at which the player can use something) but within that distance before is reported, unless it touches a solid object of another mod, which suggests it still stands in that mod's room. Distances within 12 units of the limit are not judged, because the walkable ground and the real floor can differ by that much. Triggers are judged by whether a standing person could still step into them.
 
             It does not report objects when the mod that changed the walkable ground was made with the object's mod loaded, or when both are the game's own files. Editor markers are left out. No result of this probe has yet been confirmed in the game, so a scan does not run it until one has.
+            """),
+
+        ["environment.lighting"] = new(
+            "Finds lights and light fixtures that the selected mods and the rest of your load order leave broken together: a light left glowing where its candle or fire is gone, a light shut behind another mod's wall, a light that no longer reaches any surface.",
+            """
+            The check reads your load order four ways: the files the selected mods need, the selected mods on those files, the rest of your load order on those files, and everything together. A row is listed only when everything together shows the problem and none of the other three does, so each row is something the two sides make together.
+
+            A light counts as sitting at a fixture when the fixture's burning part (a flame, an ember, a glowing window) is within 64 units of it. A light left with no fixture is one whose fixture another mod removed, disabled or moved away, with no other burning object near it. A light behind a wall is one whose rays mostly meet the back of a surface, read from 64 rays and only when at least 8 hit something. Some kinds are held until they have been checked in the game: they are counted, not listed. How many lights reach one surface is shown as a count, never as a clash.
+
+            Base Object Swapper is not applied: a cell in which a swap file names one of its objects is shown as not judged. Whether a listed light looks wrong in the game has not yet been confirmed for every kind.
             """),
 
         ["geometry.fixture-empty-space"] = new(

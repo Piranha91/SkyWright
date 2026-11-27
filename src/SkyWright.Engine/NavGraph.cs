@@ -283,8 +283,10 @@ public static class NavGraph
     /// than its own projection), which is what keeps A* admissible, and using 3D distance would make
     /// a staircase look longer than the ground it leads to for no benefit — the taut length is
     /// measured afterwards, on the smoothed path, in 3D.
-    /// Returns the triangle channel, start first, or null when the two are not connected.</summary>
-    public static List<TriRef>? FindChannel(IReadOnlyDictionary<TriRef, Node> nodes, TriRef start, TriRef goal)
+    /// Returns the triangle channel, start first, or null when the two are not connected (or, with
+    /// <paramref name="avoid"/>, not connected without entering one of those triangles).</summary>
+    public static List<TriRef>? FindChannel(IReadOnlyDictionary<TriRef, Node> nodes, TriRef start, TriRef goal,
+                                            IReadOnlySet<TriRef>? avoid = null)
     {
         if (!nodes.ContainsKey(start) || !nodes.ContainsKey(goal)) return null;
         if (start.Equals(goal)) return new List<TriRef> { start };
@@ -315,7 +317,7 @@ public static class NavGraph
             var node = nodes[cur];
             foreach (var (to, _, _) in node.Links)
             {
-                if (closed.Contains(to) || !nodes.TryGetValue(to, out var tn)) continue;
+                if (closed.Contains(to) || (avoid is not null && avoid.Contains(to)) || !nodes.TryGetValue(to, out var tn)) continue;
                 float tentative = g[cur] + Plan(node.Centroid, tn.Centroid);
                 if (g.TryGetValue(to, out var known) && tentative >= known) continue;
                 g[to] = tentative;
@@ -438,8 +440,9 @@ public static class NavGraph
     }
 
     /// <summary>The taut path between two triangles, with the channel it walks; <see cref="Reroutes"/> of them were
-    /// re-routed round an interior vertex, saving <see cref="Saved"/> u of plan length.</summary>
-    public sealed record Taut(List<TriRef> Channel, List<Vector2> Corners, int Reroutes, float Saved);
+    /// re-routed round an interior vertex and <see cref="OtherSides"/> past a hole on its other side, saving
+    /// <see cref="Saved"/> u of plan length in all.</summary>
+    public sealed record Taut(List<TriRef> Channel, List<Vector2> Corners, int Reroutes, float Saved, int OtherSides = 0);
 
     /// <summary>The taut path from <paramref name="start"/> in triangle <paramref name="from"/> to <paramref name="end"/> in
     /// <paramref name="to"/>: A*, the funnel, then the channel straightened; null when the two are not connected.
@@ -449,21 +452,30 @@ public static class NavGraph
     /// then bends at a vertex the mesh surrounds on every side. Such a bend proves the channel slack, so that stretch of the
     /// channel is re-routed round the other side of the vertex's ring of triangles and the funnel run again. A re-route is
     /// kept only if the path gets strictly shorter, repeats no triangle and walks every link in its own direction (a one-way
-    /// ledge is never walked backwards). It shortens the path within the side of each hole A* chose; it does not choose a
-    /// different side.</summary>
-    public static Taut? TautPath(IReadOnlyDictionary<TriRef, Node> nodes, TriRef from, TriRef to, Vector2 start, Vector2 end)
+    /// ledge is never walked backwards).
+    ///
+    /// A bend at a vertex on the mesh boundary is where the path passes a hole (or the mesh's edge), and A* chose that side
+    /// by centroid costs: two sides can be close in centroid cost but not in taut length, so the other side is tried too.
+    /// A* is run again with every triangle round that vertex forbidden (<see cref="PastOtherSide"/>), the funnel run on what
+    /// it finds, and that channel kept on the same terms: only if the path gets strictly shorter.
+    /// <paramref name="tryOtherSides"/> false leaves that out (a test's sabotage arm).</summary>
+    public static Taut? TautPath(IReadOnlyDictionary<TriRef, Node> nodes, TriRef from, TriRef to, Vector2 start, Vector2 end,
+                                 bool tryOtherSides = true)
     {
         var channel = FindChannel(nodes, from, to);
         if (channel is null) return null;
         var corners = Funnel(nodes, channel, start, end);
         float len = PlanLength(corners);
-        int reroutes = 0; float saved = 0f;
+        int reroutes = 0, otherSides = 0; float saved = 0f;
         int budget = 2 * channel.Count + 4;
+        // the boundary vertices whose other side was tried on the current channel and found no shorter (reset when it changes)
+        var noShorter = new HashSet<Vector2>();
         bool improved = true;
         while (improved && budget-- > 0)
         {
             improved = false;
             for (int ci = 1; ci + 1 < corners.Count && !improved; ci++)
+            {
                 foreach (var alt in AroundOtherSide(nodes, channel, corners[ci]))
                 {
                     var c2 = Funnel(nodes, alt, start, end);
@@ -472,8 +484,23 @@ public static class NavGraph
                     saved += len - l2; len = l2; channel = alt; corners = c2; reroutes++; improved = true;
                     break;
                 }
+                if (improved) { noShorter.Clear(); continue; }
+                if (!tryOtherSides || noShorter.Contains(corners[ci])) continue;
+                if (PastOtherSide(nodes, channel, corners[ci], from, to) is { } past)
+                {
+                    var c2 = Funnel(nodes, past, start, end);
+                    float l2 = PlanLength(c2);
+                    if (l2 < len - 1e-3f)
+                    {
+                        saved += len - l2; len = l2; channel = past; corners = c2; otherSides++; improved = true;
+                        noShorter.Clear();
+                        continue;
+                    }
+                }
+                noShorter.Add(corners[ci]);
+            }
         }
-        return new Taut(channel, corners, reroutes, saved);
+        return new Taut(channel, corners, reroutes, saved, otherSides);
     }
 
     static float PlanLength(IReadOnlyList<Vector2> cs)
@@ -481,6 +508,33 @@ public static class NavGraph
         float l = 0f;
         for (int i = 0; i + 1 < cs.Count; i++) l += Vector2.Distance(cs[i], cs[i + 1]);
         return l;
+    }
+
+    /// <summary>The channel A* finds when it may not touch the vertex at plan point <paramref name="v"/>: every triangle
+    /// meeting that vertex on the storey the channel passes it (reached from the channel's own triangles there, across links
+    /// to triangles with the same corner) is forbidden, except the two ends. For a vertex on a hole's edge that is the way
+    /// round the hole's other side, which centroid costs can rank behind the longer one. Null when nothing is forbidden or no
+    /// such channel exists.</summary>
+    static List<TriRef>? PastOtherSide(IReadOnlyDictionary<TriRef, Node> nodes, List<TriRef> channel, Vector2 v, TriRef from, TriRef to)
+    {
+        static Vector3? CornerAt(Node n, Vector2 v)
+        {
+            static bool At(Vector3 p, Vector2 v) => MathF.Abs(p.X - v.X) < 1e-3f && MathF.Abs(p.Y - v.Y) < 1e-3f;
+            return At(n.A, v) ? n.A : At(n.B, v) ? n.B : At(n.C, v) ? n.C : null;
+        }
+        var fan = new HashSet<TriRef>();
+        var queue = new Queue<(TriRef T, float Z)>();
+        foreach (var t in channel)
+            if (nodes.TryGetValue(t, out var n) && CornerAt(n, v) is { } p && fan.Add(t)) queue.Enqueue((t, p.Z));
+        while (queue.Count > 0)
+        {
+            var (t, z) = queue.Dequeue();
+            foreach (var (nb, _, _) in nodes[t].Links)
+                if (!fan.Contains(nb) && nodes.TryGetValue(nb, out var nn) && CornerAt(nn, v) is { } q && MathF.Abs(q.Z - z) < 1e-3f)
+                { fan.Add(nb); queue.Enqueue((nb, q.Z)); }
+        }
+        fan.Remove(from); fan.Remove(to);
+        return fan.Count == 0 ? null : FindChannel(nodes, from, to, fan);
     }
 
     /// <summary>The channels that pass the vertex at plan point <paramref name="v"/> on its other side: for each run of

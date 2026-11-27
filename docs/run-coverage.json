@@ -89,9 +89,10 @@
       "adapter": "csharp",
       "stageSource": "counted",
       "answers": [
-        "Do placed obstacles cut walkable routes in this plugin or cell?"
+        "Do placed obstacles cut walkable routes in this plugin or cell?",
+        "Does moving one object cut a walking route, its own or one beside it (the verdict of each object its move can reach, before and after)?"
       ],
-      "useWhen": "Investigate a doorway or passage where a placed obstacle may obstruct the navmesh.",
+      "useWhen": "Investigate a doorway or passage where a placed obstacle may obstruct the navmesh; or prove that a move of one object (a nudge's third arm) cuts no walking route, with --near on the unpatched and the patched order.",
       "limits": [
         "Not covered: whether several changes, each passable alone, together cut a route NPCs need between two places. This probe judges one placed obstacle at a time: whether that object's solid cuts the walkable path line through a window around it. The collective check (functional.collective-route-connectivity in the world-edit-compatibility check registry) is unbuilt, and evaluation-reporting's SKILL.md records that the local connectivity engine does not certify NPC access between destinations."
       ],
@@ -120,12 +121,14 @@
         "--geometry": "Set geometry for this invocation; consult the linked parser for accepted values.",
         "--instance": "Refused: blockprobe reads the instance from HOUSECARL_MO2_INSTANCE (or the harness config); the argument exits 2 with that sentence.",
         "--list": "Set list for this invocation; consult the linked parser for accepted values.",
+        "--near": "--near FORMKEY: the per-reference arm (Gate E, a nudge's proof): judge only that reference and every reference held in its cell (and, outdoors, the eight around it) whose route window (its box grown 256 u in plan) reaches it, the navcut boxes there too; the targets name the plugin that places it. The rows file's Judged list gives each one's verdict and Near says what was asked.",
+        "--also-at": "--also-at X,Y,Z (with --near, repeatable): another place of the --near reference the set must cover, so the unpatched and patched runs of a move judge the same references.",
         "--moved-ref-selftest": "Set moved ref selftest for this invocation; consult the linked parser for accepted values.",
         "--order": "Set order for this invocation; consult the linked parser for accepted values.",
-        "--rows": "--rows FILE: also write every listed route-cut row (Blocked, LikelyBlocked, NoLine, Unjudgeable; objects and navcut boxes) to FILE as JSON, uncapped by --list (blockprobe/RouteCutRows.cs); the route-cut check's adapter passes it.",
+        "--rows": "--rows FILE: also write every listed route-cut row (Blocked, LikelyBlocked, NoLine, Unjudgeable; objects and navcut boxes) to FILE as JSON, uncapped by --list (blockprobe/RouteCutRows.cs); the route-cut check's adapter passes it. Since Gate E the file also lists every reference the run judged with its verdict (Judged: the six, NotMeasured or NotJudged with the reason), so a reference judged fine is told from one never tested.",
         "--write-route-cut-fixture": "--write-route-cut-fixture DIR: write the route-cut fixture (_shared/RouteCutFixture.cs) that tests/test_route_cut_rows.py runs the real probe on; test-only.",
         "--profile": "Refused: blockprobe reads the profile from HOUSECARL_MO2_PROFILE (or the harness config); the argument exits 2 with that sentence.",
-        "--self-test": "Run the known-answer self-test over the probe's synthetic fixture; exit 0 when every case passes.",
+        "--self-test": "Run the known-answer self-test over the probe's synthetic fixtures (the per-reference decisions, and --near on RouteCutFixture's near fixture run as a child process); exit 0 when every case passes.",
         "--state": "Set state for this invocation; consult the linked parser for accepted values.",
         "--switch-map": "Set switch map for this invocation; consult the linked parser for accepted values."
       }
@@ -715,6 +718,45 @@
       }
     },
     {
+      "id": "recordprobe",
+      "kind": "csharp-exe",
+      "path": "_geometry-harness/recordprobe/recordprobe.csproj",
+      "adapter": "csharp",
+      "stageSource": "counted",
+      "answers": [
+        "Which records use a record of another mod's plugin that the installed version of that plugin does not have?"
+      ],
+      "useWhen": "The record checks, one per run (--check). loadability.dangling-references (held: a scan does not run it unless it is ticked, until it finds a real clash between two mods): houseCARL's errors sweep over the whole order, called in process; a link is a row only between two mods' plugins, the target's plugin loaded and either plugin in the selection; links in or into the game's own files, within one plugin or one mod, or into a plugin missing from the order are counted under their reasons. --self-test runs its known answers; --write-self-test-emit writes runcontrol's fixture.",
+      "evidence": [
+        {
+          "path": "_geometry-harness/recordprobe/Program.cs",
+          "anchor": "// recordprobe — the record checks: clashes between two mods that houseCARL's record and check tools find"
+        }
+      ],
+      "inputs": [
+        "A load order (profile or --order candidate) and the check to run; optionally the plan's population file (--population), whose plugins and mod folders are the selection."
+      ],
+      "outputs": [
+        "A conflict file of the check's rows (DANGLING: the record that uses the missing one, and the missing record) and its coverage: every link houseCARL reported counted under its reason, and what could not be judged.",
+        "Beside it OUT.json.view (the order as houseCARL read it) and OUT.json.housecarl (houseCARL's own store)."
+      ],
+      "flagCoverage": {
+        "parser": "csharp-args",
+        "path": "_geometry-harness/recordprobe/Program.cs"
+      },
+      "modifiers": {
+        "--check": "The registry id of the record check to run (required).",
+        "--instance": "MO2 instance directory (else HOUSECARL_MO2_INSTANCE; never the harness config: refused instance-not-explicit).",
+        "--game": "Game directory (else the harness config, only for its own instance).",
+        "--profile": "MO2 profile name (else the harness config, only for its own instance).",
+        "--order": "Read this candidate configuration (CandidateFile) instead of the profile's order.",
+        "--emit": "Write the conflict file here (required).",
+        "--population": "The plan's population file: its plugins and mod folders are the selection; without it every plugin is.",
+        "--self-test": "Run the known answers and exit.",
+        "--write-self-test-emit": "Write the self-test's cross-mod emit into a folder, for runcontrol's self-test, and exit."
+      }
+    },
+    {
       "id": "floorprobe",
       "kind": "csharp-exe",
       "path": "_geometry-harness/floorprobe/floorprobe.csproj",
@@ -835,7 +877,8 @@
       "answers": [
         "Which lights does a load order place in an interior cell, with what radius, shadow and portal-strict flags, and are they enabled at load?",
         "Does a placed light shine through an opaque surface, sit behind a wall or inside a solid, and how many lights reach each drawn shape?",
-        "Which lighting clashes does the combination of the selected mods with the rest of the load order make that neither makes alone (a light left with no fixture, a fixture left with no light, a light behind a wall, a light that lights nothing, a fixture lit twice, and the over-limit count), interiors and exteriors?"
+        "Which lighting clashes does the combination of the selected mods with the rest of the load order make that neither makes alone (a light left with no fixture, a fixture left with no light, a light behind a wall, a light that lights nothing, a fixture lit twice, and the over-limit count), interiors and exteriors?",
+        "What does an app scan list as a lighting clash (the lighting check behind the registry's environment.lighting row)?"
       ],
       "useWhen": "Find lighting clashes between the selection and the rest from the load order alone (--check), or investigate one order's lights cell by cell before judging a patch edit on a model-less light.",
       "limits": [
@@ -860,7 +903,7 @@
         "--instance": "MO2 instance directory (else the harness config).",
         "--game": "Game directory (else the harness config).",
         "--profile": "MO2 profile name (else the harness config).",
-        "--order": "Walk this candidate configuration (CandidateFile) instead of the profile's order.",
+        "--order": "Walk this candidate configuration (CandidateFile) instead of the profile's order; under --check it names the combined arrangement (runcontrol hands it so).",
         "--json": "Write the per-cell references, lights and readings to this path (required).",
         "--cell": "An interior cell by editor id; repeatable.",
         "--cells-file": "Interior cell editor ids, one per line ('#' comments).",
@@ -871,7 +914,7 @@
         "--dependencies": "--check: the dependencies' order file (what both sides stand on).",
         "--selection": "--check: the selection's order file (the dependencies plus the selected mods).",
         "--rest": "--check: the rest's order file (the dependencies plus the rest of the load order).",
-        "--combined": "--check: the combined order file (everything).",
+        "--combined": "--check: the combined order file (everything); --order names it too.",
         "--dump-arrangements": "--check: also write each arrangement's readings of the scenes read, as housecarl.light/1, into this folder.",
         "--scenes-file": "--check: read these scenes instead of the ones both sides touch (interior editor ids, or WORLDSPACE-FORMKEY@x,y)."
       },
@@ -879,7 +922,7 @@
         "Per cell: every reference (base, type, editor id, model, pose, load-time enable state, deletion, responsible plugin) and every placed light (radius: base plus the reference's XRDS offset, flags, shadow, portal-strict, fade, colour).",
         "With --geometry, per enabled light: facing (front / back / no first hit over 64 rays), leak (attenuated area lit through an opaque surface, by receiving reference) and point-in-solid; per lit shape whose placed box a light's radius reaches: the lights reaching it (count, shadow, strict; the bound-sphere count beside it); unreadable models named and lights near them labelled incomplete; whether Light Limit Fix is installed in the order's files (identity.llf); per enabled, drawn reference with a model, its placed emitting parts (emissive lighting-shader shapes with their value, self-lit effect shapes, self-lit particle emitter extents) or why its mesh could not be read for them.",
         "identity.solidPolicy and identity.anchorPolicy: the solid rule (MeshIntersection.PolicyVersion) and the point reading (MeshAnchor.PolicyVersion) when the run wrote at least one point-in-solid row, else \"none\"; identity.pointInSolidRows counts the rows written, refused ones included.",
-        "--check: skywright.light-check/1: the sides and the four arrangements' identities; per scene whether it was judged (Base Object Swapper scenes are not); per class subjects, listed, not the pair, no clash and not judged; every row with its class, verdict (listed, cannot tell, not judged), subject, fixture, the light's mod and the mod whose record did it, the sentence a modder reads and where the view opens; the cost per arrangement and the model cache's reads and hits."
+        "--check: skywright.light-check/1: the sides and the four arrangements' identities; per scene whether it was judged (Base Object Swapper scenes are not); per class subjects, listed, not the pair, no clash and not judged; every row with its class, verdict (listed, cannot tell, not judged), subject, fixture, the light's mod and the mod whose record did it, the sentence a modder reads and where the view opens; the cost per arrangement and the model cache's reads and hits; a summary block (listed, cannot tell, judged, not judged, scenes not judged) the registry's environment.lighting row reads; a row for each scene not judged; each row's cell (or worldspace and grid) and where a gone fixture stood; one progress line per scene read."
       ]
     },
     {
@@ -1075,6 +1118,8 @@
       },
       "modifiers": {
         "--list": "How many conflict groups the console summary lists (integer, default 25).",
+        "--nudge": "Gate C: judge one object's nudge candidates instead of an emit pass. REQUEST is JSON {subject, other, home [x,y,z], reach, candidates [{n, position [x,y,z]}]} written by the app; each candidate is the object at that position, rotation and scale kept, against every reference (the base game included) whose bounds reach it in the 3x3 grid squares around it (its cell indoors). Needs --nudge-out; does not combine with --emit, --population, scene capture or --responsible-pair.",
+        "--nudge-out": "Gate C: where --nudge writes its answer (nudge-answer/1): per candidate clear or not, whether it still crosses the other object, the new crossings by who is responsible (another mod, the same mod, the base game), the undecided pairs, and the crossings already there at home that are not held against it; or one refusal sentence (exit 2).",
         "--surface-tolerance": "Distance (u) at which two strict render surfaces count as touching (default 1e-5).",
         "--max-triangle-pairs": "Work cap per pair: triangle pairs tested before the pair is reported unresolved (default 2,000,000).",
         "--pair-seconds": "Time cap per pair in seconds before it is reported unresolved (default 120).",
@@ -7059,7 +7104,7 @@
       "path": "_geometry-harness/runcontrol/runcontrol.csproj",
       "adapter": "csharp",
       "stageSource": "counted",
-      "note": "The evaluation run controller, the one owner of census to bundle: the pipeline driver (run, arms, status) with the stages census, prepare, scope, plan, evaluate, scenes and bundle, and the commands plan, run, resume, status, finalize, bundle, verify-bundle, population and ordersweep, over the foundations (the JSON bytes, hashes, orderings and text forms its files are read in, the program identity rule, the stage ledger). run and status are the pipeline's with --entry or --out and evalrun's with --run. run and resume measure every check: a probe launched on its own (scopeprobe, probe-emit, probe-json, probe-target, adviceprobe, patchprobe), the swept checks through one ordersweep child whose job records are split into arm, reverse and diff receipts, and the derived checks (order evaluation, candidate qualification) from other receipts; every row that is not measured is accounted. The bundle stage starts finalize, bundle and verify-bundle one after the other. --through report-plan or later is refused: those stages are evalpipeline.py's, which continues a run folder this program took through bundle. For a lab entry the records stage starts the record capture, which stays the Python tool evalrecords.py (python from the machine file's key python, else python.exe on PATH; without one the stage refuses in one sentence), then this program's own import-results for each import document the capture wrote; an in-place entry's records stage starts nothing. import-results binds a record reader's evidence to one arm the plan left open: its origin (fresh, by the capture token in every MCP initialize request, or a declared reuse), its identity against the arm's frozen request and the prerequisite gate are checked before anything is copied; a live game driver's export is refused in one sentence: it is not available until evallive.py is ported. A plan is bound to the controller build that froze it (tool-changed, naming the controller). A run file of a shape the rules cannot read is refused in one sentence, exit 2. The profile, each plugin's copy in every layer, each header, what unfits a delta for a population and the configuration fingerprint are the probes' own (Mo2LoadOrder, HarnessOrderCli, PluginHeader, PopulationRules, ConfigurationIdentity). The pipeline's run records under the run-log op evalpipeline, which the workbench reads; plan under evalrun-plan, run and resume under evalrun-checks with one evalrun-check child per probe and one for the sweep, import-results under evalrun-import-results, finalize under evalrun-finalize, bundle under evalrun-bundle. Its known answers are recorded in known-answers/*.json (first from the Python controller, now retired) and in its own cases; a behaviour change gets a new known answer from what the game does. import-results and switchflip-outcome are refused in one sentence each: an import binds evidence to an AI-side evaluation's row, and the switch-flip reading rule is the live switch check's, both the houseCARL integration module's.",
+      "note": "The evaluation run controller, the one owner of census to bundle: the pipeline driver (run, arms, status) with the stages census, prepare, scope, plan, evaluate, scenes and bundle, and the commands plan, run, resume, status, finalize, bundle, verify-bundle, population and ordersweep, over the foundations (the JSON bytes, hashes, orderings and text forms its files are read in, the program identity rule, the stage ledger). run and status are the pipeline's with --entry or --out and evalrun's with --run. run and resume measure every check: a probe launched on its own (scopeprobe, probe-emit, probe-json, probe-target, adviceprobe, patchprobe), the swept checks through one ordersweep child whose job records are split into arm, reverse and diff receipts, and the derived checks (order evaluation, candidate qualification) from other receipts; every row that is not measured is accounted. The bundle stage starts finalize, bundle and verify-bundle one after the other. --through report-plan or later is refused: those stages are evalpipeline.py's, which continues a run folder this program took through bundle. For a lab entry the records stage starts the record capture, which stays the Python tool evalrecords.py (python from the machine file's key python, else python.exe on PATH; without one the stage refuses in one sentence), then this program's own import-results for each import document the capture wrote; an in-place entry's records stage starts nothing. import-results binds a record reader's evidence to one arm the plan left open: its origin (fresh, by the capture token in every MCP initialize request, or a declared reuse), its identity against the arm's frozen request and the prerequisite gate are checked before anything is copied; a live game driver's export is refused in one sentence: it is not available until evallive.py is ported. A plan is bound to the controller build that froze it (tool-changed, naming the controller). A run file of a shape the rules cannot read is refused in one sentence, exit 2. The profile, each plugin's copy in every layer, each header, what unfits a delta for a population and the configuration fingerprint are the probes' own (Mo2LoadOrder, HarnessOrderCli, PluginHeader, PopulationRules, ConfigurationIdentity). The pipeline's run records under the run-log op evalpipeline, which the workbench reads; plan under evalrun-plan, run and resume under evalrun-checks with one evalrun-check child per probe and one for the sweep, import-results under evalrun-import-results, finalize under evalrun-finalize, bundle under evalrun-bundle. Its known answers are recorded in known-answers/*.json (first from the Python controller, now retired) and in its own cases; a behaviour change gets a new known answer from what the game does. import-results and switchflip-outcome are refused in one sentence each: an import binds evidence to an AI-side evaluation's row, and the switch-flip reading rule is the live switch check's, both the houseCARL integration module's. The lighting check (environment.lighting) gets its dependencies and selection arrangements from runcontrol (LightingArrangements.cs), written beside its row and carried in the bundle as its outputs.",
       "answers": [
         "Does the run controller still write the JSON bytes, hashes, orderings and stage ledger its known answers record?",
         "What is the package identity digest of a probe's or the controller's build folder, without starting Python?",
@@ -8389,6 +8434,27 @@
       ],
       "outputs": [
         "Assertion results for: Does every probe refuse, in one sentence, a load order whose plugin lacks a master?"
+      ]
+    },
+    {
+      "id": "_geometry-harness/tests/test_corridorprobe_plugin_lookup.py",
+      "path": "_geometry-harness/tests/test_corridorprobe_plugin_lookup.py",
+      "kind": "script",
+      "answers": [
+        "Does corridorprobe find a --plugin that lives in a mod folder, and refuse one it cannot find or read in one sentence?"
+      ],
+      "useWhen": "Qualify a change to where a probe finds its --plugin (_shared/PluginOpen.cs Locate, corridorprobe, floorgapprobe).",
+      "evidence": [
+        {
+          "path": "_geometry-harness/tests/test_corridorprobe_plugin_lookup.py",
+          "anchor": "Known answers for where corridorprobe finds its --plugin: the game's Data folder first, else the profile's load order."
+        }
+      ],
+      "inputs": [
+        "The Release build of corridorprobe; a temporary MO2 layout with header-only plugins in Data and in mod folders."
+      ],
+      "outputs": [
+        "Assertion results for: Does corridorprobe find a --plugin that lives in a mod folder, and refuse one it cannot find or read in one sentence?"
       ]
     },
     {

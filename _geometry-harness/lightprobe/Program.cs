@@ -22,7 +22,7 @@
 // --list-interiors, or no light inside any placed box).
 // Base Object Swapper: not applied (stated in the output).
 // --list-interiors: every interior cell of the order with its placed-light count (the calibration sample frame).
-// --check (the lighting check, 2026-11-26): lightprobe --check --dependencies D.json --selection S.json --rest R.json --combined C.json
+// --check (the lighting check, 2026-11-26): lightprobe --check --dependencies D.json --selection S.json --rest R.json --combined C.json (or --order C.json)
 //   --json OUT [--dump-arrangements DIR] [--scenes-file FILE] [--max-mb N]. Four order files (the arms runcontrol writes), each read as
 //   itself with one model cache shared across them; the sides are read from the arms; the scenes are those both sides touch (or the
 //   named ones); the rules are src/SkyWright.Engine/LightCheck.cs. Writes skywright.light-check/1 (CheckMode.cs).
@@ -74,6 +74,8 @@ for (int i = 0; i < args.Length; i++)
         default: Console.Error.WriteLine($"unknown argument {a}"); return 2;
     }
 }
+// --check: --order names the combined arrangement (runcontrol hands every order-reading probe its arm's order file as --order)
+if (check && orderFile is not null && !arrangements.ContainsKey("combined")) { arrangements["combined"] = orderFile; orderFile = null; }
 if (check && (orderFile is not null || cellsFile is not null || wantCells.Count > 0 || listInteriors))
 { Console.Error.WriteLine("--check reads the four arrangements and finds its own scenes: drop --order, --cell, --cells-file and --list-interiors (name scenes with --scenes-file)."); return 2; }
 if (check) return CheckMode.Run(arrangements, jsonPath, dumpDir, scenesFile, maxMb, Instance, GamePath, profileName, __run);

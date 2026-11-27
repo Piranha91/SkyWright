@@ -363,7 +363,7 @@ public sealed class DisableTests : IClassFixture<DisableWorld>
     // ---- helpers ------------------------------------------------------------------------------------------------------
 
     /// <summary>A drawn reference of the fixture as the scene holds it: one box mesh at the reference's load-order pose.</summary>
-    static RefOcclusion Drawn(FormKey key, Vec3 pos, Vec3 rot, float scale)
+    internal static RefOcclusion Drawn(FormKey key, Vec3 pos, Vec3 rot, float scale)
     {
         var r = new SceneRef("meshes\\test.nif", pos, rot, scale, false, RefKey: key);
         var mesh = new SkyRender.GlMesh();

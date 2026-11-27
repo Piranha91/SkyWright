@@ -13,8 +13,8 @@ public static class Plan
     public const string NotOptedIn = "not-opted-in";
 
     /// <summary>The placeholders the controller fills in a check's adapter.args.</summary>
-    public static readonly HashSet<string> Placeholders = new(StringComparer.Ordinal)
-    { "order", "emit", "json", "base", "out", "run", "arm", "target", "nexusId", "switchMap", "pair" };
+    public static readonly HashSet<string> Placeholders = new(new[] { "order", "emit", "json", "base", "out", "run", "arm", "target", "nexusId", "switchMap", "pair" }
+        .Concat(GenericRows.OwnPlaceholders.Keys.Select(k => k.Trim('{', '}'))), StringComparer.Ordinal);   // and runcontrol's own fills (the lighting arrangements)
 
     static readonly Regex PlaceholderForm = new(@"\{([A-Za-z0-9_]+)\}", RegexOptions.CultureInvariant);
     static readonly string[] NeverRunKinds = ["unsupported", "manual"];

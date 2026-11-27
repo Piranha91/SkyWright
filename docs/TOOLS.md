@@ -73,6 +73,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does buildlayout.py's fallback marker equal the one the build writes, and do its paths exist in that build?](#tool-_geometry-harness-tests-test_buildlayout.py) — `_geometry-harness/tests/test_buildlayout.py`
 - [Does contactprobe --reverse-of give the full reverse's emit, refuse a baseline emit that is not this run's own, and does conflictdiff refuse contactprobe emits (sweep, --terrain or --empty-space) measured under different or unknown rules, or of another mode?](#tool-_geometry-harness-tests-test_contact_reverse.py) — `_geometry-harness/tests/test_contact_reverse.py`
 - [Does contactprobe take the fast memory route when the memory is there, lean under a limit or when other programs hold the memory (warning by name, unattended default recorded), stop with exit 5 under --memory-route ask, and leave no emit or rows behind when it refuses or runs out of memory?](#tool-_geometry-harness-tests-test_contact_memory_route.py) — `_geometry-harness/tests/test_contact_memory_route.py`
+- [Does corridorprobe find a --plugin that lives in a mod folder, and refuse one it cannot find or read in one sentence?](#tool-_geometry-harness-tests-test_corridorprobe_plugin_lookup.py) — `_geometry-harness/tests/test_corridorprobe_plugin_lookup.py`
 - [Does depth-survey projection and lookup math satisfy its synthetic controls?](#tool-_geometry-harness-viewprobe-tools-test_depthsurvey.py) — `_geometry-harness/viewprobe/tools/test_depthsurvey.py`
 - [Does each frame's embedded replay command reproduce that frame?](#tool-_geometry-harness-tests-test_replay_command.py) — `_geometry-harness/tests/test_replay_command.py`
 - [Does evalcontrol accept a judged-0 record import only when it states no members on an arm without the targets, and refuse every other?](#tool-integration-housecarl-tests-test_import_empty_population.py) — `integration/housecarl/tests/test_import_empty_population.py`
@@ -89,6 +90,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does houseCARL's server program, from the module's build, write navownprobe's navmesh repair plan into one patch that reads back as the winner plus the plan (its carried cell forwarded from its winner, its NAVI changed only where planned), and does the re-check credit relinked, cut and refused links truly?](#tool-integration-housecarl-tests-test_navmesh_repair_write.py) — `integration/housecarl/tests/test_navmesh_repair_write.py`
 - [Does mask deduplication preserve exact output bytes and distinguish different masks?](#tool-_geometry-harness-tests-test_mask_evidence.py) — `_geometry-harness/tests/test_mask_evidence.py`
 - [Does miss diagnosis cluster edits and preserve unknown reasons correctly?](#tool-_geometry-harness-tests-test_missdiag.py) — `_geometry-harness/tests/test_missdiag.py`
+- [Does moving one object cut a walking route, its own or one beside it (the verdict of each object its move can reach, before and after)?](#tool-blockprobe) — `blockprobe`
 - [Does narration preparation enforce its contracts without model weights or network access?](#tool-integration-housecarl-tests-test_evalspeech.py) — `integration/housecarl/tests/test_evalspeech.py`
 - [Does navedit plan, refuse and write navmesh edits, markers and repairs as its known answers say?](#tool-_geometry-harness-tests-test_navedit.py) — `_geometry-harness/tests/test_navedit.py`
 - [Does navownprobe count a link into a deleted navmesh, emit mod deletions, judge border links by their geometry (no matching edge, no link back, ambiguous candidates), find navmesh left on ground a later LAND moved, and plan a relink that refuses an ambiguous match?](#tool-_geometry-harness-tests-test_navmesh_repair_rules.py) — `_geometry-harness/tests/test_navmesh_repair_rules.py`
@@ -320,6 +322,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [What does Base Object Swapper change in this scene?](#tool-viewprobe.bos) — `viewprobe.bos`
 - [What does a lower storey look like with upper geometry sliced away?](#tool-viewprobe.cull-above) — `viewprobe.cull-above`
 - [What does a written plugin's navmesh info map (NAVI entries, island data) and navmesh box hold, read straight from its bytes?](#tool-_geometry-harness-tests-navi_bytes.py) — `_geometry-harness/tests/navi_bytes.py`
+- [What does an app scan list as a lighting clash (the lighting check behind the registry's environment.lighting row)?](#tool-lightprobe) — `lightprobe`
 - [What does each candidate mod touch, which edit kinds does it and its key patches make, and which assets does it override?](#tool-modcensus.run) — `modcensus.run`
 - [What does each edited plane hide, by owner, in each rendered view of a plane-patch group?](#tool-planeassess.score) — `planeassess.score`
 - [What does the game do when this block's switch flips run under one lock?](#tool-switchflip.batch) — `switchflip.batch`
@@ -423,6 +426,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Which planned scenes need human review before video assembly?](#tool-evalreel.storyboard-packet) — `evalreel.storyboard-packet`
 - [Which plugins and mod folders in a whole load order meet, and how: shared records, cells, neighbouring cells, placed bases, form links and asset paths compared by bytes?](#tool-ordermap) — `ordermap`
 - [Which record fields does one mod change that another mod's version throws away, from a record capture?](#tool-recordrows) — `recordrows`
+- [Which records use a record of another mod's plugin that the installed version of that plugin does not have?](#tool-recordprobe) — `recordprobe`
 - [Which required artifact classes agree between these two render outputs?](#tool-renderequiv.compare) — `renderequiv.compare`
 - [Which resolution and field of view does this game profile use?](#tool-shotplan.frame) — `shotplan.frame`
 - [Which rotation composition produces the expected placed geometry?](#tool-viewprobe.euler) — `viewprobe.euler`
@@ -933,6 +937,21 @@ Inputs: The Release contactprobe (or HC_CS_HARNESS); proofprobe --write-motion-f
 Outputs: Assertion results for: Do contactprobe's anchor, surface, volume and motion outputs name the solid rule their results depend on, and say none when no solid rule applied?
 
 Source: [_geometry-harness/tests/test_contact_solid_rule.py](../_geometry-harness/tests/test_contact_solid_rule.py) — `contactprobe's anchor, surface, volume and motion outputs name the solid rule their results depend on (cases 1874-1879, 1886-1887).`
+
+
+<a id="tool-_geometry-harness-tests-test_corridorprobe_plugin_lookup.py"></a>
+
+### _geometry-harness/tests/test_corridorprobe_plugin_lookup.py
+
+**Does corridorprobe find a --plugin that lives in a mod folder, and refuse one it cannot find or read in one sentence?**
+
+Qualify a change to where a probe finds its --plugin (_shared/PluginOpen.cs Locate, corridorprobe, floorgapprobe).
+
+Inputs: The Release build of corridorprobe; a temporary MO2 layout with header-only plugins in Data and in mod folders.
+
+Outputs: Assertion results for: Does corridorprobe find a --plugin that lives in a mod folder, and refuse one it cannot find or read in one sentence?
+
+Source: [_geometry-harness/tests/test_corridorprobe_plugin_lookup.py](../_geometry-harness/tests/test_corridorprobe_plugin_lookup.py) — `Known answers for where corridorprobe finds its --plugin: the game's Data folder first, else the profile's load order.`
 
 
 <a id="tool-_geometry-harness-tests-test_declared_cell_presence.py"></a>
@@ -1873,7 +1892,9 @@ Modifiers (do not select a separate mode):
 
 **Do placed obstacles cut walkable routes in this plugin or cell?**
 
-Investigate a doorway or passage where a placed obstacle may obstruct the navmesh.
+**Does moving one object cut a walking route, its own or one beside it (the verdict of each object its move can reach, before and after)?**
+
+Investigate a doorway or passage where a placed obstacle may obstruct the navmesh; or prove that a move of one object (a nudge's third arm) cuts no walking route, with --near on the unpatched and the patched order.
 
 Inputs: One or more target plugins, positionally (judged as one set, each listed row naming its target), optionally a --order candidate, the winning navmesh and placed obstacle geometry.
 
@@ -1886,6 +1907,7 @@ Source: [_geometry-harness/blockprobe/Program.cs](../_geometry-harness/blockprob
 
 Modifiers (do not select a separate mode):
 
+- `--also-at` — --also-at X,Y,Z (with --near, repeatable): another place of the --near reference the set must cover, so the unpatched and patched runs of a move judge the same references.
 - `--band` — Set band for this invocation; consult the linked parser for accepted values.
 - `--bos` — Set bos for this invocation; consult the linked parser for accepted values.
 - `--exclude` — Set exclude for this invocation; consult the linked parser for accepted values.
@@ -1895,10 +1917,11 @@ Modifiers (do not select a separate mode):
 - `--instance` — Refused: blockprobe reads the instance from HOUSECARL_MO2_INSTANCE (or the harness config); the argument exits 2 with that sentence.
 - `--list` — Set list for this invocation; consult the linked parser for accepted values.
 - `--moved-ref-selftest` — Set moved ref selftest for this invocation; consult the linked parser for accepted values.
+- `--near` — --near FORMKEY: the per-reference arm (Gate E, a nudge's proof): judge only that reference and every reference held in its cell (and, outdoors, the eight around it) whose route window (its box grown 256 u in plan) reaches it, the navcut boxes there too; the targets name the plugin that places it. The rows file's Judged list gives each one's verdict and Near says what was asked.
 - `--order` — Set order for this invocation; consult the linked parser for accepted values.
 - `--profile` — Refused: blockprobe reads the profile from HOUSECARL_MO2_PROFILE (or the harness config); the argument exits 2 with that sentence.
-- `--rows` — --rows FILE: also write every listed route-cut row (Blocked, LikelyBlocked, NoLine, Unjudgeable; objects and navcut boxes) to FILE as JSON, uncapped by --list (blockprobe/RouteCutRows.cs); the route-cut check's adapter passes it.
-- `--self-test` — Run the known-answer self-test over the probe's synthetic fixture; exit 0 when every case passes.
+- `--rows` — --rows FILE: also write every listed route-cut row (Blocked, LikelyBlocked, NoLine, Unjudgeable; objects and navcut boxes) to FILE as JSON, uncapped by --list (blockprobe/RouteCutRows.cs); the route-cut check's adapter passes it. Since Gate E the file also lists every reference the run judged with its verdict (Judged: the six, NotMeasured or NotJudged with the reason), so a reference judged fine is told from one never tested.
+- `--self-test` — Run the known-answer self-test over the probe's synthetic fixtures (the per-reference decisions, and --near on RouteCutFixture's near fixture run as a child process); exit 0 when every case passes.
 - `--state` — Set state for this invocation; consult the linked parser for accepted values.
 - `--switch-map` — Set switch map for this invocation; consult the linked parser for accepted values.
 - `--write-route-cut-fixture` — --write-route-cut-fixture DIR: write the route-cut fixture (_shared/RouteCutFixture.cs) that tests/test_route_cut_rows.py runs the real probe on; test-only.
@@ -4472,11 +4495,13 @@ Source: [_geometry-harness/leftbehindprobe/Program.cs](../_geometry-harness/left
 
 **Which lighting clashes does the combination of the selected mods with the rest of the load order make that neither makes alone (a light left with no fixture, a fixture left with no light, a light behind a wall, a light that lights nothing, a fixture lit twice, and the over-limit count), interiors and exteriors?**
 
+**What does an app scan list as a lighting clash (the lighting check behind the registry's environment.lighting row)?**
+
 Find lighting clashes between the selection and the rest from the load order alone (--check), or investigate one order's lights cell by cell before judging a patch edit on a model-less light.
 
 Inputs: A load order (profile or --order candidate) and interior cells by editor id.; --check: four order files (the dependencies, the selection over them, the rest over them, the combination), optionally a scenes file.
 
-Outputs: Per cell: every reference (base, type, editor id, model, pose, load-time enable state, deletion, responsible plugin) and every placed light (radius: base plus the reference's XRDS offset, flags, shadow, portal-strict, fade, colour).; With --geometry, per enabled light: facing (front / back / no first hit over 64 rays), leak (attenuated area lit through an opaque surface, by receiving reference) and point-in-solid; per lit shape whose placed box a light's radius reaches: the lights reaching it (count, shadow, strict; the bound-sphere count beside it); unreadable models named and lights near them labelled incomplete; whether Light Limit Fix is installed in the order's files (identity.llf); per enabled, drawn reference with a model, its placed emitting parts (emissive lighting-shader shapes with their value, self-lit effect shapes, self-lit particle emitter extents) or why its mesh could not be read for them.; identity.solidPolicy and identity.anchorPolicy: the solid rule (MeshIntersection.PolicyVersion) and the point reading (MeshAnchor.PolicyVersion) when the run wrote at least one point-in-solid row, else "none"; identity.pointInSolidRows counts the rows written, refused ones included.; --check: skywright.light-check/1: the sides and the four arrangements' identities; per scene whether it was judged (Base Object Swapper scenes are not); per class subjects, listed, not the pair, no clash and not judged; every row with its class, verdict (listed, cannot tell, not judged), subject, fixture, the light's mod and the mod whose record did it, the sentence a modder reads and where the view opens; the cost per arrangement and the model cache's reads and hits.
+Outputs: Per cell: every reference (base, type, editor id, model, pose, load-time enable state, deletion, responsible plugin) and every placed light (radius: base plus the reference's XRDS offset, flags, shadow, portal-strict, fade, colour).; With --geometry, per enabled light: facing (front / back / no first hit over 64 rays), leak (attenuated area lit through an opaque surface, by receiving reference) and point-in-solid; per lit shape whose placed box a light's radius reaches: the lights reaching it (count, shadow, strict; the bound-sphere count beside it); unreadable models named and lights near them labelled incomplete; whether Light Limit Fix is installed in the order's files (identity.llf); per enabled, drawn reference with a model, its placed emitting parts (emissive lighting-shader shapes with their value, self-lit effect shapes, self-lit particle emitter extents) or why its mesh could not be read for them.; identity.solidPolicy and identity.anchorPolicy: the solid rule (MeshIntersection.PolicyVersion) and the point reading (MeshAnchor.PolicyVersion) when the run wrote at least one point-in-solid row, else "none"; identity.pointInSolidRows counts the rows written, refused ones included.; --check: skywright.light-check/1: the sides and the four arrangements' identities; per scene whether it was judged (Base Object Swapper scenes are not); per class subjects, listed, not the pair, no clash and not judged; every row with its class, verdict (listed, cannot tell, not judged), subject, fixture, the light's mod and the mod whose record did it, the sentence a modder reads and where the view opens; the cost per arrangement and the model cache's reads and hits; a summary block (listed, cannot tell, judged, not judged, scenes not judged) the registry's environment.lighting row reads; a row for each scene not judged; each row's cell (or worldspace and grid) and where a gone fixture stood; one progress line per scene read.
 
 Limit: Not settled: whether a lighting change reads as broken or merely different. This probe measures placement, radius, flags, light leaking through opaque surfaces and the lights reaching each shape; how the result looks is a judgement made in game (world-edit-compatibility SKILL.md §7).
 
@@ -4488,7 +4513,7 @@ Modifiers (do not select a separate mode):
 - `--cell` — An interior cell by editor id; repeatable.
 - `--cells-file` — Interior cell editor ids, one per line ('#' comments).
 - `--check` — Run the lighting check: read the four arrangements, each as itself, and write the clashes only the combination makes (skywright.light-check/1).
-- `--combined` — --check: the combined order file (everything).
+- `--combined` — --check: the combined order file (everything); --order names it too.
 - `--dependencies` — --check: the dependencies' order file (what both sides stand on).
 - `--dump-arrangements` — --check: also write each arrangement's readings of the scenes read, as housecarl.light/1, into this folder.
 - `--game` — Game directory (else the harness config).
@@ -4497,7 +4522,7 @@ Modifiers (do not select a separate mode):
 - `--json` — Write the per-cell references, lights and readings to this path (required).
 - `--list-interiors` — List every interior cell of the order with its placed-light counts instead of measuring.
 - `--max-mb` — Stop with exit 3 when private bytes pass this many MB at a checkpoint (0, the default, is no cap).
-- `--order` — Walk this candidate configuration (CandidateFile) instead of the profile's order.
+- `--order` — Walk this candidate configuration (CandidateFile) instead of the profile's order; under --check it names the combined arrangement (runcontrol hands it so).
 - `--profile` — MO2 profile name (else the harness config).
 - `--rest` — --check: the rest's order file (the dependencies plus the rest of the load order).
 - `--scenes-file` — --check: read these scenes instead of the ones both sides touch (interior editor ids, or WORLDSPACE-FORMKEY@x,y).
@@ -5085,6 +5110,8 @@ Modifiers (do not select a separate mode):
 - `--mesh-reach` — FILE, with --population: write this arm's mesh reach (the placed references whose model a population folder provides, and how many of them it wins with and changes) and stop before any pair work; the scope stage runs it on the combined arm and the plan's placedMeshes trigger reads it.
 - `--motion` — swept: a base refused for its pose alone (unsupported_pose, or partial_geometry when every visible shape decoded and only the pose is refused) whose motion the files settle is discovered by a swept proxy (its sampled poses' boxes grown by their certified delta), an outer bound labelled in the geometry reason; default off, output unchanged.
 - `--motion-delta` — With --motion swept, the target bound (u) on motion between samples (default 0.5).
+- `--nudge` — Gate C: judge one object's nudge candidates instead of an emit pass. REQUEST is JSON {subject, other, home [x,y,z], reach, candidates [{n, position [x,y,z]}]} written by the app; each candidate is the object at that position, rotation and scale kept, against every reference (the base game included) whose bounds reach it in the 3x3 grid squares around it (its cell indoors). Needs --nudge-out; does not combine with --emit, --population, scene capture or --responsible-pair.
+- `--nudge-out` — Gate C: where --nudge writes its answer (nudge-answer/1): per candidate clear or not, whether it still crosses the other object, the new crossings by who is responsible (another mod, the same mod, the base game), the undecided pairs, and the crossings already there at home that are not held against it; or one refusal sentence (exit 2).
 - `--order` — Evaluate this candidate configuration (CandidateFile) instead of the profile's order.
 - `--pair-cache-read` — FILE (repeatable): placed-pair results an earlier run of this same build wrote, keyed by every argument of the query; a file of another build or pair time limit is not read, and the run says so. Results do not depend on it.
 - `--pair-cache-write` — FILE: write the placed-pair results this run measured (gzip JSON lines; time-outs and failures are never kept), for a later run's --pair-cache-read.
@@ -5568,6 +5595,33 @@ Modifiers (do not select a separate mode):
 
 - `--bundle` — the overlay bundle to enrich
 - `--kind` — record-rows or order-variant
+
+<a id="tool-recordprobe"></a>
+
+### recordprobe
+
+**Which records use a record of another mod's plugin that the installed version of that plugin does not have?**
+
+The record checks, one per run (--check). loadability.dangling-references (held: a scan does not run it unless it is ticked, until it finds a real clash between two mods): houseCARL's errors sweep over the whole order, called in process; a link is a row only between two mods' plugins, the target's plugin loaded and either plugin in the selection; links in or into the game's own files, within one plugin or one mod, or into a plugin missing from the order are counted under their reasons. --self-test runs its known answers; --write-self-test-emit writes runcontrol's fixture.
+
+Inputs: A load order (profile or --order candidate) and the check to run; optionally the plan's population file (--population), whose plugins and mod folders are the selection.
+
+Outputs: A conflict file of the check's rows (DANGLING: the record that uses the missing one, and the missing record) and its coverage: every link houseCARL reported counted under its reason, and what could not be judged.; Beside it OUT.json.view (the order as houseCARL read it) and OUT.json.housecarl (houseCARL's own store).
+
+Source: [_geometry-harness/recordprobe/Program.cs](../_geometry-harness/recordprobe/Program.cs) — `// recordprobe — the record checks: clashes between two mods that houseCARL's record and check tools find`
+
+
+Modifiers (do not select a separate mode):
+
+- `--check` — The registry id of the record check to run (required).
+- `--emit` — Write the conflict file here (required).
+- `--game` — Game directory (else the harness config, only for its own instance).
+- `--instance` — MO2 instance directory (else HOUSECARL_MO2_INSTANCE; never the harness config: refused instance-not-explicit).
+- `--order` — Read this candidate configuration (CandidateFile) instead of the profile's order.
+- `--population` — The plan's population file: its plugins and mod folders are the selection; without it every plugin is.
+- `--profile` — MO2 profile name (else the harness config, only for its own instance).
+- `--self-test` — Run the known answers and exit.
+- `--write-self-test-emit` — Write the self-test's cross-mod emit into a folder, for runcontrol's self-test, and exit.
 
 <a id="tool-recordrows"></a>
 

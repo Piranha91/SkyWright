@@ -6,7 +6,7 @@ using HousecarlMcp;
 
 namespace HarnessShared;
 
-/// <summary>houseCARL's own tool code, compiled in from the pin (the app's writes and reads, runcontrol's names read):
+/// <summary>houseCARL's own tool code, compiled in from the pin (the app's writes and reads, runcontrol's names read, recordprobe's checks):
 /// the server project's public tool methods called on a <see cref="LoadOrderService"/>, with no houseCARL program
 /// started. Nothing here decides a record, a lane or a refusal; each answer is the tool method's own text, as the
 /// server would have sent it.</summary>
@@ -20,6 +20,7 @@ public static class HousecarlCalls
         [ToolNames.Remove] = typeof(RemoveTools).GetMethod(nameof(RemoveTools.Remove))!,
         [ToolNames.Forward] = typeof(ForwardTools).GetMethod(nameof(ForwardTools.Forward))!,
         [ToolNames.AssetStatus] = typeof(AssetTools).GetMethod(nameof(AssetTools.AssetStatus))!,
+        [ToolNames.Check] = typeof(CheckTools).GetMethod(nameof(CheckTools.CheckTool))!,
     };
 
     static readonly Lazy<string> _identity = new(() => IdentityOf(typeof(LoadOrderService).Assembly.Location, typeof(WriteEngine).Assembly.Location));
