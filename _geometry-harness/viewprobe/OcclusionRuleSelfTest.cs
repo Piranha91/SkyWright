@@ -5,8 +5,8 @@ using Mutagen.Bethesda.Plugins;
 
 namespace ViewProbe;
 
-/// <summary>Known answers for the occlusion rule's orientation scope (ShapeCullPolicy over
-/// HarnessShared.PortalBoxOrientation), run through the rule loader and Shadow itself on planes built here.
+/// <summary>Known answers for the occlusion rule's orientation scope (ShapeCullPolicy over the Engine's
+/// OcclusionRule and PortalBoxOrientation), run through the rule loader and Shadow itself on planes built here.
 /// Cases 6000-6014. Needs no MO2 instance, no game and no GL context.</summary>
 static class OcclusionRuleSelfTest
 {

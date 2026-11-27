@@ -2494,7 +2494,7 @@ refused, by name:**
 
 A rule that omits the field predicts exactly what it always did. The field is not written into a
 report's `ruleConfiguration` unless it is on, so such a report is byte-identical to one written
-before the field existed. The decision is `HarnessShared.PortalBoxOrientation`, and its cases are
+before the field existed. The decision is the Engine's `PortalBoxOrientation`, and its cases are
 `stationrule: H0…H9` in `proofprobe`. **Opting in is a claim about engine behaviour.** A rule that
 sets it must cite in-game evidence for the class. The reported `scope` names the class whenever a
 rule opts in.
@@ -2504,7 +2504,8 @@ PortalBox's normal and a Box's two horizontal axes — use this field when a rul
 `maximumAbsNormalZ` then governs only the horizontal class above. A rule that omits it uses
 `maximumAbsNormalZ` for both, exactly as before, and the field is not written into
 `ruleConfiguration`, so such a report is byte-identical. It must be finite and in [0, 1]. Both
-upright decisions live in `HarnessShared.PortalBoxOrientation` (`Check`, `BoxUpright`). Their cases
+upright decisions live in the Engine's `PortalBoxOrientation` (`Check`, `BoxUpright`), asked by
+`OcclusionRule.Shadow` (`src/SkyWright.Engine/OcclusionRule.cs`), which owns the rule file's fields. Their cases
 are `stationrule: 6016…6020` in `proofprobe` and `--occlusion-rule-selftest DIR` (cases 6000–6014,
 run by `tools/test_occlusion_rule.py`). The reported `scope` names the tolerance when a rule states
 it. Widening it is a claim about engine behaviour: one lab test (2026-10-15) found PortalBoxes
