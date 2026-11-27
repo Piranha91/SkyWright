@@ -5,10 +5,10 @@ using ViewProbe;
 namespace Workbench;
 
 /// <summary>A staged edit as saved: the reference and its pose before and after.</summary>
-internal sealed record SavedEdit(string Ref, RefPlacementEdit.Pose Before, RefPlacementEdit.Pose After, bool Disable = false);
+internal sealed record SavedEdit(string Ref, RefPlacementEdit.Pose Before, RefPlacementEdit.Pose After, bool Disable = false, string? Nudge = null);
 
 /// <summary>A written edit as saved: the reference and the patch (and its folder) that holds it.</summary>
-internal sealed record SavedWritten(string Ref, string Patch, string PatchFolder, bool Disable = false);
+internal sealed record SavedWritten(string Ref, string Patch, string PatchFolder, bool Disable = false, bool Nudge = false);
 
 /// <summary>One review's session: selection, open row, camera, staged and written edits.</summary>
 internal sealed record SessionData(string PlanId, string Arm, string? Selected, int? OpenConflict, float[]? Camera,
@@ -45,14 +45,18 @@ internal static class SessionFile
         catch (JsonException ex) { throw new InvalidOperationException($"the session file '{path}' could not be read ({ex.Message}); move it aside to start a fresh session."); }
     }
 
+    /// <summary>The written edits as the session file keeps them: patch, folder, and whether each is a disable or came from a nudge.</summary>
+    internal static List<SavedWritten> WrittenOf(EditSession s, Func<string, string?> folderOf) =>
+        s.Written.Select(kv => new SavedWritten(kv.Key.ToString(), kv.Value.Patch, folderOf(kv.Value.Patch) ?? "", s.WrittenDisabled.Contains(kv.Key),
+                                                s.WrittenNudged.Contains(kv.Key))).ToList();
+
     /// <summary>The session as it stands, from the surface's own objects.</summary>
     internal static SessionData? Capture(IWorkbenchSurface s)
     {
         if (s.PlanId is not { } plan || s.Arm is not { } arm) return null;
         var sc = s.Scene;
-        var staged = sc?.Session.Pending.Select(e => new SavedEdit(e.Ref.ToString(), e.Before, e.After, e.Disable)).ToList() ?? new List<SavedEdit>();
-        var written = sc is null ? new List<SavedWritten>()
-            : sc.Session.Written.Select(kv => new SavedWritten(kv.Key.ToString(), kv.Value.Patch, sc.PatchFolderOf(kv.Value.Patch) ?? "", sc.Session.WrittenDisabled.Contains(kv.Key))).ToList();
+        var staged = sc?.Session.Pending.Select(e => new SavedEdit(e.Ref.ToString(), e.Before, e.After, e.Disable, e.Nudge)).ToList() ?? new List<SavedEdit>();
+        var written = sc is null ? new List<SavedWritten>() : WrittenOf(sc.Session, sc.PatchFolderOf);
         return new SessionData(plan, arm, sc?.Session.Selected?.ToString(), s.OpenRow?.Rank, sc?.Camera, staged, written, sc?.Cell);
     }
 
@@ -96,7 +100,11 @@ internal static class SessionFile
         foreach (var w in data.Written)
         {
             if (!FormKey.TryFactory(w.Ref, out var k) || !session.IsDrawn(k)) { notes.Add($"{w.Ref}'s written edit in {w.Patch} is kept for its cell; it is drawn again when that cell is open."); continue; }
-            if (readWritten(k, w) is { } pose) { if (w.Disable) session.ShowWrittenDisabled(k, pose, w.Patch); else session.ShowWritten(k, pose, w.Patch); }
+            if (readWritten(k, w) is { } pose)
+            {
+                if (w.Disable) session.ShowWrittenDisabled(k, pose, w.Patch); else session.ShowWritten(k, pose, w.Patch);
+                if (w.Nudge) session.MarkWrittenNudged(k);       // its re-check runs contactprobe and says what was not checked
+            }
             else notes.Add($"{w.Ref}'s written edit was not restored: {w.Patch} no longer holds it.");
         }
         var stale = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -111,7 +119,7 @@ internal static class SessionFile
                 stale.Add(e.Ref);
                 continue;
             }
-            if (e.Disable) session.StageDisable(k); else session.Stage(k, e.After);
+            if (e.Disable) session.StageDisable(k); else session.Stage(k, e.After, e.Nudge);
         }
         if (data.Selected is { } sel && FormKey.TryFactory(sel, out var sk) && session.IsDrawn(sk)) session.Select(sk);
         return notes;

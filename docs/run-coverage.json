@@ -1117,6 +1117,8 @@
       },
       "modifiers": {
         "--list": "How many conflict groups the console summary lists (integer, default 25).",
+        "--nudge": "Gate C: judge one object's nudge candidates instead of an emit pass. REQUEST is JSON {subject, other, home [x,y,z], reach, candidates [{n, position [x,y,z]}]} written by the app; each candidate is the object at that position, rotation and scale kept, against every reference (the base game included) whose bounds reach it in the 3x3 grid squares around it (its cell indoors). Needs --nudge-out; does not combine with --emit, --population, scene capture or --responsible-pair.",
+        "--nudge-out": "Gate C: where --nudge writes its answer (nudge-answer/1): per candidate clear or not, whether it still crosses the other object, the new crossings by who is responsible (another mod, the same mod, the base game), the undecided pairs, and the crossings already there at home that are not held against it; or one refusal sentence (exit 2).",
         "--surface-tolerance": "Distance (u) at which two strict render surfaces count as touching (default 1e-5).",
         "--max-triangle-pairs": "Work cap per pair: triangle pairs tested before the pair is reported unresolved (default 2,000,000).",
         "--pair-seconds": "Time cap per pair in seconds before it is reported unresolved (default 120).",
