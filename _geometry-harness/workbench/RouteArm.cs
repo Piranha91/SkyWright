@@ -22,7 +22,9 @@ internal sealed record RouteArmResult(string Word, string Sentence, IReadOnlyLis
 /// never read as fine, and a file with no list at all confirms nothing;</item>
 /// <item>a cut (Blocked or LikelyBlocked) under the patch that was not one before rejects the candidate ("cut");</item>
 /// <item>a reference that can no longer be judged (NoLine, Unjudgeable, NotJudged) where it could be before: "not confirmed";</item>
-/// <item>a cut there before the move and still there is not held against the candidate; it is said ("remains").</item>
+/// <item>a cut there before the move and still there is not held against the candidate; it is said ("remains");</item>
+/// <item>the moved object itself not judgeable at the nudged place: "not confirmed", whatever it read before (review E1); a
+/// neighbour judgeable neither before nor after is not held against the move, and the sentence names it.</item>
 /// </list></summary>
 internal static class RouteCutProof
 {
@@ -89,20 +91,27 @@ internal static class RouteCutProof
         if (untested.Count > 0)
             return new("not confirmed", $"walking routes could not be shown uncut: {List(untested.Select(k => $"{Name(k)} (tested {(unpatched.Judged.ContainsKey(k) ? "only before the move" : "only after it")})"))} "
                                         + "was judged in one run and not tested in the other, and an object not tested is not read as fine", Array.Empty<string>());
-        var created = new List<string>(); var lost = new List<string>(); var remains = new List<string>();
+        var created = new List<string>(); var lost = new List<string>(); var remains = new List<string>(); var neither = new List<string>();
         foreach (var k in keys)
         {
             string u = unpatched.Judged[k].Verdict, p = patched.Judged[k].Verdict;
             if (Cut.Contains(p) && !Cut.Contains(u)) created.Add(k);
             else if (Unjudged.Contains(p) && !Unjudged.Contains(u)) lost.Add(k);
             else if (Cut.Contains(p) && Cut.Contains(u)) remains.Add(k);
+            else if (Unjudged.Contains(p) && Unjudged.Contains(u) && k != m) neither.Add(k);
         }
         if (created.Count > 0)
             return new("cut", $"after the move {List(created.Select(k => $"{Name(k)} {Plain(patched.Judged[k].Verdict)}"))}, which it did not before", Array.Empty<string>());
+        // review E1: the moved object itself must be judged at the nudged place, whatever it read before
+        if (Unjudged.Contains(patched.Judged[m].Verdict))
+            return new("not confirmed", $"walking routes could not be shown uncut: at the nudged place {Name(m)} {Plain(patched.Judged[m].Verdict)}"
+                                        + (Unjudged.Contains(unpatched.Judged[m].Verdict) ? ", as where the load order places it" : ""), Array.Empty<string>());
         if (lost.Count > 0)
             return new("not confirmed", $"walking routes could not be shown uncut: after the move {List(lost.Select(k => $"{Name(k)} {Plain(patched.Judged[k].Verdict)}"))}, where before the move it could be judged", Array.Empty<string>());
         var rem = remains.Select(k => unpatched.Judged[k].FormKey).ToList();
-        return new("held", rem.Count == 0 ? $"no walking route cut ({keys.Count} object(s) near it judged before and after the move)"
-                                          : $"no walking route cut by the move; {List(rem.Select(nameOf))} already {(rem.Count == 1 ? "blocked" : "block")} a walking route before the move and still {(rem.Count == 1 ? "does" : "do")}", rem);
+        // a neighbour that could be judged neither before nor after is not held against the move, but it is named
+        var unknown = neither.Count == 0 ? "" : $"; {List(neither.Select(Name))} could not be judged before or after the move";
+        return new("held", (rem.Count == 0 ? $"no walking route cut ({keys.Count} object(s) near it judged before and after the move)"
+                                           : $"no walking route cut by the move; {List(rem.Select(nameOf))} already {(rem.Count == 1 ? "blocked" : "block")} a walking route before the move and still {(rem.Count == 1 ? "does" : "do")}") + unknown, rem);
     }
 }
