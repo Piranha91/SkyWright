@@ -393,6 +393,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Which enable-parent switches and trigger bindings affect this cell?](#tool-switchprobe.census) — `switchprobe.census`
 - [Which enable-parent switches gate this cell, and which bound scripts or quest stages flip them?](#tool-switchprobe) — `switchprobe`
 - [Which evidence-bound views should an evaluation report ask to capture?](#tool-report-scenes) — `report-scenes`
+- [Which fields did one mod change that a later mod's plugin, not made with it, puts back or changes again, on records other than cells and on cells?](#tool-recordprobe) — `recordprobe`
 - [Which findings change across every enumerated switch flip?](#tool-stateprobe.all) — `stateprobe.all`
 - [Which fixture do the capture-fallback tests render?](#tool-viewprobe.write-capture-fixture) — `viewprobe.write-capture-fixture`
 - [Which helpers do the evaluation tools on both sides of the houseCARL integration fence share?](#tool-evalbase) — `evalbase`
@@ -5544,21 +5545,24 @@ Modifiers (do not select a separate mode):
 
 **Which records use a record of another mod's plugin that the installed version of that plugin does not have?**
 
-The record checks, one per run (--check). loadability.dangling-references (held: a scan does not run it unless it is ticked, until it finds a real clash between two mods): houseCARL's errors sweep over the whole order, called in process; a link is a row only between two mods' plugins, the target's plugin loaded and either plugin in the selection; links in or into the game's own files, within one plugin or one mod, or into a plugin missing from the order are counted under their reasons. --self-test runs its known answers; --write-self-test-emit writes runcontrol's fixture.
+**Which fields did one mod change that a later mod's plugin, not made with it, puts back or changes again, on records other than cells and on cells?**
+
+The record checks, one per run (--check). loadability.dangling-references (held: a scan does not run it unless it is ticked, until it finds a real clash between two mods): houseCARL's errors sweep over the whole order, called in process; a link is a row only between two mods' plugins, the target's plugin loaded and either plugin in the selection; links in or into the game's own files, within one plugin or one mod, or into a plugin missing from the order are counted under their reasons. records.contested-fields and records.cell-attributes (both held, until a person has read the rows they found on the lab's order): houseCARL's record tool in process reads each contested record the selection touches and each other version's change against what its plugin was made with; a field one mod changed whose winning value is another mod's, the winner not made with the loser, is a row, both directions judged; made-with pairs, one mod, game files, navmesh and registration records are counted under their reasons. --instrument gives the earlier Python capture's rule as a known answer, never a scan. --self-test runs its known answers; --write-self-test-emit writes runcontrol's fixture.
 
 Inputs: A load order (profile or --order candidate) and the check to run; optionally the plan's population file (--population), whose plugins and mod folders are the selection.
 
-Outputs: A conflict file of the check's rows (DANGLING: the record that uses the missing one, and the missing record) and its coverage: every link houseCARL reported counted under its reason, and what could not be judged.; Beside it OUT.json.view (the order as houseCARL read it) and OUT.json.housecarl (houseCARL's own store).
+Outputs: A conflict file of the check's rows (DANGLING: the record that uses the missing one, and the missing record; LOST-EDIT: the record, and its field and losing plugin) and its coverage: every link houseCARL reported counted under its reason, and what could not be judged.; Beside it OUT.json.view (the order as houseCARL read it) and OUT.json.housecarl (houseCARL's own store).; For the lost-edit checks, OUT.json.rows.json: each row's record, field, the two plugins and their mods, the lost, winning and made-with values, and whether the winner changed the field itself.
 
 Source: [_geometry-harness/recordprobe/Program.cs](../_geometry-harness/recordprobe/Program.cs) — `// recordprobe — the record checks: clashes between two mods that houseCARL's record and check tools find`
 
 
 Modifiers (do not select a separate mode):
 
-- `--check` — The registry id of the record check to run (required).
+- `--check` — The registry id of the record check to run (required): loadability.dangling-references, records.contested-fields or records.cell-attributes.
 - `--emit` — Write the conflict file here (required).
 - `--game` — Game directory (else the harness config, only for its own instance).
 - `--instance` — MO2 instance directory (else HOUSECARL_MO2_INSTANCE; never the harness config: refused instance-not-explicit).
+- `--instrument` — Lost-edit checks only: the earlier Python capture's rule (the selection's plugins as the only losers, each against the plugin beneath it, no between-mods clause), a known answer; never in the registry, never a scan.
 - `--order` — Read this candidate configuration (CandidateFile) instead of the profile's order.
 - `--population` — The plan's population file: its plugins and mod folders are the selection; without it every plugin is.
 - `--profile` — MO2 profile name (else the harness config, only for its own instance).
