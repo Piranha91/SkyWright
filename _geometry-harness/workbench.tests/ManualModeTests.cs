@@ -1031,6 +1031,7 @@ public sealed class ManualWriteTests
             "disabled" => null,                                      // the patch disables nothing (Gate B)
             "moved" => null,                                         // and no edit in it came from a nudge (Gate C)
             "ct" => CancellationToken.None,
+            "routeAt" => null,                                       // nor a route arm's places (Gate E)
             _ => throw new Xunit.Sdk.XunitException($"Recheck.RunAll has a parameter {p.Name} this test does not know"),
         }).ToArray();
         RecheckResult result;
