@@ -78,6 +78,16 @@ internal static class ProbeHelp
             It does not list links in or into the game's own files (Bethesda's and Creation Club's), links within one plugin or one mod, or links into a plugin missing from the load order, which the masters check reports. It has not yet found a real clash between two mods, so a scan does not run it unless you tick it.
             """),
 
+        ["loadability.missing-assets"] = new(
+            "Finds meshes, textures and other files a mod's records use that the game cannot find because another mod's archive of the same name replaces the archive that has them.",
+            """
+            The game loads only one archive of each name: when two mods ship an archive with the same name, the copy from the mod with the higher priority is the one used, and every file in the other copy is gone in game. A record that uses one of those files then finds nothing.
+
+            The check reads each record a mod of your selection changes, as the winning plugin has it, and the files it uses, and asks whether the game finds each file. For a file it does not find, it asks again with only that plugin's own mod and the mods it was made with enabled. If none of them has the file, the mod simply does not ship it (or a mod it needs is not installed), which is counted, not listed. If one of them has it in an archive, the file is listed with the mod whose archive of that name wins.
+
+            Files the game finds, records of the game's own files, and archives that could not all be read are not listed. It has not yet found a real clash between two mods, so a scan does not run it unless you tick it.
+            """),
+
         ["records.contested-fields"] = new(
             "Finds changes one mod made to a record, such as an object's position or a character's outfit, that a later mod in your load order puts back or changes again without having been made with the first mod.",
             """

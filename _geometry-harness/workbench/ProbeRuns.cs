@@ -26,6 +26,7 @@ internal static class ProbeNames
     {
         "loadability.masters-and-order" => "Every master is present and the load order is one the game will load.",
         "loadability.dangling-references" => "Records that use a record of another mod which the installed version of that mod does not have.",
+        "loadability.missing-assets" => "Files a mod's records use that the game cannot find because another mod's archive of the same name wins.",
         "records.contested-fields" => "Changes one mod made to a record that a later mod, not made with it, puts back or changes again.",
         "records.cell-attributes" => "Cell settings one mod changed, such as lighting or water height, that a later mod, not made with it, puts back or changes again.",
         "geometry.navmesh-ownership" => "Navmesh edits a later plugin throws away, and broken links in the navmesh that wins.",
