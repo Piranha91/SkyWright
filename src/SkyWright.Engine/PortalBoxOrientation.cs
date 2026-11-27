@@ -1,12 +1,13 @@
 using System.Numerics;
 
-namespace HarnessShared;
+namespace SkyWright.Engine;
 
 // ======================================================================
 //  PortalBoxOrientation - which primitive orientations the occlusion
 //  research rule predicts, as pure functions so they can be proven without
-//  a renderer. viewprobe's ShapeCullPolicy.Shadow asks them; proofprobe's
-//  stationrule H and 6016-6020 cases hold them down.
+//  a renderer. OcclusionRule.Shadow (OcclusionRule.cs) asks them; proofprobe's
+//  stationrule H and 6016-6020 cases and the Engine's OcclusionRuleTests hold
+//  them down. (Moved here from _geometry-harness/_shared, unchanged.)
 //
 //  The rule predicts UPRIGHT primitives: a rectangle's normal, or a box's
 //  two horizontal axes, may leave level by at most the rule's upright

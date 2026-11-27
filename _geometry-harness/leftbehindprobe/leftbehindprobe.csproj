@@ -39,7 +39,6 @@
     <Compile Include="..\_shared\WorldState.cs" Link="WorldState.cs" />
     <Compile Include="..\_shared\StateArm.cs" Link="StateArm.cs" />
     <Compile Include="..\_shared\StationRule.cs" Link="StationRule.cs" />
-    <Compile Include="..\_shared\PortalBoxOrientation.cs" Link="PortalBoxOrientation.cs" />
     <Compile Include="..\_shared\FloorFeed.cs" Link="FloorFeed.cs" />
     <Compile Include="..\_shared\RingReach.cs" Link="RingReach.cs" />
     <Compile Include="..\_shared\LargeReferenceLists.cs" Link="LargeReferenceLists.cs" />

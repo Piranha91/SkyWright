@@ -3,7 +3,6 @@ using System.Text.Json.Serialization;
 
 namespace SkyWright.Engine;
 
-// RED STUB (unit 1, first commit): the API with wrong bodies, so OcclusionRuleTests fail on their assertions.
 // THE OCCLUSION RULE: which occlusion primitives the research rule predicts from an eye, and the primitive's geometry.
 // One owner. viewprobe (its renders and planes report, through ShapeCullPolicy), the station rule (StationRule's
 // corners and mid-quad) and the occlusion probe call it; nothing else carries its constants. The orientation verdicts
@@ -20,12 +19,10 @@ public readonly record struct OcclusionPrimitive(OcclusionPrimitiveKind Kind, Ve
 /// <summary>A primitive's world geometry. Every caller's corners, mid-quad and axes come from here.</summary>
 public static class OcclusionPrimitiveGeometry
 {
-    internal static Vector3 Unit(Vector3 d) => d.LengthSquared() > 1e-12f ? Vector3.Normalize(d) : Vector3.Zero;
+    static Vector3 Unit(Vector3 d) => d.LengthSquared() > 1e-12f ? Vector3.Normalize(d) : Vector3.Zero;
 
     /// <summary>The eight corners of the primitive's box in Skyrim space, indexed by axis bits (1 = +x, 2 = +y, 4 = +z).</summary>
-    public static Vector3[] BoxCorners(in OcclusionPrimitive p) => new Vector3[8];   // RED STUB
-
-    internal static Vector3[] BoxCornersReal(in OcclusionPrimitive p)
+    public static Vector3[] BoxCorners(in OcclusionPrimitive p)
     {
         var r = SpatialOverlap.RefrRotation(p.Rotation);
         var h = p.Bounds * 0.5f * p.Scale;
@@ -39,9 +36,7 @@ public static class OcclusionPrimitiveGeometry
     }
 
     /// <summary>The slab's mid-plane quad (local y = 0), ring-ordered, Skyrim space.</summary>
-    public static Vector3[] MidQuad(in OcclusionPrimitive p) => new Vector3[4];   // RED STUB
-
-    internal static Vector3[] MidQuadReal(in OcclusionPrimitive p)
+    public static Vector3[] MidQuad(in OcclusionPrimitive p)
     {
         var r = SpatialOverlap.RefrRotation(p.Rotation);
         var h = p.Bounds * 0.5f * p.Scale;
@@ -55,7 +50,8 @@ public static class OcclusionPrimitiveGeometry
     }
 
     /// <summary>A local axis of the primitive in the world, unit length (zero for a degenerate rotation).</summary>
-    public static Vector3 Axis(in OcclusionPrimitive p, Vector3 local) => Vector3.Zero;   // RED STUB
+    public static Vector3 Axis(in OcclusionPrimitive p, Vector3 local)
+        => Unit(Vector3.TransformNormal(local, SpatialOverlap.RefrRotation(p.Rotation)));
 }
 
 /// <summary>Bounded research policy, separately identified from the geometry primitive.
@@ -97,19 +93,59 @@ public sealed record OcclusionRule(string Identity, float MinimumEyeDistance, fl
     public const string NearEye = "near-eye behavior unassessed; observations bracket an exemption and do not establish a sharp threshold";
 
     /// <summary>The upright tolerance's clause, only for a rule that states its own.</summary>
-    internal static string UprightScope(float t) =>
+    static string UprightScope(float t) =>
         $" Upright Box and PortalBox primitives are admitted within |n.z| <= {t.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)} of upright (a rectangle's normal, a box's horizontal axes); larger tilts outside the horizontal class remain refused.";
 
     /// <summary>What a rule claims to cover; with no rule, the rectangle scope alone. The Box clause appears only when
     /// the rule opts in, so a rule file that says nothing about boxes reports exactly what it always did.</summary>
-    public static string ScopeOf(OcclusionRule? rule) => "";   // RED STUB
+    public static string ScopeOf(OcclusionRule? rule) =>
+        (rule is { BoxSilhouette: true } ? RectangleScope + BoxScope : RectangleScope)
+        + (rule is { UprightMaximumAbsNormalZ: { } u } ? UprightScope(u) : "")
+        + (rule is { HorizontalPortalBoxNormalDownEyeAbove: true } ? HorizontalScope : "");
 
     /// <summary>A rule file's bytes as a rule and the bytes' SHA-256 (upper-case hex); refused with
     /// <see cref="LoadRefusal"/> when a field is missing or out of range.</summary>
-    public static (OcclusionRule Rule, string Sha256) Load(byte[] bytes) =>   // RED STUB: no checks, no hash
-        (System.Text.Json.JsonSerializer.Deserialize<OcclusionRule>(bytes,
-            new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true })!, "");
+    public static (OcclusionRule Rule, string Sha256) Load(byte[] bytes)
+    {
+        var rule = System.Text.Json.JsonSerializer.Deserialize<OcclusionRule>(bytes,
+            new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true,
+                RespectRequiredConstructorParameters = true });
+        if (rule is null || string.IsNullOrWhiteSpace(rule.Identity) ||
+            !float.IsFinite(rule.MinimumEyeDistance) || rule.MinimumEyeDistance < 0 ||
+            !float.IsFinite(rule.MaximumAbsNormalZ) || rule.MaximumAbsNormalZ < 0 || rule.MaximumAbsNormalZ > 1 ||
+            rule.UprightMaximumAbsNormalZ is { } upright && (!float.IsFinite(upright) || upright < 0 || upright > 1) ||
+            rule.Evidence is null || rule.Evidence.Length == 0 || rule.Evidence.Any(string.IsNullOrWhiteSpace))
+            throw new ArgumentException(LoadRefusal);
+        return (rule, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)));
+    }
 
     /// <summary>The primitive's view shadow from <paramref name="eye"/> when this rule predicts it, else the refusal.</summary>
-    public (ConvexShadow? Shadow, string? Issue) Shadow(in OcclusionPrimitive p, Vector3 eye) => (null, "red stub");
+    public (ConvexShadow? Shadow, string? Issue) Shadow(in OcclusionPrimitive p, Vector3 eye)
+    {
+        if (p.Kind == OcclusionPrimitiveKind.Box)
+        {
+            if (!BoxSilhouette) return (null, BoxUnassessed);
+            if (!SphereBound.Finite(p.Bounds) || p.Bounds.X <= 0 || p.Bounds.Y <= 0 || p.Bounds.Z <= 0 ||
+                !float.IsFinite(p.Scale) || p.Scale <= 0) return (null, InvalidBounds);
+            // Upright, on the rule's upright tolerance: both of the box's horizontal axes stay level within it.
+            var boxIssue = PortalBoxOrientation.BoxUpright(OcclusionPrimitiveGeometry.Axis(p, Vector3.UnitX),
+                OcclusionPrimitiveGeometry.Axis(p, Vector3.UnitY), UprightTolerance);
+            if (boxIssue is not null) return (null, boxIssue);
+            var volume = ConvexShadow.FromBox(OcclusionPrimitiveGeometry.BoxCorners(p), eye);
+            if (volume is null) return (null, NoBoxShadow);
+            if (volume.EyeDistance <= MinimumEyeDistance) return (null, NearEye);
+            return (volume, null);
+        }
+        if (!SphereBound.Finite(p.Bounds) || p.Bounds.X <= 0 || p.Bounds.Z <= 0 ||
+            !float.IsFinite(p.Scale) || p.Scale <= 0) return (null, InvalidBounds);
+        var quad = OcclusionPrimitiveGeometry.MidQuad(p);
+        var shadow = ConvexShadow.FromRectangle(quad, eye);
+        if (shadow is null) return (null, DegeneratePlane);
+        var normal = Vector3.Normalize(Vector3.Cross(quad[1] - quad[0], quad[3] - quad[0]));
+        var orientation = PortalBoxOrientation.Check(normal, OcclusionPrimitiveGeometry.Axis(p, Vector3.UnitY), p.Position, eye,
+            UprightTolerance, MaximumAbsNormalZ, HorizontalPortalBoxNormalDownEyeAbove);
+        if (orientation is not null) return (null, orientation);
+        if (shadow.EyeDistance <= MinimumEyeDistance) return (null, NearEye);
+        return (shadow, null);
+    }
 }
