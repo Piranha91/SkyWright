@@ -421,6 +421,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Which planned scenes need human review before video assembly?](#tool-evalreel.storyboard-packet) — `evalreel.storyboard-packet`
 - [Which plugins and mod folders in a whole load order meet, and how: shared records, cells, neighbouring cells, placed bases, form links and asset paths compared by bytes?](#tool-ordermap) — `ordermap`
 - [Which record fields does one mod change that another mod's version throws away, from a record capture?](#tool-recordrows) — `recordrows`
+- [Which records use a record of another mod's plugin that the installed version of that plugin does not have?](#tool-recordprobe) — `recordprobe`
 - [Which required artifact classes agree between these two render outputs?](#tool-renderequiv.compare) — `renderequiv.compare`
 - [Which resolution and field of view does this game profile use?](#tool-shotplan.frame) — `shotplan.frame`
 - [Which rotation composition produces the expected placed geometry?](#tool-viewprobe.euler) — `viewprobe.euler`
@@ -5536,6 +5537,33 @@ Modifiers (do not select a separate mode):
 
 - `--bundle` — the overlay bundle to enrich
 - `--kind` — record-rows or order-variant
+
+<a id="tool-recordprobe"></a>
+
+### recordprobe
+
+**Which records use a record of another mod's plugin that the installed version of that plugin does not have?**
+
+The record checks, one per run (--check). loadability.dangling-references (held: a scan does not run it unless it is ticked, until it finds a real clash between two mods): houseCARL's errors sweep over the whole order, called in process; a link is a row only between two mods' plugins, the target's plugin loaded and either plugin in the selection; links in or into the game's own files, within one plugin or one mod, or into a plugin missing from the order are counted under their reasons. --self-test runs its known answers; --write-self-test-emit writes runcontrol's fixture.
+
+Inputs: A load order (profile or --order candidate) and the check to run; optionally the plan's population file (--population), whose plugins and mod folders are the selection.
+
+Outputs: A conflict file of the check's rows (DANGLING: the record that uses the missing one, and the missing record) and its coverage: every link houseCARL reported counted under its reason, and what could not be judged.; Beside it OUT.json.view (the order as houseCARL read it) and OUT.json.housecarl (houseCARL's own store).
+
+Source: [_geometry-harness/recordprobe/Program.cs](../_geometry-harness/recordprobe/Program.cs) — `// recordprobe — the record checks: clashes between two mods that houseCARL's record and check tools find`
+
+
+Modifiers (do not select a separate mode):
+
+- `--check` — The registry id of the record check to run (required).
+- `--emit` — Write the conflict file here (required).
+- `--game` — Game directory (else the harness config, only for its own instance).
+- `--instance` — MO2 instance directory (else HOUSECARL_MO2_INSTANCE; never the harness config: refused instance-not-explicit).
+- `--order` — Read this candidate configuration (CandidateFile) instead of the profile's order.
+- `--population` — The plan's population file: its plugins and mod folders are the selection; without it every plugin is.
+- `--profile` — MO2 profile name (else the harness config, only for its own instance).
+- `--self-test` — Run the known answers and exit.
+- `--write-self-test-emit` — Write the self-test's cross-mod emit into a folder, for runcontrol's self-test, and exit.
 
 <a id="tool-recordrows"></a>
 
