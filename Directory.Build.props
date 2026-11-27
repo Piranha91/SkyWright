@@ -94,6 +94,18 @@
     <WriteLinesToFile File="$(_SwProvDir)build.json" Lines="$(_SwProvJson)" Overwrite="true" WriteOnlyWhenDifferent="true" />
   </Target>
 
+  <!-- The folder a project builds into, for after.SkyWright.sln.targets: once the whole solution has built, a folder
+       under Probes\, Tools\ or Tests\ that no project returned here is a program the build no longer makes (it moved to
+       the integration module, or was renamed or deleted), and is removed. Root and Folders name the layout as this file
+       owns it, so the solution step spells no path. -->
+  <Target Name="SkyWrightBuildFolder" Returns="@(_SwBuildFolder)">
+    <ItemGroup>
+      <_SwBuildFolder Include="$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(OutDir)').TrimEnd('\'))"
+                      Root="$([System.IO.Path]::GetFullPath('$(SkyWrightLayoutRoot)').TrimEnd('\'))"
+                      Folders="$(SkyWrightProbes);$(SkyWrightTools);Tests" />
+    </ItemGroup>
+  </Target>
+
   <!-- houseCARL's server code as a library, for a project that sets SkyWrightHousecarlLibrary: its built assembly is
        referenced by the path houseCARL's project reports, so only housecarl-mcp.dll (and what it references) is copied,
        never its program. The project also keeps a ProjectReference with ReferenceOutputAssembly="false" so it is built first. -->
