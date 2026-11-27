@@ -6,7 +6,9 @@ namespace SkyWright.Engine;
 // that list (HarnessShared.BaseGamePlugins).
 //   a plugin's mod   the MO2 mod folder it sits in; a plugin anywhere else (the game's Data folder, MO2's overwrite) is a
 //                    mod of its own (Gate A review finding 2);
-//   dangling links   STUB (unit 1's red point): every link whose holder is in the selection is a row.
+//   dangling links   a link into a record its plugin does not have is a row only between two mods: judged when either
+//                    plugin is in the selection (Gate A review finding 1); not a row into a plugin missing from the order
+//                    (the masters check's), in the game's own files or into them, into its own plugin or its own mod.
 
 /// <summary>One end of a record link: the plugin, its mod, whether it is one of the game's own files, whether it is in the
 /// selection the scan judges, and whether it is in the load order at all.</summary>
@@ -29,7 +31,10 @@ public static class RecordClashRule
     /// <paramref name="modsDir"/>, else "plugin:&lt;file name&gt;" (a mod of its own).</summary>
     public static string ModOf(string pluginPath, string modsDir)
     {
-        return "";
+        string dir = Path.GetDirectoryName(Path.GetFullPath(pluginPath)) ?? "";
+        string parent = Path.GetDirectoryName(dir) ?? "";
+        bool inModFolder = parent.Length > 0 && string.Equals(parent.TrimEnd('\\', '/'), Path.GetFullPath(modsDir).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
+        return inModFolder ? "folder:" + Path.GetFileName(dir) : "plugin:" + Path.GetFileName(pluginPath);
     }
 
     /// <summary>A mod key in words: the folder's name, or the plugin's own name.</summary>
@@ -39,7 +44,12 @@ public static class RecordClashRule
     /// <paramref name="target"/>'s plugin should define and does not.</summary>
     public static RecordVerdict Dangling(LinkEnd holder, LinkEnd target)
     {
-        if (!holder.Selected) return new(false, NotSelected);
+        if (!target.Loaded) return new(false, NotLoaded);
+        if (!holder.Selected && !target.Selected) return new(false, NotSelected);
+        if (holder.GameFile) return new(false, InGameFiles);
+        if (target.GameFile) return new(false, IntoGameFiles);
+        if (string.Equals(holder.Plugin, target.Plugin, StringComparison.OrdinalIgnoreCase)) return new(false, SamePlugin);
+        if (string.Equals(holder.Mod, target.Mod, StringComparison.OrdinalIgnoreCase)) return new(false, SameMod);
         return new(true, BetweenMods);
     }
 }
