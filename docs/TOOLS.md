@@ -6099,6 +6099,7 @@ Source: [_geometry-harness/scopeprobe/Program.cs](../_geometry-harness/scopeprob
 Modifiers (do not select a separate mode):
 
 - `--also-scan` — Read a plugin file outside the configuration (a disabled mod's) for CELL records in the footprint or its ring, without loading it; repeatable. Results under nearby.alsoScanned.
+- `--also-scan-file` — Read the --also-scan plugin files from a list file, one path a line (UTF-8), so the command line does not grow with the load order; runcontrol's scope stage passes the disabled mods' plugins this way. Missing or unreadable: one sentence, exit 2, no scope.
 - `--assets` — Set assets for this invocation; consult the linked parser for accepted values.
 - `--disable` — Set disable for this invocation; consult the linked parser for accepted values.
 - `--enable` — Set enable for this invocation; consult the linked parser for accepted values.
@@ -6110,6 +6111,7 @@ Modifiers (do not select a separate mode):
 - `--ring` — Also name the plugins whose CELL records sit within N grid cells (0 to 5) of an exterior footprint cell, under nearby.plugins.
 - `--self-test` — Run the known-answer self-test over the probe's synthetic fixture; exit 0 when every case passes.
 - `--target` — Set target for this invocation; consult the linked parser for accepted values.
+- `--target-file` — Read the --target plugin names from a list file, one name a line (UTF-8); runcontrol's scope stage passes its targets this way. Missing or unreadable: one sentence, exit 2, no scope.
 
 <a id="tool-scripts-runlog.py"></a>
 
