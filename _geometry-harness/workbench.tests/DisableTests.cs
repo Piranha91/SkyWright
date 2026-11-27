@@ -206,6 +206,23 @@ public sealed class DisableTests : IClassFixture<DisableWorld>
         Assert.Contains("nothing else", said);                                            // and what went with it: said
     }
 
+    [Fact]
+    public void A_staged_disable_is_saved_with_the_session_and_staged_again_when_it_is_restored()
+    {
+        var ro = Drawn(DisableWorld.Plain, new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f);
+        var s = new EditSession(new[] { ro });
+        s.StageDisable(DisableWorld.Plain);
+        var data = new SessionData("plan", "baseline", null, null, null,
+            s.Pending.Select(e => new SavedEdit(e.Ref.ToString(), e.Before, e.After, e.Disable)).ToList(), Array.Empty<SavedWritten>());
+        var path = Path.Combine(_w.Root, "session-" + Guid.NewGuid().ToString("N") + ".json");
+        SessionFile.Write(path, data);
+        var back = SessionFile.Read(path)!;
+        var fresh = new EditSession(new[] { Drawn(DisableWorld.Plain, new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f) });
+        var notes = SessionFile.Restore(fresh, back, (_, _) => null);
+        Assert.Empty(notes);
+        Assert.True(fresh.IsDisabled(DisableWorld.Plain) && fresh.Pending.Single().Disable, "the restored session lost the staged disable");
+    }
+
     // ---- the refusals, each on its own fixture ---------------------------------------------------------------------
 
     async Task<(string? Refusal, string? Note)> Judge(FormKey key)

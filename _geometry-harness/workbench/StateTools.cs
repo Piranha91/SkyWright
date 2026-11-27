@@ -29,10 +29,10 @@ internal sealed class StateTools
     static readonly string[] Parts = { "bundle", "conflicts", "findings", "selection", "pending", "recheck", "repair", "launcher", "view", "decisions", "scenes", "context", "placements", "scene", "results", "world", "layers", "load_order", "live" };
     static readonly string[] DefaultParts = { "selection", "pending", "recheck" };
     /// <summary>The verbs that stage or write an edit: refused on a read-only scene.</summary>
-    static readonly string[] EditVerbs = { "stage", "undo", "commit", "recheck", "revert", "drop", "move_with", "find_clear", "choose" };
+    static readonly string[] EditVerbs = { "stage", "disable", "undo", "commit", "recheck", "revert", "drop", "move_with", "find_clear", "choose" };
     /// <summary>Every verb workbench_act takes, as its description and its unknown-verb refusal name them (one list:
     /// <c>StateToolsTests</c> holds each to the dispatch).</summary>
-    internal const string VerbList = "select, stage, undo, revert, drop, view, decide, commit, recheck, move_with, find_clear, choose, repair_preview, repair_write, layer, frame_log, load_order, map, results, world, open_profile, select_mods, select_probes, set_output, set_work_folder, run, abort, capture_window, show_tab, search_mods or open";
+    internal const string VerbList = "select, stage, disable, undo, revert, drop, view, decide, commit, recheck, move_with, find_clear, choose, repair_preview, repair_write, layer, frame_log, load_order, map, results, world, open_profile, select_mods, select_probes, set_output, set_work_folder, run, abort, capture_window, show_tab, search_mods or open";
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
     internal static CallToolResult Refuse(string sentence) => new() { IsError = true, Content = [new TextContentBlock { Text = sentence }] };
@@ -117,7 +117,8 @@ internal sealed class StateTools
                  "(selection, pending, recheck). Verbs: select (open a conflict by its rank with `conflict`, which lands the camera on its " +
                  "reference; or select a drawn reference with `ref`, or ref \"none\"); stage (move and/or turn a reference: relative with `delta` " +
                  "and `turn_degrees`, or absolute with `position` and `rotation_degrees`; the selected reference unless `ref` names one); " +
-                 "undo (the last staged edit); commit (write the staged edits to the new patch plugin `patch`: `dry_run` true, the default, " +
+                 "disable (stage the selected reference, or `ref`, to be written initially disabled in the patch plugin, never deleted: refused in one sentence when another record depends on it, such as an enable parent, a linked reference, an activate parent, a door's far side, a quest, a package, a script property, or a large-reference list; an object takes one fix, a move or a disable); " +
+                 "undo (the last staged edit, a disable too); commit (write the staged edits to the new patch plugin `patch`: `dry_run` true, the default, " +
                  "previews the values and masters and writes nothing; false writes, and then re-checks the open conflict in the background, " +
                  "about 70-80 s, read with workbench_state wait_seconds); recheck (re-check the open conflict against the written patch `patch`). " +
                  "repair_preview (plan the repair of the navmesh Findings row `finding`: relink a broken border, or move vertices to follow ground a later plugin moved; nothing is written) and " +
@@ -216,6 +217,7 @@ internal sealed class StateTools
             if (v == "find_clear") return FindClear(hub.Surface, max, snap);
             if (v == "choose") { var ch = await Choose(hub.Surface, n); if (ch.IsError != true) SaveSession(hub.Surface); return ch; }
             if (v is "repair_preview" or "repair_write") return await Repair(hub.Surface, v, finding, patch);
+            if (v == "disable") { var dr = await DisableOnUi(hub.Surface, @ref); if (dr.IsError != true) SaveSession(hub.Surface); return dr; }
             if (finding is { } fr) return await SelectFinding(hub.Surface, verb, fr);
             var r = v switch
             {
@@ -327,13 +329,25 @@ internal sealed class StateTools
         string said;
         try
         {
-            if (sc.Session.Revert(k) is { } r) said = $"reverted {k}: back at {EditSession.Describe(r.Before)}";
+            if (sc.Session.Revert(k) is { } r) said = r.Disable ? $"reverted the disable of {k}: it is shown again" : $"reverted {k}: back at {EditSession.Describe(r.Before)}";
             else if (sc.Session.Written.ContainsKey(k)) said = await sc.RevertWrittenAsync(k);
             else return Refuse($"there is nothing staged or written for {k} to revert.");
         }
         catch (InvalidOperationException ex) { return Refuse(ex.Message); }
         sc.AfterStage();
         return Answer(new { said, state = Project(s, DefaultParts, 20, 0, null) });
+    }
+
+    /// <summary>The <c>disable</c> verb: the window's Disable button, by the same path (<see cref="DisableAction"/>).</summary>
+    static async Task<CallToolResult> DisableOnUi(IWorkbenchSurface s, string? refKey)
+    {
+        var sc = SceneOr(s, out var none); if (sc is null) return none!;
+        FormKey k;
+        if (refKey is not null) { var key = Key(refKey, out var bad); if (key is null) return bad!; k = key.Value; }
+        else if (sc.Session.Selected is { } sel) k = sel;
+        else return Refuse("disable needs ref, or a selected reference.");
+        try { var said = await DisableAction.StageAsync(sc, k); return Answer(new { said, state = Project(s, DefaultParts, 20, 0, null) }); }
+        catch (InvalidOperationException ex) { return Refuse(ex.Message); }
     }
 
     static CallToolResult DropOnUi(IWorkbenchSurface s, string? refKey)
@@ -739,7 +753,7 @@ internal sealed class StateTools
                     var u = sc.Session.Undo();
                     sc.AfterStage();
                     if (u is null) return Refuse(sc.Session.Written.Count > 0 ? "there is no staged edit to undo; a written edit is undone with revert, which removes it from its patch." : "there is no staged edit to undo.");
-                    said = $"undid {u.Ref}: back at {EditSession.Describe(u.Before)}";
+                    said = u.Disable ? $"undid the disable of {u.Ref}: it is shown again" : $"undid {u.Ref}: back at {EditSession.Describe(u.Before)}";
                     break;
                 }
                 case "commit":
@@ -889,8 +903,9 @@ internal sealed class StateTools
                     drawn = PoseJson(sc.Session.Current(k)),
                     loadOrder = PoseJson(RefPlacementEdit.BakedPose(ro.Ref)),
                     written = written ? new { patch = w.Patch, pose = PoseJson(w.Pose) } : null,
-                    stagedEdits = staged,
-                    view = staged > 0 ? $"the view shows {k} at its staged pose, which is not written yet"
+                    stagedEdits = staged, disabled = sc.Session.IsDisabled(k),
+                    view = sc.Session.IsDisabled(k) ? $"the view hides {k}: it is {(staged > 0 ? "staged" : $"written to {w.Patch}")} to be initially disabled"
+                         : staged > 0 ? $"the view shows {k} at its staged pose, which is not written yet"
                          : written ? EditSession.WrittenLabel(k, w.Patch)
                          : $"the view shows {k} where the load order places it",
                 };
@@ -903,10 +918,10 @@ internal sealed class StateTools
             d["pending"] = sc?.Session.Pending.Select(e => new
             {
                 @ref = e.Ref.ToString(), sentence = EditSession.Sentence(e, sc.Session.IsDrawn(e.Ref) ? sc.Session.RefOf(e.Ref).Ref.BaseEditorId : null),
-                before = PoseJson(e.Before), after = PoseJson(e.After),
+                disable = e.Disable, before = PoseJson(e.Before), after = PoseJson(e.After),
                 moved = new[] { e.After.Position.X - e.Before.Position.X, e.After.Position.Y - e.Before.Position.Y, e.After.Position.Z - e.Before.Position.Z },
             }).ToList();
-            d["written"] = sc?.Session.Written.Select(kv => new { @ref = kv.Key.ToString(), patch = kv.Value.Patch, pose = PoseJson(kv.Value.Pose) }).ToList();
+            d["written"] = sc?.Session.Written.Select(kv => new { @ref = kv.Key.ToString(), patch = kv.Value.Patch, pose = PoseJson(kv.Value.Pose), disabled = sc.Session.WrittenDisabled.Contains(kv.Key) }).ToList();
         }
         if (parts.Contains("view")) d["view"] = ViewJson(sc?.View);
         if (parts.Contains("recheck"))

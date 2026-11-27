@@ -118,7 +118,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _input = new ViewInput(_session, _gizmo, Project, RayAt, PickAt, () => _gizmo.FitTo(_eye))
         {
             Holding = () => _viewState.ShowingOriginal,
-            Locked = () => ReadOnly ? ReadOnlyWhy : null,
+            Locked = () => ReadOnly ? ReadOnlyWhy
+                : _session.Selected is { } sk && _session.IsDisabled(sk) ? $"{sk} is to be disabled, and an object takes one fix, a move or a disable; undo the disable first to move it." : null,
             Refused = s => { Say(s); Shell.SetBanner(s); },
         };
     }
@@ -1857,6 +1858,13 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             AfterStage();
             return $"staged: {EditSession.Sentence(_session.Pending[^1], _session.RefOf(k).Ref.BaseEditorId)}";
         })));
+        row.Children.Add(B("Disable", "stage the selected object to be written initially disabled in the patch plugin (never deleted); refused when another record depends on it", async () =>
+        {
+            if (_session.Selected is not { } k) { Shell.SetBanner("select an object first"); return; }
+            try { var s = await DisableAction.StageAsync(this, k); Say(s); Shell.SetBanner(s); }
+            catch (InvalidOperationException ex) { Say("disable refused: " + ex.Message); Shell.SetBanner(ex.Message); }
+            UpdateStatus(); Invalidate();
+        }));
         var snap = new ComboBox { Margin = new Thickness(4), ToolTip = "snap moves to a grid and turns to a step", ItemsSource = new[] { "no snap", "grid 1", "grid 8", "grid 32", "grid 128", "turn 5°", "turn 15°", "turn 45°" }, SelectedIndex = 0 };
         snap.SelectionChanged += (_, _) =>
         {
@@ -1958,7 +1966,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 var line = new DockPanel { Margin = new Thickness(6, 1, 6, 1) };
                 bool staged = _session.Pending.Any(e => e.Ref == k);
                 string text = staged
-                    ? EditSession.Sentence(new PendingEdit(k, _session.Pending.First(e => e.Ref == k).Before, _session.Current(k)), _session.RefOf(k).Ref.BaseEditorId)
+                    ? EditSession.Sentence(new PendingEdit(k, _session.Pending.First(e => e.Ref == k).Before, _session.Current(k), _session.IsDisabled(k)), _session.RefOf(k).Ref.BaseEditorId)
+                    : _session.WrittenDisabled.Contains(k) ? $"written to {_session.Written[k].Patch}: {_session.RefOf(k).Ref.BaseEditorId ?? k.ToString()}, initially disabled (the plugin is not enabled)"
                     : $"written to {_session.Written[k].Patch}: {_session.RefOf(k).Ref.BaseEditorId ?? k.ToString()}";
                 var revert = new Button { Content = "Revert", Margin = new Thickness(4, 0, 0, 0), ToolTip = staged ? "drop this object's staged edits" : "remove this object's override from its patch" };
                 var key = k;
@@ -2074,6 +2083,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         using var mod = Mutagen.Bethesda.Skyrim.SkyrimMod.CreateFromBinaryOverlay(plugin, Mutagen.Bethesda.Skyrim.SkyrimRelease.SkyrimSE);
         var r = mod.EnumerateMajorRecords<Mutagen.Bethesda.Skyrim.IPlacedObjectGetter>().FirstOrDefault(x => x.FormKey == key);
         if (r?.Placement is not { } p) return null;
+        if (w.Disable && (r.MajorRecordFlagsRaw & 0x800) == 0) return null;            // the patch no longer disables it
         return new RefPlacementEdit.Pose(new Vec3(p.Position.X, p.Position.Y, p.Position.Z), new Vec3(p.Rotation.X, p.Rotation.Y, p.Rotation.Z), r.Scale ?? 1f);
     }
 
