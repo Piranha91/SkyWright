@@ -61,6 +61,8 @@
     2588  marker check: a navmesh whose record box is stale is still found (the box comes from its vertices)
     2589  marker check: a link naming a triangle the linked navmesh does not have is an open edge
     2602  use_version: every refusal is classified as the kind its cause is (the repair plan counts reasons by kind)
+    2674  use_version: a version linking into a neighbour whose matching edge does not link back is refused by name (a
+          one-way border); the same with the neighbour linking back plans
     2651-2656  R7, islands of the navmesh info map (_shared/NavIsland.cs): the height rule (2651); the island data each kind
           of edit leaves, and the refusal of a plan-changing edit on an island with a mesh (2652); use_version's island data
           is the version plugin's own entry's, refused by name when it states none (2653); the in-place ops (2654); the
@@ -295,6 +297,7 @@ CASES = [
     ("2588 stale record bounds do not hide a navmesh", lambda: selftest("2588")),
     ("2589 a link to a missing triangle is open", lambda: selftest("2589")),
     ("2602 every use_version refusal has its kind", lambda: selftest("2602")),
+    ("2674 use_version refuses a border the neighbour does not return", lambda: selftest("2674")),
     ("2651 island height rule", lambda: selftest("2651")),
     ("2652 island data per kind of edit", lambda: selftest("2652")),
     ("2653 use_version's island data is the version's own", lambda: selftest("2653")),

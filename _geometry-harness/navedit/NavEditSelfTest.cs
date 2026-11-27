@@ -669,14 +669,15 @@ static class NavEditSelfTest
         });
 
         // C2558: N's triangle 1 split at (200, 50) into two along W's edge: two candidates. The link naming one of them keeps
-        // it; a link naming neither is refused as ambiguous.
+        // it; a link naming neither is refused as ambiguous. CORRECTED 2026-11-27 (C2674): N linked nothing back, a one-way
+        // border the version would now be refused for; both halves of N's split edge now link back into W's triangle 2.
         Case("2558 use-version-two-along", () =>
         {
-            var (w, n) = Pair(linkN: false);
+            var (w, n) = Pair();
             var nv = n.Vertices.ToList(); nv.Add(new Vec3(200, 50, 0));
             var nt = n.Triangles.ToList();
-            nt[1] = new NavTri(0, 4, 9, 0) with { EdgeLink01 = nt[1].EdgeLink01, EdgeLink12 = -1, EdgeLink20 = -1 };
-            nt.Add(new NavTri(9, 4, 3, 0) with { EdgeLink01 = -1, EdgeLink12 = nt[1].EdgeLink12, EdgeLink20 = -1 });
+            nt[1] = new NavTri(0, 4, 9, 4) with { EdgeLink01 = nt[1].EdgeLink01, EdgeLink12 = -1, EdgeLink20 = 0 };
+            nt.Add(new NavTri(9, 4, 3, 4) with { EdgeLink01 = -1, EdgeLink12 = -1, EdgeLink20 = 0 });
             var n2 = n with { Vertices = nv, Triangles = nt };
             var near = new Dictionary<FormKey, NavmeshGeometry> { [NK] = n2 };
             var keep = NavEdit.UseVersion(w, w, "Ver.esp", near, tol);
@@ -709,7 +710,8 @@ static class NavEditSelfTest
         {
             var (w, n) = Pair();
             var doors = NavEdit.UseVersion(w, w with { DoorTriangles = new List<NavDoorTriangle> { new(DoorRef, 0) } }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol);
-            var (bare, nn) = Pair(linkW: false, linkN: false);
+            // CORRECTED 2026-11-27 (C2674): N linked nothing back, so the gained border was one-way; N now links back
+            var (bare, nn) = Pair(linkW: false);
             var gained = NavEdit.UseVersion(bare, w, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = nn }, tol);
             return (UsePlanned(doors) is { } dw ? "doors: " + dw : null)
                 ?? (doors.DoorsAdded.Select(d => d.Door).SequenceEqual(new[] { DoorRef }) && doors.DoorsDropped.Count == 0 && doors.After!.DoorTriangles!.Single().Door == DoorRef ? null
@@ -764,9 +766,11 @@ static class NavEditSelfTest
         // C2561: ledge links are not matched by edge geometry: the version's own (Type 2) is carried while it names a triangle N
         // has, and refused when it names one N lacks; N's ledge link into this navmesh is kept where the version's triangle of
         // that index stands on the winner's corners, and refused when the version renumbers it.
+        // CORRECTED 2026-11-27 (C2674): N linked nothing back (the version's ordinary link into N's triangle 5 was one-way);
+        // N now links back, its link into W's triangle 2 meeting the version's ledge edge as an ordinary edge.
         Case("2561 use-version-ledges", () =>
         {
-            var (w, n) = Pair(linkN: false);
+            var (w, n) = Pair();
             var ledge = w with { EdgeLinks = new List<NavEdgeLink> { new(NK, 1, 2), new(NK, 5) } };
             var ok = NavEdit.UseVersion(w with { EdgeLinks = new List<NavEdgeLink> { new(NK, 1, 2), new(NK, 5) } }, ledge, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol);
             var past = NavEdit.UseVersion(w, w with { EdgeLinks = new List<NavEdgeLink> { new(NK, 99, 2), new(NK, 5) } }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol);
@@ -787,6 +791,34 @@ static class NavEditSelfTest
             return UsePlanned(r) ?? (r.Matched == 2 && r.Changed == 0 && r.Repointed == 0 && r.Others.Count == 0 ? null : $"matched {r.Matched}, changed {r.Changed}, re-pointed {r.Repointed}, others {r.Others.Count}");
         });
 
+        // C2674 (the review of R7, 2026-11-27: USSEP's 10925F on CV-clockwork): a version whose border links into a neighbour
+        // whose matching edge links nothing back is refused in one sentence, naming the navmesh, the version's plugin, the
+        // neighbour, its winning plugin and both triangles, and offering to keep the winner's version; the neighbour's link
+        // back is not written. The control: the same version with the neighbour linking back plans. And a neighbour whose
+        // matching edge links somewhere else (not back) is refused too.
+        Case("2674 use-version-border-not-returned", () =>
+        {
+            var (w, n) = Pair(linkN: false);
+            string? Nb(FormKey m) => m == NK ? "Nb.esp" : null;
+            var r = NavEdit.UseVersion(w, w, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol, Nb);
+            if (r.Status != "refused") return $"a border the neighbour does not return was {r.Status}, with {r.Ops.Count} ops (want refused, nothing written)";
+            var s = r.Why.SingleOrDefault(x => x.Contains("does not link back"));
+            if (s is null) return "no refusal names the border the neighbour does not return: " + string.Join(" | ", r.Why);
+            if (!(s.Contains(K.ToString()) && s.Contains("Ver.esp") && s.Contains(NK.ToString()) && s.Contains("Nb.esp") && s.Contains("triangle 2") && s.Contains("triangle 1")
+                  && s.Contains("keep the winner's version") && s.EndsWith('.') && s.TrimEnd('.').Split(". ").Length == 1))
+                return "the refusal does not name the navmesh, the version's plugin, the neighbour, its winning plugin and the triangles in one sentence with what to try: " + s;
+            if (r.Others.Count != 0) return "the neighbour's link back was planned";
+            var (w2, n2) = Pair();
+            var ok = NavEdit.UseVersion(w2, w2, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n2 }, tol, Nb);
+            if (UsePlanned(ok) is { } why) return "the control, where the neighbour links back: " + why;
+            // the neighbour's edge linked elsewhere, into a third navmesh: still not back
+            var other = new FormKey(new ModKey("SelfTest", ModType.Master), 0xE07);
+            var n3 = n2 with { EdgeLinks = new List<NavEdgeLink> { new(other, 0), new(K, 6) } };
+            var r3 = NavEdit.UseVersion(w2, w2, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n3 }, tol, Nb);
+            return r3.Status == "refused" && r3.Why.Any(x => x.Contains("does not link back") && x.Contains("triangle 2") && !x.Contains("triangle 6"))
+                ? null : "a neighbour edge linking into another navmesh was taken as a link back: " + r3.Status + " " + string.Join(" | ", r3.Why);
+        });
+
         // C2602: every refusal UseVersion gives is classified by NavUseVersionPlan.ReasonKind as the kind its cause is (a repair
         // plan's one sentence counts a refused row's reasons by kind, so a sentence reworded out of its kind must fail here).
         Case("2602 use-version-reason-kinds", () =>
@@ -796,20 +828,24 @@ static class NavEditSelfTest
             var v = w.Vertices.ToList();
             foreach (var i in new[] { 2, 5, 8 }) v[i] = v[i] with { X = 190 };
             var moved = NavEdit.UseVersion(w, w with { Vertices = v }, "Ver.esp", near, tol);
-            var (w0, n0) = Pair(linkN: false);
+            // CORRECTED 2026-11-27 (C2674): the two-along and ledge cases' N linked nothing back (a one-way border, now its own
+            // refusal and its own kind, below); N links back in both
+            var (w0, n0) = Pair();
             var nv = n0.Vertices.ToList(); nv.Add(new Vec3(200, 50, 0));
             var nt = n0.Triangles.ToList();
-            nt[1] = new NavTri(0, 4, 9, 0) with { EdgeLink01 = nt[1].EdgeLink01, EdgeLink12 = -1, EdgeLink20 = -1 };
-            nt.Add(new NavTri(9, 4, 3, 0) with { EdgeLink01 = -1, EdgeLink12 = nt[1].EdgeLink12, EdgeLink20 = -1 });
+            nt[1] = new NavTri(0, 4, 9, 4) with { EdgeLink01 = nt[1].EdgeLink01, EdgeLink12 = -1, EdgeLink20 = 0 };
+            nt.Add(new NavTri(9, 4, 3, 4) with { EdgeLink01 = -1, EdgeLink12 = -1, EdgeLink20 = 0 });
             var two = NavEdit.UseVersion(w0, w0 with { EdgeLinks = new List<NavEdgeLink> { new(NK, 3), new(NK, 5) } }, "Ver.esp",
                                          new Dictionary<FormKey, NavmeshGeometry> { [NK] = n0 with { Vertices = nv, Triangles = nt } }, tol);
-            var (w1, n1) = Pair(linkN: false);
+            var (w1, n1) = Pair();
             var past = NavEdit.UseVersion(w1, w1 with { EdgeLinks = new List<NavEdgeLink> { new(NK, 99, 2), new(NK, 5) } }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n1 }, tol);
             var (w2, n2) = Pair();
             var ledgeIn = NavEdit.UseVersion(w2, Reversed(w2), "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n2 with { EdgeLinks = new List<NavEdgeLink> { new(K, 2, 1), new(K, 6) } } }, tol);
             var (wl, nl2) = Pair();
             var (barel, _) = Pair(linkW: false);
             var oneWay = NavEdit.UseVersion(wl, barel, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = nl2 }, tol);
+            var (wr, nr0) = Pair(linkN: false);
+            var notReturned = NavEdit.UseVersion(wr, wr, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = nr0 }, tol);
             string Kind(string why) => NavUseVersionPlan.ReasonKind(why);
             var want = new (string Case, UseVersionResult R, Func<string, string> Expect)[]
             {
@@ -818,6 +854,7 @@ static class NavEditSelfTest
                 ("ledge past its neighbour", past, _ => "other reason"),
                 ("a dropped neighbour that still links in", oneWay, why => why.Contains("one-way border") ? "neighbour that still links in, dropped" : Kind(why)),
                 ("neighbour's ledge renumbered", ledgeIn, _ => "neighbour link into it that cannot be re-pointed"),
+                ("a border the neighbour does not return", notReturned, _ => "border link the neighbour does not return"),
             };
             var bad = new List<string>();
             foreach (var (c, r, expect) in want)
