@@ -25,7 +25,8 @@ sealed record ScanInput(IReadOnlyList<string> Paths, Func<string, string> Family
 
 /// <summary>One judged reference (a row, or measured with no row): its cell, plugins, distances, verdict.</summary>
 sealed record ScanRow(FormKey Ref, FormKey Cell, string? CellEdid, string Placer, string? NavPlugin, string? BaseType, string? BaseEdid,
-                      string Geometry, bool Trigger, double? Winning, double? Own, double? Clearance, string? Nearest, StrandedVerdict Verdict);
+                      string Geometry, bool Trigger, double? Winning, double? Own, double? Clearance, string? Nearest, StrandedVerdict Verdict,
+                      Aabb? SubjectBox = null, Aabb? NearestBox = null, Aabb? NearestTriangles = null, Aabb? NearestRegion = null);
 
 sealed class ScanResult
 {
@@ -41,7 +42,9 @@ static class StrandScan
     sealed record BaseInfo(string Type, string? Edid, string? Model, Vec3? ObMin, Vec3? ObMax, bool MarkerFlag);
     sealed record NavObs(int Plugin, FormKey Cell, IReadOnlyList<NavmeshGeometry> Navs, IReadOnlyList<DeletedNavmesh> Dels);
     sealed record View(Dictionary<string, int> Map, Dictionary<string, NavmeshGeometry> Geo, Dictionary<string, int> RemovedBy, List<NavTriangle> Tris);
-    sealed record Blocker(string Family, Aabb? Body, Aabb? Bound, string Name);
+    /// <summary>A solid object of the room: its body (null when only a bound is known), the bounds of its rendered
+    /// triangles and its MeshReach region where read (evidence), its bound, its name.</summary>
+    sealed record Blocker(string Family, Aabb? Body, Aabb? Bound, string Name, Aabb? Triangles = null, Aabb? Region = null);
 
     public static ScanResult Run(ScanInput input)
     {
@@ -151,7 +154,8 @@ static class StrandScan
                 {
                     var bytes = input.ReadMesh(model);
                     var region = bytes is null ? null : MeshReach.OfModel(bytes, r.Position, r.Rotation, r.Scale, null, new ReachOptions(ParticlesAside: true));
-                    if (region is { Status: "certified" or "uncertified" } && !region.Box.IsEmpty) list.Add(new Blocker(fam, region.Box, null, name));
+                    var tri = SubjectGeometry.Of(r, model, input.ReadMesh).World is { } tw ? SpatialOverlap.SoupBounds(tw) : (Aabb?)null;
+                    if (region is { Status: "certified" or "uncertified" } && !region.Box.IsEmpty) list.Add(new Blocker(fam, region.Box, null, name, tri, region.Box));
                     else if (region is { Status: "no_geometry" }) { }
                     else list.Add(new Blocker(fam, null, bi.ObMin is { } lo && bi.ObMax is { } hi ? PlacedBox(lo, hi, r) : null, name));
                 }
@@ -223,7 +227,7 @@ static class StrandScan
 
             string fam = input.Family(names[placer]);
             var subjectBox = shape.World is { } sw ? SpatialOverlap.SoupBounds(sw) : new Aabb(r.Position, r.Position, false);
-            double? nearest = null, unread = null; string? nearestName = null, unreadName = null; bool anyOther = false;
+            double? nearest = null, unread = null; string? nearestName = null, unreadName = null; bool anyOther = false; Blocker? nearestB = null;
             foreach (var b in BlockersOf(cell))
             {
                 if (b.Name.EndsWith($"({k})", StringComparison.Ordinal) || StrandedRule.SameMod(b.Family, fam)) continue;
@@ -231,7 +235,7 @@ static class StrandScan
                 {
                     anyOther = true;
                     double g = MeshReach.Gap(subjectBox, body);
-                    if (nearest is null || g < nearest) { nearest = g; nearestName = b.Name; }
+                    if (nearest is null || g < nearest) { nearest = g; nearestName = b.Name; nearestB = b; }
                 }
                 else
                 {
@@ -245,7 +249,7 @@ static class StrandScan
             if (input.KeepAll) res.All[k] = (v.State, v.Reason);
             if (v.State == StrandedState.NoRow) { res.Count(v.Reason); continue; }
             res.Rows.Add(new ScanRow(k, cell, cedid, names[placer], nav is { } n2 ? names[n2] : null, bi?.Type, bi?.Edid, shape.Geometry, trigger,
-                                     dw.Distance, dow.Distance, nearest, nearestName, v));
+                                     dw.Distance, dow.Distance, nearest, nearestName, v, subjectBox, nearestB?.Body, nearestB?.Triangles, nearestB?.Region));
             res.Count(v.State == StrandedState.Reported ? "reported" : "not judged: " + StrandedRule.ReasonKey(v.Reason));
         }
         return res;

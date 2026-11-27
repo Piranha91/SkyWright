@@ -53,6 +53,8 @@ static class StrandEmit
                                 baseFile is null ? null : Predicates(baseFile, res), basePath, "load-time", "baseline", identity);
     }
 
+    static float[][]? Box(Aabb? b) => b is { IsEmpty: false } x ? new[] { new[] { x.Min.X, x.Min.Y, x.Min.Z }, new[] { x.Max.X, x.Max.Y, x.Max.Z } } : null;
+
     public static void Write(string path, ScanResult res, ConflictFile? baseFile, string? basePath, string instance, ConfigurationIdentity? identity, bool mirror)
     {
         ConflictIo.Write(path, File(res, baseFile, basePath, instance, identity, mirror));
@@ -61,6 +63,7 @@ static class StrandEmit
             id = r.Ref.ToString(), cell = r.CellEdid ?? r.Cell.ToString(), placer = r.Placer, navmesh = r.NavPlugin, baseType = r.BaseType, baseEdid = r.BaseEdid,
             geometry = r.Geometry, trigger = r.Trigger, winning = r.Winning, own = r.Own, clearance = r.Clearance, nearest = r.Nearest,
             state = r.Verdict.State.ToString(), reason = r.Verdict.Reason, cls = r.Verdict.Class,
+            subjectBox = Box(r.SubjectBox), nearestBox = Box(r.NearestBox), nearestTriangles = Box(r.NearestTriangles), nearestRegion = Box(r.NearestRegion),
         });
         System.IO.File.WriteAllText(path + ".reach.json", JsonSerializer.Serialize(new
         {
