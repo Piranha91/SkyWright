@@ -28,7 +28,10 @@ static class LostEditSelfTest
 
         public string Call(string tool, IReadOnlyDictionary<string, object?> args)
         {
-            if (tool == ToolNames.Check && CheckAnswer is not null) return CheckAnswer;
+            // the check tool: the case's own answer, else houseCARL's answer with no record with scripts and no seed reached
+            if (tool == ToolNames.Check)
+                return CheckAnswer ?? "{\"families\":{\"scripts\":{\"records_with_scripts\":0,\"unbound\":0,\"unverifiable\":0,\"records\":[]},"
+                                    + "\"dialogue\":{\"seeds_validated\":0,\"seeds_unreachable_total\":0,\"findings_found\":0,\"seeds\":[]}}}";
             if (tool != ToolNames.Records) throw new InvalidOperationException($"the fixture answers {ToolNames.Records} only, not {tool}");
             string form = (string)((Dictionary<string, object?>)args["project"]!)["form"]!;
             var ids = args.TryGetValue("formids", out var f) && f is string[] fs ? fs : Array.Empty<string>();
