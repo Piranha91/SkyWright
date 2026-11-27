@@ -125,7 +125,8 @@ internal sealed record TrialPlacement(int N, RefPlacementEdit.Pose Pose, string 
 /// <summary>What one trial's re-check gives the lane: the result, the other rows naming the moved reference and their words,
 /// the carried predicates still holding for it, and the population line.</summary>
 internal sealed record TrialRecheck(RecheckResult Result, IReadOnlyList<RowVerdict> OthersOfRef, IReadOnlyList<string> StillHolding, string Population,
-                                   IReadOnlyList<RowVerdict>? ContactNew = null, IReadOnlySet<string>? HeldBefore = null);
+                                   IReadOnlyList<RowVerdict>? ContactNew = null, IReadOnlySet<string>? HeldBefore = null,
+                                   RouteArmResult? Route = null);
 
 /// <summary>Item 8's trial lane: each candidate written as its own patch under the Work Folder's trials folder from a made-up
 /// net edit (load-order pose to candidate pose), never through the edit session, and judged by the re-check, one at a time.</summary>
@@ -160,6 +161,8 @@ internal sealed class TrialLane
     /// <summary>The reference the last ask was for.</summary>
     internal FormKey? Key { get; private set; }
     internal string? WorkFolder => _work;
+    /// <summary>The edit the running proof is of (Gate E: the route arm judges the object at both its places).</summary>
+    internal PendingEdit? Proving { get; private set; }
 
     /// <summary>Start the trials of <paramref name="key"/> from its load-order pose; returns the cost sentence at once. Each
     /// candidate is snapped to the grid on the axes it moved and settled by the drop on the calling thread; the writes and
@@ -239,6 +242,7 @@ internal sealed class TrialLane
         Directory.CreateDirectory(folder);
         var patch = $"WbNudge{ask}c{n}";
         ct.ThrowIfCancellationRequested();
+        Proving = edit;
         await _write(edit with { Nudge = null }, patch, folder).ConfigureAwait(false);
         return await _recheck(patch, folder, folder + "-recheck", contact, ct).ConfigureAwait(false);
     }

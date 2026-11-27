@@ -86,6 +86,19 @@ internal sealed class EditSession
     internal IReadOnlyList<string> NudgedIn(string plugin) => _writtenNudged
         .Where(k => string.Equals(_written[k].Patch, plugin, StringComparison.OrdinalIgnoreCase)).Select(k => k.ToString()).OrderBy(k => k, StringComparer.Ordinal).ToList();
 
+    /// <summary>The short words of the last re-check of a written nudge (review E2), or null while it has not been re-checked
+    /// since it was written (or restored from the session file): the Edits line says only what is known.</summary>
+    internal string? NudgeRechecked(FormKey key) => _nudgeRechecked.TryGetValue(key, out var w) ? w : null;
+    readonly Dictionary<FormKey, string> _nudgeRechecked = new();
+
+    /// <summary>A re-check of a written nudge finished: its short words for the Edits line.</summary>
+    internal void NoteNudgeRechecked(FormKey key, string words)
+    {
+        if (!_writtenNudged.Contains(key)) return;
+        _nudgeRechecked[key] = words;
+        Changed?.Invoke($"{key}'s re-check: {words}");
+    }
+
     /// <summary>The written edits that are disables ("initially disabled" in their patch), not moves.</summary>
     internal IReadOnlyCollection<FormKey> WrittenDisabled => _writtenDisabled;
 
@@ -99,6 +112,7 @@ internal sealed class EditSession
             _written[e.Ref] = (patch, e.After);
             if (e.Disable) _writtenDisabled.Add(e.Ref); else _writtenDisabled.Remove(e.Ref);
             if (e.Nudge is not null) _writtenNudged.Add(e.Ref); else _writtenNudged.Remove(e.Ref);
+            _nudgeRechecked.Remove(e.Ref);
         }
         _pending.Clear();
         Changed?.Invoke($"{net.Count} edit(s) written to {patch}; the view keeps them where the patch puts them (the patch is not enabled)");
@@ -112,6 +126,7 @@ internal sealed class EditSession
         _written[key] = (patch, pose);
         _writtenDisabled.Remove(key);
         _writtenNudged.Remove(key);
+        _nudgeRechecked.Remove(key);
         Changed?.Invoke($"{key} drawn as {patch} places it ({Describe(pose)})");
     }
 
@@ -135,6 +150,7 @@ internal sealed class EditSession
         _written.Remove(key);
         _writtenDisabled.Remove(key);
         _writtenNudged.Remove(key);
+        _nudgeRechecked.Remove(key);
         RefPlacementEdit.Apply(RefOf(key), Current(key));
         Changed?.Invoke($"{key}'s written edit is gone; the view shows it where the load order places it");
     }
@@ -252,7 +268,7 @@ internal sealed class EditSession
         string name = baseName ?? e.Ref.ToString();
         if (e.Disable) return $"Disable {name} (written initially disabled)";
         if (e.Nudge is not null)
-            return $"Nudged {name} {NudgeRule.Move(e.Before, e.After)}; {NudgeRule.Checked}; {NudgeRule.RoutesNotChecked}";
+            return $"Nudged {name} {NudgeRule.Move(e.Before, e.After)}; {NudgeRule.WordsOf(e.Nudge)}";
         var d = new Vector3(e.After.Position.X - e.Before.Position.X, e.After.Position.Y - e.Before.Position.Y, e.After.Position.Z - e.Before.Position.Z);
         var parts = new List<string>();
         void Part(float v, string pos, string neg) { if (MathF.Abs(v) >= 0.005f) parts.Add($"{N(MathF.Abs(v))} units {(v > 0 ? pos : neg)}"); }

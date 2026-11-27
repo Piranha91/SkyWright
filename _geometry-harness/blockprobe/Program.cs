@@ -22,6 +22,15 @@ using HousecarlCore.Progress;
 //
 // usage: blockprobe <TargetPlugin.esp> [<Target2.esp> ...] [--exclude Other.esp ...] [--list N] [--geometry collision|render] [--bos on|off]
 //                   [--state SPEC] [--switch-map FILE] [--flags] [--order FILE] [--rows FILE]
+//   --near K   the per-reference arm (Gate E, a nudge's proof): judge only the references whose route-cut verdict a move of
+//              reference K can change, and list each one's verdict. The route rule measures every object ALONE against the
+//              navmesh, on the floor its cell's objects lay (FloorFeed): another object's verdict depends on K only where K can be
+//              that floor, inside the other object's route window (its box grown by the route margin, 256 u, in plan). So the set
+//              is K and every reference held in K's cell (any plugin's; for an exterior cell, also the eight around it) whose
+//              window reaches K's box, at its winning place and at each --also-at place; the navcut boxes there likewise. The
+//              targets name the plugin(s) that place K (its own plugin will do: a later override in the same cell wins as ever).
+//   --also-at x,y,z  another place of K (same base, rotation and scale) the set must cover: a nudge's proof gives the
+//              unpatched run the candidate's place and the patched run the load order's, so both runs judge the same set.
 //   --rows     also write every listed route-cut row (Blocked, LikelyBlocked, NoLine, Unjudgeable; objects and navcut boxes)
 //              to FILE as JSON, uncapped by --list (RouteCutRows.cs). The printed output gains one line naming the file.
 //   targets   one or more plugins, judged as ONE set (P51): the union of their cells and references; each listed row
@@ -83,7 +92,8 @@ int listN = 25;
 string geometrySource = "collision";
 bool controllerBand = true;   // --band controller|nominal: the route rules' band top (the surface rules keep the nominal, as every run before)
 bool bosOn = true;
-string? stateSpec = null, switchMapPath = null, orderFile = null, rowsPath = null;
+string? stateSpec = null, switchMapPath = null, orderFile = null, rowsPath = null, nearArg = null;
+var alsoAt = new List<Vec3>();
 bool flagsOnly = false;
 for (int i = 0; i < args.Length; i++)
 {
@@ -94,6 +104,15 @@ for (int i = 0; i < args.Length; i++)
     }
     if (args[i] == "--order" && i + 1 < args.Length) { orderFile = args[++i]; continue; }
     if (args[i] == "--rows" && i + 1 < args.Length) { rowsPath = args[++i]; continue; }
+    if (args[i] == "--near" && i + 1 < args.Length) { nearArg = args[++i]; continue; }
+    if (args[i] == "--also-at" && i + 1 < args.Length)
+    {
+        var parts = args[++i].Split(',');
+        if (parts.Length != 3 || !parts.All(x => float.TryParse(x, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _)))
+        { Console.Error.WriteLine($"--also-at takes a place as x,y,z in game units (for example 100.5,-20,3), not '{args[i]}'; check the value and run again."); return 2; }
+        var v = parts.Select(x => float.Parse(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+        alsoAt.Add(new Vec3(v[0], v[1], v[2])); continue;
+    }
     if (args[i] == "--state" && i + 1 < args.Length) { stateSpec = args[++i]; continue; }
     if (args[i] == "--switch-map" && i + 1 < args.Length) { switchMapPath = args[++i]; continue; }
     if (args[i] == "--flags") { flagsOnly = true; continue; }
@@ -111,6 +130,13 @@ for (int i = 0; i < args.Length; i++)
     }
 }
 if (targets.Count == 0) { Console.Error.WriteLine("blockprobe needs at least one target plugin, named positionally."); return 2; }
+FormKey? near = null;
+if (nearArg is not null)
+{
+    if (!FormKey.TryFactory(nearArg, out var nk)) { Console.Error.WriteLine($"--near takes a reference's form key, as 001FBB:Some Plugin.esp, not '{nearArg}'; check the value and run again."); return 2; }
+    near = nk;
+}
+if (alsoAt.Count > 0 && near is null) { Console.Error.WriteLine("--also-at names another place of the --near reference, and no --near was given; add --near or drop --also-at."); return 2; }
 if (geometrySource is not ("collision" or "render")) { Console.Error.WriteLine("--geometry must be collision or render"); return 1; }
 PopulationMode popMode;
 try { popMode = PopulationCli.Resolve("blockprobe", flagsOnly, stateSpec); }
@@ -183,6 +209,18 @@ for (int t = 0; t < targets.Count; t++)
         }
 string By(FormKey k) => judgedBy.TryGetValue(k, out var s) ? "{by " + string.Join("+", s) + "}" : "{by ?}";
 
+// --near (Gate E): only the cell the targets place K in; for an exterior cell the walk also admits the eight around it
+// (BlockWalk), because a neighbour's route window can reach across the border.
+(FormKey Ws, int X, int Y)? nearGrid = null;
+if (near is { } nk0)
+{
+    var holding = targetCells.Where(kv => kv.Value.Refs.Any(r => r.FormKey == nk0)).Select(kv => kv.Key).ToList();
+    if (holding.Count == 0) { Console.Error.WriteLine($"{nk0} is not placed by {string.Join(" or ", targets)}, so --near has no cell to judge it in; name the plugin that places it as the target."); return 2; }
+    foreach (var k in targetCells.Keys.Except(holding).ToList()) targetCells.Remove(k);
+    var hc = targetCells[holding[0]];
+    if (!hc.Interior && hc.Grid is { } g0) nearGrid = (hc.Worldspace, g0.X, g0.Y);
+}
+
 var targetModKeys = targets.Select(t => ModKey.FromFileName(t)).ToHashSet();
 int targetNewRefs = targetCells.Values.Sum(c => c.Refs.Count(r => targetModKeys.Contains(r.FormKey.ModKey)));
 int targetOverrides = targetCells.Values.Sum(c => c.Refs.Count(r => !targetModKeys.Contains(r.FormKey.ModKey)));
@@ -194,7 +232,7 @@ Console.WriteLine($"target touches {targetCells.Count:N0} cells: "
 // 3×3 neighbourhood's refs and LAND, by worldspace and grid, are filed during the winning-state walk below. Nothing else
 // about the neighbours is loaded; the diff-based charter stands.
 // The walk's accumulation lives in BlockWalk.cs (so --moved-ref-selftest runs the same code); these are its maps.
-var walk = new BlockWalk(targetCells);
+var walk = new BlockWalk(targetCells, nearGrid);
 var floorRefsByWorld = walk.FloorRefsByWorld;
 var floorLandByWorld = walk.FloorLandByWorld;
 var floorTally = new FloorFeed.Tally();
@@ -487,21 +525,71 @@ var anyHits = new List<(string Cell, string Mesh, string Type, int Tris, FormKey
 long testedWithNav = 0, blockedWithNav = 0, testedNoNav = 0, blockedNoNav = 0;
 var hits = new List<(string Cell, string Mesh, string Type, int Tris, FormKey Fk, bool TargetGaveNav, string NavOwner)>();
 
+// ---- Gate E: every reference this run judges, with its verdict (the rows file's Judged list), so a reference it did not
+// judge is absent and never read as fine. Verdicts: the route-cut rule's six, or NotMeasured (nothing it could cut: no actor
+// column entered, set aside, no solid, no navmesh, not present) or NotJudged (it could not be judged here).
+var judgedList = new Dictionary<FormKey, (string Cell, string Verdict, bool Navcut, string? Why)>();
+void Judge(FormKey k, string cell, string verdict, string? why, bool navcut = false)
+{
+    // a verdict outranks "not judged here" (a reference a later plugin moved into another judged cell)
+    if (judgedList.TryGetValue(k, out var had) && had.Verdict != "NotJudged" && verdict == "NotJudged") return;
+    judgedList[k] = (cell, verdict, navcut, why);
+}
+// ---- --near: the references whose verdict a move of K can change (the header's rule) ----
+HashSet<FormKey>? nearSet = null;
+var nearBoxes = new List<Aabb>();
+if (near is { } nkey)
+{
+    nearSet = new HashSet<FormKey> { nkey };
+    if (winRef.TryGetValue(nkey, out var kr) && !kr.Deleted && winRefCell.TryGetValue(nkey, out var kc))
+    {
+        var keff = bos.Effective(kr, kc, new BosApplyReport());
+        if (baseMesh.TryGetValue(keff.Base, out var kbm) && Geometry(kbm.Mesh) is { Ok: true } kg && !kg.Box.IsEmpty && kg.Source != "none")
+            foreach (var at in new[] { keff.Position }.Concat(alsoAt))
+                nearBoxes.Add(SpatialOverlap.ToWorld(kg.Box, at, keff.Rotation, keff.Scale));
+    }
+    bool Reaches(Aabb box) => NearReach.Reaches(box, nearBoxes, RouteMargin);
+    foreach (var cellKey in targetCells.Keys)
+        foreach (var r in winRefsByCell.TryGetValue(cellKey, out var lst) ? lst : new List<PlacedRef>())
+        {
+            if (r.FormKey == nkey || r.Deleted) continue;
+            var eff = bos.Effective(r, cellKey, new BosApplyReport());
+            if (!baseMesh.TryGetValue(eff.Base, out var bm0)) continue;
+            var g0 = Geometry(bm0.Mesh);
+            if (!g0.Ok || g0.Box.IsEmpty || g0.Source == "none") continue;
+            if (Reaches(SpatialOverlap.ToWorld(g0.Box, eff.Position, eff.Rotation, eff.Scale))) nearSet.Add(r.FormKey);
+        }
+    foreach (var (_, ncs) in navcutsByCell)
+        foreach (var nk in ncs)
+        {
+            var wr = navcutRef[nk];
+            var model = NavcutGeometry.ModelBox(wr.Primitive!.Value);
+            if (!model.IsEmpty && Reaches(SpatialOverlap.ToWorld(model, wr.Position, wr.Rotation, wr.Scale))) nearSet.Add(nk);
+        }
+    Console.WriteLine($"near {nkey}: {(nearBoxes.Count == 0 ? "it has no actor-solid shape here, so only it is judged" : $"judged at its winning place and {alsoAt.Count} other place(s)")}; "
+                    + $"{nearSet.Count:N0} reference(s) whose route window (box + {RouteMargin:0} u) reaches it, in {targetCells.Count} cell(s)");
+}
+
 sw.Restart();
 foreach (var (cellKey, tcell) in targetCells)
 {
-    if (!navByCell.TryGetValue(cellKey, out var navs) || navs.Count == 0) continue;
+    // the references judged in this cell: the targets' own, or under --near the near set held here (any plugin's)
+    IReadOnlyList<PlacedRef> cellJudged = nearSet is null ? tcell.Refs
+        : winRefsByCell.TryGetValue(cellKey, out var wl) ? wl.Where(r => nearSet.Contains(r.FormKey)).ToList() : new List<PlacedRef>();
+    string cname = tcell.CellEditorId ?? cellKey.ToString();
+    void All(string verdict, string why) { foreach (var r0 in cellJudged) Judge(r0.FormKey, cname, verdict, why); }
+    if (!navByCell.TryGetValue(cellKey, out var navs) || navs.Count == 0) { All("NotMeasured", "its cell has no navmesh"); continue; }
 
     bool targetGaveNav = tcell.Navmeshes.Count > 0;
     string navOwner = string.Join("+", navs.Select(n => n.Plugin).Distinct().OrderBy(x => x));
 
     var index = NavmeshIndex.Build(navs.Select(n => n.Nav).ToList(), out _);
-    if (index.TriangleCount == 0) continue;
+    if (index.TriangleCount == 0) { All("NotMeasured", "its cell's navmesh has no triangles"); continue; }
 
     var band = ActorBand.ForCell(winRefsByCell.TryGetValue(cellKey, out var cellRefs) ? cellRefs : Array.Empty<PlacedRef>(),
                                  npcFacts, raceFacts, fallbackTop, fallbackSrc, enabledOf);
-    if (!float.IsFinite(band.Top)) { Console.WriteLine($"UNJUDGEABLE actor band in {cellKey}: {band.Source}"); continue; }
-    if (FloorLandProblem(cellKey) is { } landWhy) { Console.WriteLine($"UNJUDGEABLE floor in {cellKey}: LAND gives no heights at {landWhy}"); floorLandUnjudged++; continue; }
+    if (!float.IsFinite(band.Top)) { Console.WriteLine($"UNJUDGEABLE actor band in {cellKey}: {band.Source}"); All("NotJudged", "the cell's actor band could not be derived"); continue; }
+    if (FloorLandProblem(cellKey) is { } landWhy) { Console.WriteLine($"UNJUDGEABLE floor in {cellKey}: LAND gives no heights at {landWhy}"); floorLandUnjudged++; All("NotJudged", "the floor under the cell gives no heights"); continue; }
     ActorHeight = band.Top;
     float physicalTop = controllerBand ? ActorBand.PhysicalControllerTop(band.Top) : band.Top;
     var floor = FloorFor(cellKey, cellRefs);
@@ -510,11 +598,12 @@ foreach (var (cellKey, tcell) in targetCells)
     bandMin = MathF.Min(bandMin, band.Top); bandMax = MathF.Max(bandMax, band.Top);
     Dictionary<NavGraph.TriRef, NavGraph.Node>? gnodes = null;   // the cell's walkable graph, built once when a route needs it
 
-    foreach (var tref in tcell.Refs)
+    foreach (var tref in cellJudged)
     {
         // Test the WINNING placement — if a later patch moved or removed this reference,
         // the target's own copy is not what the game uses.
-        if (RefAdmission.Winning(tref.FormKey, cellKey, winRef, winRefCell) is not { } r) { skipped++; continue; }
+        if (RefAdmission.Winning(tref.FormKey, cellKey, winRef, winRefCell) is not { } r)
+        { Judge(tref.FormKey, cname, "NotJudged", "not held in this cell: a later plugin moved it to a cell this run does not judge, or deleted it"); skipped++; continue; }
         if (refBy.TryGetValue((cellKey, tref.FormKey), out var placedBy)) judgedBy[r.FormKey] = placedBy;
         // The Base Object Swapper layer: the base and transform the game LOADS for this reference (the record's own under
         // --bos off).
@@ -523,12 +612,12 @@ foreach (var (cellKey, tcell) in targetCells)
         // (ApplyBosOwnFlags above) — so an override under an enable parent is ignored by the chain, exactly as the
         // engine ignores it, and a clear with no parent brings the reference in. In --flags mode there is no chain and
         // the BOS-effective own flag IS the population, which is the same single test the old default ran.
-        if (enabledOf is null ? eff.InitiallyDisabled : !enabledOf(r.FormKey)) { skipped++; continue; }
-        if (r.Base is null || !baseMesh.TryGetValue(eff.Base, out var bm)) { noGeo++; continue; }
+        if (enabledOf is null ? eff.InitiallyDisabled : !enabledOf(r.FormKey)) { Judge(r.FormKey, cname, "NotMeasured", "not present when the cell loads"); skipped++; continue; }
+        if (r.Base is null || !baseMesh.TryGetValue(eff.Base, out var bm)) { Judge(r.FormKey, cname, "NotMeasured", "its base has no model"); noGeo++; continue; }
 
         var g = Geometry(bm.Mesh);
-        if (g.Ok && g.Source == "none") { noSolid++; continue; }
-        if (!g.Ok || g.Box.IsEmpty || g.Soup is null || !g.HasCollision) { noGeo++; continue; }
+        if (g.Ok && g.Source == "none") { Judge(r.FormKey, cname, "NotMeasured", "no actor-solid collision"); noSolid++; continue; }
+        if (!g.Ok || g.Box.IsEmpty || g.Soup is null || !g.HasCollision) { Judge(r.FormKey, cname, "NotJudged", $"its mesh gives no usable shape ({g.Source})"); noGeo++; continue; }
         if (g.Source == "collision") onCollision++; else onFallback++;
 
         var world = SpatialOverlap.ToWorld(g.Box, eff.Position, eff.Rotation, eff.Scale);
@@ -597,8 +686,8 @@ foreach (var (cellKey, tcell) in targetCells)
         if (nCross > 0 && columns is not null)
         {
             var aside = RefAdmission.RouteSetAside(bm.Type);
-            if (aside == RefAdmission.SetAside.Door) { routeDoors++; }
-            else if (aside == RefAdmission.SetAside.Movable) { routeMovable++; }
+            if (aside == RefAdmission.SetAside.Door) { routeDoors++; Judge(r.FormKey, cname, "NotMeasured", "a door, passable by design"); }
+            else if (aside == RefAdmission.SetAside.Movable) { routeMovable++; Judge(r.FormKey, cname, "NotMeasured", "a MoveableStatic, pushed aside"); }
             else
             {
                 routeMeasured++;
@@ -615,6 +704,7 @@ foreach (var (cellKey, tcell) in targetCells)
                 var line = facts.Line;
                 var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN, cutFloat: line?.CutFloat ?? float.NaN, cutOnStairs: line?.CutOnStairs ?? false);
                 TallyCut(vc.Verdict);
+                Judge(r.FormKey, cname, vc.Verdict.ToString(), null);
                 if (judgedBy.TryGetValue(r.FormKey, out var byTargets))
                     foreach (var bt in byTargets) { cutByTarget.TryGetValue((bt, vc.Verdict), out var bn); cutByTarget[(bt, vc.Verdict)] = bn + 1; }
                 if (eff.Touched) { cutTallyBos.TryGetValue(vc.Verdict, out var bt); cutTallyBos[vc.Verdict] = bt + 1; }
@@ -626,6 +716,8 @@ foreach (var (cellKey, tcell) in targetCells)
                                  + (eff.Resolution is { } bres ? " {" + BosHook.Describe(bres) + "}" : ""), facts.Touched, line));
             }
         }
+
+        else Judge(r.FormKey, cname, "NotMeasured", "its solid enters no actor column");
 
         if (nTrisAny > 0) blockedAny++;
         if (nCross > 0) blockedCross++;
@@ -660,9 +752,11 @@ foreach (var (cellKey, tcell) in targetCells)
         float routeTop = controllerBand ? ActorBand.PhysicalControllerTop(band.Top) : band.Top;
         var floor = FloorFor(cellKey, cellRefs2);
         Dictionary<NavGraph.TriRef, NavGraph.Node>? gnodes = null;
+        string ncell = targetCells[cellKey].CellEditorId ?? cellKey.ToString();
         foreach (var nk in navcuts)
         {
-            if (!NavcutPresent(nk)) { navcutSkippedDisabled++; continue; }
+            if (nearSet is not null && !nearSet.Contains(nk)) continue;
+            if (!NavcutPresent(nk)) { navcutSkippedDisabled++; Judge(nk, ncell, "NotMeasured", "not present when the cell loads", navcut: true); continue; }
             var wr = navcutRef[nk];
             var w = (Pos: wr.Position, Rot: wr.Rotation, Scale: wr.Scale);
             var prim = wr.Primitive!.Value;
@@ -679,12 +773,13 @@ foreach (var (cellKey, tcell) in targetCells)
                 var pa = nav.Vertices[tri.A]; var pb = nav.Vertices[tri.B]; var pc = nav.Vertices[tri.C];
                 if (columns.CountSurfaceCrossings(new Vector3(pa.X, pa.Y, pa.Z), new Vector3(pb.X, pb.Y, pb.Z), new Vector3(pc.X, pc.Y, pc.Z), Clearance, routeTop, TriInset, 1f, 0.5f, stopAfter: 1) > 0) { crosses = true; break; }
             }
-            if (!crosses) { navcutNoCross++; continue; }
+            if (!crosses) { navcutNoCross++; Judge(nk, ncell, "NotMeasured", "over no walkable ground", navcut: true); continue; }
             gnodes ??= NavGraph.Build(index).Nodes;
             var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, ActorBand.PhysicalStep, routeTop, Ladder, graph: gnodes, floorAt: floor.FloorAt, isStairsMaterial: DetectorModel.IsStairsMaterial);
             var line = facts.Line;
             var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN, cutFloat: line?.CutFloat ?? float.NaN, cutOnStairs: line?.CutOnStairs ?? false);
             navcutMeasured++;
+            Judge(nk, ncell, vc.Verdict.ToString(), null, navcut: true);
             navcutTally.TryGetValue(vc.Verdict, out var nt); navcutTally[vc.Verdict] = nt + 1;
             string plugin = definedBy.TryGetValue(nk, out var dp) ? dp : "?";
             navcutHits.Add((vc.Verdict, targetCells[cellKey].CellEditorId ?? cellKey.ToString(), nk, facts.Judged ? vc.Why : facts.Why, facts.Touched, line, plugin));
@@ -801,8 +896,14 @@ if (rowsPath is not null)
                                     judgedBy.TryGetValue(h.Fk, out var jb) ? jb.ToList() : new List<string>(), h.Touched, h.Line, h.Why, navcut: false));
     foreach (var h in navcutHits.Where(h => RouteCutRows.Listed(h.V)))
         cutRows.Add(RouteCutRows.Of(h.V, null, h.Cell, null, h.Fk, new[] { h.Plugin }, h.Touched, h.Line, h.Why, navcut: true));
-    RouteCutRows.Write(rowsPath, targets, pop.StateName, cutTally, cutRows);
-    Console.WriteLine($"\n   wrote {cutRows.Count:N0} route-cut rows -> {rowsPath}");
+    if (near is { } nk2 && !judgedList.ContainsKey(nk2))
+        Judge(nk2, "?", "NotJudged", "not held in the targets' cell under this order (deleted, or moved to another cell)");
+    var judgedRows = judgedList.OrderBy(kv => kv.Key.ToString(), StringComparer.Ordinal)
+                               .Select(kv => new RouteCutRows.Judged(kv.Key.ToString(), kv.Value.Cell, kv.Value.Verdict, kv.Value.Navcut, kv.Value.Why)).ToList();
+    var nearInfo = near is { } nk3 ? new RouteCutRows.Near(nk3.ToString(), alsoAt.Select(a => new[] { a.X, a.Y, a.Z }).ToList(),
+                                                          targetCells.Values.Select(c => c.CellEditorId ?? c.Cell.ToString()).ToList(), RouteMargin) : null;
+    RouteCutRows.Write(rowsPath, targets, pop.StateName, cutTally, cutRows, judgedRows, nearInfo);
+    Console.WriteLine($"\n   wrote {cutRows.Count:N0} route-cut rows and {judgedRows.Count:N0} judged reference(s) -> {rowsPath}");
 }
 
 if (severHits.Count > 0)

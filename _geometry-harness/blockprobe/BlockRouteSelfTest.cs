@@ -53,5 +53,8 @@ static class BlockRouteSelfTest
         t.Check("PD3-K-2 a Door is set aside as passable by design", Aside(F.DoorBase) == "Door Door", Aside(F.DoorBase));
         t.Check("PD3-K-3 a MoveableStatic is set aside as pushed aside", Aside(F.PushBase) == "MoveableStatic Movable", Aside(F.PushBase));
         t.Check("PD3-K-4 a Static is measured (control)", Aside(F.WallBase) == "Static Measure", Aside(F.WallBase));
+
+        // Gate E: the per-reference arm (--near), run as the app runs it (BlockNearSelfTest.cs)
+        BlockNearSelfTest.Checks(t);
     });
 }
