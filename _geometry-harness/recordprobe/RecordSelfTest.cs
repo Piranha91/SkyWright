@@ -144,7 +144,7 @@ static class RecordSelfTest
     public static int Run()
     {
         int failed = 0;
-        var all = Cases.Concat(LostEditSelfTest.Cases).Concat(MissingAssetSelfTest.Cases).ToList();
+        var all = Cases.Concat(LostEditSelfTest.Cases).Concat(MissingAssetSelfTest.Cases).Concat(RegistrationSelfTest.Cases).ToList();
         foreach (var (name, check) in all)
         {
             string? why;
