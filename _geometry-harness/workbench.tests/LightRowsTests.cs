@@ -28,7 +28,7 @@ public sealed class LightRowsTests
         var reg = JsonNode.Parse(File.ReadAllText(Path.Combine(ReviewSpeedPart2Tests.RepoRoot(), "data", "check-registry.json")))!;
         if (whenItLightsNothing is not null)
             reg["checks"]!.AsArray().First(c => (string?)c!["id"] == LightRows.CheckId)!["classes"]!.AsArray()
-               .First(c => (string?)c!["id"] == "light-no-fixture")!["whenItLightsNothing"] = whenItLightsNothing;
+               .First(c => (string?)c!["id"] == "light-lights-nothing")!["whenItLightsNothing"] = whenItLightsNothing;
         if (flip is not null)
         {
             var row = reg["checks"]!.AsArray().First(c => (string?)c!["id"] == LightRows.CheckId)!;
@@ -78,7 +78,7 @@ public sealed class LightRowsTests
         Assert.Equal(new[] { "LIGHT LIGHT-NO-FIXTURE", "LIGHT LIGHT-BEHIND-WALL", "LIGHT NOT JUDGED", "LIGHT NOT JUDGED" }, rows.Select(r => r.Kind));
         Assert.Contains(lines, l => l.StartsWith("1 light(s) that now reach nothing were left out"));
         Assert.All(rows, r => Assert.Equal(LightRows.CheckId, r.CheckId));
-        Assert.Contains(lines, l => l.StartsWith("held: a fixture left with no light (1), not shown as clashes; it waits on: no row of this class"));
+        Assert.Contains(lines, l => l.StartsWith("held: a fixture left with no light (1), not shown as clashes; it waits on: no case of it has been checked in the game yet"));
         Assert.Contains(lines, l => l.StartsWith("held: a fixture lit twice (1)"));
         Assert.Contains(lines, l => l.StartsWith("cannot tell: 1 surface(s)"));
         Assert.DoesNotContain(rows, r => r.Summary.StartsWith("Cannot tell"));

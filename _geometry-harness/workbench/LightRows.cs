@@ -69,7 +69,7 @@ internal static class LightRows
         const string Stranded = "light-no-fixture", Nothing = "light-lights-nothing";
         // one light, one entry: a stranded light that also reaches nothing is its lights-nothing entry (finding 4), whatever the setting
         bool merge = rule.TryGetValue(Nothing, out var nr) && nr.Admitted;
-        bool countOnly = rule.TryGetValue(Stranded, out var sr) && sr.CountOnly;
+        bool countOnly = rule.TryGetValue(Nothing, out var nc) && nc.CountOnly;
         static JsonElement Rd(JsonElement e) => e.TryGetProperty("readings", out var v) && v.ValueKind == JsonValueKind.Object ? v : default;
         static bool True(JsonElement e, string k) => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.True;
         static string? S(JsonElement e, string k) => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
