@@ -381,8 +381,27 @@ internal static class Recheck
         return FormattableString.Invariant($"re-check of conflict {rank}: {word}. {news}. ({r.Verdict}; {r.WallSeconds:0.0} s)");
     }
 
-    /// <summary>A nudge's re-check in a few words (review E2; STUB).</summary>
-    internal static string NudgeOutcome(RecheckResult r) => "resolved";
+    /// <summary>A nudge's re-check in a few words, for the Edits line (review E2); the same conditions as <see cref="NudgeBanner"/>.</summary>
+    internal static string NudgeOutcome(RecheckResult r)
+    {
+        if (r.New.Concat(r.ContactNew ?? Array.Empty<RowVerdict>()).Any()) return "not resolved: it made a new conflict or left something in the air";
+        if (r.Row.Word != "resolved") return r.Row.Word == "still there" ? "not resolved: the conflict is still there" : $"not resolved: the conflict reads {r.Row.Word}";
+        if (r.Route?.Word == "cut") return "not resolved: it blocks a walking route";
+        var missing = NudgeMissing(r);
+        if (missing.Count == 0 && r.TouchesWhy is null) return "resolved";
+        if (missing.Count == 0) return "not called resolved: it touches something not shown to have been there before the move";
+        return "not called resolved: " + string.Join(", and ", missing.Select(x => System.Text.RegularExpressions.Regex.Replace(x, @" \(.*\)$", "")));
+    }
+
+    /// <summary>What a nudge's re-check did not check, in the order the banner says it.</summary>
+    static List<string> NudgeMissing(RecheckResult r)
+    {
+        var missing = new List<string>();
+        if (r.Route?.Word != "held")
+            missing.Add(r.Route is null ? "walking routes were not checked" : r.Route.Word == "not run" ? $"walking routes were not checked ({r.Route.Sentence})" : $"walking routes could not be shown uncut ({r.Route.Sentence})");
+        if (!(r.ContactNote is null && r.ContactNew is not null)) missing.Add($"what rests on it was not judged ({r.ContactNote ?? "placement contact did not run"})");
+        return missing;
+    }
 
     /// <summary>The banner after a nudge's commit is re-checked (Gate E): two or three plain sentences in the modder's words, with
     /// the probes' lines left to the Log. "Resolved" only when the open row resolved, nothing new was made, placement contact ran
@@ -410,9 +429,7 @@ internal static class Recheck
         var oldCut = r.Route is { Remains.Count: > 0 } rr ? $"; {string.Join(" and ", rr.Remains.Select(nameOf))} already blocked a walking route before the move and still {(rr.Remains.Count == 1 ? "does" : "do")}" : "";
         if (contactOk && routeOk && r.TouchesWhy is null)
             return $"{head}: resolved. {me} is clear of {them}, nothing is left in the air and no walking route is cut{touches}{oldCut}.";
-        var missing = new List<string>();
-        if (!routeOk) missing.Add(r.Route is null ? "walking routes were not checked" : r.Route.Word == "not run" ? $"walking routes were not checked ({r.Route.Sentence})" : $"walking routes could not be shown uncut ({r.Route.Sentence})");
-        if (!contactOk) missing.Add($"what rests on it was not judged ({r.ContactNote ?? "placement contact did not run"})");
+        var missing = NudgeMissing(r);
         string tail = missing.Count == 0 ? "So it is not called resolved." : $"{char.ToUpperInvariant(missing[0][0])}{missing[0][1..]}{string.Concat(missing.Skip(1).Select(m => ", and " + m))}, so it is not called resolved.";
         return $"{head}: {me} is clear of {them}{(contactOk ? " and nothing is left in the air" : "")}{touches}. {tail}";
     }

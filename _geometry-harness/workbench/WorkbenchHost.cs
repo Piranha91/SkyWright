@@ -2146,7 +2146,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 string text = staged
                     ? EditSession.Sentence(new PendingEdit(k, _session.Pending.First(e => e.Ref == k).Before, _session.Current(k), _session.IsDisabled(k), _session.Pending.Last(e => e.Ref == k).Nudge), _session.RefOf(k).Ref.BaseEditorId)
                     : _session.WrittenDisabled.Contains(k) ? $"written to {_session.Written[k].Patch}: {_session.RefOf(k).Ref.BaseEditorId ?? k.ToString()}, initially disabled (the plugin is not enabled)"
-                    : _session.WrittenNudged.Contains(k) ? $"written to {_session.Written[k].Patch}: {_session.RefOf(k).Ref.BaseEditorId ?? k.ToString()}, nudged (its re-check after the commit says what held: overlap, placement contact and walking routes)"
+                    : _session.WrittenNudged.Contains(k) ? NudgeRule.WrittenLine(_session.RefOf(k).Ref.BaseEditorId ?? k.ToString(), _session.Written[k].Patch, _session.NudgeRechecked(k))
                     : $"written to {_session.Written[k].Patch}: {_session.RefOf(k).Ref.BaseEditorId ?? k.ToString()}";
                 var revert = new Button { Content = "Revert", Margin = new Thickness(4, 0, 0, 0), ToolTip = staged ? "drop this object's staged edits" : "remove this object's override from its patch" };
                 var key = k;
@@ -2402,6 +2402,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 buildDirs, harness, s => _window?.Dispatcher.BeginInvoke(() => Say("re-check: " + s)), disabled, nudged, routeAt: routeAt));
             LastRecheck = r;
             Shell.SetBanner(Recheck.Banner(open.Rank, r, NameOf));
+            // the Edits line of each nudged object says this re-check's short words (review E2)
+            foreach (var nk in nudged ?? Array.Empty<string>())
+                if (FormKey.TryFactory(nk, out var nfk)) _session.NoteNudgeRechecked(nfk, Recheck.NudgeOutcome(r));
             Say("re-check: " + r.Verdict);
             if (r.Route is { } ra) Say($"re-check: route cut: {ra.Word}: {ra.Sentence}");
             Say("re-check: row " + r.Row.Id + ": " + r.Row.Sentence);

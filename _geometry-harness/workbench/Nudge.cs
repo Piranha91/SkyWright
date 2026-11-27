@@ -53,9 +53,10 @@ internal static class NudgeRule
     /// <summary>What a nudge's words say was checked: all three, or the two and that walking routes were not.</summary>
     internal static string Words(bool routesHeld) => routesHeld ? CheckedAll : $"{Checked}; {RoutesNotChecked}";
 
-    /// <summary>The Edits line of a written nudge (review E2; STUB).</summary>
+    /// <summary>The Edits line of a written nudge (review E2): only what is known. Before a re-check, that it is written and not
+    /// yet re-checked; after one, the re-check's own short words (<see cref="Recheck.NudgeOutcome"/>).</summary>
     internal static string WrittenLine(string name, string patch, string? recheck) =>
-        $"written to {patch}: {name}, nudged (its re-check after the commit says what held: overlap, placement contact and walking routes)";
+        recheck is null ? $"written to {patch}: {name}, nudged; not yet re-checked" : $"written to {patch}: {name}, nudged; re-check: {recheck}";
 
     /// <summary>The same, read back from a staged nudge's note (it is saved with the session).</summary>
     internal static string WordsOf(string note) => Words(note.Contains(CheckedAll, StringComparison.Ordinal));
