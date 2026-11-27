@@ -53,6 +53,10 @@ internal static class NudgeRule
     /// <summary>What a nudge's words say was checked: all three, or the two and that walking routes were not.</summary>
     internal static string Words(bool routesHeld) => routesHeld ? CheckedAll : $"{Checked}; {RoutesNotChecked}";
 
+    /// <summary>The Edits line of a written nudge (review E2; STUB).</summary>
+    internal static string WrittenLine(string name, string patch, string? recheck) =>
+        $"written to {patch}: {name}, nudged (its re-check after the commit says what held: overlap, placement contact and walking routes)";
+
     /// <summary>The same, read back from a staged nudge's note (it is saved with the session).</summary>
     internal static string WordsOf(string note) => Words(note.Contains(CheckedAll, StringComparison.Ordinal));
     const string Try = "try moving the other object of the conflict, or move this one by hand";

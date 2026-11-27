@@ -381,6 +381,9 @@ internal static class Recheck
         return FormattableString.Invariant($"re-check of conflict {rank}: {word}. {news}. ({r.Verdict}; {r.WallSeconds:0.0} s)");
     }
 
+    /// <summary>A nudge's re-check in a few words (review E2; STUB).</summary>
+    internal static string NudgeOutcome(RecheckResult r) => "resolved";
+
     /// <summary>The banner after a nudge's commit is re-checked (Gate E): two or three plain sentences in the modder's words, with
     /// the probes' lines left to the Log. "Resolved" only when the open row resolved, nothing new was made, placement contact ran
     /// and the route arm held; otherwise it says which was not checked, or what went wrong.</summary>

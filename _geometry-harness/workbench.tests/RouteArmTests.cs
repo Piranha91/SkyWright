@@ -91,6 +91,26 @@ public sealed class RouteArmTests : IDisposable
         Assert.True(r.Word == "not confirmed", $"an object judged Clipped before the move and NoLine after it reads '{r.Word}' ({r.Sentence})");
     }
 
+    // ---- review E1: the moved object must be judged at the nudged place --------------------------------------------------
+
+    [Theory]
+    [InlineData("NoLine")]
+    [InlineData("Unjudgeable")]
+    [InlineData("NotJudged")]
+    public void The_moved_object_that_cannot_be_judged_after_the_move_is_not_confirmed_whatever_it_read_before(string verdict)
+    {
+        var r = Judge(new[] { (Moved, verdict), (Near, "None") }, new[] { (Moved, verdict), (Near, "None") });
+        Assert.True(r.Word == "not confirmed", $"the moved object read {verdict} before and after the move, so nothing judged its route at the nudged place, yet the arm reads '{r.Word}' ({r.Sentence})");
+    }
+
+    [Fact]
+    public void A_neighbour_judged_neither_before_nor_after_is_not_held_against_the_move_and_is_named()
+    {
+        var r = Judge(new[] { (Moved, "None"), (Near, "NoLine") }, new[] { (Moved, "None"), (Near, "NoLine") });
+        Assert.True(r.Word == "held", $"a neighbour that could be judged neither before nor after is held against the move: '{r.Word}' ({r.Sentence})");
+        Assert.True(r.Sentence.Contains(Near) && r.Sentence.Contains("could not be judged before or after"), $"the sentence does not name the neighbour that could not be judged: {r.Sentence}");
+    }
+
     // ---- absent is not fine ------------------------------------------------------------------------------------------
 
     [Fact]
@@ -176,6 +196,28 @@ public sealed class RouteArmTests : IDisposable
         Assert.Contains("Walking routes were not checked", said);
         var e = new PendingEdit(FormKey.Factory(Moved), P(0, 0, 0), P(-8, 0, 0), Nudge: staged[0]);
         Assert.Contains(NudgeRule.RoutesNotChecked, EditSession.Sentence(e, "MiscSack02SmallFlat"));
+    }
+
+    // ---- review E2: a written nudge's Edits line says only what is known ---------------------------------------------------
+
+    [Fact]
+    public void A_written_nudge_s_Edits_line_says_only_what_is_known_before_and_after_its_re_check()
+    {
+        var ro = DisableTests.Drawn(DisableWorld.Plain, new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f);
+        var s = new EditSession(new[] { ro });
+        s.Stage(DisableWorld.Plain, P(-8, 3, 0), "moved 8.5 units");
+        s.MarkWritten("WbNudged.esp");
+        string Line() => NudgeRule.WrittenLine("HcWbPlain", "WbNudged.esp", s.NudgeRechecked(DisableWorld.Plain));
+        var before = Line();
+        Assert.True(before.Contains("not yet re-checked") && !before.Contains("walking route") && !SaysResolved(before),
+            $"before any re-check the written nudge's line claims more than that it is written: {before}");
+        s.NoteNudgeRechecked(DisableWorld.Plain, Recheck.NudgeOutcome(Committed(new RouteArmResult("not run", RouteCutProof.NotInScan, Array.Empty<string>()))));
+        var notRun = Line();
+        Assert.True(notRun.Contains("walking routes were not checked") && !SaysResolved(notRun) && !notRun.Contains("not yet re-checked"),
+            $"after a re-check whose scan had no route-cut check the line does not say walking routes were not checked: {notRun}");
+        s.NoteNudgeRechecked(DisableWorld.Plain, Recheck.NudgeOutcome(Committed(Held)));
+        var held = Line();
+        Assert.True(SaysResolved(held), $"after a re-check where all three held the line does not say resolved: {held}");
     }
 
     // ---- the re-check of a written nudge, after the session is saved and restored ----------------------------------------

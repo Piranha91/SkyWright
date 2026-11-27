@@ -86,6 +86,10 @@ internal sealed class EditSession
     internal IReadOnlyList<string> NudgedIn(string plugin) => _writtenNudged
         .Where(k => string.Equals(_written[k].Patch, plugin, StringComparison.OrdinalIgnoreCase)).Select(k => k.ToString()).OrderBy(k => k, StringComparer.Ordinal).ToList();
 
+    /// <summary>The short words of the last re-check of a written nudge (review E2; STUB).</summary>
+    internal string? NudgeRechecked(FormKey key) => null;
+    internal void NoteNudgeRechecked(FormKey key, string words) { }
+
     /// <summary>The written edits that are disables ("initially disabled" in their patch), not moves.</summary>
     internal IReadOnlyCollection<FormKey> WrittenDisabled => _writtenDisabled;
 
