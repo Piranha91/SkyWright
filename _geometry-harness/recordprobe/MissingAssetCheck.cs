@@ -24,7 +24,6 @@ static class MissingAssetCheck
     public const string PathRefused = "a file name houseCARL refused as a path";
     public const string Unreadable = "files of a record SkyWright could not read (counted per record)";
     public const string NoOwnView = "the record's own mods could not be asked on their own";
-    static readonly HashSet<string> Containers = new(StringComparer.Ordinal) { "Cell", "Worldspace", "DialogTopic" };
 
     internal sealed record Use(string Plugin, string Path, string FormId, string Type, string? EditorId) { public int Records { get; set; } = 1; }
 
@@ -94,13 +93,12 @@ static class MissingAssetCheck
         if (matches.Count == 0)
             throw new CheckRefused($"houseCARL found no record in {string.Join(", ", selected)}, which the load order loads, so it did not read them; scan again, and report it if it repeats.");
         var uses = new Dictionary<(string, string), Use>();
-        long containers = 0, records = 0;
+        long records = 0;
         static string? S(JsonElement e, string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
         foreach (var m in matches)
         {
             string formid = S(m, "formid") ?? "", type = S(m, "type") ?? "", winner = S(m, "winner") ?? "";
             winner = RecordDelta.Spelling(winner, order.Select(p => p.Name).ToList()) ?? winner;
-            if (Containers.Contains(type)) { containers++; continue; }
             var paths = ctx.AssetLinks(formid, winner);
             if (paths is null) { Add(unjudged, Unreadable); continue; }
             records++;
@@ -190,7 +188,7 @@ static class MissingAssetCheck
         }
         long judged = setAside.Values.Sum() + rows.Count;
         var line = new CoverageLine(Population, judged, unjudged, setAside,
-            $"rows {rows.Count}; {files.Count} files named by {records} records; {containers} cell, worldspace and topic records, whose files are their own records', not read");
+            $"rows {rows.Count}; {files.Count} files named by {records} records");
         return new CheckResult(rows, new[] { line }, detail);
     }
 
