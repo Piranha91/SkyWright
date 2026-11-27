@@ -84,10 +84,10 @@ internal static class LightRows
             if (!sceneRow && !rule.TryGetValue(cls, out _))
                 throw new InvalidOperationException($"the lighting output has a row of class '{cls}', which the bundle's registry does not list; open it with the SkyWright that made it.");
             if (verdict == "cannot tell") { overLimit++; continue; }
+            // one light, one entry (finding 4): a stranded light that also reaches nothing is its lights-nothing entry, whatever else
+            if (merge && cls == Stranded && verdict == "listed" && True(Rd(r), "alsoLightsNothing")) { mergedInto++; continue; }
             if (verdict == "listed" && !rule[cls].Admitted) { held[cls] = held.GetValueOrDefault(cls) + 1; continue; }
             if (verdict == "listed" && rule[cls].Count) { overLimit++; continue; }
-            // finding 4: one light, one row, when the registry's class entry says so
-            if (merge && cls == Stranded && verdict == "listed" && True(Rd(r), "alsoLightsNothing")) { mergedInto++; continue; }
             var subjectMod = r.TryGetProperty("subjectMod", out var sm) ? Mod(sm) : (null, null);
             var others = r.TryGetProperty("otherMods", out var om) && om.ValueKind == JsonValueKind.Array ? om.EnumerateArray().Select(Mod).ToList() : new();
             string? summary = S(r, "summary");
