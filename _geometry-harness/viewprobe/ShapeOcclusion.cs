@@ -29,95 +29,26 @@ sealed class ShapeOcclusion
     public bool Visible => Culled && Visibility is { Assessed: true, VisiblePixels: > 0 };
 }
 
-/// <summary>Bounded research policy, separately identified from the geometry primitive.
-/// The near-eye interval is unsupported, not rounded into an invented threshold. A Box is a
-/// catalogue entry unless the supplied rule opts in (<c>boxSilhouette</c>), and outside what
-/// its evidence covers the refusal names what is still unassessed.</summary>
+/// <summary>The rule this process renders with: the Engine's <see cref="OcclusionRule"/>, loaded once from
+/// <c>--occlusion-rule</c>. The rule itself (its fields, scope, refusals and Shadow) is the Engine's; this holds which
+/// rule file the process was given and asks it about viewprobe's planes.</summary>
 static class ShapeCullPolicy
 {
-    /// <param name="BoxSilhouette">Opt in to predicting Box primitives by their view shadow. A rule
-    /// file that omits it keeps the catalogue behaviour, refusal text included.</param>
-    /// <param name="HorizontalPortalBoxNormalDownEyeAbove">Opt in to predicting ONE further PortalBox class:
-    /// horizontal (the authored normal's X and Y within <paramref name="MaximumAbsNormalZ"/> of 0), normal
-    /// pointing DOWN (-Z), seen from ABOVE its plane (HarnessShared.PortalBoxOrientation). The +Z form, an eye
-    /// below and every other tilt stay refused. A rule file that omits it predicts exactly what it always did,
-    /// and the field is not written into a report's ruleConfiguration unless it is on, so such a report is
-    /// byte-identical to one written before the field existed.</param>
-    /// <param name="UprightMaximumAbsNormalZ">The upright class's own tolerance: how far a PortalBox's normal, or a
-    /// Box's horizontal axes, may leave level. A rule file that omits it uses <paramref name="MaximumAbsNormalZ"/>, which
-    /// then governs only the horizontal class; the field is not written into a report unless the rule states it.</param>
-    public sealed record Rule(string Identity, float MinimumEyeDistance, float MaximumAbsNormalZ,
-                              bool Frozen, string[] Evidence, bool BoxSilhouette = false,
-                              [property: System.Text.Json.Serialization.JsonIgnore(
-                                  Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
-                              bool HorizontalPortalBoxNormalDownEyeAbove = false,
-                              [property: System.Text.Json.Serialization.JsonIgnore(
-                                  Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-                              float? UprightMaximumAbsNormalZ = null)
-    {
-        /// <summary>The upright tolerance in force: the rule's own, else <see cref="MaximumAbsNormalZ"/>.</summary>
-        [System.Text.Json.Serialization.JsonIgnore]
-        public float UprightTolerance => UprightMaximumAbsNormalZ ?? MaximumAbsNormalZ;
-    }
-    public static Rule? Configuration { get; private set; }
+    public static OcclusionRule? Configuration { get; private set; }
     public static string? Sha256 { get; private set; }
     public static string Identity => Configuration?.Identity ?? "unconfigured";
-    public const string RectangleScope = "Research predictions for rigid opaque shapes and finite PortalBox rectangles; no cell-wide clearance or compatibility attribution.";
-    public const string BoxScope = " Upright Box primitives beyond the rule's minimum eye distance are predicted by the silhouette of the stored box from the eye together with the box's own volume; a union of per-face shadows is NOT separated from that silhouette by the supporting evidence and remains untested.";
-    /// <summary>What the configured rule claims to cover. The Box clause appears only when a rule
-    /// opts in, so a rule file that says nothing about boxes reports exactly what it always did.</summary>
-    public const string HorizontalScope = " Horizontal PortalBox rectangles whose authored normal points down (-Z), seen from above their plane, are predicted by the same rectangle shadow; the normal-up form, an eye below the plane and every other tilt remain refused.";
-    /// <summary>The upright tolerance's clause, only for a rule that states its own.</summary>
-    static string UprightScope(float t) =>
-        $" Upright Box and PortalBox primitives are admitted within |n.z| <= {t.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)} of upright (a rectangle's normal, a box's horizontal axes); larger tilts outside the horizontal class remain refused.";
-    public static string Scope => (Configuration is { BoxSilhouette: true } ? RectangleScope + BoxScope : RectangleScope)
-                                  + (Configuration is { UprightMaximumAbsNormalZ: { } u } ? UprightScope(u) : "")
-                                  + (Configuration is { HorizontalPortalBoxNormalDownEyeAbove: true } ? HorizontalScope : "");
+    /// <summary>What the configured rule claims to cover (<see cref="OcclusionRule.ScopeOf"/>).</summary>
+    public static string Scope => OcclusionRule.ScopeOf(Configuration);
 
     public static void Load(string path)
     {
-        var bytes = System.IO.File.ReadAllBytes(path);
-        var rule = System.Text.Json.JsonSerializer.Deserialize<Rule>(bytes,
-            new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true,
-                RespectRequiredConstructorParameters = true });
-        if (rule is null || string.IsNullOrWhiteSpace(rule.Identity) ||
-            !float.IsFinite(rule.MinimumEyeDistance) || rule.MinimumEyeDistance < 0 ||
-            !float.IsFinite(rule.MaximumAbsNormalZ) || rule.MaximumAbsNormalZ < 0 || rule.MaximumAbsNormalZ > 1 ||
-            rule.UprightMaximumAbsNormalZ is { } upright && (!float.IsFinite(upright) || upright < 0 || upright > 1) ||
-            rule.Evidence is null || rule.Evidence.Length == 0 || rule.Evidence.Any(string.IsNullOrWhiteSpace))
-            throw new ArgumentException("Occlusion rule requires an identity, finite camera/orientation limits and evidence references.");
+        var (rule, sha) = OcclusionRule.Load(System.IO.File.ReadAllBytes(path));
         Configuration = rule;
-        Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
+        Sha256 = sha;
     }
 
     public static (ConvexShadow? Shadow, string? Issue) Shadow(PlaneRender p, Vector3 eye)
-    {
-        if (Configuration is not { } rule) return (null, "engine rule unconfigured; supply --occlusion-rule with its evidence scope");
-        if (p.Kind == PlaneKind.Box)
-        {
-            if (!rule.BoxSilhouette) return (null, "Box face behavior unassessed");
-            if (!SphereBound.Finite(p.Bounds) || p.Bounds.X <= 0 || p.Bounds.Y <= 0 || p.Bounds.Z <= 0 ||
-                !float.IsFinite(p.Scale) || p.Scale <= 0) return (null, "invalid plane bounds or scale");
-            // Upright, on the rule's upright tolerance: both of the box's horizontal axes stay level within it.
-            var boxIssue = HarnessShared.PortalBoxOrientation.BoxUpright(PlaneGeometry.Axis(p, Vector3.UnitX),
-                PlaneGeometry.Axis(p, Vector3.UnitY), rule.UprightTolerance);
-            if (boxIssue is not null) return (null, boxIssue);
-            var volume = ConvexShadow.FromBox(p.Corners, eye);
-            if (volume is null) return (null, "no box view shadow: a degenerate box, or an eye inside or on it, is unassessed");
-            if (volume.EyeDistance <= rule.MinimumEyeDistance)
-                return (null, "near-eye behavior unassessed; observations bracket an exemption and do not establish a sharp threshold");
-            return (volume, null);
-        }
-        if (!SphereBound.Finite(p.Bounds) || p.Bounds.X <= 0 || p.Bounds.Z <= 0 ||
-            !float.IsFinite(p.Scale) || p.Scale <= 0) return (null, "invalid plane bounds or scale");
-        var shadow = ConvexShadow.FromRectangle(p.Quad, eye);
-        if (shadow is null) return (null, "degenerate plane or camera");
-        var normal = Vector3.Normalize(Vector3.Cross(p.Quad[1]-p.Quad[0], p.Quad[3]-p.Quad[0]));
-        var orientation = HarnessShared.PortalBoxOrientation.Check(normal, p.Normal, p.Centre, eye,
-            rule.UprightTolerance, rule.MaximumAbsNormalZ, rule.HorizontalPortalBoxNormalDownEyeAbove);
-        if (orientation is not null) return (null, orientation);
-        if (shadow.EyeDistance <= rule.MinimumEyeDistance)
-            return (null, "near-eye behavior unassessed; observations bracket an exemption and do not establish a sharp threshold");
-        return (shadow, null);
-    }
+        => Configuration is not { } rule
+            ? (null, "engine rule unconfigured; supply --occlusion-rule with its evidence scope")
+            : rule.Shadow(p.Primitive, eye);
 }

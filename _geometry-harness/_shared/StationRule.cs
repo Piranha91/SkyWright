@@ -467,39 +467,22 @@ public static class StationRule
         return y;
     }
 
-    /// <summary>The primitive's eight box corners in the world, indexed by axis bits (1 = +x,
-    /// 2 = +y, 4 = +z) - the renderer's <c>PlaneGeometry.BoxCorners</c>, from the full rotation.
-    /// <see cref="PrimitiveGeometry.ExtentFull"/> is already scaled.</summary>
-    public static Vector3[] Corners(PrimitiveGeometry p)
-    {
-        var r = SpatialOverlap.RefrRotation(new Vec3(p.RotationRad.X, p.RotationRad.Y, p.RotationRad.Z));
-        var h = p.ExtentFull * 0.5f;
-        var c = new Vector3[8];
-        for (int i = 0; i < 8; i++)
-        {
-            var l = new Vector3((i & 1) == 0 ? -h.X : h.X, (i & 2) == 0 ? -h.Y : h.Y, (i & 4) == 0 ? -h.Z : h.Z);
-            c[i] = Vector3.Transform(l, r) + p.Position;
-        }
-        return c;
-    }
+    /// <summary>The primitive as the Engine's occlusion geometry reads it; <see cref="PrimitiveGeometry.ExtentFull"/> is
+    /// already scaled, so its scale is 1.</summary>
+    static OcclusionPrimitive Engine(PrimitiveGeometry p) =>
+        new(p.Kind == PrimitiveKind.Box ? OcclusionPrimitiveKind.Box : OcclusionPrimitiveKind.PortalBox, p.ExtentFull, p.Position,
+            new Vec3(p.RotationRad.X, p.RotationRad.Y, p.RotationRad.Z), 1f);
 
-    /// <summary>A PortalBox's mid-plane quad (local y = 0), ring-ordered - the renderer's
-    /// <c>PlaneGeometry.MidQuad</c>, from the full rotation.</summary>
-    public static Vector3[] MidQuad(PrimitiveGeometry p)
-    {
-        var r = SpatialOverlap.RefrRotation(new Vec3(p.RotationRad.X, p.RotationRad.Y, p.RotationRad.Z));
-        var h = p.ExtentFull * 0.5f;
-        return new[]
-        {
-            Vector3.Transform(new Vector3(-h.X, 0f, -h.Z), r) + p.Position,
-            Vector3.Transform(new Vector3(h.X, 0f, -h.Z), r) + p.Position,
-            Vector3.Transform(new Vector3(h.X, 0f, h.Z), r) + p.Position,
-            Vector3.Transform(new Vector3(-h.X, 0f, h.Z), r) + p.Position,
-        };
-    }
+    /// <summary>The primitive's eight box corners in the world, indexed by axis bits (1 = +x,
+    /// 2 = +y, 4 = +z): the Engine's <c>OcclusionPrimitiveGeometry.BoxCorners</c>, from the full rotation.</summary>
+    public static Vector3[] Corners(PrimitiveGeometry p) => OcclusionPrimitiveGeometry.BoxCorners(Engine(p));
+
+    /// <summary>A PortalBox's mid-plane quad (local y = 0), ring-ordered: the Engine's
+    /// <c>OcclusionPrimitiveGeometry.MidQuad</c>, from the full rotation.</summary>
+    public static Vector3[] MidQuad(PrimitiveGeometry p) => OcclusionPrimitiveGeometry.MidQuad(Engine(p));
 
     /// <summary>The primitive's view shadow from <paramref name="eye"/>, built as the renderer builds
-    /// it (<c>ShapeCullPolicy.Shadow</c>): a PortalBox by its mid-quad, a Box by its silhouette. The
+    /// it (<c>OcclusionRule.Shadow</c>): a PortalBox by its mid-quad, a Box by its silhouette. The
     /// renderer's rule-specific refusals (orientation scope, near-eye distance) are NOT applied
     /// here; the render decides those, and a pose they refuse is dropped at (d).</summary>
     public static ConvexShadow? ShadowOf(PrimitiveGeometry p, Vector3 eye)

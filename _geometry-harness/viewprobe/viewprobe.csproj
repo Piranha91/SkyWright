@@ -54,7 +54,6 @@
     <Compile Include="..\_shared\LargeReferenceLists.cs" Link="LargeReferenceLists.cs" />
     <Compile Include="..\_shared\WinStateDump.cs" Link="WinStateDump.cs" />
     <Compile Include="..\_shared\StationRule.cs" Link="StationRule.cs" />
-    <Compile Include="..\_shared\PortalBoxOrientation.cs" Link="PortalBoxOrientation.cs" />
     <Compile Include="..\_shared\StationLookup.cs" Link="StationLookup.cs" />
     <Compile Include="..\_shared\StationGround.cs" Link="StationGround.cs" />
     <Compile Include="..\_shared\StationPoseFile.cs" Link="StationPoseFile.cs" />
