@@ -1,0 +1,30 @@
+<Project>
+  <!-- Imported by the solution build (dotnet build SkyWright.sln, which scripts\build.ps1 runs), after its targets.
+       Once every project has built, a folder under the layout's Probes\, Tools\ or Tests\ that no project builds into
+       is a program the build no longer makes: it moved (to the integration module), or was renamed or deleted. It is
+       removed, so a checkout that built an older main holds no stale program beside the current ones. Which folder
+       each project builds into, and where the layout is, come from the projects (SkyWrightBuildFolder in
+       Directory.Build.props); nothing here spells a path. Building one project alone removes nothing. -->
+  <Target Name="SkyWrightRemoveProgramsNoLongerBuilt" AfterTargets="Build">
+    <MSBuild Projects="@(ProjectReference)" Targets="SkyWrightBuildFolder" BuildInParallel="True" SkipNonexistentTargets="True"
+             Properties="BuildingSolutionFile=true; CurrentSolutionConfigurationContents=$(CurrentSolutionConfigurationContents); SolutionDir=$(SolutionDir); SolutionExt=$(SolutionExt); SolutionFileName=$(SolutionFileName); SolutionName=$(SolutionName); SolutionPath=$(SolutionPath)">
+      <Output TaskParameter="TargetOutputs" ItemName="_SwBuilt" />
+    </MSBuild>
+    <PropertyGroup>
+      <_SwRoot>@(_SwBuilt->'%(Root)'->Distinct())</_SwRoot>
+      <_SwFolderNames>@(_SwBuilt->'%(Folders)'->Distinct())</_SwFolderNames>
+    </PropertyGroup>
+    <Error Condition="$(_SwRoot.Contains(';'))" Text="the solution's projects build into more than one layout ($(_SwRoot)), so no program folder was removed; build one configuration at a time (scripts\build.ps1)." />
+    <ItemGroup Condition="'$(_SwRoot)' != ''">
+      <_SwKind Include="$(_SwFolderNames)" />
+      <_SwFound Include="$([System.IO.Directory]::GetDirectories('$(_SwRoot)\%(_SwKind.Identity)'))" Condition="Exists('$(_SwRoot)\%(_SwKind.Identity)')" />
+      <_SwStale Include="@(_SwFound)" Exclude="@(_SwBuilt)" />
+      <_SwKept Include="@(_SwFound)" Exclude="@(_SwStale)" />
+    </ItemGroup>
+    <!-- a layout where not one folder is a built one means the folders were read wrong, not that every program is stale -->
+    <Error Condition="'@(_SwFound)' != '' and '@(_SwKept)' == ''" Text="none of the program folders in $(_SwRoot) is one this build made, so none was removed; build with scripts\build.ps1, and report this if it recurs." />
+    <Message Importance="high" Condition="'@(_SwStale)' != ''" Text="removing %(_SwStale.Identity): no project builds it any more" />
+    <RemoveDir Directories="@(_SwStale)" ContinueOnError="WarnAndContinue" />
+    <Error Condition="'@(_SwStale)' != '' and Exists('%(_SwStale.Identity)')" Text="the build no longer makes %(_SwStale.Identity), and that old folder could not be removed (a running program may hold its files); close it and build again." />
+  </Target>
+</Project>

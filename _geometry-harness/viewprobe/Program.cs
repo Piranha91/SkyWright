@@ -4148,7 +4148,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                                     + (straight > 1f ? $"  (x{walked / straight:0.00})" : "")
                                     + $", z {lz0:0}..{lz1:0}"
                                     + (airborne > 0 ? $", {airborne} sample(s) in the air over a walked ledge link, longest {longestAir:0} u" : "")
-                                    + (taut.Reroutes > 0 ? $", re-routed round {(taut.Reroutes == 1 ? "an interior vertex" : $"{taut.Reroutes} interior vertices")}, {taut.Saved:0} u shorter" : ""));
+                                    + (taut.Reroutes > 0 ? $", re-routed round {(taut.Reroutes == 1 ? "an interior vertex" : $"{taut.Reroutes} interior vertices")}" : "")
+                                    + (taut.OtherSides > 0 ? $", round the other side of {(taut.OtherSides == 1 ? "a hole" : $"{taut.OtherSides} holes")}" : "")
+                                    + (taut.Reroutes + taut.OtherSides > 0 ? $", {taut.Saved:0} u shorter" : ""));
                     legs.Add(leg);
                 }
                 if (unreachable.Count > 0)

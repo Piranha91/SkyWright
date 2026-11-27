@@ -119,10 +119,27 @@ if (mode is "arms" or "cut")
     { Console.Error.WriteLine(missingMaster); return 2; }
 }
 
-using var mod = SkyrimMod.CreateFromBinaryOverlay(Path.Combine(dataDir, plugin), SkyrimRelease.SkyrimSE);
+// --plugin: the game's Data folder first, else the profile's load order (PluginOpen.Locate; a mod's plugin lives in its mod
+// folder). Exempt from the missing-master refusal (ruling 12): the order only finds this one plugin's file.
+var pluginPath = HarnessShared.PluginOpen.Locate(plugin, dataDir, () =>
+{
+    string inst = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
+    string prof = Path.Combine(inst, "profiles", HarnessTarget.Require(HarnessTarget.Profile, "MO2 profile name", "profile"));
+    return Mo2LoadOrder.Build(prof, Path.Combine(inst, "mods"), dataDir, Path.Combine(inst, "overwrite")).OrderedPaths;
+});
+if (pluginPath is null) { Console.Error.WriteLine(HarnessShared.PluginOpen.NotLocated(plugin, dataDir)); return 2; }
+ISkyrimModGetter mod;
 CellPlacements? cell = null;
-foreach (var cp in PlacementExtract.FromMod(mod))
-    if (string.Equals(cp.CellEditorId, cellId, StringComparison.OrdinalIgnoreCase)) { cell = cp; break; }
+try
+{
+    mod = HarnessShared.PluginOpen.Open(pluginPath, "corridorprobe");
+    HarnessShared.PluginOpen.Guard(pluginPath, "corridorprobe's cell search", () =>
+    {
+        foreach (var cp in PlacementExtract.FromMod(mod))
+            if (string.Equals(cp.CellEditorId, cellId, StringComparison.OrdinalIgnoreCase)) { cell = cp; break; }
+    });
+}
+catch (PluginUnreadableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
 if (cell is null) { Console.Error.WriteLine($"cell '{cellId}' not found in {plugin}"); return 1; }
 var navs = NavmeshIndex.Build(cell.Navmeshes, out int malformed);
 Console.WriteLine($"{cellId}: {cell.Navmeshes.Count} navmesh(es), {navs.TriangleCount:N0} triangles ({malformed} malformed), {cell.Refs.Count:N0} refs, {(cell.Interior ? "interior" : "exterior")}");

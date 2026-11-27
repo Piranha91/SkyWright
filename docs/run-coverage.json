@@ -8439,6 +8439,27 @@
       ]
     },
     {
+      "id": "_geometry-harness/tests/test_corridorprobe_plugin_lookup.py",
+      "path": "_geometry-harness/tests/test_corridorprobe_plugin_lookup.py",
+      "kind": "script",
+      "answers": [
+        "Does corridorprobe find a --plugin that lives in a mod folder, and refuse one it cannot find or read in one sentence?"
+      ],
+      "useWhen": "Qualify a change to where a probe finds its --plugin (_shared/PluginOpen.cs Locate, corridorprobe, floorgapprobe).",
+      "evidence": [
+        {
+          "path": "_geometry-harness/tests/test_corridorprobe_plugin_lookup.py",
+          "anchor": "Known answers for where corridorprobe finds its --plugin: the game's Data folder first, else the profile's load order."
+        }
+      ],
+      "inputs": [
+        "The Release build of corridorprobe; a temporary MO2 layout with header-only plugins in Data and in mod folders."
+      ],
+      "outputs": [
+        "Assertion results for: Does corridorprobe find a --plugin that lives in a mod folder, and refuse one it cannot find or read in one sentence?"
+      ]
+    },
+    {
       "id": "_geometry-harness/tests/test_declared_cell_presence.py",
       "path": "_geometry-harness/tests/test_declared_cell_presence.py",
       "kind": "script",
