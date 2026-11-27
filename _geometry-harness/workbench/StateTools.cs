@@ -543,6 +543,11 @@ internal sealed class StateTools
         var said = new List<string>();
         foreach (var h in hosts.Where(h => !followers.Contains(h)))
         {
+            if (FormKey.TryFactory(h, out var hk) && sc.Session.IsDisabled(hk))
+            {
+                said.Add($"{h}: disabled, not moved; whatever rests on it is judged by the re-check's placement contact after the write.");
+                continue;
+            }
             if (ContextCache.Read(sc, h) is not { } read) continue;
             try { said.Add($"{h}: " + ContextRead.StaysBehind(await read, ContextCache.MovedWith(sc, h))); }
             catch (Exception ex) { said.Add($"{h}: what stays behind could not be read: {ex.GetBaseException().Message}"); }
