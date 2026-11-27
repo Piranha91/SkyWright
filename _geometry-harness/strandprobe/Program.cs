@@ -104,7 +104,7 @@ byte[]? ReadMesh(string mesh)
 }
 
 ScanResult result;
-try { result = StrandScan.Run(new ScanInput(paths, p => folderOf.GetValueOrDefault(p) ?? StrandFamily.ByName(p), ReadMesh, table, mirror, cells, KeepAll: false)); }
+try { result = StrandScan.Run(new ScanInput(paths, p => folderOf.GetValueOrDefault(p) ?? StrandFamily.ByName(p), ReadMesh, table, mirror, cells, KeepAll: cells is not null)); }
 catch (PluginUnreadableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
 Console.WriteLine($"strandprobe: {result.Population:N0} interior objects there at load; the identity cut leaves {result.LeftByCut:N0} to measure; {result.Measured:N0} measured; {sw.Elapsed.TotalSeconds:0.0} s");
 foreach (var (why, n) in result.Coverage) Console.WriteLine($"   {n,8:N0}  {why}");

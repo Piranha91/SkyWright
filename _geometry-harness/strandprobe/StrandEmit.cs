@@ -66,6 +66,9 @@ static class StrandEmit
         {
             rule = new { StrandedRule.Reach, StrandedRule.Tolerance, band = new[] { StrandedRule.BandLo, StrandedRule.BandHi }, mirror },
             population = res.Population, leftByCut = res.LeftByCut, measured = res.Measured, coverage = res.Coverage, rows,
+            // an instrument run over named cells (--cells) also lists every object without a row, with its reason
+            noRows = res.All.Where(kv => kv.Value.State == StrandedState.NoRow).OrderBy(kv => kv.Key.ToString(), StringComparer.Ordinal)
+                            .Select(kv => new { id = kv.Key.ToString(), reason = kv.Value.Reason }),
         }, new JsonSerializerOptions { WriteIndented = true }));
     }
 }
