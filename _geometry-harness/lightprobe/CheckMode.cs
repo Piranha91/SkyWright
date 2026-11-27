@@ -22,6 +22,8 @@ using SkyWright.Engine;
 static class CheckMode
 {
     static readonly string[] Roles = { "combined", "dependencies", "selection", "rest" };
+    /// <summary>The class of a row that stands for a whole scene not judged (Base Object Swapper); not one of the six lighting classes.</summary>
+    public const string SceneClass = "scene-not-judged";
     /// <summary>Below this much memory the runtime may use, the model cache is emptied before each arrangement is indexed.</summary>
     const long LeanBelow = 6L << 30;
 
@@ -72,6 +74,7 @@ static class CheckMode
         Console.WriteLine($"memory the runtime may use: {usable >> 20:N0} MB; model cache budget {cache.Budget >> 20:N0} MB; "
                         + (lean ? $"lean (under {LeanBelow >> 20:N0} MB): models are not kept between arrangements" : "models are shared across the arrangements"));
         var readings = Roles.ToDictionary(r => r, _ => new Dictionary<string, LightCheckReading>());
+        var cellOf = new Dictionary<string, string>(StringComparer.Ordinal);   // the combined arrangement's cell of each scene member
         var scenes = new List<LightCheckSceneKey>();
         var display = new Dictionary<string, string>();
         var notJudged = new Dictionary<string, string>();
@@ -116,6 +119,9 @@ static class CheckMode
                                     + $"{oneSide} touched by one side only and {noLight} with no light, not read");
                 }
                 var members = scenes.ToDictionary(s => s.Id, s => index.Members(s));
+                if (role == "combined")
+                    foreach (var m in members.Values.SelectMany(x => x))
+                        if (rd.Idx.RefCell.TryGetValue(keyOf[m.P.Key], out var rc)) cellOf[m.P.Key] = rc.Cell.ToString();
                 var scope = members.Values.SelectMany(m => m.Select(x => keyOf[x.P.Key])).ToHashSet();
                 rd.ReadBases(scope, sw);
                 var (llfJson, llfOn) = rd.Llf();
@@ -124,12 +130,15 @@ static class CheckMode
                 var dumpCells = new List<object>();
                 int pis = 0;
                 run.Stage("cells", $"measuring scenes ({role})", scenes.Count, "scenes");
+                int nth = 0;
                 foreach (var s in scenes)
                 {
                     run.Advance();
+                    // progress per scene (Gate B review finding 3): exterior checks read a hundred or more scenes per arrangement
+                    Console.WriteLine($"scene {++nth} of {scenes.Count} ({role}): {display[s.Id]} at {sw.Elapsed.TotalSeconds:0.0}s");
                     var mem = members[s.Id];
-                    if (!notJudged.ContainsKey(s.Id) && mem.FirstOrDefault(m => rd.BosNames(keyOf[m.P.Key])) is { P: not null } bos)
-                        notJudged[s.Id] = $"Not judged: a Base Object Swapper file changes {bos.P.Key} in this scene ({role} arrangement), and this check does not apply Base Object Swapper; look at the scene in game.";
+                    if (!notJudged.ContainsKey(s.Id) && BosRefusal(mem.Select(m => keyOf[m.P.Key]), rd.BosNames, role) is { } bosWhy)
+                        notJudged[s.Id] = bosWhy;
                     var subjects = mem.Where(m => m.Subject).Select(m => m.P.Key).ToHashSet(StringComparer.Ordinal);
                     FormKey cellKey = s.Exterior ? FormKey.Null : keyOf.GetValueOrDefault(s.Space, FormKey.Null);
                     FormKey wsKey = s.Exterior ? keyOf.GetValueOrDefault(s.Space, FormKey.Null) : FormKey.Null;
@@ -161,6 +170,8 @@ static class CheckMode
         var rows = new List<object>();
         var counts = LightCheck.Classes.ToDictionary(k => k, _ => new LightCheckCount());
         var sceneRows = new List<object>();
+        // a scene not judged is a row a modder sees, not only a scenes[] entry (Gate B review finding 1)
+        rows.AddRange(RefusedSceneRows(scenes, notJudged, display));
         LightCheckReading Of(string role, string id) => readings[role].TryGetValue(id, out var x) ? x : new LightCheckReading(Names(role));
         foreach (var s in scenes)
         {
@@ -177,8 +188,11 @@ static class CheckMode
             rows.AddRange(res.Rows.Select(r => (object)new
             {
                 @class = r.Class, title = LightCheck.ClassTitles[r.Class], verdict = r.Verdict, scene = r.Scene, sceneId = s.Id, kind = s.Exterior ? "exterior" : "interior",
+                space = s.Space, x = s.Exterior ? s.X : (int?)null, y = s.Exterior ? s.Y : (int?)null,
+                cell = cellOf.GetValueOrDefault(r.Subject) ?? (s.Exterior ? null : s.Space),
                 subject = r.Subject, subjectEdid = r.SubjectEdid, fixture = r.Fixture, fixtureEdid = r.FixtureEdid, shape = r.ShapeIndex, shapeName = r.ShapeName,
-                subjectMod = r.SubjectMod, otherMods = r.OtherMods, summary = r.Summary, reason = r.Reason, at = new[] { r.At.X, r.At.Y, r.At.Z }, shadow = r.Shadow,
+                subjectMod = r.SubjectMod, otherMods = r.OtherMods, summary = r.Summary, reason = r.Reason, at = new[] { r.At.X, r.At.Y, r.At.Z },
+                fixtureAt = r.FixtureAt is { } fa ? new[] { fa.X, fa.Y, fa.Z } : null, shadow = r.Shadow,
                 readings = r.Readings,
             }));
         }
@@ -196,7 +210,16 @@ static class CheckMode
             },
             classes = LightCheck.Classes.Select(c => new { id = c, title = LightCheck.ClassTitles[c] }).ToList(),
             counts = LightCheck.Classes.ToDictionary(c => c, c => new { subjects = counts[c].Subjects, listed = counts[c].Listed, notThePair = counts[c].NotThePair,
-                                                                        noClash = counts[c].NoClash, notJudged = counts[c].NotJudged }),
+                                                                        noClash = counts[c].NoClash, notJudged = counts[c].NotJudged, alsoLightsNothing = counts[c].AlsoLightsNothing }),
+            // the totals runcontrol reads through the registry's adapter.result (every class, admitted or held: admission is the app's)
+            summary = new
+            {
+                listed = LightCheck.Classes.Where(c => c != LightCheck.OverLightLimit).Sum(c => counts[c].Listed),
+                cannotTell = counts[LightCheck.OverLightLimit].Listed,
+                judged = LightCheck.Classes.Sum(c => counts[c].Subjects - counts[c].NotJudged),
+                notJudged = LightCheck.Classes.Sum(c => counts[c].NotJudged) + notJudged.Count,
+                scenesNotJudged = notJudged.Count,
+            },
             population = new { scenesRead = scenes.Count, interiors = scenes.Count(s => !s.Exterior), exteriors = scenes.Count(s => s.Exterior),
                                scenesNotJudged = notJudged.Count, oneSideNotRead = oneSide, noLightNotRead = noLight },
             scenes = sceneRows,
@@ -209,6 +232,37 @@ static class CheckMode
         Console.WriteLine($"{rows.Count} rows over {scenes.Count} scenes ({notJudged.Count} not judged) -> {jsonPath}; {sw.Elapsed.TotalSeconds:0.0}s; "
                         + $"model reads {cache.Reads:N0}, cache hits {cache.Hits:N0}; peak working set {Process.GetCurrentProcess().PeakWorkingSet64 / 1048576.0:N0} MB");
         return 0;
+    }
+
+    /// <summary>One row per scene not judged (Gate B review finding 1), in scene order: class scene-not-judged, its one-sentence reason,
+    /// where it opens (an interior's cell; an exterior's worldspace and grid, looking at the centre cell's middle).</summary>
+    public static List<Dictionary<string, object?>> RefusedSceneRows(IEnumerable<LightCheckSceneKey> scenes, IReadOnlyDictionary<string, string> notJudged,
+                                                                    IReadOnlyDictionary<string, string> display)
+    {
+        var o = new List<Dictionary<string, object?>>();
+        foreach (var s in scenes)
+        {
+            if (!notJudged.TryGetValue(s.Id, out var why)) continue;
+            o.Add(new Dictionary<string, object?>
+            {
+                ["class"] = SceneClass, ["title"] = "A scene not judged", ["verdict"] = "not judged", ["scene"] = display.GetValueOrDefault(s.Id, s.Id),
+                ["sceneId"] = s.Id, ["kind"] = s.Exterior ? "exterior" : "interior", ["space"] = s.Space,
+                ["x"] = s.Exterior ? (int?)s.X : null, ["y"] = s.Exterior ? (int?)s.Y : null, ["cell"] = s.Exterior ? null : s.Space,
+                ["summary"] = why, ["reason"] = why,
+                ["at"] = s.Exterior ? new[] { (s.X + 0.5f) * LightCheckSceneIndex.Cell, (s.Y + 0.5f) * LightCheckSceneIndex.Cell, 0f } : null,
+            });
+        }
+        return o;
+    }
+
+    /// <summary>A scene is not judged when a Base Object Swapper file names one of its members or a member's base (decision 7: BOS is
+    /// not applied). The one-sentence reason names the first such member; null when no swap file names any.</summary>
+    public static string? BosRefusal(IEnumerable<FormKey> members, Func<FormKey, bool> named, string role)
+    {
+        foreach (var m in members)
+            if (named(m))
+                return $"Not judged: a Base Object Swapper file changes {m} in this scene ({role} arrangement), and this check does not apply Base Object Swapper; look at the scene in game.";
+        return null;
     }
 
     /// <summary>Every placed reference of an arrangement as the population sees it (touchers and light flags only where asked). keyOf

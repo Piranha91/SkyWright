@@ -210,6 +210,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             }
         }
         if (_marks.Selected is not null) { _marks.StandIn = new(); _marks.StandInTris = new(); _marks.StandInFor = null; }
+        _marks.PointTris = new(); _marks.PointFor = null;   // a marked place belongs to the landing that made it
         _marks.Set(_marks.Selected, _marks.Partner);
         UpdateKey();
         LoadOrderPanel.Selection(_session.Selected?.ToString(), other);
@@ -796,6 +797,22 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     /// from a distance that fits the box, trying a few headings and pitches until a pick at the screen centre names the
     /// reference (other geometry can stand in front). Says which pose it kept and whether the centre pick named it.</summary>
     internal bool Land(FormKey key)
+    {
+        bool landed = LandOn(key);
+        // a lighting row's gone fixture: the scene shows the combination, where it is not, so its own setup's spot is marked
+        if (Shell.PendingPoint is { } pp)
+        {
+            Shell.PendingPoint = null;
+            var tris = new List<float>();
+            MarkerGizmos.DiamondTriangles(tris, pp.At + new Vector3(0, 0, 40f), 32f);
+            _marks.PointTris = tris; _marks.PointFor = pp.What;
+            Shell.LastLanding = (Shell.LastLanding ?? "") + "; " + pp.What;
+            Invalidate("point");
+        }
+        return landed;
+    }
+
+    bool LandOn(FormKey key)
     {
         if (!_session.IsDrawn(key) && LandOnStandIn(key)) return true;
         if (!_session.IsDrawn(key))

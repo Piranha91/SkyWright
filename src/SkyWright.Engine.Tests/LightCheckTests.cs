@@ -76,6 +76,7 @@ public sealed class LightCheckTests
         Assert.Equal(new LightCheckMod("Selected Mod", Sel), row.SubjectMod);
         Assert.Equal(new LightCheckMod("Rest Mod B", RestB), Assert.Single(row.OtherMods));
         Assert.Contains("Rest Mod B removes", row.Summary);
+        Assert.Equal(At0, row.FixtureAt);   // the view marks where the removed candle stood
     }
 
     [Fact]
@@ -90,6 +91,108 @@ public sealed class LightCheckTests
         var c = Light(C().Add(Candle(candle, At0, deleted: true, touchers: gone)), light, Above);
         var row = Assert.Single(Rows(Eval(d, s, r, c), LightCheck.LightNoFixture));
         Assert.Equal(RestB, Assert.Single(row.OtherMods).Plugin);
+    }
+
+    [Fact]
+    public void KP1m_the_other_side_moves_the_candle_away_and_the_row_says_the_candle_moved()
+    {
+        // Gate B review finding 2 (the fixture half); rejects: a row that names no mod, or says the light moved, when the candle did
+        string candle = K(0x801, Base), light = K(0x802, Sel);
+        var away = new Vector3(300, 0, 0);
+        var d = D().Add(Candle(candle, At0));
+        var s = Light(S().Add(Candle(candle, At0)), light, Above);
+        var r = R().Add(Candle(candle, away, touchers: new[] { Base, RestB }));
+        var c = Light(C().Add(Candle(candle, away, touchers: new[] { Base, RestB })), light, Above);
+        var row = Assert.Single(Rows(Eval(d, s, r, c), LightCheck.LightNoFixture));
+        Assert.Equal("listed", row.Verdict);
+        Assert.Equal(new LightCheckMod("Rest Mod B", RestB), Assert.Single(row.OtherMods));
+        Assert.Contains("which Rest Mod B moves", row.Summary);
+        Assert.DoesNotContain("another mod", row.Summary);
+        Assert.DoesNotContain("moves the light", row.Summary);
+        Assert.Equal("fixture", row.Readings.GetValueOrDefault("moved"));
+    }
+
+    [Fact]
+    public void KP1m_the_other_side_moves_the_light_away_from_its_candle_and_the_row_says_the_light_moved()
+    {
+        // Gate B review finding 2; rejects: "<candle>, which another mod moves N units away" about a candle nobody moved (the mover looked
+        // for on the fixture's records only). Rest Mod B carries a record of the selection's light that puts it 300 u from the candle.
+        string candle = K(0x801, Base), light = K(0x802, Sel);
+        var d = D().Add(Candle(candle, At0));
+        var s = Light(S().Add(Candle(candle, At0)), light, Above);
+        var r = R().Add(Candle(candle, At0));
+        var c = Light(C().Add(Candle(candle, At0)), light, new Vector3(300, 0, 20), touchers: new[] { Sel, RestB });
+        var row = Assert.Single(Rows(Eval(d, s, r, c), LightCheck.LightNoFixture));
+        Assert.Equal("listed", row.Verdict);
+        Assert.Equal(new LightCheckMod("Rest Mod B", RestB), Assert.Single(row.OtherMods));
+        Assert.Contains("Rest Mod B moves the light", row.Summary);
+        Assert.DoesNotContain("another mod", row.Summary);
+        Assert.DoesNotContain("which Rest Mod B moves", row.Summary);
+        Assert.Equal("light", row.Readings.GetValueOrDefault("moved"));
+        Assert.Null(row.FixtureAt);   // the candle still stands where it did: no marker for a gone fixture
+    }
+
+    [Fact]
+    public void KP1m_light_and_candle_apart_with_no_record_to_explain_it_names_no_mover()
+    {
+        // Gate B review finding 2: "another mod" only when no record explains it, and then the sentence asserts no mover
+        string candle = K(0x801, Base), light = K(0x802, Sel);
+        var away = new Vector3(300, 0, 0);
+        var d = D().Add(Candle(candle, At0));
+        var s = Light(S().Add(Candle(candle, At0)), light, Above);
+        var r = R().Add(Candle(candle, away));
+        var c = Light(C().Add(Candle(candle, away)), light, Above);
+        var row = Assert.Single(Rows(Eval(d, s, r, c), LightCheck.LightNoFixture));
+        Assert.Empty(row.OtherMods);
+        Assert.DoesNotContain(" moves ", row.Summary);
+        Assert.Contains("299 units apart", row.Summary);
+        Assert.Null(row.Readings.GetValueOrDefault("moved"));
+    }
+
+    [Fact]
+    public void KF4_a_stranded_light_that_lights_nothing_carries_the_fixture_fact_on_its_lights_nothing_row_and_is_counted()
+    {
+        // Gate B review finding 4: one light, one row (the app merges by the registry's data); rejects: the lights-nothing row without the
+        // fixture fact, the stranded row not marked, or the light missing from the stranded class's count
+        string candle = K(0x801, Base), room = K(0x803, Base), light = K(0x802, Sel);
+        var gone = new[] { Base, RestB };
+        var d = D().Add(Candle(candle, At0)).Add(Solid(room, At0));
+        var s = Light(S().Add(Candle(candle, At0)).Add(Solid(room, At0)), light, Above, litBy: new Dictionary<string, double> { [room] = 100 });
+        var r = R().Add(Candle(candle, At0, deleted: true, touchers: gone)).Add(Solid(room, At0, on: false, touchers: gone));
+        var c = Light(C().Add(Candle(candle, At0, deleted: true, touchers: gone)).Add(Solid(room, At0, on: false, touchers: gone)), light, Above,
+                      facing: new FacingResult(64, 0, 0, 64), lit: 0);
+        var res = Eval(d, s, r, c);
+        var stranded = Assert.Single(Rows(res, LightCheck.LightNoFixture));
+        Assert.Equal(true, stranded.Readings.GetValueOrDefault("alsoLightsNothing"));
+        var nothing = Assert.Single(Rows(res, LightCheck.LightLightsNothing));
+        Assert.Equal(candle, nothing.Fixture);
+        Assert.Equal(At0, nothing.FixtureAt);
+        var merged = Assert.IsType<string>(nothing.Readings.GetValueOrDefault("strandedSummary"));
+        Assert.Contains("CandleHornTable01, which Rest Mod B removes", merged);
+        Assert.Contains("lights nothing", merged);
+        Assert.Contains("safe to disable", merged);
+        Assert.Equal(1, res.Counts[LightCheck.LightNoFixture].Listed);
+        Assert.Equal(1, res.Counts[LightCheck.LightNoFixture].AlsoLightsNothing);
+    }
+
+    [Fact]
+    public void KF4_a_stranded_light_that_reaches_surfaces_says_how_many_checks_hit_and_no_more()
+    {
+        // Gate B review finding 4; rejects: a sentence claiming the light still lights the room, or one with no measured hit count
+        string candle = K(0x801, Base), light = K(0x802, Sel);
+        var d = D().Add(Candle(candle, At0));
+        var s = Light(S().Add(Candle(candle, At0)), light, Above);
+        var r = R().Add(Candle(candle, At0, deleted: true, touchers: new[] { Base, RestB }));
+        var c = Light(C().Add(Candle(candle, At0, deleted: true, touchers: new[] { Base, RestB })), light, Above);
+        var row = Assert.Single(Rows(Eval(d, s, r, c), LightCheck.LightNoFixture));
+        Assert.Contains("60 of 64 checks from the light hit a surface", row.Summary);
+        Assert.DoesNotContain("lights the room", row.Summary);
+        Assert.DoesNotContain("very little", row.Summary);
+        Assert.Equal(60, row.Readings.GetValueOrDefault("hits"));
+        Assert.Null(row.Readings.GetValueOrDefault("alsoLightsNothing"));
+        var few = Light(C().Add(Candle(candle, At0, deleted: true, touchers: new[] { Base, RestB })), light, Above, facing: new FacingResult(64, 3, 0, 61));
+        var fewRow = Assert.Single(Rows(Eval(d, s, r, few), LightCheck.LightNoFixture));
+        Assert.Contains("3 of 64 checks from the light hit a surface; it reaches very little", fewRow.Summary);
     }
 
     [Fact]
