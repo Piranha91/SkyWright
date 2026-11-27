@@ -85,7 +85,7 @@ internal static class ProbeHelp
 
             The check reads every record a mod of your selection changes that another mod's plugin also changes. It compares each copy that does not win with what its own plugin was made with, to find what that mod really changed, then with the copy that wins. A field is listed when one mod changed it, the winning value differs in game, the two plugins are in different mods, and the winning plugin was not made with the other (it does not list it among its masters). It looks both ways, and says whether the winning mod changed the field itself or only carries an older value.
 
-            Values are compared as the game reads them. Changes within one mod, the game's own files, cells, navmesh, and quests, dialogue and form lists are not listed. It is held: a scan runs it only when you tick it.
+            Values are compared as the game reads them; two positions less than half a unit apart are the same. Changes within one mod, the game's own files, cells, navmesh, and quests, dialogue and form lists are not listed.
             """),
 
         ["records.cell-attributes"] = new(
@@ -93,7 +93,7 @@ internal static class ProbeHelp
             """
             A cell's own record holds its lighting, water, music, flags and encounter zone. When two mods change the same cell, the game uses only the version of the mod lower in the load order, so a mod made without the other carries the cell's settings it was made with and undoes the other mod's.
 
-            The check is the same as the check for changed fields, on cells: it lists a setting one mod changed whose winning value is another mod's, when the two plugins are in different mods and the winning plugin was not made with the other one. It looks both ways, says whether the winning mod changed the setting itself, compares values as the game reads them, and does not list changes within one mod or in the game's own files. It is held: a scan does not run it unless you tick it, until a person has read the rows it found on a test load order.
+            The check is the same as the check for changed fields, on cells: it lists a setting one mod changed whose winning value is another mod's, when the two plugins are in different mods and the winning plugin was not made with the other one. It looks both ways, says whether the winning mod changed the setting itself, compares values as the game reads them, and does not list changes within one mod or in the game's own files. A cell's occlusion data and height map, which the editor rebuilds from the cell's objects and land, are not listed.
             """),
 
         ["geometry.stranded-object"] = new(

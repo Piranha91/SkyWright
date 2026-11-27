@@ -5,7 +5,7 @@ using Xunit;
 namespace WorkbenchTests;
 
 /// <summary>The two lost-edit checks in the app (record checks unit 2): each Findings row keeps its own sentence when one
-/// record carries several (one row per field and losing plugin), what the row names, and the held tiles' lines and help.
+/// record carries several (one row per field and losing plugin), what the row names, the Findings line, and the tiles' lines and help.
 /// The sentence itself is recordprobe's (its LE22).</summary>
 [Trait("tier", "unit")]
 public sealed class LostEditWordsTests
@@ -48,15 +48,16 @@ public sealed class LostEditWordsTests
     }
 
     [Fact]
-    public void Both_checks_are_held_with_their_own_reason_a_plain_line_and_help()
+    public void Both_checks_run_by_default_with_a_plain_line_and_help()
     {
+        // switched on 2026-11-27 (record checks round 3): the reviewer read the lab's 424 rows and found 3 false alarms
         foreach (var id in new[] { "records.contested-fields", "records.cell-attributes" })
         {
             var c = Assert.Single(Launcher.Registry(), x => x.Id == id);
-            Assert.True(c.Held);
+            Assert.False(c.Held);
+            Assert.Null(c.HeldReason);
             Assert.Equal("probe-emit", c.Kind);
-            Assert.Equal("it is held back until a person has read the rows it found on the lab's load order", c.HeldReason);
-            Assert.Equal(c.HeldReason, new Launcher().WhyNotHere(c));
+            Assert.Null(new Launcher().WhyNotHere(c));
             Assert.Contains("not made with it", ProbeNames.Says(id));
             var help = ProbeHelp.Of(id);
             Assert.NotNull(help);

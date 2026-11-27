@@ -3,8 +3,9 @@ using System.Diagnostics;
 namespace RunControl;
 
 /// <summary>The two lost-edit checks (records.contested-fields, records.cell-attributes) through runcontrol's own parts:
-/// each registry row is held (opt-in), runs recordprobe --check through the probe-emit adapter with the plan's population,
-/// and is planned only when named; the real recordprobe writes a conflict file runcontrol reads, with its one lost edit
+/// each registry row runs by default (switched on 2026-11-27, record checks round 3: optional like environment.lighting,
+/// not opt-in), runs recordprobe --check through the probe-emit adapter with the plan's population, and is planned without
+/// --opt-in; the real recordprobe writes a conflict file runcontrol reads, with its one lost edit
 /// between two mods.</summary>
 static class SelfTestLostEdits
 {
@@ -22,7 +23,7 @@ static class SelfTestLostEdits
 
     public static void Run(Action<string, Func<string?>> Case, Action<string, string> Skip)
     {
-        Case("lost edits: both registry rows are held, run recordprobe as a probe-emit with the population, and are planned only with --opt-in", () =>
+        Case("lost edits: both registry rows run by default (optional, not opt-in), run recordprobe as a probe-emit with the population, and are planned without --opt-in", () =>
         {
             var reg = Registry.Load(Checkout.Registry);
             var problems = Registry.Validate(reg);
@@ -32,8 +33,8 @@ static class SelfTestLostEdits
             foreach (var id in Ids)
             {
                 if (Registry.CheckById(reg, id) is not { } check) return $"the registry has no {id}";
-                if (check.Get("optIn") is not true || check.Get("required") is not false || check.Get("heldWhy") is not string { Length: > 0 })
-                    return $"{id} is not held (optIn true, required false, its own heldWhy)";
+                if (check.Get("optIn") is true || check.Get("required") is not false || check.Get("heldWhy") is not null)
+                    return $"{id} is not on by default as an optional check (no optIn, required false, no heldWhy)";
                 var ad = PyValue.Dict(check["adapter"]);
                 if (Py.S(ad["kind"]) != "probe-emit" || Py.S(ad["exe"]) != "recordprobe" || Py.S(ad.Get("populationFlag")) != "--population"
                     || Py.S(ad["output"]) != "conflict-file" || !Py.L(ad["args"]).Select(Py.S).SequenceEqual(new[] { "--check", id }))
@@ -44,7 +45,7 @@ static class SelfTestLostEdits
                     return Py.S(checks[0]["status"]);
                 }
                 string without = StatusOf(new HashSet<string>()), with = StatusOf(new HashSet<string> { id });
-                if (without != EvalStore.NotOptedIn || with != "planned") return $"{id}: without --opt-in {without}, with it {with}";
+                if (without != "planned" || with != "planned") return $"{id}: without --opt-in {without}, with it {with}";
             }
             return null;
         });
