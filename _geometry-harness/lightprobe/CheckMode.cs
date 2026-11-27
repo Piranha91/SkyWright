@@ -22,6 +22,8 @@ using SkyWright.Engine;
 static class CheckMode
 {
     static readonly string[] Roles = { "combined", "dependencies", "selection", "rest" };
+    /// <summary>Below this much memory the runtime may use, the model cache is emptied before each arrangement is indexed.</summary>
+    const long LeanBelow = 6L << 30;
 
     /// <summary>Run the check; the arguments are parsed by Program.cs (one parser for every mode).</summary>
     public static int Run(IReadOnlyDictionary<string, string> orders, string? jsonPath, string? dumpDir, string? scenesFile, long maxMb,
@@ -65,6 +67,10 @@ static class CheckMode
         Console.WriteLine($"sides: selection {string.Join(", ", sides.PluginsOn(LightSide.Selection))}; rest {string.Join(", ", sides.PluginsOn(LightSide.Rest))}");
 
         var cache = new LightMeshCache();
+        long usable = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+        bool lean = usable < LeanBelow;
+        Console.WriteLine($"memory the runtime may use: {usable >> 20:N0} MB; model cache budget {cache.Budget >> 20:N0} MB; "
+                        + (lean ? $"lean (under {LeanBelow >> 20:N0} MB): models are not kept between arrangements" : "models are shared across the arrangements"));
         var readings = Roles.ToDictionary(r => r, _ => new Dictionary<string, LightCheckReading>());
         var scenes = new List<LightCheckSceneKey>();
         var display = new Dictionary<string, string>();
@@ -76,10 +82,15 @@ static class CheckMode
                                                    NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals };
         if (dumpDir is not null) Directory.CreateDirectory(dumpDir);
 
-        foreach (var role in Roles)
+        // Each arrangement is read in its own frame, so nothing of its index stays reachable once it returns (measured 2026-11-26: read in
+        // one long frame, the first arrangement's index outlived it and a 2.5 GiB heap ran out of memory indexing the second).
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        int ReadOne(string role)
         {
-            Console.WriteLine($"---- {role}: {orders[role]} ({sw.Elapsed.TotalSeconds:0.0}s)");
             double t0 = sw.Elapsed.TotalSeconds;
+            // fast when the memory exists, else lean: an arrangement's index takes 2.4-3.5 GB (Gate A), so below LeanBelow of usable
+            // memory the models are not kept while the next arrangement is indexed (each is then read again, as separate runs would)
+            if (lean && role != Roles[0]) cache.Clear();
             long reads0 = cache.Reads, hits0 = cache.Hits;
             using (var rd = OrderReading.Open(cfgs[role], modsDir, dataDir, overwriteDir, run, Cap, sw, cache, trackLand: true, bos: true, out var refusal))
             {
@@ -134,8 +145,16 @@ static class CheckMode
                                  basesSeconds = Math.Round(rd.BasesSeconds, 2), scenesSeconds = Math.Round(tScenes, 2), modelReads = cache.Reads - reads0, modelCacheHits = cache.Hits - hits0,
                                  totalSeconds = Math.Round(sw.Elapsed.TotalSeconds - t0, 2) });
             }
+            return 0;
+        }
+        foreach (var role in Roles)
+        {
+            Console.WriteLine($"---- {role}: {orders[role]} ({sw.Elapsed.TotalSeconds:0.0}s)");
+            if (ReadOne(role) is int rc and not 0) return rc;
+            System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
             GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
             Cap("after " + role);
+            Console.WriteLine($"after {role}: managed heap {GC.GetTotalMemory(false) >> 20:N0} MB, private bytes {Process.GetCurrentProcess().PrivateMemorySize64 >> 20:N0} MB");
         }
 
         // ---- the rules, per scene
@@ -182,7 +201,7 @@ static class CheckMode
                                scenesNotJudged = notJudged.Count, oneSideNotRead = oneSide, noLightNotRead = noLight },
             scenes = sceneRows,
             rows,
-            cost = new { seconds = Math.Round(sw.Elapsed.TotalSeconds, 2), arrangements = timing, modelReads = cache.Reads, modelCacheHits = cache.Hits,
+            cost = new { seconds = Math.Round(sw.Elapsed.TotalSeconds, 2), arrangements = timing, modelReads = cache.Reads, modelCacheHits = cache.Hits, cacheBudgetMb = cache.Budget >> 20, cachePeakMb = cache.PeakBytes >> 20, cacheEmptied = cache.Evictions, lean, usableMemoryMb = usable >> 20,
                          peakWorkingSetMb = Process.GetCurrentProcess().PeakWorkingSet64 / 1048576, largestPrivateMb = peakPrivate },
         };
         File.WriteAllText(jsonPath, JsonSerializer.Serialize(outDoc, jsonOpts));

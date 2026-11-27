@@ -185,8 +185,12 @@ sealed class OrderReading : IDisposable
                 return m.Status == "refused" ? (null, m.Reason) : (m, null);
             }
             catch (Exception ex) { return (null, "read threw: " + ex.Message); }
-        });
+        }, r => ModelBytes(r.Item1));
     }
+
+    /// <summary>About how many bytes a model reading holds (its placed-soup source data: vertices, indices, tags and shape map).</summary>
+    static long ModelBytes(LightModel? m) => m?.Soup is not { } s ? 0
+        : (long)s.Vertices.Length * 12 + (long)s.Indices.Length * 4 + (m.Tags?.Length ?? 0) * 8L + (m.ShapeOfTriangle?.Length ?? 0) * 4L + m.Shapes.Count * 96L;
 
     // emitting parts (lane A, 2026-10-13): read per mesh, separately from the render model (a particle-only mesh still has emitters)
     EmitterModel? Emitters(FormKey b)
@@ -202,7 +206,7 @@ sealed class OrderReading : IDisposable
             if (bytes is null) return new EmitterModel("refused", "asset read failed: " + err, Array.Empty<EmittingPart>());
             try { return LightReach.ReadEmitters(bytes); }
             catch (Exception ex) { return new EmitterModel("refused", "read threw: " + ex.Message, Array.Empty<EmittingPart>()); }
-        });
+        }, e => e.Parts.Count * 64L);
     }
 
     static double[] V(Vec3 v) => new double[] { v.X, v.Y, v.Z };

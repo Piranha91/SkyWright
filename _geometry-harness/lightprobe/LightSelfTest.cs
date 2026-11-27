@@ -208,6 +208,15 @@ static class LightSelfTest
             return cache.Get("model", a, _ => "model") == "model" && cache.Get("emitters", a, _ => "emitters") == "emitters" && cache.Reads == 2;
         });
 
+        Check("model cache: past its byte budget the cache empties and reads again, and every reading is still its own source's",
+              "a budget that evicts by handing back another entry, or a cache that grows past its budget", () =>
+        {
+            var cache = new LightMeshCache(budgetBytes: 1000);
+            var srcs = Enumerable.Range(0, 5).Select(i => new PlacementSource("Mod " + i, AssetKind.Loose, $@"X:\lab\mods\Mod {i}\meshes\x.nif", null, @"meshes\x.nif")).ToList();
+            var got = srcs.Concat(srcs).Select(s => cache.Get("model", s, x => x.ProviderName, _ => 400)).ToList();
+            return got.SequenceEqual(srcs.Concat(srcs).Select(s => s.ProviderName)) && cache.Evictions > 0 && cache.PeakBytes <= 1000 && cache.Reads == 10;
+        });
+
         if (meshesFrom is null)
             Console.WriteLine("NOT RUN  emitter reader cases on vanilla meshes (they need --meshes-from GAME_DATA, the folder holding Skyrim - Meshes0/1.bsa)");
         else
