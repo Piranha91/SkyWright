@@ -110,6 +110,14 @@ static class DanglingCheck
             if (total != listed)
                 throw new CheckRefused($"houseCARL's errors sweep counted {total} dangling link(s) and listed {listed}, so the check cannot be complete; scan again, and report it if it repeats.");
             long scanned = errors.TryGetProperty("scanned_plugins", out var sp) && sp.ValueKind == JsonValueKind.Number ? sp.GetInt64() : 0;
+            // the whole-order sweep leaves out a plugin houseCARL could not parse (ErrorCheck: the order less ExcludedPlugins)
+            // and names it under excluded_plugins; any other plugin of the order it did not sweep is unexplained
+            long unparsed = root.TryGetProperty("excluded_plugins", out var ex) && ex.ValueKind == JsonValueKind.Array
+                ? ex.EnumerateArray().Select(x => x.ValueKind == JsonValueKind.String ? x.GetString() : x.TryGetProperty("plugin", out var xp) ? xp.GetString() : null)
+                    .Count(n => n is not null && byName.ContainsKey(n)) : 0;
+            if (unparsed > 0) unjudged[Unparsed] = unparsed;
+            if (scanned + unparsed < order.Count)
+                throw new CheckRefused($"houseCARL's errors sweep covered {scanned} of the order's {order.Count} plugins and did not say why the others were left out, so the check cannot be complete; scan again, and report it if it repeats.");
             var line = new CoverageLine(Population, judged, unjudged, setAside,
                 $"rows {rows.Count}; plugins swept {scanned} of {order.Count}; a link is judged when either plugin is in the selection");
             return new CheckResult(rows, new[] { line });
