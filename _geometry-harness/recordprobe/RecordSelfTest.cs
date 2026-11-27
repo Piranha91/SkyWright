@@ -31,7 +31,8 @@ static class RecordSelfTest
             {
                 ["errors"] = new Dictionary<string, object?>
                 {
-                    ["scanned_plugins"] = sections.Length, ["dangling"] = sections.Sum(s => s.Links.Length),
+                    // every plugin of the largest order here (three) swept; KD14 and KD15 say otherwise themselves
+                    ["scanned_plugins"] = 3, ["dangling"] = sections.Sum(s => s.Links.Length),
                     ["accounting"] = new Dictionary<string, object?> { ["dangling_missing"] = 0 }, ["plugins"] = plugins,
                 },
             },
@@ -110,6 +111,22 @@ static class RecordSelfTest
         {
             var answer = CrossAnswer().Replace("\"dangling_missing\":0", "\"dangling_missing\":2");
             try { DanglingCheck.Judge(answer, CrossOrder(true, true)); return "a cut listing gave a result"; }
+            catch (CheckRefused ex) { return OneSentence(ex.Message) ? null : "not one sentence: " + ex.Message; }
+        }),
+        ("KD14 review U1-F1: a plugin of the order houseCARL could not parse is not judged, with its reason, not counted as swept", () =>
+        {
+            var answer = Answer(("Patch.esp", Array.Empty<(string, string)>())).Replace("\"scanned_plugins\":3", "\"scanned_plugins\":1").Replace("\"families\":", "\"excluded_plugins\":[{\"plugin\":\"Base.esp\",\"reason\":\"bad record header\"}],\"families\":");
+            var un = DanglingCheck.Judge(answer, Order(("Base.esp", InMod("Base Mod", "Base.esp"), true), ("Patch.esp", InMod("Patch Mod", "Patch.esp"), true))).Coverage[0].Unjudgeable
+                     ?? new Dictionary<string, long>();
+            return un.GetValueOrDefault(DanglingCheck.Unparsed) == 1 && un.Count == 1 ? null : $"not judged: {string.Join(", ", un.Select(kv => $"{kv.Key} {kv.Value}"))}";
+        }),
+        ("KD15 review U1-F1: a sweep that covered fewer of the order's plugins than it names refuses in one sentence", () =>
+        {
+            try
+            {
+                DanglingCheck.Judge(Answer(("Patch.esp", Array.Empty<(string, string)>())).Replace("\"scanned_plugins\":3", "\"scanned_plugins\":1"), Order(("Base.esp", InMod("Base Mod", "Base.esp"), true), ("Patch.esp", InMod("Patch Mod", "Patch.esp"), true)));
+                return "a sweep of 1 of 2 plugins, the other unexplained, gave a result";
+            }
             catch (CheckRefused ex) { return OneSentence(ex.Message) ? null : "not one sentence: " + ex.Message; }
         }),
         ("KD13 the row says it in a modder's words: the plugins and their mods, no internal terms, one sentence", () =>

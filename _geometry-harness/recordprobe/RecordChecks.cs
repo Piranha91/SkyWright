@@ -46,6 +46,7 @@ static class DanglingCheck
     public const string Population = "dangling links houseCARL's errors sweep found in the load order";
     public const string Unscannable = "records houseCARL could not read, whose links are not judged";
     public const string ScanFailed = "plugins houseCARL could not scan, whose links are not judged";
+    public const string Unparsed = "plugins houseCARL could not parse and left out of the sweep, whose links are not judged";
 
     public static readonly IReadOnlyDictionary<string, object?> Args = new Dictionary<string, object?>
     {
@@ -54,7 +55,8 @@ static class DanglingCheck
 
     public static CheckResult Run(RecordContext ctx) => Judge(ctx.Call(ToolNames.Check, Args), ctx.Order);
 
-    /// <summary>The target's plugin, from its FormKey ("0136DB:Skyrim.esm").</summary>
+    /// <summary>The target's plugin, from its FormKey ("0136DB:Skyrim.esm"). <paramref name="holder"/> is not read: it is
+    /// there so the sabotage arm "the target's plugin taken from the plugin that holds the link" is a one-line change.</summary>
     static string OriginOf(string target, string holder) => target[(target.LastIndexOf(':') + 1)..];
 
     public static CheckResult Judge(string answer, IReadOnlyList<OrderPlugin> order)
