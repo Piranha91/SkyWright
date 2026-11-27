@@ -87,7 +87,15 @@ public static class RecordClashRule
     /// read). A row only between two mods: judged when any of the three is in the selection; not a row when the record is the
     /// game's own, or when no mod it is made with ships the file (its own mod's archive hiding the file reads so too, since its
     /// own mod is one of them); counted as not told apart when the archive that wins cannot be named as a third mod's.</summary>
-    public static RecordVerdict MissingAsset(LinkEnd needer, LinkEnd? shipper, LinkEnd? hider) => new(true, BetweenMods);   // STUB: the red point
+    public static RecordVerdict MissingAsset(LinkEnd needer, LinkEnd? shipper, LinkEnd? hider)
+    {
+        if (!needer.Selected && shipper?.Selected != true && hider?.Selected != true) return new(false, NotSelected);
+        if (needer.GameFile) return new(false, AssetNamedByGameFile);
+        if (shipper is null) return new(false, AssetOwnDefect);
+        if (hider is null || hider.GameFile || string.Equals(hider.Mod, shipper?.Mod, StringComparison.OrdinalIgnoreCase)) return new(false, AssetCannotTell);
+        if (string.Equals(hider.Mod, needer.Mod, StringComparison.OrdinalIgnoreCase)) return new(false, AssetCannotTell);
+        return new(true, BetweenMods);
+    }
 
     /// <summary>A plugin's masters, transitively, from each plugin's header (<paramref name="direct"/>: its masters, or null
     /// when its header could not be read or it is not in the order). Blind when any header on the way could not be read.</summary>

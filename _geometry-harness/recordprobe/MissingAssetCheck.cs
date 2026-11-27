@@ -123,7 +123,7 @@ static class MissingAssetCheck
             var st = full[u.Path];
             if (st.Error is not null) { Add(unjudged, PathRefused); continue; }
             if (st.Exists) { Add(setAside, Present); continue; }
-            // STUB: the red point (an incomplete read is not yet set apart)
+            if (st.MaybeIncomplete) { Add(unjudged, Incomplete); continue; }
             lost.Add(u);
         }
         LinkEnd Layer(string? layer, string archive) => layer switch
@@ -153,7 +153,7 @@ static class MissingAssetCheck
             foreach (var (u, st) in there)
             {
                 if (st.Error is not null) { Add(unjudged, PathRefused); continue; }
-                // STUB: the red point (an incomplete read is not yet set apart)
+                if (st.MaybeIncomplete) { Add(unjudged, Incomplete); continue; }
                 LinkEnd? shipper = null, hider = null; string? archive = null;
                 if (st.Exists && st.InArchive && st.Winner is { } a)
                 {
