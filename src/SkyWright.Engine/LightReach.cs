@@ -47,6 +47,8 @@ public sealed record LeakResult(double Lit, double Leak, int Samples, int Receiv
 public sealed record FacingResult(int Rays, int Front, int Back, int None)
 {
     public double BackFraction => Rays == 0 ? 0 : (double)Back / Rays;
+    /// <summary>Back-face first hits per surface owner (the scene's owner index): whose surfaces put the light behind them.</summary>
+    public IReadOnlyDictionary<int, int> BackByOwner { get; init; } = new Dictionary<int, int>();
 }
 
 public static class LightReach
@@ -388,15 +390,18 @@ public sealed class LightScene
     public FacingResult Facing(Vector3 light, double radius, int rays = 64)
     {
         var o = Vector3D.From(light); int f = 0, b = 0, none = 0;
+        var backBy = new Dictionary<int, int>();
         double golden = Math.PI * (3 - Math.Sqrt(5));
         for (int i = 0; i < rays; i++)
         {
             double z = 1 - 2 * (i + 0.5) / rays, rr = Math.Sqrt(Math.Max(0, 1 - z * z)), th = golden * i;
             var d = new Vector3D(rr * Math.Cos(th), rr * Math.Sin(th), z);
             var h = FirstHit(o, d, radius);
-            if (h is null) none++; else if (h.Value.Front) f++; else b++;
+            if (h is null) none++;
+            else if (h.Value.Front) f++;
+            else { b++; int ow = _owner[h.Value.Tri]; backBy[ow] = backBy.GetValueOrDefault(ow) + 1; }
         }
-        return new FacingResult(rays, f, b, none);
+        return new FacingResult(rays, f, b, none) { BackByOwner = backBy };
     }
 
     /// <summary>Lit and leaked attenuated area around a point light (see the file header). Each triangle inside the radius is

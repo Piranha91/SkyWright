@@ -1,4 +1,4 @@
-"""motionprobe sweep and lightprobe outputs name the solid rule their results depend on (cases 1960-1968).
+"""motionprobe sweep and lightprobe outputs name the solid rule their results depend on (cases 1960-1967; 1968 retired with lightclash.py).
 
     python _geometry-harness/tests/test_solid_rule_named.py
 
@@ -30,7 +30,6 @@ case that needs point readings.
     1965  lightprobe --geometry on the collision-only fixture: no rows; both "none".
     1966  lightprobe without --geometry: no rows; both "none".
     1967  lightprobe --list-interiors: no rows; both "none"; identity.policy still LightReach's.
-    1968  lightclash folds five arms written with the new identity fields (the reader is not broken by them).
 
 Probes under test come from this checkout's Release builds unless HC_SR_HARNESS names another build folder (a base build, for the
 red run); the fixture writers (proofprobe, stateprobe) come from HC_SR_FIXTURES, else this checkout.
@@ -228,24 +227,6 @@ def main() -> int:
             ident = none_case("interiors", "--list-interiors")
             assert "emitters v1" in str(ident.get("policy")), f"identity.policy changed: {ident.get('policy')!r}"
 
-        def c1968():
-            src = Path(td) / "light-cubes.json"
-            assert src.exists(), "no lit-cube output to fold"
-            arms = []
-            for a in ("u", "plusa", "plusb", "dep", "p"):
-                dst = Path(td) / f"arm-{a}.json"
-                shutil.copyfile(src, dst)
-                arms += ["--arm", f"{a}={dst}"]
-            keys = [l["key"] for c in L.light["cubes"]["cells"] for l in c["lights"]]
-            edits = Path(td) / "edits.json"
-            edits.write_text(json.dumps([{"id": "e1", "action": "DISABLE", "records": keys}]), encoding="utf-8")
-            out = Path(td) / "fold.json"
-            r = run([sys.executable, HARNESS / "lightclash.py", *arms, "--mods", "MlRoom.esm", "MlLights.esp", "--edits", edits,
-                     "--out", out, "--leak-threshold", "0.5"])
-            assert r.returncode == 0 and out.exists(), f"lightclash exit {r.returncode}: {(r.stdout + r.stderr)[-600:]}"
-            res = json.loads(out.read_text(encoding="utf-8"))
-            assert len(res["edits"]) == 1 and len(res["edits"][0]["records"]) == len(keys), f"fold output: {res}"
-
         for name, fn in [("1960 motionprobe sweep, built solid region: solidPolicy names the rule", c1960),
                          ("1961 motionprobe sweep, built region that is not a solid: solidPolicy names the rule", c1961),
                          ("1962 motionprobe sweep refused: solidPolicy none", c1962),
@@ -253,8 +234,7 @@ def main() -> int:
                          ("1964 lightprobe --geometry with point readings: rule and anchor named, rows counted", c1964),
                          ("1965 lightprobe --geometry without point readings: none", c1965),
                          ("1966 lightprobe without --geometry: none", c1966),
-                         ("1967 lightprobe --list-interiors: none; policy unchanged", c1967),
-                         ("1968 lightclash folds arms carrying the new identity fields", c1968)]:
+                         ("1967 lightprobe --list-interiors: none; policy unchanged", c1967)]:
             check(name, fn)
         if os.environ.get("HC_SR_DUMP"):
             d = Path(os.environ["HC_SR_DUMP"])
