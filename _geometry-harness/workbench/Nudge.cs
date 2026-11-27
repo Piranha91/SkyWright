@@ -266,8 +266,12 @@ internal sealed class NudgeLane
             catch (OperationCanceledException) { throw; }
             catch (Exception ex) { v = new TrialVerdict("not checked", "not checked: " + (ex is AggregateException ae ? ae.GetBaseException() : ex).Message, Array.Empty<string>()); }
             lock (_lock) _proofs.Add(new NudgeProofRun(c.Candidate.N, v.Word, v.Sentence, clock.Elapsed.TotalSeconds));
-            if (v.Word != "clear") continue;
-            var note = FormattableString.Invariant($"moved {NudgeRule.Move(home, c.Pose)} from where the load order places it, {c.Candidate.Rule}; {c.Drop}; the nearest of {clear.Count} clear position(s) the judge found among {settled.Count} within {cap}, confirmed by the probes on try {tried}; {NudgeRule.Checked}; {NudgeRule.RoutesNotChecked}");
+            // confirmed: the open row resolved and nothing was created ("clear"), or the same with a crossing of this object that
+            // was already there before the move still holding ("resolved here, but", said in the note): not held against it, as
+            // in the judge's rule (the app run of 2026-11-26 found every candidate of row 8 in that case)
+            if (v.Word is not ("clear" or "resolved here, but")) continue;
+            var still = v.Word == "clear" ? "" : $"; still there from before the move, as the probes say it: {v.Sentence.Replace("resolved here, but: ", "").TrimEnd('.')}";
+            var note = FormattableString.Invariant($"moved {NudgeRule.Move(home, c.Pose)} from where the load order places it, {c.Candidate.Rule}; {c.Drop}; the nearest of {clear.Count} clear position(s) the judge found among {settled.Count} within {cap}, confirmed by the probes on try {tried}{still}; {NudgeRule.Checked}; {NudgeRule.RoutesNotChecked}");
             return Done(_stage(c.Pose, note));
         }
         var why = string.Join(", ", Proofs.Select(p => $"position {p.N} {p.Word}"));

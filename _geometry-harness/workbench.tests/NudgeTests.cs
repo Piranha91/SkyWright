@@ -102,6 +102,22 @@ public sealed class NudgeTests : IClassFixture<DisableWorld>
         Assert.True(f.Proved[0] < f.Proved[1], "the next candidate tried is not the next in order");
     }
 
+    /// <summary>The app run on the lab (RESULT-C.md): every proof of row 8 read "resolved here, but", because a crossing of the
+    /// object with a third object, there before the move, still held. Not held against the candidate, as in the judge's rule;
+    /// the staged note says what still holds.</summary>
+    [Fact]
+    public async Task A_crossing_already_there_before_the_move_does_not_block_the_proof_and_the_note_says_it()
+    {
+        var f = new Fakes
+        {
+            ProofOf = _ => Proof("resolved") with { StillHolding = new[] { "001FBB:JKs Skyrim.esp / 000B5C:Ultimate Markarth.esp: holds (actual render surfaces: crossing)" } },
+        };
+        var said = await Run(f.Lane());
+        Assert.True(f.Proved.Count == 1 && f.Staged.Count == 1, $"a proof whose only remaining row was there before the move was not taken ({said})");
+        Assert.Contains("000B5C:Ultimate Markarth.esp", f.Staged[0].Note);
+        Assert.Contains("walking routes not checked", f.Staged[0].Note);
+    }
+
     [Fact]
     public async Task At_most_three_proofs_and_when_none_is_confirmed_nothing_is_staged()
     {
