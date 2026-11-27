@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- recordprobe: the record checks (loadability.dangling-references first). houseCARL's record and check tools are
+       called in process through HousecarlCalls (no houseCARL program started); the between-mods rule is
+       SkyWright.Engine.RecordClashRule; this program reads the order, asks houseCARL and writes the conflict file. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>recordprobe</AssemblyName>
+    <NoWarn>CA1416</NoWarn>
+    <!-- houseCARL's server code compiled in as a library (Directory.Build.props), never its program -->
+    <SkyWrightHousecarlLibrary>true</SkyWrightHousecarlLibrary>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\_shared\PluginOpen.cs" Link="PluginOpen.cs" />
+    <Compile Include="..\_shared\LastSighting.cs" Link="LastSighting.cs" />
+    <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
+    <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
+    <Compile Include="..\_shared\ConflictReport.cs" Link="ConflictReport.cs" />
+    <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
+    <Compile Include="..\_shared\OrderMasters.cs" Link="OrderMasters.cs" />
+    <Compile Include="..\_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />
+    <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
+    <Compile Include="..\_shared\EnablePopulation.cs" Link="EnablePopulation.cs" />
+    <Compile Include="..\_shared\BaseGamePlugins.cs" Link="BaseGamePlugins.cs" />
+    <Compile Include="..\_shared\HousecarlCalls.cs" Link="HousecarlCalls.cs" />
+    <Compile Include="..\_shared\HousecarlRulebook.cs" Link="HousecarlRulebook.cs" />
+    <Compile Include="..\_shared\CheckoutLayout.cs" Link="CheckoutLayout.cs" />
+    <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
+    <ProjectReference Include="$(SkyWrightSrc)SkyWright.Engine\SkyWright.Engine.csproj" />
+    <!-- built first, its program not referenced: SkyWrightHousecarlLibrary references its assembly alone -->
+    <ProjectReference Include="$(HousecarlSrc)housecarl-mcp\housecarl-mcp.csproj" ReferenceOutputAssembly="false" Private="false" />
+    <PackageReference Include="ModelContextProtocol.Core" Version="2.2.0" />
+    <EmbeddedResource Include="known-answers\game-files-errors.json" LogicalName="game-files-errors.json" />
+  </ItemGroup>
+</Project>

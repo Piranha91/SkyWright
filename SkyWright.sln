@@ -107,6 +107,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SkyWright.Guards", "src\Sky
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "strandprobe", "_geometry-harness\strandprobe\strandprobe.csproj", "{C4D36E27-7748-4612-A378-48DD05950317}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "recordprobe", "_geometry-harness\recordprobe\recordprobe.csproj", "{A08EDD2E-FA40-4662-BCE4-CED20DF763DE}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -693,6 +695,18 @@ Global
 		{C4D36E27-7748-4612-A378-48DD05950317}.Release|x64.Build.0 = Release|Any CPU
 		{C4D36E27-7748-4612-A378-48DD05950317}.Release|x86.ActiveCfg = Release|Any CPU
 		{C4D36E27-7748-4612-A378-48DD05950317}.Release|x86.Build.0 = Release|Any CPU
+		{A08EDD2E-FA40-4662-BCE4-CED20DF763DE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A08EDD2E-FA40-4662-BCE4-CED20DF763DE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A08EDD2E-FA40-4662-BCE4-CED20DF763DE}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{A08EDD2E-FA40-4662-BCE4-CED20DF763DE}.Debug|x64.Build.0 = Debug|Any CPU
+		{A08EDD2E-FA40-4662-BCE4-CED20DF763DE}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{A08EDD2E-FA40-4662-BCE4-CED20DF763DE}.Debug|x86.Build.0 = Debug|Any CPU
+		{A08EDD2E-FA40-4662-BCE4-CED20DF763DE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A08EDD2E-FA40-4662-BCE4-CED20DF763DE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A08EDD2E-FA40-4662-BCE4-CED20DF763DE}.Release|x64.ActiveCfg = Release|Any CPU
+		{A08EDD2E-FA40-4662-BCE4-CED20DF763DE}.Release|x64.Build.0 = Release|Any CPU
+		{A08EDD2E-FA40-4662-BCE4-CED20DF763DE}.Release|x86.ActiveCfg = Release|Any CPU
+		{A08EDD2E-FA40-4662-BCE4-CED20DF763DE}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -746,5 +760,6 @@ Global
 		{5615D08D-548A-4EA7-9042-4E4F2078ABA7} = {034F5ECB-81AE-90EE-0798-CB9E1DCA2CA2}
 		{28777FB4-03FB-491C-97F4-354A8A6FA880} = {034F5ECB-81AE-90EE-0798-CB9E1DCA2CA2}
 		{C4D36E27-7748-4612-A378-48DD05950317} = {8AFE4D18-5D5E-4488-5F08-05028A10D277}
+		{A08EDD2E-FA40-4662-BCE4-CED20DF763DE} = {8AFE4D18-5D5E-4488-5F08-05028A10D277}
 	EndGlobalSection
 EndGlobal
