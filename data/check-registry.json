@@ -967,6 +967,111 @@
       "unsupportedReason": "the Part D result is bounded to its constructed positive; no natural-defect occlusion detector exists to adapt."
     },
     {
+      "id": "environment.lighting",
+      "family": "environment",
+      "title": "Lights and light fixtures one mod leaves broken for another",
+      "required": false,
+      "applicability": {
+        "trigger": {
+          "placed": true
+        },
+        "note": "Lights, the fixtures they sit at and the walls they shine on are placed references; a target that places nothing cannot strand, hide or double a light."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "baseline",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "probe-json",
+        "exe": "lightprobe",
+        "args": [
+          "--check",
+          "--dependencies",
+          "{dependencies}",
+          "--selection",
+          "{selection}",
+          "--rest",
+          "{rest}",
+          "--order",
+          "{order}",
+          "--json",
+          "{json}"
+        ],
+        "reverse": false,
+        "output": "json",
+        "result": {
+          "kind": "detector",
+          "findings": "summary.listed",
+          "judged": "summary.judged",
+          "unjudgeable": "summary.notJudged",
+          "unit": "lighting subjects (a light, a fixture or a lit shape, once per class)",
+          "note": "findings counts every listed row of every class, admitted or held (the app shows a held class's rows as held, from classes below); the over-limit count is summary.cannotTell and is never a finding."
+        },
+        "commonFlags": true
+      },
+      "evidence": {
+        "strength": "calibrated-inference",
+        "claim": "LIGHT FIXTURE HOST",
+        "limits": "Read from the load order alone over four arrangements (the files the selected mods need, the selected mods on them, the rest of the load order on them, and everything together); a row is listed only when everything together shows the problem and none of the other three does. Base Object Swapper is not applied: a cell in which a _SWAP.ini names one of its objects is not judged. Whether a listed light looks wrong in the game has not been confirmed for every kind. How many lights reach one surface is a count, never a clash. Load-time state only; interiors, and exterior cells with their eight neighbours. A light whose radius passes 16,384 units, or 4,096 units outdoors, is not judged. It cannot tell whether a surface a light still reaches is in a room the player can enter, so a light left shining on a switched-off old room is still listed. A light that reaches no surface at all is counted, not listed, unless the light-lights-nothing class says to list it."
+      },
+      "classes": [
+        {
+          "id": "light-no-fixture",
+          "title": "A light left with no fixture",
+          "admitted": true,
+          "provisional": true,
+          "held": null,
+          "evidence": "Provisional. No false alarm on Bethesda's own files across 62 lights at a fixture (95 % upper bound 4.7 %); every development row was a light the patch author edited."
+        },
+        {
+          "id": "fixture-no-light",
+          "title": "A fixture left with no light",
+          "admitted": false,
+          "provisional": false,
+          "held": "no case of it has been checked in the game yet",
+          "evidence": "No false alarm on Bethesda's own files across 62 lit fixtures (95 % upper bound 4.7 %); no development case has produced one yet."
+        },
+        {
+          "id": "light-behind-wall",
+          "title": "A light behind a wall",
+          "admitted": true,
+          "provisional": true,
+          "held": null,
+          "evidence": "Provisional. No false alarm on Bethesda's own files across 158 enabled lights (95 % upper bound 1.9 %); shadow-casting lights are flagged in the row."
+        },
+        {
+          "id": "light-lights-nothing",
+          "title": "A light that lights nothing",
+          "admitted": true,
+          "provisional": true,
+          "held": null,
+          "evidence": "Provisional. No false alarm on Bethesda's own files across 158 enabled lights (95 % upper bound 1.9 %); harmless to look at, so it is cleanup.",
+          "whenItLightsNothing": "count"
+        },
+        {
+          "id": "fixture-lit-twice",
+          "title": "A fixture lit twice",
+          "admitted": false,
+          "provisional": false,
+          "held": "no case of it has been checked in the game yet, and whether doubled light shows is not known",
+          "evidence": "No false alarm on Bethesda's own files across 441 burning fixtures (95 % upper bound 0.7 %); no development case has produced one yet."
+        },
+        {
+          "id": "over-light-limit",
+          "title": "Over the light limit",
+          "admitted": false,
+          "provisional": false,
+          "count": true,
+          "held": "it is a count, never a clash: whether the game drops a light here is not known",
+          "evidence": "Bethesda's own exteriors already go over the count in places; none is listed on Bethesda's own files."
+        }
+      ],
+      "manualDecisionAllowed": false
+    },
+    {
       "id": "environment.generated-output-regeneration",
       "family": "environment",
       "title": "Generated output that must be rebuilt after this change: Occlusion.esp, DynDOLOD, xLODGen, Synthesis, Reqtificator",

@@ -106,6 +106,16 @@ internal static class ProbeHelp
             It does not report objects when the mod that changed the walkable ground was made with the object's mod loaded, or when both are the game's own files. Editor markers are left out. No result of this probe has yet been confirmed in the game, so a scan does not run it until one has.
             """),
 
+        ["environment.lighting"] = new(
+            "Finds lights and light fixtures that the selected mods and the rest of your load order leave broken together: a light left glowing where its candle or fire is gone, a light shut behind another mod's wall, a light that no longer reaches any surface.",
+            """
+            The check reads your load order four ways: the files the selected mods need, the selected mods on those files, the rest of your load order on those files, and everything together. A row is listed only when everything together shows the problem and none of the other three does, so each row is something the two sides make together.
+
+            A light counts as sitting at a fixture when the fixture's burning part (a flame, an ember, a glowing window) is within 64 units of it. A light left with no fixture is one whose fixture another mod removed, disabled or moved away, with no other burning object near it. A light behind a wall is one whose rays mostly meet the back of a surface, read from 64 rays and only when at least 8 hit something. Some kinds are held until they have been checked in the game: they are counted, not listed. How many lights reach one surface is shown as a count, never as a clash.
+
+            Base Object Swapper is not applied: a cell in which a swap file names one of its objects is shown as not judged. Whether a listed light looks wrong in the game has not yet been confirmed for every kind.
+            """),
+
         ["geometry.fixture-empty-space"] = new(
             "Finds fixtures such as weapon racks, shelves and wall decorations left hanging in empty space after another mod removed or moved the room around them.",
             """

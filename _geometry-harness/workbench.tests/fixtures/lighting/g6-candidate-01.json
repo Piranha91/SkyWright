@@ -1,0 +1,5642 @@
+{
+  "identity": {
+    "schema": "skywright.light-check/1",
+    "policy": "light_check_v1|sides from the arms: the selection against the rest|four arrangements, each read as itself|needs both: positive in the combination, negative in the dependencies and in each side alone|each scene alone|host: own model, else the nearest emitting part within H of an enabled non-item reference, unreadable = not judged|stranded: no emitting part of any enabled fixture within H in the arrangement read|behind a wall: back-face majority, 8 of 64 hits|lights nothing: no hit and no lit area|lit twice: lights of both sides within H|over the limit: a count, never a clash|radius over 16384 u not judged; exterior radius over 4096 u not judged",
+    "lightPolicy": "light_reach_v4|winding-normal front|two-sided not modelled|opaque only|lit = drawn lighting-shader shapes; editor markers not drawn|radius = base \u002B XRDS|shape count by placed box|emitters v1: emissive (Own_Emit, value \u003E 0), self-lit effect (no Effect_Lighting), particle emitter extent",
+    "hostRadius": 64,
+    "emitThreshold": 0.02,
+    "implausibleRadius": 16384,
+    "exteriorReach": 4096,
+    "bos": "not applied: a scene in which a Base Object Swapper file names a reference is not judged",
+    "population": "load-time",
+    "state": "baseline",
+    "sides": {
+      "selection": [
+        "COTN - Morthal.esp"
+      ],
+      "rest": [
+        "ccafdsse001-dwesanctuary.esm",
+        "ccasvsse001-almsivi.esm",
+        "ccbgssse002-exoticarrows.esl",
+        "ccbgssse003-zombies.esl",
+        "ccbgssse004-ruinsedge.esl",
+        "ccbgssse005-goldbrand.esl",
+        "ccbgssse006-stendarshammer.esl",
+        "ccbgssse007-chrysamere.esl",
+        "ccbgssse008-wraithguard.esl",
+        "ccbgssse010-petdwarvenarmoredmudcrab.esl",
+        "ccbgssse011-hrsarmrelvn.esl",
+        "ccbgssse012-hrsarmrstl.esl",
+        "ccbgssse013-dawnfang.esl",
+        "ccbgssse014-spellpack01.esl",
+        "ccbgssse016-umbra.esm",
+        "ccbgssse018-shadowrend.esl",
+        "ccbgssse019-staffofsheogorath.esl",
+        "ccbgssse020-graycowl.esl",
+        "ccbgssse021-lordsmail.esl",
+        "ccbgssse031-advcyrus.esm",
+        "ccbgssse034-mntuni.esl",
+        "ccbgssse035-petnhound.esl",
+        "ccbgssse036-petbwolf.esl",
+        "ccbgssse038-bowofshadows.esl",
+        "ccbgssse040-advobgobs.esl",
+        "ccbgssse041-netchleather.esl",
+        "ccbgssse043-crosselv.esl",
+        "ccbgssse045-hasedoki.esl",
+        "ccbgssse050-ba_daedric.esl",
+        "ccbgssse051-ba_daedricmail.esl",
+        "ccbgssse052-ba_iron.esl",
+        "ccbgssse053-ba_leather.esl",
+        "ccbgssse054-ba_orcish.esl",
+        "ccbgssse055-ba_orcishscaled.esl",
+        "ccbgssse056-ba_silver.esl",
+        "ccbgssse057-ba_stalhrim.esl",
+        "ccbgssse058-ba_steel.esl",
+        "ccbgssse059-ba_dragonplate.esl",
+        "ccbgssse060-ba_dragonscale.esl",
+        "ccbgssse061-ba_dwarven.esl",
+        "ccbgssse062-ba_dwarvenmail.esl",
+        "ccbgssse063-ba_ebony.esl",
+        "ccbgssse064-ba_elven.esl",
+        "ccbgssse066-staves.esl",
+        "ccbgssse067-daedinv.esm",
+        "ccbgssse068-bloodfall.esl",
+        "ccbgssse069-contest.esl",
+        "cccbhsse001-gaunt.esl",
+        "ccedhsse001-norjewel.esl",
+        "ccedhsse002-splkntset.esl",
+        "ccedhsse003-redguard.esl",
+        "cceejsse001-hstead.esm",
+        "cceejsse002-tower.esl",
+        "cceejsse003-hollow.esl",
+        "cceejsse004-hall.esl",
+        "cceejsse005-cave.esm",
+        "ccffbsse001-imperialdragon.esl",
+        "ccffbsse002-crossbowpack.esl",
+        "ccfsvsse001-backpacks.esl",
+        "cckrtsse001_altar.esl",
+        "ccmtysse001-knightsofthenine.esl",
+        "ccmtysse002-ve.esl",
+        "ccpewsse002-armsofchaos.esl",
+        "ccqdrsse002-firewood.esl",
+        "ccrmssse001-necrohouse.esl",
+        "cctwbsse001-puzzledungeon.esm",
+        "ccvsvsse001-winter.esl",
+        "ccvsvsse002-pets.esl",
+        "ccvsvsse003-necroarts.esl",
+        "ccvsvsse004-beafarmer.esl",
+        "Lux - Master plugin.esm",
+        "Lux - Resources.esp",
+        "Lux.esp",
+        "_ResourcePack.esl"
+      ]
+    },
+    "mods": {
+      "COTN - Morthal.esp": "Cities of the North - Morthal",
+      "Lux - Master plugin.esm": "Lux (For Compatibility Testing Dev)",
+      "Lux - Resources.esp": "Lux - Resources",
+      "Lux.esp": "Lux (For Compatibility Testing Dev)",
+      "Unofficial Skyrim Special Edition Patch.esp": "Unofficial Skyrim Special Edition Patch"
+    },
+    "arrangements": {
+      "combined": {
+        "order": "C:\\hc-runs\\2026-11-26-lighting-check\\gate-c\\e2e5\\run\\prepare\\candidates\\candidate-01.json",
+        "configuration": "6921cfe9248b (85 plugins, 12 providers, load-time/baseline, candidate:candidate-01.json)",
+        "plugins": [
+          "Skyrim.esm",
+          "Update.esm",
+          "Dawnguard.esm",
+          "HearthFires.esm",
+          "Dragonborn.esm",
+          "ccasvsse001-almsivi.esm",
+          "ccbgssse001-fish.esm",
+          "ccbgssse002-exoticarrows.esl",
+          "ccbgssse003-zombies.esl",
+          "ccbgssse004-ruinsedge.esl",
+          "ccbgssse005-goldbrand.esl",
+          "ccbgssse006-stendarshammer.esl",
+          "ccbgssse007-chrysamere.esl",
+          "ccbgssse010-petdwarvenarmoredmudcrab.esl",
+          "ccbgssse011-hrsarmrelvn.esl",
+          "ccbgssse012-hrsarmrstl.esl",
+          "ccbgssse014-spellpack01.esl",
+          "ccbgssse019-staffofsheogorath.esl",
+          "ccbgssse020-graycowl.esl",
+          "ccbgssse021-lordsmail.esl",
+          "ccmtysse001-knightsofthenine.esl",
+          "ccqdrsse001-survivalmode.esl",
+          "cctwbsse001-puzzledungeon.esm",
+          "cceejsse001-hstead.esm",
+          "ccqdrsse002-firewood.esl",
+          "ccbgssse018-shadowrend.esl",
+          "ccbgssse035-petnhound.esl",
+          "ccfsvsse001-backpacks.esl",
+          "cceejsse002-tower.esl",
+          "ccedhsse001-norjewel.esl",
+          "ccvsvsse002-pets.esl",
+          "ccBGSSSE037-Curios.esl",
+          "ccbgssse034-mntuni.esl",
+          "ccbgssse045-hasedoki.esl",
+          "ccbgssse008-wraithguard.esl",
+          "ccbgssse036-petbwolf.esl",
+          "ccffbsse001-imperialdragon.esl",
+          "ccmtysse002-ve.esl",
+          "ccbgssse043-crosselv.esl",
+          "ccvsvsse001-winter.esl",
+          "cceejsse003-hollow.esl",
+          "ccbgssse016-umbra.esm",
+          "ccbgssse031-advcyrus.esm",
+          "ccbgssse038-bowofshadows.esl",
+          "ccbgssse040-advobgobs.esl",
+          "ccbgssse050-ba_daedric.esl",
+          "ccbgssse052-ba_iron.esl",
+          "ccbgssse054-ba_orcish.esl",
+          "ccbgssse058-ba_steel.esl",
+          "ccbgssse059-ba_dragonplate.esl",
+          "ccbgssse061-ba_dwarven.esl",
+          "ccpewsse002-armsofchaos.esl",
+          "ccbgssse041-netchleather.esl",
+          "ccedhsse002-splkntset.esl",
+          "ccbgssse064-ba_elven.esl",
+          "ccbgssse063-ba_ebony.esl",
+          "ccbgssse062-ba_dwarvenmail.esl",
+          "ccbgssse060-ba_dragonscale.esl",
+          "ccbgssse056-ba_silver.esl",
+          "ccbgssse055-ba_orcishscaled.esl",
+          "ccbgssse053-ba_leather.esl",
+          "ccbgssse051-ba_daedricmail.esl",
+          "ccbgssse057-ba_stalhrim.esl",
+          "ccbgssse066-staves.esl",
+          "ccbgssse067-daedinv.esm",
+          "ccbgssse068-bloodfall.esl",
+          "ccbgssse069-contest.esl",
+          "ccvsvsse003-necroarts.esl",
+          "ccvsvsse004-beafarmer.esl",
+          "ccbgssse025-advdsgs.esm",
+          "ccffbsse002-crossbowpack.esl",
+          "ccbgssse013-dawnfang.esl",
+          "ccrmssse001-necrohouse.esl",
+          "ccedhsse003-redguard.esl",
+          "cceejsse004-hall.esl",
+          "cceejsse005-cave.esm",
+          "cckrtsse001_altar.esl",
+          "cccbhsse001-gaunt.esl",
+          "ccafdsse001-dwesanctuary.esm",
+          "_ResourcePack.esl",
+          "Lux - Master plugin.esm",
+          "Lux - Resources.esp",
+          "Unofficial Skyrim Special Edition Patch.esp",
+          "Lux.esp",
+          "COTN - Morthal.esp"
+        ]
+      },
+      "dependencies": {
+        "order": "C:\\hc-runs\\2026-11-26-lighting-check\\gate-c\\e2e5\\run\\evaluation\\outputs\\environment.lighting\\arrangements\\dependencies.json",
+        "configuration": "a8d901e226cc (10 plugins, 11 providers, load-time/baseline, candidate:dependencies.json)",
+        "plugins": [
+          "Skyrim.esm",
+          "Update.esm",
+          "Dawnguard.esm",
+          "HearthFires.esm",
+          "Dragonborn.esm",
+          "ccbgssse001-fish.esm",
+          "ccqdrsse001-survivalmode.esl",
+          "ccBGSSSE037-Curios.esl",
+          "ccbgssse025-advdsgs.esm",
+          "Unofficial Skyrim Special Edition Patch.esp"
+        ]
+      },
+      "selection": {
+        "order": "C:\\hc-runs\\2026-11-26-lighting-check\\gate-c\\e2e5\\run\\evaluation\\outputs\\environment.lighting\\arrangements\\selection.json",
+        "configuration": "0d53f64c16b2 (11 plugins, 12 providers, load-time/baseline, candidate:selection.json)",
+        "plugins": [
+          "Skyrim.esm",
+          "Update.esm",
+          "Dawnguard.esm",
+          "HearthFires.esm",
+          "Dragonborn.esm",
+          "ccbgssse001-fish.esm",
+          "ccqdrsse001-survivalmode.esl",
+          "ccBGSSSE037-Curios.esl",
+          "ccbgssse025-advdsgs.esm",
+          "Unofficial Skyrim Special Edition Patch.esp",
+          "COTN - Morthal.esp"
+        ]
+      },
+      "rest": {
+        "order": "C:\\hc-runs\\2026-11-26-lighting-check\\gate-c\\e2e5\\run\\evaluation\\outputs\\environment.lighting\\arrangements\\rest.json",
+        "configuration": "60c16351a55c (84 plugins, 11 providers, load-time/baseline, candidate:rest.json)",
+        "plugins": [
+          "Skyrim.esm",
+          "Update.esm",
+          "Dawnguard.esm",
+          "HearthFires.esm",
+          "Dragonborn.esm",
+          "ccasvsse001-almsivi.esm",
+          "ccbgssse001-fish.esm",
+          "ccbgssse002-exoticarrows.esl",
+          "ccbgssse003-zombies.esl",
+          "ccbgssse004-ruinsedge.esl",
+          "ccbgssse005-goldbrand.esl",
+          "ccbgssse006-stendarshammer.esl",
+          "ccbgssse007-chrysamere.esl",
+          "ccbgssse010-petdwarvenarmoredmudcrab.esl",
+          "ccbgssse011-hrsarmrelvn.esl",
+          "ccbgssse012-hrsarmrstl.esl",
+          "ccbgssse014-spellpack01.esl",
+          "ccbgssse019-staffofsheogorath.esl",
+          "ccbgssse020-graycowl.esl",
+          "ccbgssse021-lordsmail.esl",
+          "ccmtysse001-knightsofthenine.esl",
+          "ccqdrsse001-survivalmode.esl",
+          "cctwbsse001-puzzledungeon.esm",
+          "cceejsse001-hstead.esm",
+          "ccqdrsse002-firewood.esl",
+          "ccbgssse018-shadowrend.esl",
+          "ccbgssse035-petnhound.esl",
+          "ccfsvsse001-backpacks.esl",
+          "cceejsse002-tower.esl",
+          "ccedhsse001-norjewel.esl",
+          "ccvsvsse002-pets.esl",
+          "ccBGSSSE037-Curios.esl",
+          "ccbgssse034-mntuni.esl",
+          "ccbgssse045-hasedoki.esl",
+          "ccbgssse008-wraithguard.esl",
+          "ccbgssse036-petbwolf.esl",
+          "ccffbsse001-imperialdragon.esl",
+          "ccmtysse002-ve.esl",
+          "ccbgssse043-crosselv.esl",
+          "ccvsvsse001-winter.esl",
+          "cceejsse003-hollow.esl",
+          "ccbgssse016-umbra.esm",
+          "ccbgssse031-advcyrus.esm",
+          "ccbgssse038-bowofshadows.esl",
+          "ccbgssse040-advobgobs.esl",
+          "ccbgssse050-ba_daedric.esl",
+          "ccbgssse052-ba_iron.esl",
+          "ccbgssse054-ba_orcish.esl",
+          "ccbgssse058-ba_steel.esl",
+          "ccbgssse059-ba_dragonplate.esl",
+          "ccbgssse061-ba_dwarven.esl",
+          "ccpewsse002-armsofchaos.esl",
+          "ccbgssse041-netchleather.esl",
+          "ccedhsse002-splkntset.esl",
+          "ccbgssse064-ba_elven.esl",
+          "ccbgssse063-ba_ebony.esl",
+          "ccbgssse062-ba_dwarvenmail.esl",
+          "ccbgssse060-ba_dragonscale.esl",
+          "ccbgssse056-ba_silver.esl",
+          "ccbgssse055-ba_orcishscaled.esl",
+          "ccbgssse053-ba_leather.esl",
+          "ccbgssse051-ba_daedricmail.esl",
+          "ccbgssse057-ba_stalhrim.esl",
+          "ccbgssse066-staves.esl",
+          "ccbgssse067-daedinv.esm",
+          "ccbgssse068-bloodfall.esl",
+          "ccbgssse069-contest.esl",
+          "ccvsvsse003-necroarts.esl",
+          "ccvsvsse004-beafarmer.esl",
+          "ccbgssse025-advdsgs.esm",
+          "ccffbsse002-crossbowpack.esl",
+          "ccbgssse013-dawnfang.esl",
+          "ccrmssse001-necrohouse.esl",
+          "ccedhsse003-redguard.esl",
+          "cceejsse004-hall.esl",
+          "cceejsse005-cave.esm",
+          "cckrtsse001_altar.esl",
+          "cccbhsse001-gaunt.esl",
+          "ccafdsse001-dwesanctuary.esm",
+          "_ResourcePack.esl",
+          "Lux - Master plugin.esm",
+          "Lux - Resources.esp",
+          "Unofficial Skyrim Special Edition Patch.esp",
+          "Lux.esp"
+        ]
+      }
+    },
+    "llf": {
+      "installed": false,
+      "how": "none of SKSE/Plugins/LightLimitFix.dll, SKSE/Plugins/CommunityShaders.dll, Shaders/Features/LightLimitFix.ini",
+      "found": []
+    }
+  },
+  "classes": [
+    {
+      "id": "light-no-fixture",
+      "title": "A light left with no fixture"
+    },
+    {
+      "id": "fixture-no-light",
+      "title": "A fixture left with no light"
+    },
+    {
+      "id": "light-behind-wall",
+      "title": "A light behind a wall"
+    },
+    {
+      "id": "light-lights-nothing",
+      "title": "A light that lights nothing"
+    },
+    {
+      "id": "fixture-lit-twice",
+      "title": "A fixture lit twice"
+    },
+    {
+      "id": "over-light-limit",
+      "title": "Over the light limit (a count)"
+    }
+  ],
+  "counts": {
+    "light-no-fixture": {
+      "subjects": 97,
+      "listed": 45,
+      "notThePair": 0,
+      "noClash": 52,
+      "notJudged": 0,
+      "alsoLightsNothing": 30
+    },
+    "fixture-no-light": {
+      "subjects": 28,
+      "listed": 0,
+      "notThePair": 1,
+      "noClash": 27,
+      "notJudged": 0,
+      "alsoLightsNothing": 0
+    },
+    "light-behind-wall": {
+      "subjects": 125,
+      "listed": 2,
+      "notThePair": 1,
+      "noClash": 103,
+      "notJudged": 19,
+      "alsoLightsNothing": 0
+    },
+    "light-lights-nothing": {
+      "subjects": 125,
+      "listed": 39,
+      "notThePair": 0,
+      "noClash": 86,
+      "notJudged": 0,
+      "alsoLightsNothing": 0
+    },
+    "fixture-lit-twice": {
+      "subjects": 135,
+      "listed": 0,
+      "notThePair": 0,
+      "noClash": 135,
+      "notJudged": 0,
+      "alsoLightsNothing": 0
+    },
+    "over-light-limit": {
+      "subjects": 3341,
+      "listed": 2,
+      "notThePair": 6,
+      "noClash": 3333,
+      "notJudged": 0,
+      "alsoLightsNothing": 0
+    }
+  },
+  "summary": {
+    "listed": 86,
+    "cannotTell": 2,
+    "judged": 3832,
+    "notJudged": 19,
+    "scenesNotJudged": 0
+  },
+  "population": {
+    "scenesRead": 13,
+    "interiors": 10,
+    "exteriors": 3,
+    "scenesNotJudged": 0,
+    "oneSideNotRead": 2429,
+    "noLightNotRead": 0
+  },
+  "scenes": [
+    {
+      "scene": "MorthalThonnirsHouse",
+      "sceneId": "0138CA:Skyrim.esm",
+      "kind": "interior",
+      "judged": true,
+      "rows": 12,
+      "lights": 16,
+      "gaps": []
+    },
+    {
+      "scene": "MorthalThaumaturgistsHut",
+      "sceneId": "0138CB:Skyrim.esm",
+      "kind": "interior",
+      "judged": true,
+      "rows": 5,
+      "lights": 18,
+      "gaps": []
+    },
+    {
+      "scene": "MorthalHighmoonHall",
+      "sceneId": "0138CC:Skyrim.esm",
+      "kind": "interior",
+      "judged": true,
+      "rows": 10,
+      "lights": 29,
+      "gaps": []
+    },
+    {
+      "scene": "MorthalGuardhouse",
+      "sceneId": "0138CD:Skyrim.esm",
+      "kind": "interior",
+      "judged": true,
+      "rows": 11,
+      "lights": 16,
+      "gaps": []
+    },
+    {
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "judged": true,
+      "rows": 32,
+      "lights": 33,
+      "gaps": []
+    },
+    {
+      "scene": "MorthalJorgenandLamisHouse",
+      "sceneId": "0138CF:Skyrim.esm",
+      "kind": "interior",
+      "judged": true,
+      "rows": 14,
+      "lights": 15,
+      "gaps": []
+    },
+    {
+      "scene": "MorthalFalionsHouse",
+      "sceneId": "0138D0:Skyrim.esm",
+      "kind": "interior",
+      "judged": true,
+      "rows": 14,
+      "lights": 19,
+      "gaps": []
+    },
+    {
+      "scene": "MorthalAlvasHouse",
+      "sceneId": "0138E1:Skyrim.esm",
+      "kind": "interior",
+      "judged": true,
+      "rows": 9,
+      "lights": 14,
+      "gaps": []
+    },
+    {
+      "scene": "MorthalGuardhouseJail",
+      "sceneId": "05D010:Skyrim.esm",
+      "kind": "interior",
+      "judged": true,
+      "rows": 0,
+      "lights": 6,
+      "gaps": []
+    },
+    {
+      "scene": "MorthalAlvasHouseCellar",
+      "sceneId": "10CEEA:Skyrim.esm",
+      "kind": "interior",
+      "judged": true,
+      "rows": 0,
+      "lights": 5,
+      "gaps": []
+    },
+    {
+      "scene": "00003C:Skyrim.esm cell -8, 14",
+      "sceneId": "00003C:Skyrim.esm@-8,14",
+      "kind": "exterior",
+      "judged": true,
+      "rows": 0,
+      "lights": 1,
+      "gaps": []
+    },
+    {
+      "scene": "00003C:Skyrim.esm cell -8, 15",
+      "sceneId": "00003C:Skyrim.esm@-8,15",
+      "kind": "exterior",
+      "judged": true,
+      "rows": 0,
+      "lights": 1,
+      "gaps": []
+    },
+    {
+      "scene": "00003C:Skyrim.esm cell -8, 16",
+      "sceneId": "00003C:Skyrim.esm@-8,16",
+      "kind": "exterior",
+      "judged": true,
+      "rows": 0,
+      "lights": 1,
+      "gaps": []
+    }
+  ],
+  "rows": [
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalThonnirsHouse",
+      "sceneId": "0138CA:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CA:Skyrim.esm",
+      "cell": "0138CA:Skyrim.esm",
+      "subject": "0924A4:Lux.esp",
+      "subjectEdid": "Lux_NorthEmberFireOmni",
+      "fixture": "0DFFB6:Skyrim.esm",
+      "fixtureEdid": "FireplaceWood01Burning",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni sits at FireplaceWood01Burning, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        1081.8422,
+        122.407265,
+        344.7098
+      ],
+      "fixtureAt": [
+        1091.4806,
+        130.54845,
+        271.2084
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "self-lit effect",
+        "distanceOwn": 5.720765675120553,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni sat at FireplaceWood01Burning, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalThonnirsHouse",
+      "sceneId": "0138CA:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CA:Skyrim.esm",
+      "cell": "0138CA:Skyrim.esm",
+      "subject": "0924A4:Lux.esp",
+      "subjectEdid": "Lux_NorthEmberFireOmni",
+      "fixture": "0DFFB6:Skyrim.esm",
+      "fixtureEdid": "FireplaceWood01Burning",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        1081.8422,
+        122.407265,
+        344.7098
+      ],
+      "fixtureAt": [
+        1091.4806,
+        130.54845,
+        271.2084
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni sat at FireplaceWood01Burning, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalThonnirsHouse",
+      "sceneId": "0138CA:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CA:Skyrim.esm",
+      "cell": "0138CA:Skyrim.esm",
+      "subject": "0924A5:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0DFF7E:Skyrim.esm",
+      "fixtureEdid": "CandleHornChandelier01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornChandelier01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        969.25964,
+        -74.0084,
+        538.53326
+      ],
+      "fixtureAt": [
+        957.8628,
+        -97.288574,
+        569.3624
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 1.83966064453125,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornChandelier01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalThonnirsHouse",
+      "sceneId": "0138CA:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CA:Skyrim.esm",
+      "cell": "0138CA:Skyrim.esm",
+      "subject": "0924A5:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0DFF7E:Skyrim.esm",
+      "fixtureEdid": "CandleHornChandelier01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        969.25964,
+        -74.0084,
+        538.53326
+      ],
+      "fixtureAt": [
+        957.8628,
+        -97.288574,
+        569.3624
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornChandelier01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalThonnirsHouse",
+      "sceneId": "0138CA:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CA:Skyrim.esm",
+      "cell": "0138CA:Skyrim.esm",
+      "subject": "0924AD:Lux.esp",
+      "subjectEdid": "Lux_NorthSpotClip150",
+      "fixture": "0DFFCE:Skyrim.esm",
+      "fixtureEdid": "FarmIntWoodEnd01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 sits at FarmIntWoodEnd01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 16 of 64 checks from the light hit a surface.",
+      "reason": "host removed or disabled",
+      "at": [
+        450.37393,
+        -259.10742,
+        542.05664
+      ],
+      "fixtureAt": [
+        576,
+        -96,
+        32
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 5.3739013671875,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 16,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 sat at FarmIntWoodEnd01, which Cities of the North - Morthal disables"
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "listed",
+      "scene": "MorthalThonnirsHouse",
+      "sceneId": "0138CA:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CA:Skyrim.esm",
+      "cell": "0138CA:Skyrim.esm",
+      "subject": "0924AD:Lux.esp",
+      "subjectEdid": "Lux_NorthSpotClip150",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 now sits behind Cities of the North - Morthal\u0027s wall: most of what it reaches is the back of a surface (11 of 16 hits). It casts shadows, which may hide it.",
+      "at": [
+        450.37393,
+        -259.10742,
+        542.05664
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 5,
+          "back": 11,
+          "none": 48
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalThonnirsHouse",
+      "sceneId": "0138CA:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CA:Skyrim.esm",
+      "cell": "0138CA:Skyrim.esm",
+      "subject": "0924AE:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlicker",
+      "fixture": "0DFFAD:Skyrim.esm",
+      "fixtureEdid": "CandleHornFloor01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker sits at CandleHornFloor01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        1413.2731,
+        -96.36592,
+        439.90524
+      ],
+      "fixtureAt": [
+        1426.4835,
+        -97.08292,
+        271.99976
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 40.66778564453125,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker sat at CandleHornFloor01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalThonnirsHouse",
+      "sceneId": "0138CA:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CA:Skyrim.esm",
+      "cell": "0138CA:Skyrim.esm",
+      "subject": "0924AE:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlicker",
+      "fixture": "0DFFAD:Skyrim.esm",
+      "fixtureEdid": "CandleHornFloor01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        1413.2731,
+        -96.36592,
+        439.90524
+      ],
+      "fixtureAt": [
+        1426.4835,
+        -97.08292,
+        271.99976
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker sat at CandleHornFloor01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalThonnirsHouse",
+      "sceneId": "0138CA:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CA:Skyrim.esm",
+      "cell": "0138CA:Skyrim.esm",
+      "subject": "0924AF:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        1092.3827,
+        41.957138,
+        453.10443
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalThonnirsHouse",
+      "sceneId": "0138CA:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CA:Skyrim.esm",
+      "cell": "0138CA:Skyrim.esm",
+      "subject": "0924B1:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlicker",
+      "fixture": "0DFFDB:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker sits at CandleHornTable01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        816.9527,
+        -287.85773,
+        392.7434
+      ],
+      "fixtureAt": [
+        803.0742,
+        -316.90018,
+        334.4739
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 41.88191672395011,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker sat at CandleHornTable01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalThonnirsHouse",
+      "sceneId": "0138CA:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CA:Skyrim.esm",
+      "cell": "0138CA:Skyrim.esm",
+      "subject": "0924B1:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlicker",
+      "fixture": "0DFFDB:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        816.9527,
+        -287.85773,
+        392.7434
+      ],
+      "fixtureAt": [
+        803.0742,
+        -316.90018,
+        334.4739
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker sat at CandleHornTable01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalThonnirsHouse",
+      "sceneId": "0138CA:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CA:Skyrim.esm",
+      "cell": "0138CA:Skyrim.esm",
+      "subject": "0924B2:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        551.3811,
+        69.591156,
+        405.09406
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalThaumaturgistsHut",
+      "sceneId": "0138CB:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CB:Skyrim.esm",
+      "cell": "0138CB:Skyrim.esm",
+      "subject": "09249C:Lux.esp",
+      "subjectEdid": "Lux_NorthEmberFireOmni",
+      "fixture": "0DFEF2:Skyrim.esm",
+      "fixtureEdid": "FireplaceWood01Burning",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni sits at FireplaceWood01Burning, which Cities of the North - Morthal disables; the light now glows where nothing burns; 62 of 64 checks from the light hit a surface.",
+      "reason": "host removed or disabled",
+      "at": [
+        -1278.0579,
+        102.56668,
+        75.46103
+      ],
+      "fixtureAt": [
+        -1275.7637,
+        110.84604,
+        0.176754
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "self-lit effect",
+        "distanceOwn": 0,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 62,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni sat at FireplaceWood01Burning, which Cities of the North - Morthal disables"
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalThaumaturgistsHut",
+      "sceneId": "0138CB:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CB:Skyrim.esm",
+      "cell": "0138CB:Skyrim.esm",
+      "subject": "09249E:Lux.esp",
+      "subjectEdid": "Lux_FakeFlicker",
+      "fixture": "0DFEC5:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_FakeFlicker sits at CandleHornTable01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 48 of 64 checks from the light hit a surface.",
+      "reason": "host removed or disabled",
+      "at": [
+        -1132.6846,
+        30.958384,
+        135.65211
+      ],
+      "fixtureAt": [
+        -1132.6206,
+        29.30673,
+        77.77484
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 38.2452392578125,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 48,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_FakeFlicker sat at CandleHornTable01, which Cities of the North - Morthal disables"
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalThaumaturgistsHut",
+      "sceneId": "0138CB:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CB:Skyrim.esm",
+      "cell": "0138CB:Skyrim.esm",
+      "subject": "0924A1:Lux.esp",
+      "subjectEdid": "Lux_FakeFlickerNS",
+      "fixture": "0DFEA4:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_FakeFlickerNS sits at CandleHornTable01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 17 of 64 checks from the light hit a surface.",
+      "reason": "host removed or disabled",
+      "at": [
+        -1266.8292,
+        65.46312,
+        379.92975
+      ],
+      "fixtureAt": [
+        -1288.8563,
+        63.196423,
+        303.44232
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 57.07398318627239,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 17,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_FakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal disables"
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalThaumaturgistsHut",
+      "sceneId": "0138CB:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CB:Skyrim.esm",
+      "cell": "0138CB:Skyrim.esm",
+      "subject": "0924A2:Lux.esp",
+      "subjectEdid": "Lux_FakeFlickerNS",
+      "fixture": "0DFEF3:Skyrim.esm",
+      "fixtureEdid": "CandleHornFloor01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_FakeFlickerNS sits at CandleHornFloor01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 23 of 64 checks from the light hit a surface.",
+      "reason": "host removed or disabled",
+      "at": [
+        -953.4445,
+        -167.99791,
+        386.29532
+      ],
+      "fixtureAt": [
+        -927.3758,
+        -183.58354,
+        239.99976
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 19.34162581754294,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 23,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_FakeFlickerNS sat at CandleHornFloor01, which Cities of the North - Morthal disables"
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalThaumaturgistsHut",
+      "sceneId": "0138CB:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CB:Skyrim.esm",
+      "cell": "0138CB:Skyrim.esm",
+      "subject": "0924A3:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0DFE8E:Skyrim.esm",
+      "fixtureEdid": "CandleHornChandelier01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornChandelier01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 47 of 64 checks from the light hit a surface.",
+      "reason": "host removed or disabled",
+      "at": [
+        -1260.877,
+        -111.87645,
+        548.6681
+      ],
+      "fixtureAt": [
+        -1275.2126,
+        -128.00056,
+        549.3783
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 0,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 47,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornChandelier01, which Cities of the North - Morthal disables"
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalHighmoonHall",
+      "sceneId": "0138CC:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CC:Skyrim.esm",
+      "cell": "0138CC:Skyrim.esm",
+      "subject": "092406:Lux.esp",
+      "subjectEdid": "Lux_NorthEmberFireOmniNS",
+      "fixture": "0F615D:Skyrim.esm",
+      "fixtureEdid": "FireplaceWood01Burning",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmniNS sits at FireplaceWood01Burning, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        -126.3893,
+        840.3767,
+        134.43053
+      ],
+      "fixtureAt": [
+        -129.23535,
+        849.72,
+        22.781189
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "self-lit effect",
+        "distanceOwn": 22.835232734680176,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmniNS sat at FireplaceWood01Burning, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalHighmoonHall",
+      "sceneId": "0138CC:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CC:Skyrim.esm",
+      "cell": "0138CC:Skyrim.esm",
+      "subject": "092406:Lux.esp",
+      "subjectEdid": "Lux_NorthEmberFireOmniNS",
+      "fixture": "0F615D:Skyrim.esm",
+      "fixtureEdid": "FireplaceWood01Burning",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmniNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        -126.3893,
+        840.3767,
+        134.43053
+      ],
+      "fixtureAt": [
+        -129.23535,
+        849.72,
+        22.781189
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmniNS sat at FireplaceWood01Burning, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "not judged",
+      "scene": "MorthalHighmoonHall",
+      "sceneId": "0138CC:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CC:Skyrim.esm",
+      "cell": "0138CC:Skyrim.esm",
+      "subject": "09240A:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeWindowNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [],
+      "summary": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeWindowNS to tell which side of a wall it is on (1 of 64 checks hit something); look at it in game.",
+      "reason": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeWindowNS to tell which side of a wall it is on (1 of 64 checks hit something); look at it in game.",
+      "at": [
+        -943.97723,
+        1138.5621,
+        439.29178
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "not judged",
+        "facing": {
+          "rays": 64,
+          "front": 1,
+          "back": 0,
+          "none": 63
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "not judged",
+      "scene": "MorthalHighmoonHall",
+      "sceneId": "0138CC:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CC:Skyrim.esm",
+      "cell": "0138CC:Skyrim.esm",
+      "subject": "09240B:Lux.esp",
+      "subjectEdid": "Lux_NorthChandelierFlickerNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [],
+      "summary": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthChandelierFlickerNS to tell which side of a wall it is on (7 of 64 checks hit something); look at it in game.",
+      "reason": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthChandelierFlickerNS to tell which side of a wall it is on (7 of 64 checks hit something); look at it in game.",
+      "at": [
+        -665.3404,
+        990.4076,
+        450.62952
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "not judged",
+        "facing": {
+          "rays": 64,
+          "front": 7,
+          "back": 0,
+          "none": 57
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "not judged",
+      "scene": "MorthalHighmoonHall",
+      "sceneId": "0138CC:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CC:Skyrim.esm",
+      "cell": "0138CC:Skyrim.esm",
+      "subject": "092439:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [],
+      "summary": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS to tell which side of a wall it is on (4 of 64 checks hit something); look at it in game.",
+      "reason": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS to tell which side of a wall it is on (4 of 64 checks hit something); look at it in game.",
+      "at": [
+        -902.7201,
+        973.1311,
+        457.76837
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "not judged",
+        "facing": {
+          "rays": 64,
+          "front": 4,
+          "back": 0,
+          "none": 60
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "not judged",
+      "scene": "MorthalHighmoonHall",
+      "sceneId": "0138CC:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CC:Skyrim.esm",
+      "cell": "0138CC:Skyrim.esm",
+      "subject": "09243B:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlicker",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [],
+      "summary": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker to tell which side of a wall it is on (1 of 64 checks hit something); look at it in game.",
+      "reason": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker to tell which side of a wall it is on (1 of 64 checks hit something); look at it in game.",
+      "at": [
+        -867.12866,
+        1169.8632,
+        165.59848
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "not judged",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 1,
+          "none": 63
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalHighmoonHall",
+      "sceneId": "0138CC:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CC:Skyrim.esm",
+      "cell": "0138CC:Skyrim.esm",
+      "subject": "092457:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeWindowNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeWindowNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        665.0964,
+        1137.7957,
+        439.29178
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "not judged",
+      "scene": "MorthalHighmoonHall",
+      "sceneId": "0138CC:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CC:Skyrim.esm",
+      "cell": "0138CC:Skyrim.esm",
+      "subject": "092458:Lux.esp",
+      "subjectEdid": "Lux_NorthChandelierFlickerNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [],
+      "summary": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthChandelierFlickerNS to tell which side of a wall it is on (7 of 64 checks hit something); look at it in game.",
+      "reason": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthChandelierFlickerNS to tell which side of a wall it is on (7 of 64 checks hit something); look at it in game.",
+      "at": [
+        -130.94121,
+        1589.4735,
+        150.075
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "not judged",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 7,
+          "none": 57
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalHighmoonHall",
+      "sceneId": "0138CC:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CC:Skyrim.esm",
+      "cell": "0138CC:Skyrim.esm",
+      "subject": "09245C:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        606.77203,
+        1164.1803,
+        103.22309
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "not judged",
+      "scene": "MorthalHighmoonHall",
+      "sceneId": "0138CC:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CC:Skyrim.esm",
+      "cell": "0138CC:Skyrim.esm",
+      "subject": "3C1490:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeWindowNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [],
+      "summary": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeWindowNS to tell which side of a wall it is on (2 of 64 checks hit something); look at it in game.",
+      "reason": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeWindowNS to tell which side of a wall it is on (2 of 64 checks hit something); look at it in game.",
+      "at": [
+        -119.13769,
+        1088.3745,
+        360.0467
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "not judged",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 2,
+          "none": 62
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "not judged",
+      "scene": "MorthalGuardhouse",
+      "sceneId": "0138CD:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CD:Skyrim.esm",
+      "cell": "0138CD:Skyrim.esm",
+      "subject": "08D257:Lux.esp",
+      "subjectEdid": "Lux_NorthEmberFireOmni",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [],
+      "summary": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni to tell which side of a wall it is on (1 of 64 checks hit something); look at it in game.",
+      "reason": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni to tell which side of a wall it is on (1 of 64 checks hit something); look at it in game.",
+      "at": [
+        1125.1405,
+        119.07032,
+        331.92975
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "not judged",
+        "facing": {
+          "rays": 64,
+          "front": 1,
+          "back": 0,
+          "none": 63
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalGuardhouse",
+      "sceneId": "0138CD:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CD:Skyrim.esm",
+      "cell": "0138CD:Skyrim.esm",
+      "subject": "08D25F:Lux.esp",
+      "subjectEdid": "Lux_NorthSpotClip150",
+      "fixture": "0DFE0B:Skyrim.esm",
+      "fixtureEdid": "FarmIntWoodEnd02",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 sits at FarmIntWoodEnd02, which Cities of the North - Morthal disables; the light now glows where nothing burns; 18 of 64 checks from the light hit a surface.",
+      "reason": "host removed or disabled",
+      "at": [
+        1481.6139,
+        -99.431946,
+        544.14746
+      ],
+      "fixtureAt": [
+        1376,
+        -96,
+        32
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 25.3861083984375,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 18,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 sat at FarmIntWoodEnd02, which Cities of the North - Morthal disables"
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalGuardhouse",
+      "sceneId": "0138CD:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CD:Skyrim.esm",
+      "cell": "0138CD:Skyrim.esm",
+      "subject": "08D260:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0EC553:Skyrim.esm",
+      "fixtureEdid": "CandleHornChandelier01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornChandelier01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        1010.2273,
+        -71.64671,
+        537.4546
+      ],
+      "fixtureAt": [
+        989.8628,
+        -97.288574,
+        569.3624
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 2.9183349609375,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornChandelier01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalGuardhouse",
+      "sceneId": "0138CD:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CD:Skyrim.esm",
+      "cell": "0138CD:Skyrim.esm",
+      "subject": "08D260:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0EC553:Skyrim.esm",
+      "fixtureEdid": "CandleHornChandelier01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        1010.2273,
+        -71.64671,
+        537.4546
+      ],
+      "fixtureAt": [
+        989.8628,
+        -97.288574,
+        569.3624
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornChandelier01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalGuardhouse",
+      "sceneId": "0138CD:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CD:Skyrim.esm",
+      "cell": "0138CD:Skyrim.esm",
+      "subject": "08D261:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlicker",
+      "fixture": "0DFE14:Skyrim.esm",
+      "fixtureEdid": "CandleHornFloor01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker sits at CandleHornFloor01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        653.2923,
+        110.273796,
+        422.15247
+      ],
+      "fixtureAt": [
+        644.24493,
+        133.99504,
+        271.99976
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 22.915008544921875,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker sat at CandleHornFloor01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalGuardhouse",
+      "sceneId": "0138CD:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CD:Skyrim.esm",
+      "cell": "0138CD:Skyrim.esm",
+      "subject": "08D261:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlicker",
+      "fixture": "0DFE14:Skyrim.esm",
+      "fixtureEdid": "CandleHornFloor01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        653.2923,
+        110.273796,
+        422.15247
+      ],
+      "fixtureAt": [
+        644.24493,
+        133.99504,
+        271.99976
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker sat at CandleHornFloor01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalGuardhouse",
+      "sceneId": "0138CD:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CD:Skyrim.esm",
+      "cell": "0138CD:Skyrim.esm",
+      "subject": "08D262:Lux.esp",
+      "subjectEdid": "Lux_NorthChandelierFlickerNS",
+      "fixture": "0DFDF0:Skyrim.esm",
+      "fixtureEdid": "CandleHornChandelier01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthChandelierFlickerNS sits at CandleHornChandelier01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        862.14386,
+        585.76044,
+        300.51486
+      ],
+      "fixtureAt": [
+        861.2812,
+        581.06384,
+        323.53662
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 0,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthChandelierFlickerNS sat at CandleHornChandelier01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalGuardhouse",
+      "sceneId": "0138CD:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CD:Skyrim.esm",
+      "cell": "0138CD:Skyrim.esm",
+      "subject": "08D262:Lux.esp",
+      "subjectEdid": "Lux_NorthChandelierFlickerNS",
+      "fixture": "0DFDF0:Skyrim.esm",
+      "fixtureEdid": "CandleHornChandelier01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthChandelierFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        862.14386,
+        585.76044,
+        300.51486
+      ],
+      "fixtureAt": [
+        861.2812,
+        581.06384,
+        323.53662
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthChandelierFlickerNS sat at CandleHornChandelier01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalGuardhouse",
+      "sceneId": "0138CD:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CD:Skyrim.esm",
+      "cell": "0138CD:Skyrim.esm",
+      "subject": "08D263:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        848.05206,
+        -281.7052,
+        401.7793
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalGuardhouse",
+      "sceneId": "0138CD:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CD:Skyrim.esm",
+      "cell": "0138CD:Skyrim.esm",
+      "subject": "08D264:Lux.esp",
+      "subjectEdid": "Lux_NorthChandelierFlickerNS",
+      "fixture": "0DFE0A:Skyrim.esm",
+      "fixtureEdid": "CandleHornFloor01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthChandelierFlickerNS sits at CandleHornFloor01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 1 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        1359.1222,
+        -300.30853,
+        420.9916
+      ],
+      "fixtureAt": [
+        1361.3359,
+        -327.04065,
+        271.99976
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 21.754150390625,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 1,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthChandelierFlickerNS sat at CandleHornFloor01, which Cities of the North - Morthal disables"
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "not judged",
+      "scene": "MorthalGuardhouse",
+      "sceneId": "0138CD:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CD:Skyrim.esm",
+      "cell": "0138CD:Skyrim.esm",
+      "subject": "08D264:Lux.esp",
+      "subjectEdid": "Lux_NorthChandelierFlickerNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [],
+      "summary": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthChandelierFlickerNS to tell which side of a wall it is on (1 of 64 checks hit something); look at it in game.",
+      "reason": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthChandelierFlickerNS to tell which side of a wall it is on (1 of 64 checks hit something); look at it in game.",
+      "at": [
+        1359.1222,
+        -300.30853,
+        420.9916
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "not judged",
+        "facing": {
+          "rays": 64,
+          "front": 1,
+          "back": 0,
+          "none": 63
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "09247C:Lux.esp",
+      "subjectEdid": "Lux_NorthEmberFireOmni",
+      "fixture": "0E005E:Skyrim.esm",
+      "fixtureEdid": "FireplaceWood01Burning",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni sits at FireplaceWood01Burning, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        1564.6765,
+        -161.33524,
+        107.381226
+      ],
+      "fixtureAt": [
+        1569.3992,
+        -162.3052,
+        24.130222
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "self-lit effect",
+        "distanceOwn": 0,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni sat at FireplaceWood01Burning, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "09247C:Lux.esp",
+      "subjectEdid": "Lux_NorthEmberFireOmni",
+      "fixture": "0E005E:Skyrim.esm",
+      "fixtureEdid": "FireplaceWood01Burning",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        1564.6765,
+        -161.33524,
+        107.381226
+      ],
+      "fixtureAt": [
+        1569.3992,
+        -162.3052,
+        24.130222
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni sat at FireplaceWood01Burning, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "09247E:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E0117:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornTable01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        1571.5626,
+        -497.67136,
+        128.36565
+      ],
+      "fixtureAt": [
+        1524.8506,
+        -516.8961,
+        62.696186
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 55.68249386880674,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "09247E:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E0117:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        1571.5626,
+        -497.67136,
+        128.36565
+      ],
+      "fixtureAt": [
+        1524.8506,
+        -516.8961,
+        62.696186
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "09247F:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E011A:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornTable01, which Cities of the North - Morthal moves 1,547 units away; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host 1547 u away",
+      "at": [
+        1566.3287,
+        185.09116,
+        134.99895
+      ],
+      "fixtureAt": [
+        1615.4277,
+        190.88416,
+        62.69619
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host 1547 u away",
+        "hostKind": "emissive",
+        "distanceOwn": 60.30312802616764,
+        "distanceCombined": 1547.153460136377,
+        "unknown": [],
+        "moved": "fixture",
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal moves 1,547 units away",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "09247F:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E011A:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        1566.3287,
+        185.09116,
+        134.99895
+      ],
+      "fixtureAt": [
+        1615.4277,
+        190.88416,
+        62.69619
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal moves 1,547 units away; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "092480:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E0115:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornTable01, which Cities of the North - Morthal moves 1,866 units away; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host 1866 u away",
+      "at": [
+        2068.6343,
+        -515.7411,
+        138.88062
+      ],
+      "fixtureAt": [
+        2111.833,
+        -518.2046,
+        62.696186
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host 1866 u away",
+        "hostKind": "emissive",
+        "distanceOwn": 61.03181738457805,
+        "distanceCombined": 1866.0099348965855,
+        "unknown": [],
+        "moved": "fixture",
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal moves 1,866 units away",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "092480:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E0115:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        2068.6343,
+        -515.7411,
+        138.88062
+      ],
+      "fixtureAt": [
+        2111.833,
+        -518.2046,
+        62.696186
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal moves 1,866 units away; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "092486:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeWindowNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeWindowNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        1343.8002,
+        -806.37134,
+        54.686935
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "not judged",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "092487:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeWindowNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [],
+      "summary": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeWindowNS to tell which side of a wall it is on (0 of 64 checks hit something); look at it in game.",
+      "reason": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeWindowNS to tell which side of a wall it is on (0 of 64 checks hit something); look at it in game.",
+      "at": [
+        1061.96,
+        -832.97894,
+        74.90942
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "not judged",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "092488:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E007C:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornTable01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        1120.776,
+        -1030.4371,
+        137.36275
+      ],
+      "fixtureAt": [
+        1148.3389,
+        -1049.2773,
+        59.750828
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 62.52417316090456,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "092488:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E007C:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        1120.776,
+        -1030.4371,
+        137.36275
+      ],
+      "fixtureAt": [
+        1148.3389,
+        -1049.2773,
+        59.750828
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "092489:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E0105:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornTable01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        1257.7915,
+        -1030.8074,
+        120.050186
+      ],
+      "fixtureAt": [
+        1240.1162,
+        -1040.6127,
+        59.750835
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 40.93862587700532,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "092489:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E0105:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        1257.7915,
+        -1030.8074,
+        120.050186
+      ],
+      "fixtureAt": [
+        1240.1162,
+        -1040.6127,
+        59.750835
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "09248A:Lux.esp",
+      "subjectEdid": "Lux_NorthSpotClip150",
+      "fixture": "0E012D:Skyrim.esm",
+      "fixtureEdid": "FarmIntInnEnd02",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 sits at FarmIntInnEnd02, which Cities of the North - Morthal disables; the light now glows where nothing burns; 3 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        680.75684,
+        -406.6808,
+        397.12335
+      ],
+      "fixtureAt": [
+        672,
+        -160,
+        0
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 16.818810920603227,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 3,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 sat at FarmIntInnEnd02, which Cities of the North - Morthal disables"
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "not judged",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "09248A:Lux.esp",
+      "subjectEdid": "Lux_NorthSpotClip150",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [],
+      "summary": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 to tell which side of a wall it is on (3 of 64 checks hit something); look at it in game.",
+      "reason": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 to tell which side of a wall it is on (3 of 64 checks hit something); look at it in game.",
+      "at": [
+        680.75684,
+        -406.6808,
+        397.12335
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "not judged",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 3,
+          "none": 61
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "092491:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeWindowColdNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeWindowColdNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        1978.7598,
+        -101.742905,
+        252.31828
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "092492:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E0082:Skyrim.esm",
+      "fixtureEdid": "CandleHornChandelier01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornChandelier01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        1181.1884,
+        512.97437,
+        263.8418
+      ],
+      "fixtureAt": [
+        1183.8955,
+        510.0841,
+        290.4062
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 0,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornChandelier01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "092492:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E0082:Skyrim.esm",
+      "fixtureEdid": "CandleHornChandelier01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        1181.1884,
+        512.97437,
+        263.8418
+      ],
+      "fixtureAt": [
+        1183.8955,
+        510.0841,
+        290.4062
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornChandelier01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "not judged",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "092493:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeWindowColdNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeWindowColdNS to tell which side of a wall it is on (5 of 64 checks hit something); look at it in game.",
+      "reason": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeWindowColdNS to tell which side of a wall it is on (5 of 64 checks hit something); look at it in game.",
+      "at": [
+        1289.2578,
+        661.37665,
+        227.95564
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "not judged",
+        "facing": {
+          "rays": 64,
+          "front": 3,
+          "back": 2,
+          "none": 59
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "BE90EE:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E006C:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornTable01, which Cities of the North - Morthal moves 1,282 units away; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host 1282 u away",
+      "at": [
+        1818.283,
+        185.09116,
+        134.99895
+      ],
+      "fixtureAt": [
+        1779.2676,
+        196.34204,
+        62.595673
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host 1282 u away",
+        "hostKind": "emissive",
+        "distanceOwn": 56.501678716459914,
+        "distanceCombined": 1281.920010057594,
+        "unknown": [],
+        "moved": "fixture",
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal moves 1,282 units away",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "BE90EE:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E006C:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        1818.283,
+        185.09116,
+        134.99895
+      ],
+      "fixtureAt": [
+        1779.2676,
+        196.34204,
+        62.595673
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal moves 1,282 units away; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "BE90EF:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E0119:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornTable01, which Cities of the North - Morthal moves 1,476 units away; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host 1476 u away",
+      "at": [
+        2078.8662,
+        185.09116,
+        134.99895
+      ],
+      "fixtureAt": [
+        2038.9443,
+        196.34204,
+        62.69619
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host 1476 u away",
+        "hostKind": "emissive",
+        "distanceOwn": 56.72264552483775,
+        "distanceCombined": 1475.8828376919153,
+        "unknown": [],
+        "moved": "fixture",
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal moves 1,476 units away",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "BE90EF:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E0119:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        2078.8662,
+        185.09116,
+        134.99895
+      ],
+      "fixtureAt": [
+        2038.9443,
+        196.34204,
+        62.69619
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal moves 1,476 units away; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "BE90F0:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E0102:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornTable01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        1107.2477,
+        710.38824,
+        131.62642
+      ],
+      "fixtureAt": [
+        1078.0482,
+        731.1748,
+        61.68966
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 54.966258549104424,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "BE90F0:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E0102:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        1107.2477,
+        710.38824,
+        131.62642
+      ],
+      "fixtureAt": [
+        1078.0482,
+        731.1748,
+        61.68966
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "BE90F1:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E0103:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornTable01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        1204.5245,
+        365.61932,
+        131.62642
+      ],
+      "fixtureAt": [
+        1218.9891,
+        330.756,
+        61.56247
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 55.008438220127765,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "BE90F1:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E0103:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        1204.5245,
+        365.61932,
+        131.62642
+      ],
+      "fixtureAt": [
+        1218.9891,
+        330.756,
+        61.56247
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "BE90F2:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E011D:Skyrim.esm",
+      "fixtureEdid": "CandleHornWall01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornWall01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        917.85364,
+        -15.933708,
+        214.4971
+      ],
+      "fixtureAt": [
+        928.3994,
+        70.74536,
+        202.29526
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 58.33594371862322,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornWall01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "BE90F2:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E011D:Skyrim.esm",
+      "fixtureEdid": "CandleHornWall01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        917.85364,
+        -15.933708,
+        214.4971
+      ],
+      "fixtureAt": [
+        928.3994,
+        70.74536,
+        202.29526
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornWall01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "BE90F3:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E0125:Skyrim.esm",
+      "fixtureEdid": "CandleHornWall01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornWall01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        916.27435,
+        -300.1863,
+        214.4971
+      ],
+      "fixtureAt": [
+        927.83105,
+        -390.49026,
+        202.29526
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 62.04273550624779,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornWall01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalMoorsideInn",
+      "sceneId": "0138CE:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CE:Skyrim.esm",
+      "cell": "0138CE:Skyrim.esm",
+      "subject": "BE90F3:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E0125:Skyrim.esm",
+      "fixtureEdid": "CandleHornWall01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        916.27435,
+        -300.1863,
+        214.4971
+      ],
+      "fixtureAt": [
+        927.83105,
+        -390.49026,
+        202.29526
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornWall01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalJorgenandLamisHouse",
+      "sceneId": "0138CF:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CF:Skyrim.esm",
+      "cell": "0138CF:Skyrim.esm",
+      "subject": "092469:Lux.esp",
+      "subjectEdid": "Lux_NorthSpotClip150",
+      "fixture": "0E0013:Skyrim.esm",
+      "fixtureEdid": "FarmIntWoodEnd02",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 sits at FarmIntWoodEnd02, which Cities of the North - Morthal disables; the light now glows where nothing burns; 4 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        1180.648,
+        -118.22159,
+        553.50635
+      ],
+      "fixtureAt": [
+        1056,
+        -128,
+        32
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 7.788178113433758,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 4,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 sat at FarmIntWoodEnd02, which Cities of the North - Morthal disables"
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "not judged",
+      "scene": "MorthalJorgenandLamisHouse",
+      "sceneId": "0138CF:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CF:Skyrim.esm",
+      "cell": "0138CF:Skyrim.esm",
+      "subject": "092469:Lux.esp",
+      "subjectEdid": "Lux_NorthSpotClip150",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [],
+      "summary": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 to tell which side of a wall it is on (4 of 64 checks hit something); look at it in game.",
+      "reason": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 to tell which side of a wall it is on (4 of 64 checks hit something); look at it in game.",
+      "at": [
+        1180.648,
+        -118.22159,
+        553.50635
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "not judged",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 4,
+          "none": 60
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalJorgenandLamisHouse",
+      "sceneId": "0138CF:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CF:Skyrim.esm",
+      "cell": "0138CF:Skyrim.esm",
+      "subject": "09246A:Lux.esp",
+      "subjectEdid": "Lux_NorthEmberFireOmni",
+      "fixture": "0E0019:Skyrim.esm",
+      "fixtureEdid": "FireplaceWood01Burning",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni sits at FireplaceWood01Burning, which Cities of the North - Morthal moves 565 units away; the light now glows where nothing burns; 1 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host 565 u away",
+      "at": [
+        803.43164,
+        82.60392,
+        348.77112
+      ],
+      "fixtureAt": [
+        805.58716,
+        91.93542,
+        272.11713
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host 565 u away",
+        "hostKind": "self-lit effect",
+        "distanceOwn": 0,
+        "distanceCombined": 564.6142249137905,
+        "unknown": [],
+        "moved": "fixture",
+        "hits": 1,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni sat at FireplaceWood01Burning, which Cities of the North - Morthal moves 565 units away"
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "not judged",
+      "scene": "MorthalJorgenandLamisHouse",
+      "sceneId": "0138CF:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CF:Skyrim.esm",
+      "cell": "0138CF:Skyrim.esm",
+      "subject": "09246A:Lux.esp",
+      "subjectEdid": "Lux_NorthEmberFireOmni",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni to tell which side of a wall it is on (1 of 64 checks hit something); look at it in game.",
+      "reason": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni to tell which side of a wall it is on (1 of 64 checks hit something); look at it in game.",
+      "at": [
+        803.43164,
+        82.60392,
+        348.77112
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "not judged",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 1,
+          "none": 63
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalJorgenandLamisHouse",
+      "sceneId": "0138CF:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CF:Skyrim.esm",
+      "cell": "0138CF:Skyrim.esm",
+      "subject": "09246B:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlicker",
+      "fixture": "0E0022:Skyrim.esm",
+      "fixtureEdid": "CandleHornFloor01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker sits at CandleHornFloor01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        967.7409,
+        24.34095,
+        432.67673
+      ],
+      "fixtureAt": [
+        932.228,
+        90.148315,
+        271.99976
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 56.92450534605733,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker sat at CandleHornFloor01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalJorgenandLamisHouse",
+      "sceneId": "0138CF:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CF:Skyrim.esm",
+      "cell": "0138CF:Skyrim.esm",
+      "subject": "09246B:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlicker",
+      "fixture": "0E0022:Skyrim.esm",
+      "fixtureEdid": "CandleHornFloor01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        967.7409,
+        24.34095,
+        432.67673
+      ],
+      "fixtureAt": [
+        932.228,
+        90.148315,
+        271.99976
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker sat at CandleHornFloor01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalJorgenandLamisHouse",
+      "sceneId": "0138CF:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CF:Skyrim.esm",
+      "cell": "0138CF:Skyrim.esm",
+      "subject": "09246C:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0DFFE5:Skyrim.esm",
+      "fixtureEdid": "CandleHornChandelier01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornChandelier01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        704.9212,
+        -100.228,
+        548.06744
+      ],
+      "fixtureAt": [
+        669.8628,
+        -129.28857,
+        569.3624
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 0,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornChandelier01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalJorgenandLamisHouse",
+      "sceneId": "0138CF:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CF:Skyrim.esm",
+      "cell": "0138CF:Skyrim.esm",
+      "subject": "09246C:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0DFFE5:Skyrim.esm",
+      "fixtureEdid": "CandleHornChandelier01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        704.9212,
+        -100.228,
+        548.06744
+      ],
+      "fixtureAt": [
+        669.8628,
+        -129.28857,
+        569.3624
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornChandelier01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalJorgenandLamisHouse",
+      "sceneId": "0138CF:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CF:Skyrim.esm",
+      "cell": "0138CF:Skyrim.esm",
+      "subject": "09246E:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E001E:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornTable01, which Cities of the North - Morthal moves 409 units away; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host 409 u away",
+      "at": [
+        491.59717,
+        -13.651962,
+        396.36682
+      ],
+      "fixtureAt": [
+        478.7314,
+        13.930183,
+        334.88773
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host 409 u away",
+        "hostKind": "emissive",
+        "distanceOwn": 43.67305018791255,
+        "distanceCombined": 408.526914701925,
+        "unknown": [],
+        "moved": "fixture",
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal moves 409 units away",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalJorgenandLamisHouse",
+      "sceneId": "0138CF:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CF:Skyrim.esm",
+      "cell": "0138CF:Skyrim.esm",
+      "subject": "09246E:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0E001E:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        491.59717,
+        -13.651962,
+        396.36682
+      ],
+      "fixtureAt": [
+        478.7314,
+        13.930183,
+        334.88773
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal moves 409 units away; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "not judged",
+      "scene": "MorthalJorgenandLamisHouse",
+      "sceneId": "0138CF:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CF:Skyrim.esm",
+      "cell": "0138CF:Skyrim.esm",
+      "subject": "09246F:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeWindowColdNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeWindowColdNS to tell which side of a wall it is on (4 of 64 checks hit something); look at it in game.",
+      "reason": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeWindowColdNS to tell which side of a wall it is on (4 of 64 checks hit something); look at it in game.",
+      "at": [
+        497.08478,
+        -272.027,
+        519.3998
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "not judged",
+        "facing": {
+          "rays": 64,
+          "front": 2,
+          "back": 2,
+          "none": 60
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "not judged",
+      "scene": "MorthalJorgenandLamisHouse",
+      "sceneId": "0138CF:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CF:Skyrim.esm",
+      "cell": "0138CF:Skyrim.esm",
+      "subject": "092472:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [],
+      "summary": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS to tell which side of a wall it is on (0 of 64 checks hit something); look at it in game.",
+      "reason": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS to tell which side of a wall it is on (0 of 64 checks hit something); look at it in game.",
+      "at": [
+        1106.9735,
+        -312.24716,
+        404.59583
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "not judged",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "over-light-limit",
+      "title": "Over the light limit (a count)",
+      "verdict": "cannot tell",
+      "scene": "MorthalJorgenandLamisHouse",
+      "sceneId": "0138CF:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CF:Skyrim.esm",
+      "cell": "0138CF:Skyrim.esm",
+      "subject": "000950:COTN - Morthal.esp",
+      "subjectEdid": "COTN_Morthal05_INT",
+      "shape": 2,
+      "shapeName": "Logs",
+      "subjectMod": {
+        "mod": "Cities of the North - Morthal",
+        "plugin": "COTN - Morthal.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        },
+        {
+          "mod": "Lux (For Compatibility Testing Dev)",
+          "plugin": "Lux.esp"
+        },
+        {
+          "mod": "Skyrim.esm",
+          "plugin": "Skyrim.esm"
+        }
+      ],
+      "summary": "Cannot tell: 8 lights from Cities of the North - Morthal and Lux (For Compatibility Testing Dev) and Skyrim.esm reach Cities of the North - Morthal\u0027s Logs (the game shows at most 7, or 4 with shadows, on one surface). Whether this shows in game is not yet known.",
+      "at": [
+        -141.43994,
+        -97.41684,
+        73.31077
+      ],
+      "readings": {
+        "attribution": "needs both",
+        "count": 8,
+        "shadow": 4,
+        "strict": 4,
+        "reading": "vanilla",
+        "lights": [
+          "000966:COTN - Morthal.esp",
+          "000968:COTN - Morthal.esp",
+          "092462:Lux.esp",
+          "092469:Lux.esp",
+          "09246A:Lux.esp",
+          "09246F:Lux.esp",
+          "0DFFE1:Skyrim.esm",
+          "0E0036:Skyrim.esm"
+        ],
+        "countSingles": {
+          "dependencies": null,
+          "selection": 4,
+          "rest": null
+        }
+      }
+    },
+    {
+      "class": "over-light-limit",
+      "title": "Over the light limit (a count)",
+      "verdict": "cannot tell",
+      "scene": "MorthalJorgenandLamisHouse",
+      "sceneId": "0138CF:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138CF:Skyrim.esm",
+      "cell": "0138CF:Skyrim.esm",
+      "subject": "000950:COTN - Morthal.esp",
+      "subjectEdid": "COTN_Morthal05_INT",
+      "shape": 5,
+      "shapeName": "Frame",
+      "subjectMod": {
+        "mod": "Cities of the North - Morthal",
+        "plugin": "COTN - Morthal.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        },
+        {
+          "mod": "Lux (For Compatibility Testing Dev)",
+          "plugin": "Lux.esp"
+        },
+        {
+          "mod": "Skyrim.esm",
+          "plugin": "Skyrim.esm"
+        }
+      ],
+      "summary": "Cannot tell: 9 lights from Cities of the North - Morthal and Lux (For Compatibility Testing Dev) and Skyrim.esm reach Cities of the North - Morthal\u0027s Frame (the game shows at most 7, or 4 with shadows, on one surface). Whether this shows in game is not yet known.",
+      "at": [
+        -141.43994,
+        -97.41684,
+        73.31077
+      ],
+      "readings": {
+        "attribution": "needs both",
+        "count": 9,
+        "shadow": 4,
+        "strict": 5,
+        "reading": "vanilla",
+        "lights": [
+          "000966:COTN - Morthal.esp",
+          "000968:COTN - Morthal.esp",
+          "092462:Lux.esp",
+          "092469:Lux.esp",
+          "09246A:Lux.esp",
+          "09246E:Lux.esp",
+          "09246F:Lux.esp",
+          "0DFFE1:Skyrim.esm",
+          "0E0036:Skyrim.esm"
+        ],
+        "countSingles": {
+          "dependencies": null,
+          "selection": 4,
+          "rest": null
+        }
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalFalionsHouse",
+      "sceneId": "0138D0:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138D0:Skyrim.esm",
+      "cell": "0138D0:Skyrim.esm",
+      "subject": "08D246:Lux.esp",
+      "subjectEdid": "Lux_NorthEmberFireOmni",
+      "fixture": "0DFD40:Skyrim.esm",
+      "fixtureEdid": "FireplaceWood01Burning",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni sits at FireplaceWood01Burning, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        1115.7418,
+        100.01149,
+        341.9172
+      ],
+      "fixtureAt": [
+        1123.6573,
+        120.8953,
+        272.11713
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "self-lit effect",
+        "distanceOwn": 0,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni sat at FireplaceWood01Burning, which Cities of the North - Morthal disables"
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "not judged",
+      "scene": "MorthalFalionsHouse",
+      "sceneId": "0138D0:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138D0:Skyrim.esm",
+      "cell": "0138D0:Skyrim.esm",
+      "subject": "08D246:Lux.esp",
+      "subjectEdid": "Lux_NorthEmberFireOmni",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [],
+      "summary": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni to tell which side of a wall it is on (0 of 64 checks hit something); look at it in game.",
+      "reason": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni to tell which side of a wall it is on (0 of 64 checks hit something); look at it in game.",
+      "at": [
+        1115.7418,
+        100.01149,
+        341.9172
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "not judged",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalFalionsHouse",
+      "sceneId": "0138D0:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138D0:Skyrim.esm",
+      "cell": "0138D0:Skyrim.esm",
+      "subject": "08D247:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0DFD0E:Skyrim.esm",
+      "fixtureEdid": "CandleHornChandelier01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornChandelier01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        1009.83545,
+        -73.68326,
+        543.1643
+      ],
+      "fixtureAt": [
+        989.8628,
+        -97.288574,
+        569.3624
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 0,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornChandelier01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalFalionsHouse",
+      "sceneId": "0138D0:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138D0:Skyrim.esm",
+      "cell": "0138D0:Skyrim.esm",
+      "subject": "08D247:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0DFD0E:Skyrim.esm",
+      "fixtureEdid": "CandleHornChandelier01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        1009.83545,
+        -73.68326,
+        543.1643
+      ],
+      "fixtureAt": [
+        989.8628,
+        -97.288574,
+        569.3624
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornChandelier01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalFalionsHouse",
+      "sceneId": "0138D0:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138D0:Skyrim.esm",
+      "cell": "0138D0:Skyrim.esm",
+      "subject": "08D251:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlicker",
+      "fixture": "0DFD49:Skyrim.esm",
+      "fixtureEdid": "CandleHornFloor01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker sits at CandleHornFloor01, which Cities of the North - Morthal moves 1,669 units away; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host 1669 u away",
+      "at": [
+        561.178,
+        17.331861,
+        424.22067
+      ],
+      "fixtureAt": [
+        509.83102,
+        4.2559166,
+        271.99976
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host 1669 u away",
+        "hostKind": "emissive",
+        "distanceOwn": 32.125748797369724,
+        "distanceCombined": 1669.3779239907121,
+        "unknown": [],
+        "moved": "fixture",
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker sat at CandleHornFloor01, which Cities of the North - Morthal moves 1,669 units away",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalFalionsHouse",
+      "sceneId": "0138D0:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138D0:Skyrim.esm",
+      "cell": "0138D0:Skyrim.esm",
+      "subject": "08D251:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlicker",
+      "fixture": "0DFD49:Skyrim.esm",
+      "fixtureEdid": "CandleHornFloor01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        561.178,
+        17.331861,
+        424.22067
+      ],
+      "fixtureAt": [
+        509.83102,
+        4.2559166,
+        271.99976
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker sat at CandleHornFloor01, which Cities of the North - Morthal moves 1,669 units away; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalFalionsHouse",
+      "sceneId": "0138D0:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138D0:Skyrim.esm",
+      "cell": "0138D0:Skyrim.esm",
+      "subject": "08D252:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0DFD45:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornTable01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        855.1962,
+        88.97114,
+        400.61328
+      ],
+      "fixtureAt": [
+        826.4851,
+        130.78181,
+        334.88773
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 56.285656229748994,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalFalionsHouse",
+      "sceneId": "0138D0:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138D0:Skyrim.esm",
+      "cell": "0138D0:Skyrim.esm",
+      "subject": "08D252:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0DFD45:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        855.1962,
+        88.97114,
+        400.61328
+      ],
+      "fixtureAt": [
+        826.4851,
+        130.78181,
+        334.88773
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornTable01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalFalionsHouse",
+      "sceneId": "0138D0:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138D0:Skyrim.esm",
+      "cell": "0138D0:Skyrim.esm",
+      "subject": "08D253:Lux.esp",
+      "subjectEdid": "Lux_NorthSpotClip150",
+      "fixture": "0DFD39:Skyrim.esm",
+      "fixtureEdid": "FarmIntWoodEnd02",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 sits at FarmIntWoodEnd02, which Cities of the North - Morthal disables; the light now glows where nothing burns; 19 of 64 checks from the light hit a surface.",
+      "reason": "host removed or disabled",
+      "at": [
+        1493.216,
+        -81.97581,
+        526.4241
+      ],
+      "fixtureAt": [
+        1376,
+        -96,
+        32
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 13.7840576171875,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 19,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 sat at FarmIntWoodEnd02, which Cities of the North - Morthal disables"
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "listed",
+      "scene": "MorthalFalionsHouse",
+      "sceneId": "0138D0:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138D0:Skyrim.esm",
+      "cell": "0138D0:Skyrim.esm",
+      "subject": "08D253:Lux.esp",
+      "subjectEdid": "Lux_NorthSpotClip150",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 now sits behind Cities of the North - Morthal\u0027s wall: most of what it reaches is the back of a surface (12 of 19 hits). It casts shadows, which may hide it.",
+      "at": [
+        1493.216,
+        -81.97581,
+        526.4241
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 7,
+          "back": 12,
+          "none": 45
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalFalionsHouse",
+      "sceneId": "0138D0:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138D0:Skyrim.esm",
+      "cell": "0138D0:Skyrim.esm",
+      "subject": "08D254:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        849.03644,
+        -298.81943,
+        419.44318
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalFalionsHouse",
+      "sceneId": "0138D0:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138D0:Skyrim.esm",
+      "cell": "0138D0:Skyrim.esm",
+      "subject": "08D255:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0DFD60:Skyrim.esm",
+      "fixtureEdid": "CandleHornFloor01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornFloor01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        653.3244,
+        -260.4576,
+        454.74527
+      ],
+      "fixtureAt": [
+        644.2911,
+        -324.12186,
+        271.99976
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 61.9960447579321,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornFloor01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalFalionsHouse",
+      "sceneId": "0138D0:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138D0:Skyrim.esm",
+      "cell": "0138D0:Skyrim.esm",
+      "subject": "08D255:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0DFD60:Skyrim.esm",
+      "fixtureEdid": "CandleHornFloor01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        653.3244,
+        -260.4576,
+        454.74527
+      ],
+      "fixtureAt": [
+        644.2911,
+        -324.12186,
+        271.99976
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornFloor01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalFalionsHouse",
+      "sceneId": "0138D0:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138D0:Skyrim.esm",
+      "cell": "0138D0:Skyrim.esm",
+      "subject": "08D256:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeWindowColdNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeWindowColdNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        554.10596,
+        18.189117,
+        533.786
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalAlvasHouse",
+      "sceneId": "0138E1:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138E1:Skyrim.esm",
+      "cell": "0138E1:Skyrim.esm",
+      "subject": "08D233:Lux.esp",
+      "subjectEdid": "Lux_NorthEmberFireOmni",
+      "fixture": "0DFDAE:Skyrim.esm",
+      "fixtureEdid": "FireplaceWood01Burning",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni sits at FireplaceWood01Burning, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        1119.2708,
+        117.31109,
+        333.74036
+      ],
+      "fixtureAt": [
+        1127.5708,
+        124.57513,
+        271.3683
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "self-lit effect",
+        "distanceOwn": 0,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni sat at FireplaceWood01Burning, which Cities of the North - Morthal disables"
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "not judged",
+      "scene": "MorthalAlvasHouse",
+      "sceneId": "0138E1:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138E1:Skyrim.esm",
+      "cell": "0138E1:Skyrim.esm",
+      "subject": "08D233:Lux.esp",
+      "subjectEdid": "Lux_NorthEmberFireOmni",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [],
+      "summary": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni to tell which side of a wall it is on (0 of 64 checks hit something); look at it in game.",
+      "reason": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthEmberFireOmni to tell which side of a wall it is on (0 of 64 checks hit something); look at it in game.",
+      "at": [
+        1119.2708,
+        117.31109,
+        333.74036
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "not judged",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalAlvasHouse",
+      "sceneId": "0138E1:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138E1:Skyrim.esm",
+      "cell": "0138E1:Skyrim.esm",
+      "subject": "08D23B:Lux.esp",
+      "subjectEdid": "Lux_NorthSpotClip150",
+      "fixture": "0DFDA8:Skyrim.esm",
+      "fixtureEdid": "FarmIntWoodEnd02",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 sits at FarmIntWoodEnd02, which Cities of the North - Morthal disables; the light now glows where nothing burns; 6 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        1472.5319,
+        -86.31681,
+        547.51587
+      ],
+      "fixtureAt": [
+        1376,
+        -96,
+        32
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 34.4681396484375,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 6,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 sat at FarmIntWoodEnd02, which Cities of the North - Morthal disables"
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "not judged",
+      "scene": "MorthalAlvasHouse",
+      "sceneId": "0138E1:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138E1:Skyrim.esm",
+      "cell": "0138E1:Skyrim.esm",
+      "subject": "08D23B:Lux.esp",
+      "subjectEdid": "Lux_NorthSpotClip150",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [],
+      "summary": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 to tell which side of a wall it is on (6 of 64 checks hit something); look at it in game.",
+      "reason": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthSpotClip150 to tell which side of a wall it is on (6 of 64 checks hit something); look at it in game.",
+      "at": [
+        1472.5319,
+        -86.31681,
+        547.51587
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "not judged",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 6,
+          "none": 58
+        },
+        "incomplete": []
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalAlvasHouse",
+      "sceneId": "0138E1:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138E1:Skyrim.esm",
+      "cell": "0138E1:Skyrim.esm",
+      "subject": "08D23C:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0DFD88:Skyrim.esm",
+      "fixtureEdid": "CandleHornChandelier01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sits at CandleHornChandelier01, which Cities of the North - Morthal disables; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host removed or disabled",
+      "at": [
+        1010.44525,
+        -70.13597,
+        533.71063
+      ],
+      "fixtureAt": [
+        989.8628,
+        -97.288574,
+        569.3624
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host removed or disabled",
+        "hostKind": "emissive",
+        "distanceOwn": 6.66229248046875,
+        "distanceCombined": null,
+        "unknown": [],
+        "moved": null,
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornChandelier01, which Cities of the North - Morthal disables",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalAlvasHouse",
+      "sceneId": "0138E1:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138E1:Skyrim.esm",
+      "cell": "0138E1:Skyrim.esm",
+      "subject": "08D23C:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "fixture": "0DFD88:Skyrim.esm",
+      "fixtureEdid": "CandleHornChandelier01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        1010.44525,
+        -70.13597,
+        533.71063
+      ],
+      "fixtureAt": [
+        989.8628,
+        -97.288574,
+        569.3624
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS sat at CandleHornChandelier01, which Cities of the North - Morthal disables; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-no-fixture",
+      "title": "A light left with no fixture",
+      "verdict": "listed",
+      "scene": "MorthalAlvasHouse",
+      "sceneId": "0138E1:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138E1:Skyrim.esm",
+      "cell": "0138E1:Skyrim.esm",
+      "subject": "08D23D:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlicker",
+      "fixture": "0DFDA5:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker sits at CandleHornTable01, which Cities of the North - Morthal moves 1,075 units away; the light now glows where nothing burns; 0 of 64 checks from the light hit a surface; it reaches very little.",
+      "reason": "host 1075 u away",
+      "at": [
+        867.3366,
+        -293.79657,
+        383.10983
+      ],
+      "fixtureAt": [
+        922.48364,
+        -299.36768,
+        334.4739
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "label": "host 1075 u away",
+        "hostKind": "emissive",
+        "distanceOwn": 45.4469169892671,
+        "distanceCombined": 1075.2723073165175,
+        "unknown": [],
+        "moved": "fixture",
+        "hits": 0,
+        "fixtureClause": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker sat at CandleHornTable01, which Cities of the North - Morthal moves 1,075 units away",
+        "alsoLightsNothing": true
+      }
+    },
+    {
+      "class": "light-lights-nothing",
+      "title": "A light that lights nothing",
+      "verdict": "listed",
+      "scene": "MorthalAlvasHouse",
+      "sceneId": "0138E1:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138E1:Skyrim.esm",
+      "cell": "0138E1:Skyrim.esm",
+      "subject": "08D23D:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlicker",
+      "fixture": "0DFDA5:Skyrim.esm",
+      "fixtureEdid": "CandleHornTable01",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [
+        {
+          "mod": "Cities of the North - Morthal",
+          "plugin": "COTN - Morthal.esp"
+        }
+      ],
+      "summary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker lights nothing with Cities of the North - Morthal installed: no surface is in its reach. Harmless to look at; safe to disable.",
+      "at": [
+        867.3366,
+        -293.79657,
+        383.10983
+      ],
+      "fixtureAt": [
+        922.48364,
+        -299.36768,
+        334.4739
+      ],
+      "shadow": true,
+      "readings": {
+        "attribution": "needs both",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "lit": 0,
+        "leak": 0,
+        "strandedSummary": "Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlicker sat at CandleHornTable01, which Cities of the North - Morthal moves 1,075 units away; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+        "strandedOtherMods": [
+          {
+            "mod": "Cities of the North - Morthal",
+            "plugin": "COTN - Morthal.esp"
+          }
+        ]
+      }
+    },
+    {
+      "class": "light-behind-wall",
+      "title": "A light behind a wall",
+      "verdict": "not judged",
+      "scene": "MorthalAlvasHouse",
+      "sceneId": "0138E1:Skyrim.esm",
+      "kind": "interior",
+      "space": "0138E1:Skyrim.esm",
+      "cell": "0138E1:Skyrim.esm",
+      "subject": "08D241:Lux.esp",
+      "subjectEdid": "Lux_NorthFakeFlickerNS",
+      "subjectMod": {
+        "mod": "Lux (For Compatibility Testing Dev)",
+        "plugin": "Lux.esp"
+      },
+      "otherMods": [],
+      "summary": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS to tell which side of a wall it is on (0 of 64 checks hit something); look at it in game.",
+      "reason": "Not judged: too few surfaces around Lux (For Compatibility Testing Dev)\u0027s light Lux_NorthFakeFlickerNS to tell which side of a wall it is on (0 of 64 checks hit something); look at it in game.",
+      "at": [
+        542.6775,
+        -3.226416,
+        412.74545
+      ],
+      "shadow": false,
+      "readings": {
+        "attribution": "not judged",
+        "facing": {
+          "rays": 64,
+          "front": 0,
+          "back": 0,
+          "none": 64
+        },
+        "incomplete": []
+      }
+    }
+  ],
+  "cost": {
+    "seconds": 119.33,
+    "arrangements": [
+      {
+        "role": "combined",
+        "plugins": 85,
+        "indexSeconds": 17.96,
+        "lightBasesSeconds": 0.04,
+        "basesSeconds": 4.05,
+        "scenesSeconds": 17.75,
+        "modelReads": 1218,
+        "modelCacheHits": 0,
+        "totalSeconds": 41.56
+      },
+      {
+        "role": "dependencies",
+        "plugins": 10,
+        "indexSeconds": 12.08,
+        "lightBasesSeconds": 0,
+        "basesSeconds": 2.23,
+        "scenesSeconds": 6.46,
+        "modelReads": 64,
+        "modelCacheHits": 944,
+        "totalSeconds": 21.95
+      },
+      {
+        "role": "selection",
+        "plugins": 11,
+        "indexSeconds": 11.58,
+        "lightBasesSeconds": 0,
+        "basesSeconds": 2.32,
+        "scenesSeconds": 10.38,
+        "modelReads": 0,
+        "modelCacheHits": 1186,
+        "totalSeconds": 25.27
+      },
+      {
+        "role": "rest",
+        "plugins": 84,
+        "indexSeconds": 12.98,
+        "lightBasesSeconds": 0,
+        "basesSeconds": 3.45,
+        "scenesSeconds": 12.12,
+        "modelReads": 0,
+        "modelCacheHits": 1036,
+        "totalSeconds": 29.76
+      }
+    ],
+    "modelReads": 1282,
+    "modelCacheHits": 3166,
+    "cacheBudgetMb": 15758,
+    "cachePeakMb": 29,
+    "cacheEmptied": 0,
+    "lean": false,
+    "usableMemoryMb": 63033,
+    "peakWorkingSetMb": 3980,
+    "largestPrivateMb": 3768
+  }
+}

@@ -61,6 +61,10 @@ public static class GenericRows
     /// <summary>runcontrol's own placeholders beyond the plain substitutions; a caller's entry of the same token wins.</summary>
     public static readonly IReadOnlyDictionary<string, Placeholder> OwnPlaceholders = new Dictionary<string, Placeholder>(StringComparer.Ordinal)
     {
+        // the lighting check's arrangements besides the row's own order (LightingArrangements: runcontrol owns the lists)
+        ["{dependencies}"] = LightingArrangements.Fill("dependencies"),
+        ["{selection}"] = LightingArrangements.Fill("selection"),
+        ["{rest}"] = LightingArrangements.Fill("rest"),
     };
 
     /// <summary>runcontrol's own rules over a built command line (each may add to it, or refuse the row with a status
@@ -73,7 +77,7 @@ public static class GenericRows
     public delegate List<string>? OutputsRule(PyDict plan, PyDict check, List<string> argv, string outDir);
 
     /// <summary>runcontrol's own output rules, asked after a caller's.</summary>
-    public static readonly IReadOnlyList<OutputsRule> OwnOutputRules = [];
+    public static readonly IReadOnlyList<OutputsRule> OwnOutputRules = [LightingArrangements.Outputs];
 
 
     public static void Build(Executor ex, PyDict check, PyDict arm, Action<List<string>, List<string>, object?> launch,
