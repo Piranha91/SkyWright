@@ -60,6 +60,8 @@ if (cfg.Refused) { Console.Error.WriteLine(cfg.RefusedReason); return 2; }
 HarnessOrderCli.Print(cfg);
 
 HashSet<string>? selPlugins = null, selMods = null;
+// the emit's population: the load-time state, scoped by the population file when one is given (PopulationRules owns the name)
+string population = "load-time";
 if (populationPath is not null)
 {
     try
@@ -69,6 +71,7 @@ if (populationPath is not null)
             ? arr.EnumerateArray().Select(x => x.GetProperty("name").GetString() ?? "") : Enumerable.Empty<string>();
         selPlugins = Names("plugins").ToHashSet(StringComparer.OrdinalIgnoreCase);
         selMods = Names("mods").ToHashSet(StringComparer.OrdinalIgnoreCase);
+        population = PopulationRules.Identity(population, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(populationPath))));
     }
     catch (Exception ex) when (ex is IOException or JsonException or KeyNotFoundException or InvalidOperationException)
     { Console.Error.WriteLine($"recordprobe: the population file {populationPath} could not be read ({ex.Message}); plan the scan again."); return 2; }
@@ -107,6 +110,6 @@ foreach (var c in result.Coverage)
     foreach (var (why, n) in c.Unjudgeable ?? new Dictionary<string, long>()) Console.WriteLine($"   {n,8:N0}  not judged: {why}");
 }
 ConflictIo.Write(emitPath, new ConflictFile("recordprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), result.Rows, result.Coverage,
-    null, null, "load-time", "baseline", cfg.Identity("load-time", "baseline")));
+    null, null, population, "baseline", cfg.Identity(population, "baseline")));
 Console.WriteLine($"wrote {result.Rows.Count:N0} row(s) -> {emitPath}; elapsed {sw.Elapsed.TotalSeconds:0.0} s");
 return 0;

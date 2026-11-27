@@ -25,6 +25,7 @@
     <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
     <Compile Include="..\_shared\EnablePopulation.cs" Link="EnablePopulation.cs" />
     <Compile Include="..\_shared\BaseGamePlugins.cs" Link="BaseGamePlugins.cs" />
+    <Compile Include="..\_shared\PopulationRules.cs" Link="PopulationRules.cs" />
     <Compile Include="..\_shared\HousecarlCalls.cs" Link="HousecarlCalls.cs" />
     <Compile Include="..\_shared\HousecarlRulebook.cs" Link="HousecarlRulebook.cs" />
     <Compile Include="..\_shared\CheckoutLayout.cs" Link="CheckoutLayout.cs" />
