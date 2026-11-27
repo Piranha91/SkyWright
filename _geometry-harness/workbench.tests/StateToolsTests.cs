@@ -17,7 +17,8 @@ namespace WorkbenchTests;
 /// <c>HttpClientTransport</c>) calling <c>workbench_state</c> and <c>workbench_act</c>. The scene behind them is a real
 /// <see cref="EditSession"/> over a one-reference scene; the shell and the host's write and re-check are stand-ins that
 /// record what they were asked (the window's own write and re-check are exercised by the end-to-end run).</summary>
-[Trait("tier", "integration")]
+// in the Shell collection, which runs alone: M7n sets the process-wide WB_RUNCONTROL, which a parallel BundleTests case read
+[Collection("Shell"), Trait("tier", "integration")]
 public sealed class StateToolsTests : IAsyncLifetime
 {
     sealed class FakeScene : IWorkbenchScene
