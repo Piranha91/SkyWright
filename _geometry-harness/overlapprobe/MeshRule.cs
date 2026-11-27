@@ -452,7 +452,8 @@ sealed class MeshRule
                                                 default, null, null, _results), null);
     }
 
-    /// <summary>The coverage line: what the rule judged and read, and the scope in a sentence.</summary>
+    /// <summary>The coverage line: what the rule judged and read, and the scope in a sentence. No timing: the emit is the
+    /// same for the same inputs, so a --reverse-of emit can equal the full reverse's (its timings are printed instead).</summary>
     public CoverageLine Coverage()
     {
         long Count(MeshShape s) => Owners.Answered.Count(o => o.Shape == s);
@@ -469,6 +470,6 @@ sealed class MeshRule
                 ["TouchingNotCredited"] = TouchingNotCredited, ["MeshUnknownJudgedByPluginRule"] = UnknownJudgedByPluginRule,
             },
             $"credited: {Scope}; {Count(MeshShape.Credited):N0} model path(s) a credited folder reshapes; {Targets.Count:N0} target reference(s), "
-          + $"{Partners:N0} base-game partner(s) readmitted; readmission {ReadmitSeconds:0.0}s, counterfactuals {JudgeSeconds:0.0}s");
+          + $"{Partners:N0} base-game partner(s) readmitted");
     }
 }
