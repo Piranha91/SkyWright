@@ -70,7 +70,10 @@ internal static class HarnessSuitesGuard
         },
         // the probes: SkyWright's, and the houseCARL integration module's (lookprobe), each run from its own build
         ProbeRoots: new[] { "_geometry-harness", "integration/housecarl" },
-        Alone: Array.Empty<(string, string)>());
+        Alone: new[]
+        {
+            ("_geometry-harness/tests/test_contact_memory_route.py", "its case CR-16 needs the unlimited contactprobe run to take the fast memory route, which the probe takes only while the machine's free physical memory covers the fast route's need; a runner beside it that holds memory turns that run lean and the case red"),
+        });
 
     public static int RunGuard(string[] args)
     {
