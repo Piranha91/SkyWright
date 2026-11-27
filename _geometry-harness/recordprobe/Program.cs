@@ -13,10 +13,13 @@ using SkyWright.Engine;
 // emit's coverage under its reason, never a row; a read houseCARL marks incomplete is "not judged", or the check refuses.
 //
 // usage: recordprobe --self-test
-//        recordprobe --check ID [--order CANDIDATE.json] --emit OUT.json [--population FILE] --instance DIR --profile NAME --game DIR
-//   --check       the registry id: loadability.dangling-references
+//        recordprobe --check ID [--order CANDIDATE.json] --emit OUT.json [--population FILE] [--instrument] --instance DIR --profile NAME --game DIR
+//   --check       the registry id: loadability.dangling-references, records.contested-fields, records.cell-attributes
+//   --instrument  the lost-edit checks only: the earlier Python capture's rule (the selection's plugins as the only losers,
+//                 each against the plugin beneath it, no between-mods clause), a known answer; never in the registry, never a scan
 //   --population  the plan's population file: its plugins and mod folders are the selection; without it every plugin is
-//   --emit        the conflict file; beside it OUT.json.view\ (the order as houseCARL reads it) and OUT.json.housecarl\
+//   --emit        the conflict file; beside it OUT.json.view\ (the order as houseCARL reads it), OUT.json.housecarl\ and, for
+//                 a check that has them, OUT.json.rows.json (each row's values in full)
 
 using var __run = RunLog.BeginProcess("recordprobe", args);
 if (args.Length == 1 && args[0] == "--self-test") return RecordSelfTest.Run();
@@ -25,6 +28,7 @@ if (args.Length == 2 && args[0] == "--write-self-test-emit") return RecordSelfTe
 
 string Instance = HarnessTarget.Instance, GamePath = HarnessTarget.Game, profileName = HarnessTarget.Profile;
 string? check = null, orderFile = null, emitPath = null, populationPath = null;
+bool instrument = false;
 for (int i = 0; i < args.Length; i++)
 {
     string a = args[i];
@@ -40,6 +44,7 @@ for (int i = 0; i < args.Length; i++)
             case "--order": orderFile = Next(); break;
             case "--emit": emitPath = Next(); break;
             case "--population": populationPath = Next(); break;
+            case "--instrument": instrument = true; break;
             default: Console.Error.WriteLine($"recordprobe: unknown argument {a}; see the usage at the top of Program.cs."); return 2;
         }
     }
@@ -47,6 +52,8 @@ for (int i = 0; i < args.Length; i++)
 }
 if (check is null || !RecordChecks.ById.TryGetValue(check, out var run))
 { Console.Error.WriteLine($"recordprobe: --check must name one of {string.Join(", ", RecordChecks.ById.Keys)}; name the check to run."); return 2; }
+if (instrument && check is not (LostEditCheck.FieldsId or LostEditCheck.CellsId))
+{ Console.Error.WriteLine($"recordprobe: --instrument is a mode of {LostEditCheck.FieldsId} and {LostEditCheck.CellsId} only; drop it or name one of them."); return 2; }
 if (emitPath is null) { Console.Error.WriteLine("recordprobe: no --emit OUT.json was given, so the rows would go nowhere; name the file to write."); return 2; }
 Instance = HarnessTarget.Require(Instance, "MO2 instance directory", "instance", "--instance");
 GamePath = HarnessTarget.Require(GamePath, "game directory", "game", "--game");
@@ -80,9 +87,9 @@ var order = cfg.OrderedPaths.Select(p =>
 {
     string name = Path.GetFileName(p), mod = RecordClashRule.ModOf(p, modsDir);
     bool selected = selPlugins is null || selPlugins.Contains(name) || (selMods?.Contains(RecordClashRule.ModName(mod)) == true && mod.StartsWith("folder:", StringComparison.Ordinal));
-    return new OrderPlugin(name, mod, RecordChecks.IsGameFile(name), selected);
+    return new OrderPlugin(name, mod, RecordChecks.IsGameFile(name), selected, PluginHeader.TryRead(p)?.Masters);
 }).ToList();
-Console.WriteLine($"recordprobe: {check}; {order.Count} plugins, {order.Count(p => p.Selected)} in the selection");
+Console.WriteLine($"recordprobe: {check}; {order.Count} plugins, {order.Count(p => p.Selected)} in the selection{(instrument ? "; INSTRUMENT mode (a known answer, not a scan)" : "")}");
 
 // the order as houseCARL reads it: plugins.txt, loadorder.txt and modlist.txt of this configuration, the profile's INIs
 string view = emitPath + ".view", hcData = emitPath + ".housecarl";
@@ -98,7 +105,7 @@ CheckResult result;
 try
 {
     using var svc = HousecarlCalls.Open(dataDir, modsDir, view, hcData, CorpusRulebook.CorpusPath);
-    result = run(new RecordContext((tool, a) => HousecarlCalls.Invoke(svc, tool, a), order));
+    result = run(new RecordContext((tool, a) => HousecarlCalls.Invoke(svc, tool, a), order, instrument));
 }
 catch (CheckRefused ex) { Console.Error.WriteLine($"recordprobe: {ex.Message}"); return 2; }
 try { Directory.Delete(Path.Combine(hcData, "results"), true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
@@ -111,5 +118,8 @@ foreach (var c in result.Coverage)
 }
 ConflictIo.Write(emitPath, new ConflictFile("recordprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), result.Rows, result.Coverage,
     null, null, population, "baseline", cfg.Identity(population, "baseline")));
+if (result.Detail is not null)
+    File.WriteAllText(emitPath + ".rows.json", JsonSerializer.Serialize(result.Detail, new JsonSerializerOptions { WriteIndented = true }));
+Console.WriteLine($"recordprobe: peak working set {Process.GetCurrentProcess().PeakWorkingSet64 / (1024 * 1024):N0} MB");
 Console.WriteLine($"wrote {result.Rows.Count:N0} row(s) -> {emitPath}; elapsed {sw.Elapsed.TotalSeconds:0.0} s");
 return 0;

@@ -6,16 +6,19 @@ using SkyWright.Engine;
 
 /// <summary>One plugin of the order as the record checks see it: its name, its mod (RecordClashRule.ModOf), whether it is
 /// one of the game's own files, and whether it is in the selection the scan judges.</summary>
-sealed record OrderPlugin(string Name, string Mod, bool GameFile, bool Selected);
+sealed record OrderPlugin(string Name, string Mod, bool GameFile, bool Selected, IReadOnlyList<string>? Masters = null);
 
 /// <summary>A check that cannot give a result: one sentence, what went wrong and what to try. Nothing is written.</summary>
 sealed class CheckRefused(string message) : Exception(message);
 
-/// <summary>What a check reads with: houseCARL's tools in process, and the order.</summary>
-sealed record RecordContext(Func<string, IReadOnlyDictionary<string, object?>, string> Call, IReadOnlyList<OrderPlugin> Order);
+/// <summary>What a check reads with: houseCARL's tools in process, and the order (each plugin's masters as its header
+/// names them, null when the header could not be read). <paramref name="Instrument"/>: the lost-edit checks' known-answer
+/// mode (LostEditCheck), never a scan.</summary>
+sealed record RecordContext(Func<string, IReadOnlyDictionary<string, object?>, string> Call, IReadOnlyList<OrderPlugin> Order, bool Instrument = false);
 
-/// <summary>A check's result: its rows and its coverage, in the conflict file's shape.</summary>
-sealed record CheckResult(IReadOnlyList<Conflict> Rows, IReadOnlyList<CoverageLine> Coverage);
+/// <summary>A check's result: its rows and its coverage, in the conflict file's shape, and each row's values in full
+/// (written beside the emit as OUT.json.rows.json; null when the check has none).</summary>
+sealed record CheckResult(IReadOnlyList<Conflict> Rows, IReadOnlyList<CoverageLine> Coverage, IReadOnlyList<object>? Detail = null);
 
 /// <summary>The record checks this program runs, by registry id. A check is one function of the context; each runs in its
 /// own process (one registry row, one child), so a crash stays in one check.</summary>
@@ -25,6 +28,8 @@ static class RecordChecks
         new Dictionary<string, Func<RecordContext, CheckResult>>(StringComparer.Ordinal)
         {
             [DanglingCheck.Id] = DanglingCheck.Run,
+            [LostEditCheck.FieldsId] = LostEditCheck.Fields,
+            [LostEditCheck.CellsId] = LostEditCheck.Cells,
         };
 
     /// <summary>A plugin is one of the game's own files: Bethesda's or Creation Club's (BaseGamePlugins owns the names).</summary>

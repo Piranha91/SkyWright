@@ -52,4 +52,18 @@ public static class RecordClashRule
         if (string.Equals(holder.Mod, target.Mod, StringComparison.OrdinalIgnoreCase)) return new(false, SameMod);
         return new(true, BetweenMods);
     }
+
+    public const string GameFileSide = "one of the two is the game's own file";
+    public const string SameModEdit = "both are plugins of one mod: one mod's own business";
+    public const string MadeWith = "the winner was made with the plugin it overrides, so its value is the later one by design";
+
+    /// <summary>STUB (unit 2, the red point): every pair is between two mods.</summary>
+    public static RecordVerdict LostEdit(LinkEnd loser, LinkEnd winner, bool winnerMadeWithLoser) => new(true, BetweenMods);
+
+    /// <summary>STUB (unit 2, the red point): the direct masters only.</summary>
+    public static (IReadOnlySet<string> Closure, bool Blind) Masters(string plugin, Func<string, IReadOnlyList<string>?> direct)
+    {
+        var d = direct(plugin);
+        return (new HashSet<string>(d ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase), false);
+    }
 }
