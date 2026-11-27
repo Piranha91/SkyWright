@@ -1788,7 +1788,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                                        _window?.Dispatcher.BeginInvoke(() => Say("trial re-check: " + s)); },
             moved: contact ? new[] { key } : null, ct: ct), ct);
         var un = Path.Combine(work, "unpatched.json"); var pa = Path.Combine(work, "patched.json");
-        return new TrialRecheck(r, ClearRule.OthersOfRef(un, pa, r.Row.Id, key), ClearRule.StillHolding(pa, key), population, r.ContactNew);
+        return new TrialRecheck(r, ClearRule.OthersOfRef(un, pa, r.Row.Id, key), ClearRule.StillHolding(pa, key), population, r.ContactNew,
+                                contact ? NudgeProofRule.HeldPairs(un, key) : null);
     }
 
     // ---- Gate C: nudge one object -----------------------------------------------------------------------------------
@@ -1865,9 +1866,12 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 if (NudgeRule.OneFix(_session, key) is { } changed) return "nothing is staged: " + changed;
                 _session.Stage(key, pose, staged);
                 AfterStage();
-                return $"staged: nudge {name ?? key.ToString()} {staged}" + (note is null ? "" : " " + note);
+                Say($"staged: nudge {name ?? key.ToString()} {staged}" + (note is null ? "" : " " + note));
+                return $"staged: nudge {name ?? key.ToString()} {staged}";
             }),
-            s => _window?.Dispatcher.BeginInvoke(() => { Say(s); Shell.SetBanner(s); }));
+            s => _window?.Dispatcher.BeginInvoke(() => { Say(s); Shell.SetBanner(s); }),
+            k => FormKey.TryFactory(k, out var fk) ? $"{(_session.IsDrawn(fk) ? _session.RefOf(fk).Ref.BaseEditorId ?? k : k)} ({fk.ModKey.FileName})" : k,
+            s => _window?.Dispatcher.BeginInvoke(() => Say(s)));
         _nudge = lane; _nudgeStop = stop; _nudgeKey = key; _nudgeSaid = null;
         async Task<string> Go()
         {

@@ -108,14 +108,108 @@ public sealed class NudgeTests : IClassFixture<DisableWorld>
     [Fact]
     public async Task A_crossing_already_there_before_the_move_does_not_block_the_proof_and_the_note_says_it()
     {
-        var f = new Fakes
-        {
-            ProofOf = _ => Proof("resolved") with { StillHolding = new[] { "001FBB:JKs Skyrim.esp / 000B5C:Ultimate Markarth.esp: holds (actual render surfaces: crossing)" } },
-        };
+        var f = new Fakes { ProofOf = _ => Old(still: true) };
         var said = await Run(f.Lane());
         Assert.True(f.Proved.Count == 1 && f.Staged.Count == 1, $"a proof whose only remaining row was there before the move was not taken ({said})");
         Assert.Contains("000B5C:Ultimate Markarth.esp", f.Staged[0].Note);
         Assert.Contains("walking routes not checked", f.Staged[0].Note);
+    }
+
+    // ---- round 1, C1: "resolved here, but" confirms only what was there before the move --------------------------------
+    const string Sack = "001FBB:JKs Skyrim.esp", Third = "000B5C:Ultimate Markarth.esp";
+    static readonly string Pair = "000b5c:ultimate markarth.esp|001fbb:jks skyrim.esp";
+    static readonly string OtherRowId = "overlap|000b5c:ultimate markarth.esp|001fbb:jks skyrim.esp";
+
+    /// <summary>A proof whose open row resolved, with the third object's row in the given word and/or its pair still holding,
+    /// and what held in the unpatched run.</summary>
+    static TrialRecheck Old(bool still = false, string? otherWord = null, bool heldBefore = true)
+        => Proof("resolved") with
+        {
+            OthersOfRef = otherWord is null ? Array.Empty<RowVerdict>() : new[] { new RowVerdict(OtherRowId, otherWord, otherWord, otherWord + ": as the re-run read it.") },
+            StillHolding = still ? new[] { $"{Sack} / {Third}: holds (actual render surfaces: crossing)" } : Array.Empty<string>(),
+            HeldBefore = heldBefore ? new HashSet<string> { Pair } : new HashSet<string>(),
+        };
+
+    public static IEnumerable<object[]> Remaining() => new[]
+    {
+        new object[] { "a pair still holding that held before", true, null!, true, true },
+        new object[] { "a pair still holding that did not hold before", true, null!, false, false },
+        new object[] { "another row still there that held before", false, "still there", true, true },
+        new object[] { "another row reclassified, its pair still holding and held before", true, "reclassified", true, true },
+        new object[] { "another row reclassified with its pair not shown holding", false, "reclassified", true, false },
+        new object[] { "another row unmeasured", false, "unmeasured", true, false },
+        new object[] { "another row in neither run", false, "not in either run", true, false },
+    };
+
+    [Theory, MemberData(nameof(Remaining))]
+    public void A_proof_confirms_with_rows_left_only_when_each_was_there_before_the_move(string what, bool still, string? word, bool before, bool confirms)
+    {
+        var v = NudgeProofRule.Verdict(Old(still, word, before));
+        Assert.True((v.Word is "clear" or "resolved here, but") == confirms, $"{what}: the proof reads {v.Word} ({v.Sentence}); it should {(confirms ? "" : "not ")}confirm the nudge");
+    }
+
+    [Fact]
+    public void What_held_before_the_move_is_read_from_the_unpatched_emit_rows_and_holding_predicates()
+    {
+        var emit = Path.Combine(_w.Root, "emit-" + Guid.NewGuid().ToString("N") + ".json");
+        File.WriteAllText(emit, $$"""
+            { "Conflicts": [ { "Kind": "OVERLAP", "A": "a", "B": "b", "Summary": "s", "Necessary": [ { "FormKey": "{{Sack}}", "Role": "r" } ], "Alternative": [ { "FormKey": "{{Third}}", "Role": "r" } ] } ],
+              "Predicates": [ { "Kind": "OVERLAP", "A": "a", "B": "b", "FormKey": "{{Sack}}", "Other": "000900:Some.esp", "Physical": "Holds" },
+                              { "Kind": "OVERLAP", "A": "a", "B": "b", "FormKey": "{{Sack}}", "Other": "000901:Some.esp", "Physical": "Gone" } ] }
+            """);
+        var held = NudgeProofRule.HeldPairs(emit, Sack);
+        Assert.Contains(Pair, held);
+        Assert.Contains("000900:some.esp|001fbb:jks skyrim.esp", held);
+        Assert.DoesNotContain("000901:some.esp|001fbb:jks skyrim.esp", held);
+    }
+
+    [Fact]
+    public async Task The_banner_after_a_nudge_is_plain_sentences_in_the_modders_words()
+    {
+        var f = new Fakes { ProofOf = _ => Old(still: true, otherWord: "reclassified") };
+        var lane = new NudgeLane(p => (p, "keeps its height"),
+            (req, ct) => Task.FromResult(new NudgeJudgeAnswer(req.Candidates.Select(c => new NudgeJudged(c.N, true, false, Array.Empty<string>(), Array.Empty<string>())).ToList(), Array.Empty<string>(), 3, 0, 0.1)),
+            (edit, n, ct) => Task.FromResult(f.ProofOf(n)), (pose, note) => "staged", null,
+            k => k.StartsWith("000B5C", StringComparison.OrdinalIgnoreCase) ? "MrkPillar (Ultimate Markarth.esp)" : k.StartsWith("000848") ? "MrkArnleifTrading01 (Ultimate Markarth.esp)" : "MiscSack02SmallFlat (JKs Skyrim.esp)");
+        var said = await lane.RunAsync(FormKey.Factory(Sack), "MiscSack02SmallFlat", Home, SubjectBox, OtherBox, CancellationToken.None, FormKey.Factory("000848:Ultimate Markarth.esp"));
+        Assert.True(said.Contains("MiscSack02SmallFlat (JKs Skyrim.esp)") && said.Contains("MrkArnleifTrading01 (Ultimate Markarth.esp)") && said.Contains("MrkPillar (Ultimate Markarth.esp)")
+                    && said.Contains("Walking routes were not checked", StringComparison.Ordinal), $"the banner does not name what moved, what it is clear of, what it still touches and what was not checked: {said}");
+        foreach (var jargon in new[] { "|", "triangle", "render", "reclassified", "°", "resolved here" })
+            Assert.False(said.Contains(jargon, StringComparison.Ordinal), $"the banner says '{jargon}': {said}");
+        Assert.True(System.Text.RegularExpressions.Regex.Matches(said, @"\.\s").Count <= 2, $"more than three sentences: {said}");
+    }
+
+    // ---- round 1, C2: a written nudge's mark is saved and restored -------------------------------------------------------
+    [Fact]
+    public void A_written_nudge_is_saved_and_restored_and_its_re_check_says_walking_routes_were_not_checked()
+    {
+        var ro = DisableTests.Drawn(DisableWorld.Plain, new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f);
+        var s = new EditSession(new[] { ro });
+        s.Stage(DisableWorld.Plain, P(-8, 0, 0), "moved 8 units");
+        s.MarkWritten("WbNudged.esp");
+        var data = new SessionData("plan", "baseline", null, null, null, Array.Empty<SavedEdit>(), SessionFile.WrittenOf(s, _ => "folder"));
+        var path = Path.Combine(_w.Root, "session-" + Guid.NewGuid().ToString("N") + ".json");
+        SessionFile.Write(path, data);
+        var fresh = new EditSession(new[] { DisableTests.Drawn(DisableWorld.Plain, new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f) });
+        SessionFile.Restore(fresh, SessionFile.Read(path)!, (_, _) => P(-8, 0, 0));
+        var nudged = fresh.NudgedIn("WbNudged.esp");
+        Assert.True(nudged.Contains(DisableWorld.Plain.ToString()), "the restored written edit lost that it came from a nudge");
+        var r = new RecheckResult(new RowVerdict("open", "resolved", "repaired", "resolved."), Array.Empty<RowVerdict>(), "verdict", Array.Empty<string>(), "build", 200,
+                                  Nudged: nudged.Count > 0 ? string.Join(", ", nudged) : null);
+        Assert.Contains("walking routes not checked", Recheck.Banner(8, r));
+    }
+
+    // ---- round 1, C6: what rests on a nudged object is said as the proof judged it ---------------------------------------
+    [Fact]
+    public void For_a_nudged_object_what_rests_on_it_is_said_as_the_proof_judged_it()
+    {
+        var a = new ContextAnswer(Sack, Array.Empty<DoorFact>(), Array.Empty<NameFact>(), null, Array.Empty<string>(),
+            new[] { new RestFact("001FC7:JKs Skyrim.esp", DependentMotion.Fixed, "001FC7:JKs Skyrim.esp (MiscSack02SmallFlat) rests on it and stays in the air if this moves") },
+            Array.Empty<NavFact>(), new Dictionary<string, string>(), "");
+        var moved = ContextRead.StaysBehind(a, Array.Empty<string>());
+        var nudged = ContextRead.StaysBehind(a, Array.Empty<string>(), nudged: true);
+        Assert.Contains("stays in the air", moved);
+        Assert.True(!nudged.Contains("stays in the air") && nudged.Contains("judged by the nudge's proof"), $"a nudged object's line still says it stays in the air: {nudged}");
     }
 
     [Fact]
@@ -136,7 +230,7 @@ public sealed class NudgeTests : IClassFixture<DisableWorld>
         Assert.True(f.Proved.Count == 0 && f.Staged.Count == 0, $"with nothing clear, the probes ran {f.Proved.Count} time(s) and {f.Staged.Count} position(s) were staged");
         Assert.True(said.Contains("no clear position", StringComparison.OrdinalIgnoreCase) && said.Contains("107") && said.Contains("try disabling", StringComparison.OrdinalIgnoreCase),
             $"the sentence does not say nothing is clear within the cap and to try disabling: '{said}'");
-        Assert.True(said.TrimEnd().EndsWith('.') && said.Count(c => c == '.') <= 2, $"not one sentence: '{said}'");
+        Assert.True(said.TrimEnd().EndsWith('.') && System.Text.RegularExpressions.Regex.Matches(said, @"\.\s").Count <= 2, $"not two or three plain sentences: '{said}'");
     }
 
     [Fact]

@@ -194,13 +194,72 @@ internal sealed record NudgeJudgeAnswer(IReadOnlyList<NudgeJudged> Candidates, I
 /// nothing (GATE-C-RED.md, proof p03).</summary>
 internal static class NudgeProofRule
 {
+    static readonly System.Text.RegularExpressions.Regex Key = new(@"[0-9A-Fa-f]{6}:[^|/()]+?\.es[mpl]", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>The pair of objects a row's identity or a still-holding line names, as one key ("a|b", lower case, sorted).</summary>
+    internal static string? PairOf(string text)
+    {
+        var keys = Key.Matches(text).Select(m => m.Value.ToLowerInvariant()).Distinct().OrderBy(k => k, StringComparer.Ordinal).ToList();
+        return keys.Count == 2 ? keys[0] + "|" + keys[1] : null;
+    }
+
+    /// <summary>Every pair of <paramref name="refKey"/> with another object that held in an emit: its rows, and its carried
+    /// predicates whose physical state is Holds.</summary>
+    internal static IReadOnlySet<string> HeldPairs(string emitPath, string refKey)
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        using var doc = JsonDocument.Parse(File.ReadAllText(emitPath));
+        static string? S(JsonElement e, string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+        void Add(string? a, string? b)
+        {
+            if (a is null || b is null) return;
+            if (!string.Equals(a, refKey, StringComparison.OrdinalIgnoreCase) && !string.Equals(b, refKey, StringComparison.OrdinalIgnoreCase)) return;
+            var k = new[] { a.ToLowerInvariant(), b.ToLowerInvariant() }.OrderBy(x => x, StringComparer.Ordinal).ToArray();
+            set.Add(k[0] + "|" + k[1]);
+        }
+        if (doc.RootElement.TryGetProperty("Conflicts", out var cs) && cs.ValueKind == JsonValueKind.Array)
+            foreach (var c in cs.EnumerateArray())
+            {
+                string? other = c.TryGetProperty("Alternative", out var alt) && alt.ValueKind == JsonValueKind.Array && alt.GetArrayLength() > 0 ? S(alt[0], "FormKey") : null;
+                if (c.TryGetProperty("Necessary", out var ns) && ns.ValueKind == JsonValueKind.Array)
+                    foreach (var n in ns.EnumerateArray()) Add(S(n, "FormKey"), other);
+            }
+        if (doc.RootElement.TryGetProperty("Predicates", out var ps) && ps.ValueKind == JsonValueKind.Array)
+            foreach (var p in ps.EnumerateArray())
+                if (string.Equals(S(p, "Physical"), "Holds", StringComparison.OrdinalIgnoreCase)) Add(S(p, "FormKey"), S(p, "Other"));
+        return set;
+    }
+
+    /// <summary>Why a "resolved here, but" proof does not confirm the nudge, or null when every remaining item was there before
+    /// the move: each other row of the object is still there (or reclassified with its same pair still holding) and held in the
+    /// unpatched run, and each pair still holding held in the unpatched run too. A row unmeasured or in neither run confirms
+    /// nothing.</summary>
+    internal static string? NotThereBefore(TrialRecheck rc)
+    {
+        if (rc.HeldBefore is not { } before) return "what held before the move was not read, so what remains cannot be shown to be old";
+        var still = rc.StillHolding.Select(PairOf).Where(p => p is not null).Select(p => p!).ToHashSet(StringComparer.Ordinal);
+        foreach (var o in rc.OthersOfRef.Where(o => o.Word != "resolved"))
+        {
+            var pair = PairOf(o.Id);
+            if (o.Word is not ("still there" or "reclassified")) return $"row {o.Id} reads {o.Word}";
+            if (pair is null || !before.Contains(pair)) return $"row {o.Id} did not hold before the move";
+            if (o.Word == "reclassified" && !still.Contains(pair)) return $"row {o.Id} was reclassified and its crossing is not shown still holding";
+        }
+        foreach (var h in rc.StillHolding)
+            if (PairOf(h) is not { } p || !before.Contains(p)) return $"{h} did not hold before the move";
+        return null;
+    }
+
     internal static TrialVerdict Verdict(TrialRecheck rc)
     {
         var refused = rc.Result.Lines.FirstOrDefault(l => l.Contains("! REFUSED", StringComparison.Ordinal))
                       ?? (rc.Result.Verdict.Contains("UNJUDGED", StringComparison.Ordinal) || rc.Result.Verdict.Contains("REFUSED", StringComparison.Ordinal) ? rc.Result.Verdict : null);
         if (refused is not null)
             return new TrialVerdict("not confirmed", $"not confirmed: conflictdiff refused a gate ({refused.Trim().Replace("! REFUSED: ", "")}), so the probe could not measure part of what the move changed", Array.Empty<string>());
-        return ClearRule.Judge(rc.Result.Row, rc.OthersOfRef, rc.Result.New.Concat(rc.ContactNew ?? Array.Empty<RowVerdict>()).ToList(), rc.StillHolding);
+        var v = ClearRule.Judge(rc.Result.Row, rc.OthersOfRef, rc.Result.New.Concat(rc.ContactNew ?? Array.Empty<RowVerdict>()).ToList(), rc.StillHolding);
+        if (v.Word == "resolved here, but" && NotThereBefore(rc) is { } why)
+            return new TrialVerdict("not confirmed", $"not confirmed: {v.Sentence.TrimEnd('.')}; and {why}", v.Rows);
+        return v;
     }
 }
 
@@ -222,12 +281,15 @@ internal sealed class NudgeLane
     readonly Prove _prove;
     readonly Func<RefPlacementEdit.Pose, string, string> _stage;
     readonly Action<string>? _say;
+    readonly Func<string, string> _nameOf;
+    readonly Action<string>? _log;
     readonly object _lock = new();
     readonly List<NudgeProofRun> _proofs = new();
 
     internal NudgeLane(Func<RefPlacementEdit.Pose, (RefPlacementEdit.Pose Pose, string Drop)> settle, Judge judge, Prove prove,
-                       Func<RefPlacementEdit.Pose, string, string> stage, Action<string>? say = null)
-    { _settle = settle; _judge = judge; _prove = prove; _stage = stage; _say = say; }
+                       Func<RefPlacementEdit.Pose, string, string> stage, Action<string>? say = null, Func<string, string>? nameOf = null,
+                       Action<string>? log = null)
+    { _settle = settle; _judge = judge; _prove = prove; _stage = stage; _say = say; _nameOf = nameOf ?? (k => k); _log = log; }
 
     internal IReadOnlyList<NudgeProofRun> Proofs { get { lock (_lock) return _proofs.ToList(); } }
     internal string Phase { get; private set; } = "not started";
@@ -236,25 +298,32 @@ internal sealed class NudgeLane
 
     void Say(string phase, string s) { Phase = phase; _say?.Invoke(s); }
 
+    /// <summary>Runs the nudge; returns two or three plain sentences for the banner (what moved and how far, what it is clear of
+    /// and still touches, what was not checked; or why nothing is staged). The detail goes to <c>say</c> (the Log).</summary>
     internal async Task<string> RunAsync(FormKey key, string? name, RefPlacementEdit.Pose home, Aabb subject, Aabb other, CancellationToken ct, FormKey? otherKey = null)
     {
         string what = name is { Length: > 0 } ? $"{name} ({key})" : key.ToString();
+        string me = _nameOf(key.ToString()), them = otherKey is { } ok ? _nameOf(ok.ToString()) : "the other object";
         string cap = FormattableString.Invariant($"{NudgeRule.Cap:0} units");
+        const string Then = " Nothing is staged; try disabling it, or move the other object.";
         Say("searching", $"nudge {what}: settling the candidate positions within {cap} by the drop");
         var cands = NudgeSearch.Candidates(subject, other);
         var settled = await Task.Run(() => NudgeSearch.Settled(home, cands, _settle, NudgeRule.Cap, ct), ct).ConfigureAwait(false);
         Judged = settled.Count;
         if (settled.Count == 0)
-            return Done($"no clear position was found within {cap} of where the load order places {what}: every candidate's drop took it past the cap; nothing is staged, so try disabling it or moving the other object.");
+            return Done($"No clear position within {cap} was found for {me}: wherever it was set down, the drop took it past {cap}." + Then,
+                        $"nudge {what}: every candidate's drop took it past the cap");
         Say("judging", $"nudge {what}: the judge program is checking {settled.Count} positions against everything near it (about 30 s)");
         var ans = await _judge(new NudgeRequest(key, otherKey ?? FormKey.Null, home, settled.Select(s => (s.Candidate.N, s.Pose)).ToList()), ct).ConfigureAwait(false);
-        if (ans.Refused is { } no) return Done(no);
+        if (ans.Refused is { } no) return Done(no, "nudge judge refused: " + no);
         var verdicts = ans.Candidates.ToDictionary(c => c.N);
         var clear = settled.Where(s => verdicts.TryGetValue(s.Candidate.N, out var v) && v.Clear).ToList();
         ClearCount = clear.Count;
         if (clear.Count == 0)
-            return Done($"no clear position was found within {cap} of where the load order places {what}: each of the {settled.Count} positions judged still crosses the other object or crosses something new; nothing is staged, so try disabling it or moving the other object.");
+            return Done($"No clear position within {cap} was found for {me}: each of the {settled.Count} places checked still touches {them} or touches something new." + Then,
+                        $"nudge {what}: each of the {settled.Count} positions judged still crosses the other object or crosses something new ({ans.Neighbours} objects near it, {ans.NoGeometry} with no readable shape)");
         int tried = 0;
+        var reasons = new List<string>();
         foreach (var c in clear.Take(MaxProofs))
         {
             ct.ThrowIfCancellationRequested();
@@ -262,21 +331,38 @@ internal sealed class NudgeLane
             Say($"proving {tried}", FormattableString.Invariant($"nudge {what}: the probes are checking position {tried} of at most {MaxProofs} ({NudgeRule.Move(home, c.Pose)}), about 150-220 s"));
             var clock = System.Diagnostics.Stopwatch.StartNew();
             TrialVerdict v;
-            try { v = NudgeProofRule.Verdict(await _prove(new PendingEdit(key, home, c.Pose), c.Candidate.N, ct).ConfigureAwait(false)); }
+            TrialRecheck? rc = null;
+            try { rc = await _prove(new PendingEdit(key, home, c.Pose), c.Candidate.N, ct).ConfigureAwait(false); v = NudgeProofRule.Verdict(rc); }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex) { v = new TrialVerdict("not checked", "not checked: " + (ex is AggregateException ae ? ae.GetBaseException() : ex).Message, Array.Empty<string>()); }
             lock (_lock) _proofs.Add(new NudgeProofRun(c.Candidate.N, v.Word, v.Sentence, clock.Elapsed.TotalSeconds));
-            // confirmed: the open row resolved and nothing was created ("clear"), or the same with a crossing of this object that
-            // was already there before the move still holding ("resolved here, but", said in the note): not held against it, as
-            // in the judge's rule (the app run of 2026-11-26 found every candidate of row 8 in that case)
-            if (v.Word is not ("clear" or "resolved here, but")) continue;
+            _log?.Invoke($"nudge {what}: position {c.Candidate.N} ({NudgeRule.Move(home, c.Pose)}): {v.Sentence}");
+            // confirmed: the open row resolved and nothing was created ("clear"), or the same with only crossings shown to have
+            // been there before the move still there ("resolved here, but", checked by NudgeProofRule.NotThereBefore)
+            if (v.Word is not ("clear" or "resolved here, but"))
+            {
+                reasons.Add(v.Word switch
+                {
+                    "new conflict" => "it would make a new clash or leave something in the air",
+                    "not confirmed" or "unmeasured" or "not checked" => "the probes could not measure all of it",
+                    _ => $"it did not clear {them}",
+                });
+                continue;
+            }
+            var stillKeys = (rc!.OthersOfRef.Where(o => o.Word != "resolved").Select(o => o.Id).Concat(rc.StillHolding))
+                .Select(NudgeProofRule.PairOf).Where(p => p is not null).SelectMany(p => p!.Split('|'))
+                .Where(k => !string.Equals(k, key.ToString(), StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             var still = v.Word == "clear" ? "" : $"; still there from before the move, as the probes say it: {v.Sentence.Replace("resolved here, but: ", "").TrimEnd('.')}";
             var note = FormattableString.Invariant($"moved {NudgeRule.Move(home, c.Pose)} from where the load order places it, {c.Candidate.Rule}; {c.Drop}; the nearest of {clear.Count} clear position(s) the judge found among {settled.Count} within {cap}, confirmed by the probes on try {tried}{still}; {NudgeRule.Checked}; {NudgeRule.RoutesNotChecked}");
-            return Done(_stage(c.Pose, note));
+            var staged = _stage(c.Pose, note);
+            if (staged.StartsWith("nothing is staged", StringComparison.Ordinal)) return Done(staged, staged);
+            var touches = stillKeys.Count == 0 ? "" : $", and it still touches {string.Join(" and ", stillKeys.Select(_nameOf))}, as it did before the move";
+            return Done($"Staged a nudge of {me}: {NudgeRule.Move(home, c.Pose)} from where the load order places it. It is clear of {them} and nothing is left in the air{touches}. Walking routes were not checked, and nothing is written until you commit.",
+                        $"nudge {what}: {staged}");
         }
-        var why = string.Join(", ", Proofs.Select(p => $"position {p.N} {p.Word}"));
-        return Done($"the probes confirmed none of the {tried} nearest clear position(s) within {cap} of where the load order places {what} ({why}); nothing is staged, so try disabling it or moving the other object.");
+        return Done($"The probes did not confirm any of the {tried} nearest places that looked clear for {me}: {string.Join("; ", reasons.Distinct())}." + Then,
+                    $"nudge {what}: the probes confirmed none of the {tried} nearest clear position(s) within {cap} ({string.Join(", ", Proofs.Select(p => $"position {p.N} {p.Word}"))})");
     }
 
-    string Done(string said) { Say("done", said); return said; }
+    string Done(string said, string detail) { _log?.Invoke(detail); Say("done", said); return said; }
 }
