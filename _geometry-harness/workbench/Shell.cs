@@ -109,7 +109,8 @@ internal static class Shell
     internal static string RowText(RankedRow r) =>
         $"{r.Rank}. {r.Row.Kind}  {r.Row.A} / {r.Row.B}{(r.Row.Mesh is not null ? " (its mesh)" : "")}  ref {r.Row.RefKey}{(r.Row.RefBaseEditorId is { } e ? " " + e : "")}"
         + $"  [physical {r.PhysicalLabel}; check's evidence grade {r.EvidenceLabel}; {r.NewLabel}; severity {r.Severity} ({r.SeverityLabel})]"
-        + (r.Row.MeshSentence is { } ms ? "\n      " + ms : "");
+        + (r.Row.MeshSentence is { } ms ? "\n      " + ms : "")
+        + (StrandedWords.Sentence(r.Row.CheckId, r.Row.Summary) is { } st ? "\n      " + st : "");
 
     /// <summary>A row as the list shows it: rank, what clashes, the two mods and the object; the grades are in its tooltip.</summary>
     internal static string RowLabel(RankedRow r) =>
