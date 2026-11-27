@@ -1,0 +1,2912 @@
+{
+ "families_ran": [
+  "errors"
+ ],
+ "findings_defaulted": false,
+ "families_refused": [],
+ "families_not_selected": [
+  {
+   "family": "scripts",
+   "describes": "unbound script properties",
+   "findings": "findings=[\"scripts\"]"
+  },
+  {
+   "family": "dialogue",
+   "describes": "broken dialogue wiring, silent lines and result scripts that will not fire",
+   "findings": "findings=[\"dialogue\"] seeds=[\"XXXXXX:Plugin.esp\"]"
+  },
+  {
+   "family": "facegen",
+   "describes": "dark-face desyncs between an NPC's baked files and its winning record",
+   "findings": "findings=[\"facegen\"]"
+  }
+ ],
+ "findings_scope": "findings= selected, and this response answers for: dangling references, missing masters and parse failures. It did NOT run: unbound script properties (findings=[\"scripts\"]), broken dialogue wiring, silent lines and result scripts that will not fire (findings=[\"dialogue\"] seeds=[\"XXXXXX:Plugin.esp\"]), dark-face desyncs between an NPC's baked files and its winning record (findings=[\"facegen\"]) — ask for it with the findings= spelling named beside each.",
+ "warnings": null,
+ "warnings_omitted": null,
+ "archive_read_failures": null,
+ "archive_read_failures_omitted": null,
+ "root_read_failures": null,
+ "root_read_failures_omitted": null,
+ "excluded_plugins": [],
+ "families": {
+  "errors": {
+   "scanned_plugins": 11,
+   "epoch": "e2-efd2544d11cb8816",
+   "epoch_covers_all_inputs": true,
+   "dangling": 398,
+   "engine_supplied_links": 15199,
+   "unscannable_records": 0,
+   "missing_masters": 0,
+   "injected": null,
+   "baseline_injected": null,
+   "classes_checked": [
+    "dangling",
+    "missing_masters"
+   ],
+   "filter_note": "NARROWED to findings=[dangling, missing_masters].",
+   "off_order_scanned": [],
+   "off_order_coverage": null,
+   "counts_only": false,
+   "baseline_dangling": 398,
+   "non_baseline_dangling": 0,
+   "base_masters_swept": [
+    "Skyrim.esm",
+    "Update.esm",
+    "Dawnguard.esm",
+    "HearthFires.esm",
+    "Dragonborn.esm"
+   ],
+   "base_masters": [
+    "Skyrim.esm",
+    "Update.esm",
+    "Dawnguard.esm",
+    "HearthFires.esm",
+    "Dragonborn.esm"
+   ],
+   "plugins": [
+    {
+     "plugin": "Skyrim.esm",
+     "scan_error": null,
+     "missing_masters": [],
+     "installed_but_inactive_masters": null,
+     "unscannable_records": 0,
+     "unscannable_samples": [],
+     "injected": [],
+     "build_mismatches": [],
+     "dangling": [
+      {
+       "source": "06BABF:Skyrim.esm",
+       "source_type": "Region",
+       "source_editorid": "Hills",
+       "target": "0136DB:Skyrim.esm",
+       "path": "Worldspace"
+      },
+      {
+       "source": "04EF65:Skyrim.esm",
+       "source_type": "Region",
+       "source_editorid": "Region127",
+       "target": "02433E:Skyrim.esm",
+       "path": "Worldspace"
+      },
+      {
+       "source": "02F6D2:Skyrim.esm",
+       "source_type": "Region",
+       "source_editorid": "Region13",
+       "target": "0009A7:Skyrim.esm",
+       "path": "Worldspace"
+      },
+      {
+       "source": "0207CB:Skyrim.esm",
+       "source_type": "Region",
+       "source_editorid": "Region10",
+       "target": "0138D8:Skyrim.esm",
+       "path": "Worldspace"
+      },
+      {
+       "source": "012FB4:Skyrim.esm",
+       "source_type": "NavigationMeshInfoMap",
+       "source_editorid": null,
+       "target": "028E37:Skyrim.esm",
+       "path": "MapInfos[4479].NavigationMesh"
+      },
+      {
+       "source": "012FB4:Skyrim.esm",
+       "source_type": "NavigationMeshInfoMap",
+       "source_editorid": null,
+       "target": "028E34:Skyrim.esm",
+       "path": "MapInfos[4479].ParentCell"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[0].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[0].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[1].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[1].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[1].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[1].Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[2].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[2].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[2].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[2].Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[3].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[3].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[4].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[4].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[4].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[4].Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[5].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[5].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[5].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[5].Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[7].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[7].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[9].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[9].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[9].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[9].Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[10].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[10].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[11].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[11].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[11].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[11].Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[15].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[16].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[16].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[17].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[17].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[5].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[5].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[7].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[7].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[8].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[8].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[8].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[8].Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[9].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[9].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[9].Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[9].Landscape.Layers[4].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[10].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[13].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[13].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[13].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[13].Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[14].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[14].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[14].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[14].Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[15].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[15].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[15].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[15].Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[16].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[16].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[19].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[19].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[19].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[19].Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[20].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[20].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[5].Items[3].Items[22].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[20].Items[3].Items[10].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[20].Items[3].Items[10].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[20].Items[3].Items[11].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[20].Items[3].Items[11].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[20].Items[3].Items[11].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[20].Items[3].Items[11].Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[20].Items[3].Items[12].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[20].Items[3].Items[12].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[20].Items[3].Items[12].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[20].Items[3].Items[12].Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[20].Items[3].Items[13].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[20].Items[3].Items[14].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[20].Items[3].Items[14].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[20].Items[3].Items[15].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[20].Items[3].Items[15].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[23].Items[8].Items[1].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[23].Items[8].Items[1].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[23].Items[8].Items[2].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[23].Items[8].Items[2].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[23].Items[8].Items[3].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[23].Items[8].Items[9].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[23].Items[8].Items[9].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[23].Items[8].Items[9].Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[23].Items[8].Items[9].Landscape.Layers[5].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[23].Items[8].Items[10].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[23].Items[8].Items[10].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[23].Items[8].Items[10].Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[23].Items[8].Items[10].Landscape.Layers[4].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[23].Items[8].Items[11].Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B44A:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "CWTestHold",
+       "target": "000844:Skyrim.esm",
+       "path": "SubCells[23].Items[8].Items[11].Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B4D4:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4D4:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B53C:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B53C:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B4D5:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWBattlebornFarm",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4D5:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWBattlebornFarm",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B4D5:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWBattlebornFarm",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B4D5:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWBattlebornFarm",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B53B:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B53B:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B53B:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B53B:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B4D6:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWChillfurrowFarm",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4D6:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWChillfurrowFarm",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B4D6:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWChillfurrowFarm",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B4D6:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWChillfurrowFarm",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B53A:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B53A:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B53A:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B53A:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B4F0:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4F0:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B534:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B534:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B4F1:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWRiverwood",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4F1:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWRiverwood",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B4F1:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWRiverwood",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B4F1:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWRiverwood",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B532:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B532:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B532:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B532:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B4F2:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4F2:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B4F2:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B4F2:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B52F:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B52F:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B52F:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B52F:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B511:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B511:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B527:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B527:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B513:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWHoldStart",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B513:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWHoldStart",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B513:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWHoldStart",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B513:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWHoldStart",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B515:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B515:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B515:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B515:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[3].Header.Texture"
+      },
+      {
+       "source": "01C49F:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWxxx",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01C49F:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWxxx",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01E6CE:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01E6CE:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01C4A0:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01C4A0:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01C4A0:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01C4A0:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01E6C9:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01E6C9:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01E6C9:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01E6C9:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[3].Header.Texture"
+      },
+      {
+       "source": "01E6B6:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01E6D5:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01E6B7:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01E6B7:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01E6D4:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01E6D4:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01E6B9:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01E6B9:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01E6D2:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01E6D2:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B4C5:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4C5:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01E6CC:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01E6CC:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B4CB:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4CB:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01E6D1:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01E6D1:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B4D7:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWCampSons",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4D7:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWCampSons",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B4D7:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWCampSons",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B4D7:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWCampSons",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B539:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B539:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B539:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B539:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B4D8:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWPatrolsWhiterun",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4D8:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWPatrolsWhiterun",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B4D8:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWPatrolsWhiterun",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B4D8:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWPatrolsWhiterun",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[4].Header.Texture"
+      },
+      {
+       "source": "01B538:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B538:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B538:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B538:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[4].Header.Texture"
+      },
+      {
+       "source": "01B4D9:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01E6CF:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4E5:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4E5:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B4E5:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B4E5:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01E6CD:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01E6CD:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01E6CD:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01E6CD:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B4F3:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4F3:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B4F3:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B4F3:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B52D:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B52D:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B52D:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B52D:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B4F4:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4F4:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B4F4:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B4F4:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B52C:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B52C:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B52C:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B52C:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B4F5:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4F5:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01E6CB:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01E6CB:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B507:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWPelagiaFarm",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B507:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWPelagiaFarm",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B507:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWPelagiaFarm",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B507:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWPelagiaFarm",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B529:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B529:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B529:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B529:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B508:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B508:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B528:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B528:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01E6B8:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01E6D3:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4CD:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4CD:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B542:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B542:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B4CE:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWBarleydarkFarm",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4CE:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWBarleydarkFarm",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B4CE:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWBarleydarkFarm",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B4CE:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWBarleydarkFarm",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B541:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B541:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B541:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B541:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B4CF:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWFortBlackmoor",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4CF:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWFortBlackmoor",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B4CF:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWFortBlackmoor",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B4CF:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWFortBlackmoor",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B53F:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B53F:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B53F:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B53F:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B4E8:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B537:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4E9:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4E9:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B536:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B536:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B4EA:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4EA:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B535:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B535:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B4D0:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4D0:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B53E:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B53E:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B4D1:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B4D1:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B53D:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B53D:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B4D2:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01E6D0:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B500:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWCampImperial",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B500:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWCampImperial",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B500:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWCampImperial",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B500:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWCampImperial",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[5].Header.Texture"
+      },
+      {
+       "source": "01B52B:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B52B:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B52B:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[3].Header.Texture"
+      },
+      {
+       "source": "01B52B:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[5].Header.Texture"
+      },
+      {
+       "source": "01B501:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWPatrolsImperial",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B501:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWPatrolsImperial",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B501:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWPatrolsImperial",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B501:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "TestCWPatrolsImperial",
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[4].Header.Texture"
+      },
+      {
+       "source": "01B52A:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B52A:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "01B52A:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[2].Header.Texture"
+      },
+      {
+       "source": "01B52A:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[4].Header.Texture"
+      },
+      {
+       "source": "01B502:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[0].Header.Texture"
+      },
+      {
+       "source": "01B502:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Landscape.Layers[1].Header.Texture"
+      },
+      {
+       "source": "01E6CA:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[0].Header.Texture"
+      },
+      {
+       "source": "01E6CA:Skyrim.esm",
+       "source_type": "Landscape",
+       "source_editorid": null,
+       "target": "000844:Skyrim.esm",
+       "path": "Layers[1].Header.Texture"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[0].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[1].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[2].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[6].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[7].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[8].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[9].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[10].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[11].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[12].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[13].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[14].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[15].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[16].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[17].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[18].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[19].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[0].Items[0].Items[20].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[2].Items[0].Items[0].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[2].Items[0].Items[1].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[2].Items[0].Items[5].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[2].Items[0].Items[6].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[2].Items[0].Items[7].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[2].Items[0].Items[8].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[2].Items[0].Items[9].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[2].Items[0].Items[10].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[2].Items[0].Items[12].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[2].Items[0].Items[13].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[2].Items[0].Items[14].Regions[0]"
+      },
+      {
+       "source": "0243DE:Skyrim.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "FallowstoneCaveWorldStart",
+       "target": "106633:Skyrim.esm",
+       "path": "SubCells[2].Items[0].Items[15].Regions[0]"
+      },
+      {
+       "source": "0243E2:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "0243E3:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "0243E4:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "0243EC:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "0243ED:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "0243EE:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "0243EF:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "0243F3:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "FallowstoneCaveExit",
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "0243F4:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "0243F7:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "0243F8:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "FallowstoneCaveOrigin",
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "024409:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "02440A:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "02440C:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "FallowstoneCaveStartNew",
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "024411:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": "FallowstoneCave",
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "10662C:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "10662D:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "10662E:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "0243E1:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "0243E5:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "0243FB:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "0243FC:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "0243FF:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "024400:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "024401:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "024402:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "02440E:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "02440F:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "10662F:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "106630:Skyrim.esm",
+       "source_type": "Cell",
+       "source_editorid": null,
+       "target": "106633:Skyrim.esm",
+       "path": "Regions[0]"
+      },
+      {
+       "source": "0877F9:Skyrim.esm",
+       "source_type": "Explosion",
+       "source_editorid": "FireStormExplosion02",
+       "target": "C80000:Skyrim.esm",
+       "path": "Light"
+      },
+      {
+       "source": "0877F9:Skyrim.esm",
+       "source_type": "Explosion",
+       "source_editorid": "FireStormExplosion02",
+       "target": "C80000:Skyrim.esm",
+       "path": "Sound1"
+      },
+      {
+       "source": "0877F9:Skyrim.esm",
+       "source_type": "Explosion",
+       "source_editorid": "FireStormExplosion02",
+       "target": "B40000:Skyrim.esm",
+       "path": "Sound2"
+      },
+      {
+       "source": "0877F9:Skyrim.esm",
+       "source_type": "Explosion",
+       "source_editorid": "FireStormExplosion02",
+       "target": "000043:Skyrim.esm",
+       "path": "SpawnProjectile"
+      },
+      {
+       "source": "07EA04:Skyrim.esm",
+       "source_type": "Explosion",
+       "source_editorid": "fakeForceBallTiny",
+       "target": "800000:Skyrim.esm",
+       "path": "Light"
+      },
+      {
+       "source": "07EA04:Skyrim.esm",
+       "source_type": "Explosion",
+       "source_editorid": "fakeForceBallTiny",
+       "target": "800000:Skyrim.esm",
+       "path": "Sound2"
+      },
+      {
+       "source": "07EA04:Skyrim.esm",
+       "source_type": "Explosion",
+       "source_editorid": "fakeForceBallTiny",
+       "target": "000141:Skyrim.esm",
+       "path": "SpawnProjectile"
+      },
+      {
+       "source": "078C57:Skyrim.esm",
+       "source_type": "Explosion",
+       "source_editorid": "fakeForceBall1024",
+       "target": "700000:Skyrim.esm",
+       "path": "Light"
+      },
+      {
+       "source": "078C57:Skyrim.esm",
+       "source_type": "Explosion",
+       "source_editorid": "fakeForceBall1024",
+       "target": "800000:Skyrim.esm",
+       "path": "Sound2"
+      },
+      {
+       "source": "078C57:Skyrim.esm",
+       "source_type": "Explosion",
+       "source_editorid": "fakeForceBall1024",
+       "target": "000145:Skyrim.esm",
+       "path": "SpawnProjectile"
+      },
+      {
+       "source": "04C6CF:Skyrim.esm",
+       "source_type": "Explosion",
+       "source_editorid": "MAGSpiderSpitExplosion",
+       "target": "000043:Skyrim.esm",
+       "path": "SpawnProjectile"
+      },
+      {
+       "source": "0247BE:Skyrim.esm",
+       "source_type": "Explosion",
+       "source_editorid": "FXDragonFireExplosion",
+       "target": "800000:Skyrim.esm",
+       "path": "Sound2"
+      },
+      {
+       "source": "02298C:Skyrim.esm",
+       "source_type": "Explosion",
+       "source_editorid": "MQ104TestDragonDeathExplosion",
+       "target": "200000:Skyrim.esm",
+       "path": "Light"
+      },
+      {
+       "source": "02298C:Skyrim.esm",
+       "source_type": "Explosion",
+       "source_editorid": "MQ104TestDragonDeathExplosion",
+       "target": "FA0000:Skyrim.esm",
+       "path": "Sound2"
+      },
+      {
+       "source": "02298C:Skyrim.esm",
+       "source_type": "Explosion",
+       "source_editorid": "MQ104TestDragonDeathExplosion",
+       "target": "000059:Skyrim.esm",
+       "path": "SpawnProjectile"
+      }
+     ]
+    },
+    {
+     "plugin": "Dawnguard.esm",
+     "scan_error": null,
+     "missing_masters": [],
+     "installed_but_inactive_masters": null,
+     "unscannable_records": 0,
+     "unscannable_samples": [],
+     "injected": [],
+     "build_mismatches": [],
+     "dangling": [
+      {
+       "source": "014760:Dawnguard.esm",
+       "source_type": "Activator",
+       "source_editorid": "DLC1VampireLordBlocker",
+       "target": "07B5B9:Dawnguard.esm",
+       "path": "VirtualMachineAdapter.Scripts[0].Properties[1].Object"
+      },
+      {
+       "source": "00959F:Dawnguard.esm",
+       "source_type": "Weather",
+       "source_editorid": "SoulCairnAurora",
+       "target": "007011:Update.esm",
+       "path": "Sounds[0].Sound"
+      },
+      {
+       "source": "006AEC:Dawnguard.esm",
+       "source_type": "Weather",
+       "source_editorid": "DLC1Eclipse",
+       "target": "01DF89:Dawnguard.esm",
+       "path": "Sounds[0].Sound"
+      },
+      {
+       "source": "006AEC:Dawnguard.esm",
+       "source_type": "Weather",
+       "source_editorid": "DLC1Eclipse",
+       "target": "01DF8C:Dawnguard.esm",
+       "path": "Sounds[1].Sound"
+      },
+      {
+       "source": "001408:Dawnguard.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "DLC01SoulCairn",
+       "target": "006718:Dawnguard.esm",
+       "path": "SubCells[0].Items[0].Items[22].Temporary[24].AttachRef"
+      },
+      {
+       "source": "001408:Dawnguard.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "DLC01SoulCairn",
+       "target": "006718:Dawnguard.esm",
+       "path": "SubCells[0].Items[0].Items[22].Temporary[25].AttachRef"
+      },
+      {
+       "source": "001408:Dawnguard.esm",
+       "source_type": "Worldspace",
+       "source_editorid": "DLC01SoulCairn",
+       "target": "006718:Dawnguard.esm",
+       "path": "SubCells[0].Items[0].Items[22].Temporary[26].AttachRef"
+      },
+      {
+       "source": "002C75:Dawnguard.esm",
+       "source_type": "Cell",
+       "source_editorid": "DLC01SoulCairnCraterKeeper",
+       "target": "006718:Dawnguard.esm",
+       "path": "Temporary[24].AttachRef"
+      },
+      {
+       "source": "002C75:Dawnguard.esm",
+       "source_type": "Cell",
+       "source_editorid": "DLC01SoulCairnCraterKeeper",
+       "target": "006718:Dawnguard.esm",
+       "path": "Temporary[25].AttachRef"
+      },
+      {
+       "source": "002C75:Dawnguard.esm",
+       "source_type": "Cell",
+       "source_editorid": "DLC01SoulCairnCraterKeeper",
+       "target": "006718:Dawnguard.esm",
+       "path": "Temporary[26].AttachRef"
+      },
+      {
+       "source": "015DC3:Dawnguard.esm",
+       "source_type": "PlacedObject",
+       "source_editorid": null,
+       "target": "006718:Dawnguard.esm",
+       "path": "AttachRef"
+      },
+      {
+       "source": "015DC8:Dawnguard.esm",
+       "source_type": "PlacedObject",
+       "source_editorid": null,
+       "target": "006718:Dawnguard.esm",
+       "path": "AttachRef"
+      },
+      {
+       "source": "015DCA:Dawnguard.esm",
+       "source_type": "PlacedObject",
+       "source_editorid": null,
+       "target": "006718:Dawnguard.esm",
+       "path": "AttachRef"
+      }
+     ]
+    },
+    {
+     "plugin": "Dragonborn.esm",
+     "scan_error": null,
+     "missing_masters": [],
+     "installed_but_inactive_masters": null,
+     "unscannable_records": 0,
+     "unscannable_samples": [],
+     "injected": [],
+     "build_mismatches": [],
+     "dangling": [
+      {
+       "source": "034CFB:Dragonborn.esm",
+       "source_type": "Weather",
+       "source_editorid": "DLC2ApocryphaWeatherNew",
+       "target": "0FB625:Dragonborn.esm",
+       "path": "Sounds[0].Sound"
+      }
+     ]
+    }
+   ],
+   "capped": false,
+   "plugins_with_findings": 3,
+   "rendered": 3,
+   "truncated": false,
+   "accounting": {
+    "listing": true,
+    "dangling_found": 398,
+    "dangling_visible": 398,
+    "dangling_missing": 0,
+    "dangling_missing_by_budget": 0,
+    "dangling_missing_by_response_cut": 0,
+    "limit": 1000000,
+    "sections_with_findings": 3,
+    "sections_rendered": 3,
+    "max_chars": 200000000,
+    "dangling_missing_by_source": [],
+    "dangling_missing_by_source_total": 0
+   },
+   "boundary": "checks FormLink resolution, missing masters, and parse failures. Does NOT verify navmesh/terrain spatial integrity (CRC/grid), flag required-but-null fields, list unused-master cleanup, or link-check an owned item's ownership 'variable' word (a rank/global Mutagen can't type on an override); a null FormLink is a legal optional."
+  }
+ }
+}
