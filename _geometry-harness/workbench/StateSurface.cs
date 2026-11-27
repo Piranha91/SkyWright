@@ -92,6 +92,13 @@ internal interface IWorkbenchScene
     IEnumerable<(string Layer, string MotionSystem)>? BodiesOf(string key) => null;
     /// <summary>Item 8: the trial lane; null where the scene cannot run trials.</summary>
     TrialLane? Trials => null;
+    /// <summary>Gate C: nudge one object of the open conflict in the background (refused in one sentence before any work); the
+    /// sentence says it started. <see cref="NudgeRunning"/> holds the run, <see cref="NudgeState"/> what it has done.</summary>
+    Task<string> NudgeAsync(FormKey key) => throw new InvalidOperationException("this scene cannot nudge: it has no write target or no bundle to prove a position with.");
+    /// <summary>Gate C: stop a running nudge; one sentence.</summary>
+    string AbortNudge() => "no nudge is running.";
+    Task<string>? NudgeRunning => null;
+    object? NudgeState => null;
     /// <summary>Item 8: the boxes of a reference and the open row's other reference, Skyrim space; null when not drawn.</summary>
     (SkyWright.Engine.Aabb Subject, SkyWright.Engine.Aabb Other)? PairBoxes(FormKey key) => null;
     /// <summary>The scene takes no edits (opened from the Results or World tab).</summary>
