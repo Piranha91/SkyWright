@@ -419,11 +419,11 @@
       "path": "_geometry-harness/corridorprobe/corridorprobe.csproj",
       "adapter": "csharp",
       "stageSource": "single-stage",
-      "note": "Reads ONE plugin and one named cell, then walks that cell's lines. There is no population to count through; the longRunSeconds rule promotes it automatically if recorded history disagrees.",
+      "note": "Reads ONE plugin, from the game's Data folder only, and one named cell, then walks that cell's lines. There is no population to count through; the longRunSeconds rule promotes it automatically if recorded history disagrees.",
       "answers": [
         "What are the widths of these navmesh corridors, and how do live paths compare with the route rule?"
       ],
-      "useWhen": "Evaluate a narrow passage using navmesh width and, when supplied, measured travel evidence.",
+      "useWhen": "An instrument for calibrating the route rule: measure navmesh corridor widths and read walked in-game arms back through the rule. No scan the app starts runs it; for a passage a mod blocks, the check is route cut (geometry.route-cut), which runs the same rule through blockprobe. --plugin is read from the game's Data folder only, so it reads Bethesda's plugins, not a mod's.",
       "evidence": [
         {
           "path": "_geometry-harness/corridorprobe/Program.cs",
@@ -490,7 +490,7 @@
       "answers": [
         "What moves in this mesh, through which animations, and what space does the moving part sweep?"
       ],
-      "useWhen": "Read an animated object's motion (NIF sequences and controllers, behaviour-graph clips), pose it at a named animation time or rest state, or measure its swept region before judging a clash with it.",
+      "useWhen": "An instrument for investigations: read an animated object's motion (NIF sequences and controllers, behaviour-graph clips), pose it at a named animation time or rest state, or measure the space its moving part sweeps. No scan the app starts runs it. Its engine is used by the overlap and contact checks only when --motion swept is asked for, which no scan passes.",
       "evidence": [
         {
           "path": "_geometry-harness/motionprobe/Program.cs",
@@ -627,7 +627,7 @@
         "How far is an object from the nearest winning navmesh triangle (reach <Cell> <subjects.json> --json OUT)?",
         "How far is the nearest actor-solid surface from a standing body's column at a point (clear <Cell> <file>)?"
       ],
-      "useWhen": "Investigate actors walking above a floor or beneath its surface by measuring navmesh-to-floor separation.",
+      "useWhen": "An instrument for investigating actors that seem to walk above a floor or sink into it. No scan the app starts runs it, and a navmesh-to-floor offset is not a clash by itself: in game the feet follow the collision floor, not the navmesh. The floor rule a modder relies on is already part of the route-cut, conditional-geometry and navmesh-ownership checks.",
       "evidence": [
         {
           "path": "_geometry-harness/floorgapprobe/Program.cs",
@@ -739,7 +739,7 @@
       "answers": [
         "Do the winning mesh bounds disagree with the plugin's stored bounds?"
       ],
-      "useWhen": "Investigate culling or spatial-query anomalies where stored object bounds may not enclose the winning mesh.",
+      "useWhen": "An instrument for investigations: compare each record's stored object bounds with the winning mesh. No scan the app starts runs it. A disagreement is not a clash by itself: measured on 2026-11-26 on the lab order, Bethesda's own meshes disagree with their stored bounds more often than meshes that come from a mod (13.7 % against 8.4 % more than a quarter off), and what stale bounds do in game has not been tested.",
       "evidence": [
         {
           "path": "_geometry-harness/geoprobe/Program.cs",
@@ -1352,7 +1352,7 @@
       "answers": [
         "Which installed plugins should one new mod be evaluated against, and why is each other plugin left out?"
       ],
-      "useWhen": "Before evaluating a mod a user wants to add to a working order: pick the installed plugins it shares records, cells, neighbouring cells, asset paths or placed bases with.",
+      "useWhen": "A helper for choosing what to check: before evaluating a mod a user wants to add to a working order, pick the installed plugins it shares records, cells, neighbouring cells, asset paths or placed bases with. It finds no clash, and no scan the app starts runs it; in the app the modder ticks the mods to check instead.",
       "evidence": [
         {
           "path": "_geometry-harness/selectprobe/Program.cs",
@@ -1488,7 +1488,7 @@
       "answers": [
         "How do I run every check over a whole load order once, and get its leads with an added mod's view first?"
       ],
-      "useWhen": "Screen a whole order (or the order plus a mod you are adding) without picking pairs first; read the result with orderleads.py.",
+      "useWhen": "Screen a whole order (or the order plus a mod you are adding) without picking pairs first; read the result with orderleads.py. A development driver, not a check: it runs the existing checks once over the order and their rows become leads. No scan the app starts runs it; the app compares the profile with and without the mods the modder ticks.",
       "evidence": [
         {
           "path": "_geometry-harness/orderpass.py",
@@ -1529,7 +1529,7 @@
       "answers": [
         "Which clashes between mods did a whole-order pass find for an added mod, at a place, or between two plugins, and where do I look first?"
       ],
-      "useWhen": "After a whole-order pass (orderpass.py), to read its leads for a mod you are adding, a cell you care about or a pair of plugins, with dummies, no-signal plugins and unassessed checks named.",
+      "useWhen": "After a whole-order pass (orderpass.py), to read its leads for a mod you are adding, a cell you care about or a pair of plugins, with dummies, no-signal plugins and unassessed checks named. Leads are places to open, not verdicts; the verdicts are the checks' own. No scan the app starts runs it.",
       "evidence": [
         {
           "path": "_geometry-harness/orderleads.py",
@@ -1598,7 +1598,7 @@
       "answers": [
         "Which plugins and mod folders in a whole load order meet, and how: shared records, cells, neighbouring cells, placed bases, form links and asset paths compared by bytes?"
       ],
-      "useWhen": "Before a whole-order pass (orderpass.py), or to see which installed plugins meet a given one: one index over every plugin and mod folder, with every cell's FormKey, EditorID, worldspace and grid, and each plugin's size so an empty header-only plugin (a dummy) can be told.",
+      "useWhen": "A helper of the whole-order pass (orderpass.py), or to see which installed plugins meet a given one: one index over every plugin and mod folder, with every cell's FormKey, EditorID, worldspace and grid, and each plugin's size so an empty header-only plugin (a dummy) can be told. It finds no clash, and no scan the app starts runs it.",
       "evidence": [
         {
           "path": "_geometry-harness/ordermap/Program.cs",
@@ -4341,9 +4341,9 @@
       "stageSource": "counted",
       "note": "Compares identity-bound scene manifests with explicit plugin and asset views; records input/output artifacts and complete pair accounting.",
       "answers": [
-        "Which overlap findings require both mods rather than already occurring in a source setup?"
+        "Is each overlap pair of a combined setup new, inherited, changed, absent or unresolved against each source setup?"
       ],
-      "useWhen": "Decide whether a combined setup introduces a geometry conflict or inherits it from a source configuration.",
+      "useWhen": "A helper for overlap investigations: label each pair of a combined scene against scenes captured without some of the mods. New means absent from a setup without one of the mods, so pairs inside one mod are new too: it is not a test that an overlap needs both mods. No scan the app starts runs it; the app's overlap check (geometry.object-overlap) classifies pairs its own way.",
       "evidence": [
         {
           "path": "_geometry-harness/overlap_attribution.py",
@@ -4379,7 +4379,7 @@
       "answers": [
         "How can I rank and group overlap findings into local incidents while retaining every member?"
       ],
-      "useWhen": "Reduce a large collision finding list to reviewable incidents without dropping the underlying pairs.",
+      "useWhen": "A helper for overlap investigations: rank and group a long list of overlap pairs into local incidents (one cell, a shared object, within the policy's incident radius) without dropping any pair. No scan the app starts runs it. The app's own grouping owns the review rows (one scene per cell, joined by any shared object, keyed by data/scene-policy.json); triage's 384-unit incident rule is not ported into the app.",
       "evidence": [
         {
           "path": "_geometry-harness/overlap_triage.py",
@@ -10066,6 +10066,27 @@
       ],
       "outputs": [
         "Assertion results for: Does the driver of the stages after the bundle reuse a stage only when nothing changed, continue a run folder the built-in controller carried through the bundle, and refuse one it did not?"
+      ]
+    },
+    {
+      "id": "integration/housecarl/tests/test_lab_pictures_reuse.py",
+      "path": "integration/housecarl/tests/test_lab_pictures_reuse.py",
+      "kind": "script",
+      "answers": [
+        "Does a lab run keep its pictures across a rebuild of unchanged code, redo them after a real change to the renderer or controller, and carry banked picture descriptions only when a redone capture matches within the stated tolerance?"
+      ],
+      "useWhen": "Check changes to how evalpipeline.py binds its picture stages to the programs they run, to the build's provenance record, or to the image-observations picture comparison.",
+      "evidence": [
+        {
+          "path": "integration/housecarl/tests/test_lab_pictures_reuse.py",
+          "anchor": "Known answers for a lab run's pictures across a rebuild, and for the blind observations' picture comparison"
+        }
+      ],
+      "inputs": [
+        "Controlled fixtures for test_lab_pictures_reuse, and the build's program folders."
+      ],
+      "outputs": [
+        "Assertion results for: Does a lab run keep its pictures across a rebuild of unchanged code, redo them after a real change, and carry banked picture descriptions only within the stated tolerance?"
       ]
     },
     {
