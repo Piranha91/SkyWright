@@ -690,6 +690,28 @@ public static partial class SelfTest
             }
             finally { ChildLaunch.RunJob = saved; }
         });
+        Case("child launch: a command line Windows would not take is refused in one sentence, and nothing is started", () =>
+        {
+            using var t = new Temp();
+            var (inst, game) = World(t, ShadowMods, ShadowEnabled, ShadowPlugins);
+            var ctx = InPlace(t, inst, game, "Sel");
+            var argv = new List<string> { Path.Combine(Environment.SystemDirectory, "whoami.exe") };
+            argv.AddRange(Enumerable.Range(0, 3000).Select(i => $"argument-{i:0000}"));
+            int length = ChildRunner.CommandLine(argv).Length;
+            string want = $"the command line for too-long would be {length.ToString("#,0", System.Globalization.CultureInfo.InvariantCulture)} characters, more than the 32,767 Windows allows, so it was not started; "
+                          + "this is a fault in SkyWright, not in your mods: report it with the run folder.";
+            ChildLaunch.RunJob = saved;
+            bool was = RunLog.Enabled;
+            RunLog.Enabled = false;
+            try
+            {
+                ChildLaunch.Run(ctx, t.At("logs"), "too-long", argv);
+                return "it was started";
+            }
+            catch (Refusal r) { return Same("sentence", r.Message, want) ?? (File.Exists(t.At("logs/too-long.txt")) ? "a log was written, so something ran" : null); }
+            catch (System.ComponentModel.Win32Exception w) { return $"Windows refused it (error {w.NativeErrorCode}) and no sentence was given"; }
+            finally { RunLog.Enabled = was; }
+        });
         Case("stages: a scope that stops on the order reader's refusal names it for the profile without the selection", () =>
         {
             using var t = new Temp();

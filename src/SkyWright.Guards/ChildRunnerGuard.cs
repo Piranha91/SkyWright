@@ -155,6 +155,19 @@ internal static class ChildRunnerGuard
                   && Row("crg-missing").Status == RunStatus.Failed && !File.Exists(Path.Combine(logs, "crg-missing-job.txt")),
                   "a program that cannot be started throws, and both runs are recorded as failed with Python's wording");
 
+            // ---- a command line Windows would not take (more than 32,766 characters): refused in one sentence, before anything starts
+            var longArgv = new[] { "cmd.exe", "/c", "exit", "0" }.Concat(Enumerable.Range(0, 3000).Select(i => $"argument-{i:0000}")).ToArray();
+            int longLength = ChildRunner.CommandLine(longArgv).Length;
+            Exception? tooLong = null;
+            try { new ChildRunner("crg-long", logs).Run(new ChildJob("crg-long-job", longArgv)); }
+            catch (Exception ex) { tooLong = ex; }
+            Check(longLength > ChildRunner.MaxCommandLine && ChildRunner.CommandLineTooLong(new ChildJob("x", longArgv[..4])) is null
+                  && tooLong is CommandLineTooLongException
+                  && tooLong.Message == $"the command line for crg-long-job would be {longLength.ToString("#,0", System.Globalization.CultureInfo.InvariantCulture)} characters, "
+                                        + "more than the 32,767 Windows allows, so it was not started; this is a fault in SkyWright, not in your mods: report it with the run folder."
+                  && Row("crg-long-job").Status == RunStatus.Failed && !File.Exists(Path.Combine(logs, "crg-long-job.txt")),
+                  "a command line past Windows' limit is refused in one sentence before anything starts, and its run is recorded as failed");
+
             // ---- before launch
             var late = new ChildRunner("crg-late", logs, ChildRunner.Now() - 1).Run(new ChildJob("crg-late-job", new[] { "cmd.exe", "/c", "echo", "no" }));
             Check(late is { Stopped: "before-launch", ExitCode: null, RunId: null, Attempt: 0, Seconds: 0.0 }
