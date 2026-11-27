@@ -22,7 +22,7 @@ public static partial class SelfTest
     {
         string? root = HarnessShared.CheckoutLayout.Locate(null, out _)?.Checkout;
         string registryPath = root == null ? "" : HarnessShared.CheckoutLayout.Registry(root);
-        const string t1 = "boundary: the app's registry holds no row only an LLM fills, no skill key and no records family";
+        const string t1 = "boundary: the app's registry holds no row only an LLM fills and no skill key";
         const string t2 = "boundary: on the real registry, what keeps an app scan of each recorded real scope from completing is no AI-side row";
         if (!File.Exists(registryPath))
         {
@@ -45,7 +45,8 @@ public static partial class SelfTest
                 var why = new List<string>();
                 if (rows.Count > 0) why.Add("AI-side rows: " + string.Join(", ", rows));
                 if (registry.ContainsKey("skill")) why.Add($"a skill key ({Ev.Str(registry["skill"])})");
-                if (families.Contains("records")) why.Add("a records family");
+                // 2026-11-27 (record checks unit 2): the records family is back, its two lost-edit checks run by recordprobe in C#
+                // (no model, no houseCARL program); what stays AI-side is the rows list in known-answers/boundary.json
                 return why.Count == 0 ? null : string.Join("; ", why);
             });
 

@@ -78,6 +78,34 @@ internal static class ProbeHelp
             It does not list links in or into the game's own files (Bethesda's and Creation Club's), links within one plugin or one mod, or links into a plugin missing from the load order, which the masters check reports. It has not yet found a real clash between two mods, so a scan does not run it unless you tick it.
             """),
 
+        ["loadability.missing-assets"] = new(
+            "Finds meshes, textures and other files a mod's records use that the game cannot find because another mod's archive of the same name replaces the archive that has them.",
+            """
+            The game loads only one archive of each name: when two mods ship an archive with the same name, the copy from the mod with the higher priority is the one used, and every file in the other copy is gone in game. A record that uses one of those files then finds nothing.
+
+            The check reads each record a mod of your selection changes, as the winning plugin has it, and the files it uses, and asks whether the game finds each file. For a file it does not find, it asks again with only that plugin's own mod and the mods it was made with enabled. If none of them has the file, the mod simply does not ship it (or a mod it needs is not installed), which is counted, not listed. If one of them has it in an archive, the file is listed with the mod whose archive of that name wins.
+
+            Files the game finds, records of the game's own files, and archives that could not all be read are not listed. It has not yet found a real clash between two mods, so a scan does not run it unless you tick it.
+            """),
+
+        ["records.contested-fields"] = new(
+            "Finds changes one mod made to a record, such as an object's position or a character's outfit, that a later mod in your load order puts back or changes again without having been made with the first mod.",
+            """
+            When two mods change the same record, the game uses only the version of the mod with the higher priority, every field of it: a mod made without the other carries the values it was made with, and the other mod's change is gone in game.
+
+            The check reads every record a mod of your selection changes that another mod's plugin also changes. It compares each copy that does not win with what its own plugin was made with, to find what that mod really changed, then with the copy that wins. A field is listed when one mod changed it, the winning value differs in game, the two plugins are in different mods, and the winning plugin was not made with the other (it does not list it among its masters). It looks both ways, and says whether the winning mod changed the field itself or only carries an older value.
+
+            Values are compared as the game reads them; two positions less than half a unit apart are the same. Changes within one mod, the game's own files, cells, navmesh, and quests, dialogue and form lists are not listed.
+            """),
+
+        ["records.cell-attributes"] = new(
+            "Finds cell settings one mod changed, such as lighting, water height, music or encounter zone, that a later mod in your load order puts back or changes again without having been made with the first mod.",
+            """
+            A cell's own record holds its lighting, water, music, flags and encounter zone. When two mods change the same cell, the game uses only the version of the mod lower in the load order, so a mod made without the other carries the cell's settings it was made with and undoes the other mod's.
+
+            The check is the same as the check for changed fields, on cells: it lists a setting one mod changed whose winning value is another mod's, when the two plugins are in different mods and the winning plugin was not made with the other one. It looks both ways, says whether the winning mod changed the setting itself, compares values as the game reads them, and does not list changes within one mod or in the game's own files. A cell's occlusion data and height map, which the editor rebuilds from the cell's objects and land, are not listed.
+            """),
+
         ["geometry.stranded-object"] = new(
             "Finds objects left out of reach after another mod moved the walkable ground away from them, such as lights and decorations left behind when a mod rebuilds a room somewhere else.",
             """

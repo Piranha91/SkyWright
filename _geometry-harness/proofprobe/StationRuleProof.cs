@@ -1029,9 +1029,9 @@ static class StationRuleProof
           obsSha == M9ObservingSha256, $"{obsSha} ({obsDoc.Length} chars)");
 
         // ======================== H, the opt-in horizontal PortalBox class (GATE-B-CODE §3) ==
-        // HarnessShared.PortalBoxOrientation decides which PortalBox orientations viewprobe's rule
-        // predicts. Kept here because it shares this file's geometry (StationRule.MidQuad, the
-        // renderer's quad) and proofprobe links it beside StationRule. The fixture rotations are the
+        // SkyWright.Engine.PortalBoxOrientation decides which PortalBox orientations the occlusion
+        // rule (OcclusionRule) predicts. Kept here because it shares this file's geometry
+        // (StationRule.MidQuad, the renderer's quad). The fixture rotations are the
         // in-situ form measured at Gate A: X about 90 or 270 with a Y yaw.
         const float Tol = 0.001f;
         (Vector3 Quad, Vector3 Authored, Vector3 Centre) Orient(Vector3 rotDeg, Vector3 pos)

@@ -418,7 +418,7 @@ internal static class Shell
         {
             var item = new ListBoxItem
             {
-                Content = $"{f.Rank}. [{f.Row.CheckId}] {f.Row.Role}, {f.NewLabel}: {f.Row.Summary}" + (f.Row.Clickable ? "" : "   (does not open the viewer)"),
+                Content = FindingWords.Line(f, Bundle?.Manual == true),
                 Tag = f,
             };
             if (f.InvolvesTarget) item.FontWeight = FontWeights.SemiBold;
