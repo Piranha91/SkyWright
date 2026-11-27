@@ -2830,7 +2830,7 @@
     },
     "exit": 2,
     "stdout": "",
-    "stderr": "REFUSED: registry check loadability.masters-and-order: adapter.args uses the placeholder {no_such}, which this controller cannot fill. Known placeholders: arm, base, emit, json, nexusId, order, out, pair, run, switchMap, target. A placeholder is never passed through to a probe literally.\n",
+    "stderr": "REFUSED: registry check loadability.masters-and-order: adapter.args uses the placeholder {no_such}, which this controller cannot fill. Known placeholders: arm, base, dependencies, emit, json, nexusId, order, out, pair, rest, run, selection, switchMap, target. A placeholder is never passed through to a probe literally.\n",
     "written": []
    },
    {
