@@ -173,7 +173,7 @@ using var assets = assetsBuilt;
 Console.WriteLine($"assets: {bsaCount} BSAs indexed ({sw.ElapsedMilliseconds} ms)");
 
 // ---- the plugin: base records with a mesh, worldspace names, every cell with its landscape ----
-// --plugin: the game's Data folder first, else the profile's load order (a mod's plugin lives in its mod folder).
+// --plugin: the game's Data folder first, else the profile's load order (PluginOpen.Locate; a mod's plugin lives in its mod folder).
 var walk = new List<string>();
 if (winning)
 {
@@ -183,14 +183,9 @@ if (winning)
 }
 else
 {
-    string pluginPath = Path.Combine(dataDir, plugin);
-    if (!File.Exists(pluginPath))
-    {
-        // Exempt from the missing-master refusal (ruling 12): the order only finds this one plugin's file; no order is evaluated.
-        var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
-        pluginPath = order.OrderedPaths.FirstOrDefault(pp => string.Equals(Path.GetFileName(pp), plugin, StringComparison.OrdinalIgnoreCase)) ?? "";
-        if (pluginPath.Length == 0) { Console.Error.WriteLine($"{plugin} is neither in {dataDir} nor in the profile's load order"); return 2; }
-    }
+    // Exempt from the missing-master refusal (ruling 12): the order only finds this one plugin's file; no order is evaluated.
+    var pluginPath = HarnessShared.PluginOpen.Locate(plugin, dataDir, () => Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir).OrderedPaths);
+    if (pluginPath is null) { Console.Error.WriteLine(HarnessShared.PluginOpen.NotLocated(plugin, dataDir)); return 2; }
     walk.Add(pluginPath);
 }
 var baseMesh = new Dictionary<FormKey, (string Mesh, string Type)>();

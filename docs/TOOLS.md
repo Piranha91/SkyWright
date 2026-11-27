@@ -72,6 +72,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does buildlayout.py's fallback marker equal the one the build writes, and do its paths exist in that build?](#tool-_geometry-harness-tests-test_buildlayout.py) — `_geometry-harness/tests/test_buildlayout.py`
 - [Does contactprobe --reverse-of give the full reverse's emit, refuse a baseline emit that is not this run's own, and does conflictdiff refuse contactprobe emits (sweep, --terrain or --empty-space) measured under different or unknown rules, or of another mode?](#tool-_geometry-harness-tests-test_contact_reverse.py) — `_geometry-harness/tests/test_contact_reverse.py`
 - [Does contactprobe take the fast memory route when the memory is there, lean under a limit or when other programs hold the memory (warning by name, unattended default recorded), stop with exit 5 under --memory-route ask, and leave no emit or rows behind when it refuses or runs out of memory?](#tool-_geometry-harness-tests-test_contact_memory_route.py) — `_geometry-harness/tests/test_contact_memory_route.py`
+- [Does corridorprobe find a --plugin that lives in a mod folder, and refuse one it cannot find or read in one sentence?](#tool-_geometry-harness-tests-test_corridorprobe_plugin_lookup.py) — `_geometry-harness/tests/test_corridorprobe_plugin_lookup.py`
 - [Does depth-survey projection and lookup math satisfy its synthetic controls?](#tool-_geometry-harness-viewprobe-tools-test_depthsurvey.py) — `_geometry-harness/viewprobe/tools/test_depthsurvey.py`
 - [Does each frame's embedded replay command reproduce that frame?](#tool-_geometry-harness-tests-test_replay_command.py) — `_geometry-harness/tests/test_replay_command.py`
 - [Does evalcontrol accept a judged-0 record import only when it states no members on an arm without the targets, and refuse every other?](#tool-integration-housecarl-tests-test_import_empty_population.py) — `integration/housecarl/tests/test_import_empty_population.py`
@@ -903,6 +904,21 @@ Inputs: The Release contactprobe (or HC_CS_HARNESS); proofprobe --write-motion-f
 Outputs: Assertion results for: Do contactprobe's anchor, surface, volume and motion outputs name the solid rule their results depend on, and say none when no solid rule applied?
 
 Source: [_geometry-harness/tests/test_contact_solid_rule.py](../_geometry-harness/tests/test_contact_solid_rule.py) — `contactprobe's anchor, surface, volume and motion outputs name the solid rule their results depend on (cases 1874-1879, 1886-1887).`
+
+
+<a id="tool-_geometry-harness-tests-test_corridorprobe_plugin_lookup.py"></a>
+
+### _geometry-harness/tests/test_corridorprobe_plugin_lookup.py
+
+**Does corridorprobe find a --plugin that lives in a mod folder, and refuse one it cannot find or read in one sentence?**
+
+Qualify a change to where a probe finds its --plugin (_shared/PluginOpen.cs Locate, corridorprobe, floorgapprobe).
+
+Inputs: The Release build of corridorprobe; a temporary MO2 layout with header-only plugins in Data and in mod folders.
+
+Outputs: Assertion results for: Does corridorprobe find a --plugin that lives in a mod folder, and refuse one it cannot find or read in one sentence?
+
+Source: [_geometry-harness/tests/test_corridorprobe_plugin_lookup.py](../_geometry-harness/tests/test_corridorprobe_plugin_lookup.py) — `Known answers for where corridorprobe finds its --plugin: the game's Data folder first, else the profile's load order.`
 
 
 <a id="tool-_geometry-harness-tests-test_declared_cell_presence.py"></a>
