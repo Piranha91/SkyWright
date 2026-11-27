@@ -63,6 +63,8 @@ static class StrandEmit
             id = r.Ref.ToString(), cell = r.CellEdid ?? r.Cell.ToString(), placer = r.Placer, navmesh = r.NavPlugin, baseType = r.BaseType, baseEdid = r.BaseEdid,
             geometry = r.Geometry, trigger = r.Trigger, winning = r.Winning, own = r.Own, clearance = r.Clearance, nearest = r.Nearest,
             state = r.Verdict.State.ToString(), reason = r.Verdict.Reason, cls = r.Verdict.Class,
+            // the nearest walkable point (the navmesh side of the closest pair) with the navmesh that wins and with its own
+            winningNear = r.WinningNear, ownNear = r.OwnNear,
             subjectBox = Box(r.SubjectBox), nearestBox = Box(r.NearestBox), nearestTriangles = Box(r.NearestTriangles), nearestRegion = Box(r.NearestRegion),
         });
         System.IO.File.WriteAllText(path + ".reach.json", JsonSerializer.Serialize(new

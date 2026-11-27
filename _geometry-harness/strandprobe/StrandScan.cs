@@ -26,7 +26,8 @@ sealed record ScanInput(IReadOnlyList<string> Paths, Func<string, string> Family
 /// <summary>One judged reference (a row, or measured with no row): its cell, plugins, distances, verdict.</summary>
 sealed record ScanRow(FormKey Ref, FormKey Cell, string? CellEdid, string Placer, string? NavPlugin, string? BaseType, string? BaseEdid,
                       string Geometry, bool Trigger, double? Winning, double? Own, double? Clearance, string? Nearest, StrandedVerdict Verdict,
-                      Aabb? SubjectBox = null, Aabb? NearestBox = null, Aabb? NearestTriangles = null, Aabb? NearestRegion = null);
+                      Aabb? SubjectBox = null, Aabb? NearestBox = null, Aabb? NearestTriangles = null, Aabb? NearestRegion = null,
+                      double[]? WinningNear = null, double[]? OwnNear = null);
 
 sealed class ScanResult
 {
@@ -249,7 +250,7 @@ static class StrandScan
             if (input.KeepAll) res.All[k] = (v.State, v.Reason);
             if (v.State == StrandedState.NoRow) { res.Count(v.Reason); continue; }
             res.Rows.Add(new ScanRow(k, cell, cedid, names[placer], nav is { } n2 ? names[n2] : null, bi?.Type, bi?.Edid, shape.Geometry, trigger,
-                                     dw.Distance, dow.Distance, nearest, nearestName, v, subjectBox, nearestB?.Body, nearestB?.Triangles, nearestB?.Region));
+                                     dw.Distance, dow.Distance, nearest, nearestName, v, subjectBox, nearestB?.Body, nearestB?.Triangles, nearestB?.Region, dw.Near, dow.Near));
             res.Count(v.State == StrandedState.Reported ? "reported" : "not judged: " + StrandedRule.ReasonKey(v.Reason));
         }
         return res;

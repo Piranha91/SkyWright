@@ -18,9 +18,10 @@ namespace SkyWright.Engine;
 
 public readonly record struct NavTriangle(Vector3 A, Vector3 B, Vector3 C, ushort Flags, string Navmesh, int Index);
 
-/// <summary>Status <c>measured</c> or <c>refused</c>. Horizontal and Vertical are the components of the closest pair.</summary>
+/// <summary>Status <c>measured</c> or <c>refused</c>. Horizontal and Vertical are the components of the closest pair;
+/// <paramref name="Near"/> is the pair's point on the navmesh (x, y, z), null when refused.</summary>
 public sealed record NavDistance(string Status, string? Reason, double? Distance, double? Horizontal, double? Vertical,
-                                 string? Navmesh, int? Triangle);
+                                 string? Navmesh, int? Triangle, double[]? Near = null);
 
 public static class NavmeshReach
 {
@@ -79,7 +80,7 @@ public static class NavmeshReach
     static NavDistance Answer(double best, (DV P, DV Q) bp, NavTriangle tri)
     {
         var dv = bp.Q - bp.P;
-        return new("measured", null, best, Math.Sqrt(dv.X * dv.X + dv.Y * dv.Y), Math.Abs(dv.Z), tri.Navmesh, tri.Index);
+        return new("measured", null, best, Math.Sqrt(dv.X * dv.X + dv.Y * dv.Y), Math.Abs(dv.Z), tri.Navmesh, tri.Index, new[] { bp.Q.X, bp.Q.Y, bp.Q.Z });
     }
 
     // The object's triangles with their boxes, or null when a coordinate is not finite.
@@ -321,7 +322,7 @@ public static class NavmeshReach
         if (bt is not { } tri) return new("refused", triangles.Count == 0 ? "no navmesh triangle in the cells searched" : "every navmesh triangle in the cells searched is flagged deleted",
                                           null, null, null, null, null);
         var dv = bp.Q - bp.P;
-        return new("measured", null, best, Math.Sqrt(dv.X * dv.X + dv.Y * dv.Y), Math.Abs(dv.Z), tri.Navmesh, tri.Index);
+        return new("measured", null, best, Math.Sqrt(dv.X * dv.X + dv.Y * dv.Y), Math.Abs(dv.Z), tri.Navmesh, tri.Index, new[] { bp.Q.X, bp.Q.Y, bp.Q.Z });
     }
 }
 
