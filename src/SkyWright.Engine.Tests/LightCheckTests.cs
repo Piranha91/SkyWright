@@ -93,6 +93,61 @@ public sealed class LightCheckTests
     }
 
     [Fact]
+    public void KP1m_the_other_side_moves_the_candle_away_and_the_row_says_the_candle_moved()
+    {
+        // Gate B review finding 2 (the fixture half); rejects: a row that names no mod, or says the light moved, when the candle did
+        string candle = K(0x801, Base), light = K(0x802, Sel);
+        var away = new Vector3(300, 0, 0);
+        var d = D().Add(Candle(candle, At0));
+        var s = Light(S().Add(Candle(candle, At0)), light, Above);
+        var r = R().Add(Candle(candle, away, touchers: new[] { Base, RestB }));
+        var c = Light(C().Add(Candle(candle, away, touchers: new[] { Base, RestB })), light, Above);
+        var row = Assert.Single(Rows(Eval(d, s, r, c), LightCheck.LightNoFixture));
+        Assert.Equal("listed", row.Verdict);
+        Assert.Equal(new LightCheckMod("Rest Mod B", RestB), Assert.Single(row.OtherMods));
+        Assert.Contains("which Rest Mod B moves", row.Summary);
+        Assert.DoesNotContain("another mod", row.Summary);
+        Assert.DoesNotContain("moves the light", row.Summary);
+        Assert.Equal("fixture", row.Readings.GetValueOrDefault("moved"));
+    }
+
+    [Fact]
+    public void KP1m_the_other_side_moves_the_light_away_from_its_candle_and_the_row_says_the_light_moved()
+    {
+        // Gate B review finding 2; rejects: "<candle>, which another mod moves N units away" about a candle nobody moved (the mover looked
+        // for on the fixture's records only). Rest Mod B carries a record of the selection's light that puts it 300 u from the candle.
+        string candle = K(0x801, Base), light = K(0x802, Sel);
+        var d = D().Add(Candle(candle, At0));
+        var s = Light(S().Add(Candle(candle, At0)), light, Above);
+        var r = R().Add(Candle(candle, At0));
+        var c = Light(C().Add(Candle(candle, At0)), light, new Vector3(300, 0, 20), touchers: new[] { Sel, RestB });
+        var row = Assert.Single(Rows(Eval(d, s, r, c), LightCheck.LightNoFixture));
+        Assert.Equal("listed", row.Verdict);
+        Assert.Equal(new LightCheckMod("Rest Mod B", RestB), Assert.Single(row.OtherMods));
+        Assert.Contains("Rest Mod B moves the light", row.Summary);
+        Assert.DoesNotContain("another mod", row.Summary);
+        Assert.DoesNotContain("which Rest Mod B moves", row.Summary);
+        Assert.Equal("light", row.Readings.GetValueOrDefault("moved"));
+    }
+
+    [Fact]
+    public void KP1m_light_and_candle_apart_with_no_record_to_explain_it_names_no_mover()
+    {
+        // Gate B review finding 2: "another mod" only when no record explains it, and then the sentence asserts no mover
+        string candle = K(0x801, Base), light = K(0x802, Sel);
+        var away = new Vector3(300, 0, 0);
+        var d = D().Add(Candle(candle, At0));
+        var s = Light(S().Add(Candle(candle, At0)), light, Above);
+        var r = R().Add(Candle(candle, away));
+        var c = Light(C().Add(Candle(candle, away)), light, Above);
+        var row = Assert.Single(Rows(Eval(d, s, r, c), LightCheck.LightNoFixture));
+        Assert.Empty(row.OtherMods);
+        Assert.DoesNotContain(" moves ", row.Summary);
+        Assert.Contains("299 units apart", row.Summary);
+        Assert.Null(row.Readings.GetValueOrDefault("moved"));
+    }
+
+    [Fact]
     public void KP1_a_replacement_candle_at_the_spot_keeps_the_light_hosted()
     {
         // finding 1; rejects: "stranded" from the original host alone, when the other mod put its own burning candle in the same place
