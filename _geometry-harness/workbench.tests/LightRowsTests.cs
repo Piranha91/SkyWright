@@ -74,7 +74,9 @@ public sealed class LightRowsTests
         // rejects: admission decided in code (a held class's rows listed as clashes), a held class dropped silently, the over-limit count
         // listed as a clash, or a not-judged row (a scene's included) hidden
         var (rows, lines) = Read(Registry());
-        Assert.Equal(new[] { "LIGHT LIGHT-NO-FIXTURE", "LIGHT LIGHT-BEHIND-WALL", "LIGHT LIGHT-LIGHTS-NOTHING", "LIGHT NOT JUDGED", "LIGHT NOT JUDGED" }, rows.Select(r => r.Kind));
+        // the lights-nothing row is counted, not listed, at the registry's default (the owner's preliminary ruling, 2026-11-26)
+        Assert.Equal(new[] { "LIGHT LIGHT-NO-FIXTURE", "LIGHT LIGHT-BEHIND-WALL", "LIGHT NOT JUDGED", "LIGHT NOT JUDGED" }, rows.Select(r => r.Kind));
+        Assert.Contains(lines, l => l.StartsWith("1 light(s) that now reach nothing were left out"));
         Assert.All(rows, r => Assert.Equal(LightRows.CheckId, r.CheckId));
         Assert.Contains(lines, l => l.StartsWith("held: a fixture left with no light (1), not shown as clashes; it waits on: no row of this class"));
         Assert.Contains(lines, l => l.StartsWith("held: a fixture lit twice (1)"));
@@ -154,21 +156,25 @@ public sealed class LightRowsTests
     }));
 
     [Fact]
-    public void A_stranded_light_that_lights_nothing_is_one_row_in_the_lights_nothing_class_as_the_registry_says()
+    public void A_light_that_reaches_nothing_is_one_entry_counted_or_listed_as_the_registry_says()
     {
-        // finding 4; rejects: the same light listed twice, the fixture fact lost from the merged row, the merge done in code whatever
-        // the registry says, or the merged light dropped from the count; and stranded lights that reach more surfaces listed later
-        var (rows, lines) = LightRows.Read(StrandedOutput(), LightRows.Classes(Registry()), "x");
-        Assert.Equal(new[] { "000840:Lux.esp", "000810:Lux.esp" }, rows.Where(r => r.Light!.Class == "light-no-fixture").Select(r => r.RefKey));
-        var nothing = Assert.Single(rows, r => r.Light!.Class == "light-lights-nothing");
-        Assert.Contains("which Cities of the North - Morthal removes", nothing.Summary);
-        Assert.Contains("lights nothing", nothing.Summary);
-        Assert.Equal(new Vector3(1, 2, 3), nothing.Light!.FixtureAt);
-        Assert.Contains(lines, l => l.StartsWith("1 light(s) left with no fixture also light nothing, so each is listed once"));
+        // finding 4 and the owner's preliminary ruling; rejects: the same light twice, the fixture fact lost from its entry, the setting
+        // decided in code, a counted light silently dropped, or a flip that changes anything but those rows; stranded lights that reach
+        // more surfaces first
+        var count = LightRows.ReadAll(StrandedOutput(), LightRows.Classes(Registry()), "x");
+        Assert.Equal(new[] { "000840:Lux.esp", "000810:Lux.esp" }, count.Rows.Select(r => r.RefKey));
+        var entry = Assert.Single(count.Counted);
+        Assert.Contains("which Cities of the North - Morthal removes", entry.Summary);
+        Assert.Contains("safe to disable", entry.Summary);
+        Assert.Equal(new Vector3(1, 2, 3), entry.Light!.FixtureAt);
+        Assert.Contains(count.Lines, l => l.StartsWith("1 light(s) that now reach nothing were left out") && l.Contains("1 of them also left with no fixture"));
 
-        var both = LightRows.Read(StrandedOutput(), LightRows.Classes(Registry(whenItLightsNothing: "list-both")), "x");
-        Assert.Equal(3, both.Rows.Count(r => r.Light!.Class == "light-no-fixture"));
-        Assert.StartsWith("Lux's light L lights nothing with COTN installed", both.Rows.Single(r => r.Light!.Class == "light-lights-nothing").Summary);
-        Assert.DoesNotContain(both.Lines, l => l.Contains("listed once"));
+        var list = LightRows.ReadAll(StrandedOutput(), LightRows.Classes(Registry(whenItLightsNothing: "list")), "x");
+        Assert.Empty(list.Counted);
+        var listed = Assert.Single(list.Rows, r => r.Light!.Class == "light-lights-nothing");
+        Assert.Equal(entry.Summary, listed.Summary);   // the same entry, now listed
+        Assert.Equal(count.Rows.Select(r => r.Identity + r.Summary), list.Rows.Where(r => r.Light!.Class != "light-lights-nothing").Select(r => r.Identity + r.Summary));
+        Assert.Contains(list.Lines, l => l.Contains("listed once, under a light that lights nothing"));
+        Assert.DoesNotContain(list.Lines, l => l.Contains("were left out"));
     }
 }

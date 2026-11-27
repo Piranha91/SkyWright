@@ -891,7 +891,7 @@
       "evidence": {
         "strength": "calibrated-inference",
         "claim": "LIGHT FIXTURE HOST",
-        "limits": "Read from the load order alone over four arrangements (the dependencies, the selection over them, the rest over them, the combination); a row is listed only when the combination reads positive and no single arrangement does. Base Object Swapper is not applied: a scene in which a _SWAP.ini names a member is not judged. Whether a stranded, hidden or doubled light looks wrong in game is not established (Gate D designs that test). The over-limit reading is a count and never a clash. Load-time state only; interiors and exteriors (a centre cell with its eight neighbours). A radius over 16,384 units, or over 4,096 units outdoors, is not judged."
+        "limits": "Read from the load order alone over four arrangements (the dependencies, the selection over them, the rest over them, the combination); a row is listed only when the combination reads positive and no single arrangement does. Base Object Swapper is not applied: a scene in which a _SWAP.ini names a member is not judged. Whether a stranded, hidden or doubled light looks wrong in game is not established (Gate D designs that test). The over-limit reading is a count and never a clash. Load-time state only; interiors and exteriors (a centre cell with its eight neighbours). A radius over 16,384 units, or over 4,096 units outdoors, is not judged. The offline reading does not know whether a surface a light reaches is in a room the player uses: on Group 6 five stranded lights in Morthal's Thaumaturgist's Hut are listed because they reach a left-over old room that no player view shows (in game, 2026-11-26). A light that reaches nothing is counted, not listed, by default (the light-no-fixture class entry's whenItLightsNothing)."
       },
       "classes": [
         {
@@ -900,7 +900,7 @@
           "admitted": true,
           "provisional": true,
           "held": null,
-          "whenItLightsNothing": "merge-into-lights-nothing",
+          "whenItLightsNothing": "count",
           "evidence": "Provisional (Gate A review decision 5): 0 rows on Bethesda's sides of 62 hosted lights (95 % bound 4.7 %); 45 rows on Group 6, every one a light the patch author edited (C:/hc-runs/2026-11-26-lighting-check/GATE-A.md section 6; gate-b/null.txt; gate-b/compare-g6-rows.txt)."
         },
         {

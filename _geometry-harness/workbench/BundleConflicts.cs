@@ -207,6 +207,7 @@ internal sealed class BundleConflicts
         var rows = new List<ConflictRow>();
         var seen = new HashSet<string>();
         var checkLines = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var lightCounted = new List<FindingRow>();
         var read = new List<(string, string)>();
 
         foreach (var check in PlacedChecks)
@@ -227,9 +228,12 @@ internal sealed class BundleConflicts
                 var (lrel, lfull) = Outputs(key).FirstOrDefault();
                 if (lfull is null) { notes.Add($"{key} has no json output, so it gives no lighting rows"); continue; }
                 read.Add((key, lrel));
-                var (lrows, llines) = LightRows.Read(lfull, LightRows.Classes(Path.Combine(dir, "registry", "check-registry.json")), strength.GetValueOrDefault(check, "unknown"));
+                var (lrows, llines, lcounted) = LightRows.ReadAll(lfull, LightRows.Classes(Path.Combine(dir, "registry", "check-registry.json")), strength.GetValueOrDefault(check, "unknown"));
                 foreach (var lr in lrows) if (seen.Add(lr.Identity)) rows.Add(lr);
                 checkLines[check] = llines;
+                // the lights counted and not listed (a light that reaches nothing, under the registry's "count"): on the Findings tab to tidy
+                lightCounted.AddRange(lcounted.Select(c => new FindingRow(check, c.Kind, c.A, c.B, c.Summary, c.RefKey, c.Cell,
+                    c.Cell is null ? "the scan did not record which cell this light stands in" : null, "counted, not a clash", c.Identity) { EvidenceStrength = c.EvidenceStrength, Arm = arm, Source = lrel }));
                 continue;
             }
             HashSet<string>? newOnArm = arm == baselineArm ? null : NewRows(dir, check, arm, notes);
@@ -276,7 +280,7 @@ internal sealed class BundleConflicts
             .Select(f => Path.GetFileNameWithoutExtension(f).Split("__")[0]).Where(id => !listed.Contains(id)).ToList();
         if (unlisted.Count > 0)
             notes.Add($"{unlisted.Count} receipt(s) are of checks this SkyWright does not list ({string.Join(", ", unlisted.Distinct().OrderBy(x => x, StringComparer.Ordinal))}): an AI-side evaluation's rows, not shown here.");
-        var findings = new List<FindingRow>();
+        var findings = new List<FindingRow>(lightCounted);
         foreach (var c in plan.GetProperty("checks").EnumerateArray())
         {
             var check = c.GetProperty("checkId").GetString()!;
@@ -338,7 +342,7 @@ internal sealed class BundleConflicts
             string state = accepted && exec == "completed" ? "ran" : exec.StartsWith("rejected") || (!accepted && exec == "completed") ? "rejected"
                          : exec.StartsWith("blocked") ? "blocked" : exec.Length == 0 ? "no result" : exec;
             int before = manual ? rows.Count(x => x.CheckId == check && x.NewOnArm == false) + findings.Count(x => x.CheckId == check && x.NewOnArm == false) : 0;
-            int count = rows.Count(x => x.CheckId == check) + findings.Count(x => x.CheckId == check) - before;
+            int count = rows.Count(x => x.CheckId == check) + findings.Count(x => x.CheckId == check && x.Role != "counted, not a clash") - before;
             checks.Add(new CheckStatus(check, state, state == "ran" ? count : null, state == "ran" ? null : why, state == "ran" && manual && !checkLines.ContainsKey(check) ? before : null)
                        { Lines = state == "ran" ? checkLines.GetValueOrDefault(check) ?? new List<string>() : new List<string>() });
         }
