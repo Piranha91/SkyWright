@@ -88,6 +88,45 @@
       "manualDecisionAllowed": false
     },
     {
+      "id": "loadability.dangling-references",
+      "family": "loadability",
+      "title": "Records that use a record of another mod's plugin which the installed plugin does not have",
+      "required": false,
+      "optIn": true,
+      "heldWhy": "it is held back until it has found a real clash between two mods",
+      "applicability": {
+        "trigger": {
+          "masters": true
+        },
+        "note": "A plugin with masters can use a record a master no longer has; a plugin with none defines everything it uses."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "probe-emit",
+        "exe": "recordprobe",
+        "args": [
+          "--check",
+          "loadability.dangling-references"
+        ],
+        "reverse": false,
+        "output": "conflict-file",
+        "commonFlags": true,
+        "populationFlag": "--population"
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": null,
+        "limits": "Held: a scan does not run it unless it is ticked, because it has never found a real clash between two mods; the lab's orders have none, so it has been shown only on made-up cases. The hold lifts when a scan of real mods finds one and a person confirms the plugin was made for another version of the mod it uses. houseCARL's errors sweep reads every record's links over the whole load order; a link is a row only when the record that uses it is in one mod's plugin and the record it names belongs to another mod's plugin that is loaded but does not have it, and either plugin is in the selection. A plugin in the game's Data folder or in MO2's overwrite counts as a mod of its own. No row, counted under its reason: links in or into the game's own files (Bethesda's and Creation Club's), links into the same plugin or another plugin of the same mod, and links into a plugin missing from the load order (the masters check's). Records houseCARL could not read and plugins it could not scan are not judged. A missing master is not this check's."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
       "id": "geometry.navmesh-ownership",
       "family": "geometry",
       "title": "Navmesh edits discarded by a later plugin, and the integrity of the winning mesh's links",

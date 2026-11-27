@@ -52,6 +52,17 @@ public sealed class DisableWorld : IDisposable
     internal static readonly FormKey OneWayDoor = K(0x829);       // a door that leads to FarDoor, which does not lead back: nothing names it
     internal static readonly FormKey QuestScriptTarget = K(0x828);// named by a script property of the quest
 
+    // Gate C, the kinds a nudge refuses by what depends on where the object stands (data/nudge-refusals.json)
+    internal static readonly FormKey ActivatorBase = K(0x860), FurnitureBase = K(0x861), IdleBase = K(0x862), MarkerStat = K(0x863), MiscBase = K(0x864);
+    internal static readonly FormKey ActivatorRef = K(0x868);     // an activator
+    internal static readonly FormKey FurnitureRef = K(0x869);     // furniture
+    internal static readonly FormKey IdleRef = K(0x86A);          // an idle marker
+    internal static readonly FormKey MarkerRef = K(0x86B);        // a static whose base carries the Is-Marker flag (0x00800000)
+    internal static readonly FormKey MapMarkerRef = K(0x86C);     // a map marker (XMRK)
+    internal static readonly FormKey PrimitiveRef = K(0x86D);     // a trigger box (XPRM), no collision layer
+    internal static readonly FormKey CarryAlias = K(0x86E);       // a loose item (MiscItem) a quest alias alone names: moved like any item, said
+    internal static readonly FormKey PlainDoor = K(0x86F);        // a door that leads nowhere and that nothing names
+
     internal static readonly P3Float PersistentAtMaster = new(100, 0, 0), PersistentAtLater = new(130, -20, 5);
     internal static readonly P3Float PersistentRot = new(0f, -0f, 3.1415927f);   // a negative zero, as Gate A's winner had
 
@@ -79,6 +90,11 @@ public sealed class DisableWorld : IDisposable
         var m = new SkyrimMod(Master, Rel);
         m.Statics.Add(new Static(Stat, Rel) { EditorID = "HcWbDisStatic" });
         m.Doors.Add(new Door(DoorBase, Rel) { EditorID = "HcWbDisDoor" });
+        m.Activators.Add(new Mutagen.Bethesda.Skyrim.Activator(ActivatorBase, Rel) { EditorID = "HcWbNudgeLever" });
+        m.Furniture.Add(new Furniture(FurnitureBase, Rel) { EditorID = "HcWbNudgeChair" });
+        m.IdleMarkers.Add(new IdleMarker(IdleBase, Rel) { EditorID = "HcWbNudgeIdle" });
+        m.Statics.Add(new Static(MarkerStat, Rel) { EditorID = "HcWbNudgeXHeading", MajorRecordFlagsRaw = 0x00800000 });
+        m.MiscItems.Add(new MiscItem(MiscBase, Rel) { EditorID = "HcWbNudgeSack" });
         m.Races.Add(new Race(RaceKey, Rel) { EditorID = "HcWbDisRace" });
         m.Npcs.Add(new Npc(NpcBase, Rel) { EditorID = "HcWbDisNpc", Height = 1f, Race = new FormLinkNullable<IRaceGetter>(RaceKey) });
         m.CollisionLayers.Add(new CollisionLayer(NavcutLayer, Rel) { EditorID = "L_NAVCUT", Name = "L_NAVCUT", Index = 49, Flags = CollisionLayer.Flag.NavmeshObstacle, Description = "cuts navmesh" });
@@ -114,6 +130,16 @@ public sealed class DisableWorld : IDisposable
         var plink = Ref(PersistLinker, Stat, 1410); var pl2 = new LinkedReferences(); pl2.Reference.SetTo(PersistLinkTarget); plink.LinkedReferences.Add(pl2); cell.Persistent.Add(plink);
         cell.Temporary.Add(Ref(QuestScriptTarget, Stat, 1500));
         cell.Persistent.Add(LoadDoor(OneWayDoor, FarDoor, 1600));
+        cell.Temporary.Add(Ref(ActivatorRef, ActivatorBase, 1700));
+        cell.Temporary.Add(Ref(FurnitureRef, FurnitureBase, 1710));
+        cell.Temporary.Add(Ref(IdleRef, IdleBase, 1720));
+        cell.Temporary.Add(Ref(MarkerRef, MarkerStat, 1730));
+        var mapm = Ref(MapMarkerRef, Stat, 1740); mapm.MapMarker = new MapMarker { Name = "HcWbNudgeTown", Flags = MapMarker.Flag.Visible, Type = MapMarker.MarkerType.City };
+        cell.Persistent.Add(mapm);
+        var prim = Ref(PrimitiveRef, Stat, 1750); prim.Primitive = new PlacedPrimitive { Type = PlacedPrimitive.TypeEnum.Box, Bounds = new P3Float(40, 40, 40) };
+        cell.Temporary.Add(prim);
+        cell.Persistent.Add(Ref(CarryAlias, MiscBase, 1760));
+        cell.Temporary.Add(Ref(PlainDoor, DoorBase, 1770));
         var far = new SkCell(FarCell, Rel) { EditorID = "HcWbDisFarCell", Flags = SkCell.Flag.IsInteriorCell };
         far.Persistent.Add(LoadDoor(FarDoor, Door, 0));
         var block = new CellBlock { BlockNumber = 2, GroupType = GroupTypeEnum.InteriorCellBlock };
@@ -122,6 +148,7 @@ public sealed class DisableWorld : IDisposable
 
         var q = new Quest(Quest, Rel) { EditorID = "HcWbDisQuest" };
         q.Aliases.Add(new QuestAlias { ID = 0, Name = "Forced", ForcedReference = new FormLinkNullable<IPlacedGetter>(AliasTarget) });
+        q.Aliases.Add(new QuestAlias { ID = 1, Name = "PickUp", ForcedReference = new FormLinkNullable<IPlacedGetter>(CarryAlias) });
         q.VirtualMachineAdapter = new QuestAdapter();
         var qs = new ScriptEntry { Name = "HcWbDisQuestScript" };
         qs.Properties.Add(new ScriptObjectProperty { Name = "Thing", Object = new FormLink<ISkyrimMajorRecordGetter>(QuestScriptTarget) });

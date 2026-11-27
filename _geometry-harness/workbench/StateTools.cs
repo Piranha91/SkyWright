@@ -26,13 +26,13 @@ internal sealed class StateTools
         "runs again on the patch's cell and says whether the open conflict is resolved and whether a new one appeared. " +
         "Positions are Skyrim units (about 70 units to a metre); +X is east, +Y is north, +Z is up.";
 
-    static readonly string[] Parts = { "bundle", "conflicts", "findings", "selection", "pending", "recheck", "repair", "launcher", "view", "decisions", "scenes", "context", "placements", "scene", "results", "world", "layers", "load_order", "live" };
+    static readonly string[] Parts = { "bundle", "conflicts", "findings", "selection", "pending", "recheck", "repair", "launcher", "view", "decisions", "scenes", "context", "placements", "scene", "results", "world", "layers", "load_order", "live", "nudge" };
     static readonly string[] DefaultParts = { "selection", "pending", "recheck" };
     /// <summary>The verbs that stage or write an edit: refused on a read-only scene.</summary>
-    static readonly string[] EditVerbs = { "stage", "disable", "undo", "commit", "recheck", "revert", "drop", "move_with", "find_clear", "choose" };
+    static readonly string[] EditVerbs = { "stage", "disable", "nudge", "undo", "commit", "recheck", "revert", "drop", "move_with", "find_clear", "choose" };
     /// <summary>Every verb workbench_act takes, as its description and its unknown-verb refusal name them (one list:
     /// <c>StateToolsTests</c> holds each to the dispatch).</summary>
-    internal const string VerbList = "select, stage, disable, undo, revert, drop, view, decide, commit, recheck, move_with, find_clear, choose, repair_preview, repair_write, layer, frame_log, load_order, map, results, world, open_profile, select_mods, select_probes, set_output, set_work_folder, run, abort, capture_window, show_tab, search_mods or open";
+    internal const string VerbList = "select, stage, disable, nudge, undo, revert, drop, view, decide, commit, recheck, move_with, find_clear, choose, repair_preview, repair_write, layer, frame_log, load_order, map, results, world, open_profile, select_mods, select_probes, set_output, set_work_folder, run, abort, capture_window, show_tab, search_mods or open";
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
     internal static CallToolResult Refuse(string sentence) => new() { IsError = true, Content = [new TextContentBlock { Text = sentence }] };
@@ -53,6 +53,7 @@ internal sealed class StateTools
                      "decisions (each Conflicts row's decision: real problem, intentional or unsure, its reason, and whether it still applies or is flagged to reconsider; and decisions whose row is not in this run). " +
                      "scenes (the Conflicts rows by cell: inside a cell, rows naming a common reference are one cluster, and rows with equal values of the grouping data's group key are one group; with each cell's clickable Findings rows), " +
                      "context (the selected reference: doors within 256 units, each 'touches it' or 'near only', with the far side; what names it; its enable parent; what rests on it and what physics does with it at load; the navmesh under its bounds; what stays behind a move; 'reading' while the read runs), " +
+                     "nudge (the last nudge: running or not, its phase, how many positions were judged and found clear, each proof's word and seconds, what it said, and what a nudge does not check; wait_seconds waits for it). " +
                      "placements (find_clear's candidate positions: each one's move, drop, what it touches there, its word from the open row's re-check, what was and was not checked; wait_seconds waits for them). " +
                      "scene (what the 3D view shows or is loading: the cell, the load order it is built on, read-only or not, and the last build's time and the longest the window waited during it). " +
                      "results (the Results tab: the open evaluation's pairs with their counts, the choices made, and the rows listed, each with its group, values and place; limit and offset page the rows; the open row with its setup, cell and what was said). " +
@@ -80,6 +81,7 @@ internal sealed class StateTools
             var r0 = await hub.OnUi(() =>
             {
                 running = hub.Surface.Scene is { Rechecking: true } s ? s.RecheckRunning
+                        : hub.Surface.Scene?.NudgeRunning is { IsCompleted: false } nr ? nr
                         : hub.Surface.Scene?.Trials?.Running is { IsCompleted: false } tr ? tr
                         : hub.Launcher.RunTask is { IsCompleted: false } lr ? lr : null;
                 return Task.FromResult(Answer(new { }));
@@ -102,6 +104,7 @@ internal sealed class StateTools
             if (parts.Contains("scenes")) d["scenes"] = ScenesJson(hub.Surface, hub.Standings, include_decided, include_findings_only);
             if (parts.Contains("context")) d["context"] = ContextJson(hub.Surface);
             if (parts.Contains("placements")) d["placements"] = PlacementsJson(hub.Surface);
+            if (parts.Contains("nudge")) d["nudge"] = hub.Surface.Scene?.NudgeState ?? new { refused = "no scene is shown, or it cannot nudge." };
             if (parts.Contains("scene")) d["scene"] = SceneDirector.State();
             if (parts.Contains("results")) d["results"] = ResultsView.State(limit, offset);
             if (parts.Contains("load_order")) d["load_order"] = LoadOrderPanel.State();
@@ -118,6 +121,7 @@ internal sealed class StateTools
                  "reference; or select a drawn reference with `ref`, or ref \"none\"); stage (move and/or turn a reference: relative with `delta` " +
                  "and `turn_degrees`, or absolute with `position` and `rotation_degrees`; the selected reference unless `ref` names one); " +
                  "disable (stage the selected reference, or `ref`, to be written initially disabled in the patch plugin, never deleted: refused in one sentence when another record depends on it, such as an enable parent, a linked reference, an activate parent, a door's far side, a quest, a package, a script property, or a large-reference list; an object takes one fix, a move or a disable. " + DisableRule.Limits + "); " +
+                 "nudge (find the smallest move, within 107 units including the drop, that clears the open overlap for the selected reference or `ref`: refused in one sentence when something depends on where it stands (data/nudge-refusals.json) or it already has a fix; runs in the background, about 30 s for the judge program and 150-220 s per proof by the open row's probe and contactprobe, at most 3; the first position the probes confirm is staged, never written, and says that walking routes were not checked; `op` abort stops it; read with workbench_state project [\"nudge\"]); " +
                  "undo (the last staged edit, a disable too); commit (write the staged edits to the new patch plugin `patch`: `dry_run` true, the default, " +
                  "previews the values and masters and writes nothing; false writes, and then re-checks the open conflict in the background, " +
                  "about 70-80 s, read with workbench_state wait_seconds); recheck (re-check the open conflict against the written patch `patch`). " +
@@ -218,6 +222,7 @@ internal sealed class StateTools
             if (v == "choose") { var ch = await Choose(hub.Surface, n); if (ch.IsError != true) SaveSession(hub.Surface); return ch; }
             if (v is "repair_preview" or "repair_write") return await Repair(hub.Surface, v, finding, patch);
             if (v == "disable") { var dr = await DisableOnUi(hub.Surface, @ref); if (dr.IsError != true) SaveSession(hub.Surface); return dr; }
+            if (v == "nudge") return await NudgeOnUi(hub.Surface, @ref, op);
             if (finding is { } fr) return await SelectFinding(hub.Surface, verb, fr);
             var r = v switch
             {
@@ -347,6 +352,20 @@ internal sealed class StateTools
         else if (sc.Session.Selected is { } sel) k = sel;
         else return Refuse("disable needs ref, or a selected reference.");
         try { var said = await DisableAction.StageAsync(sc, k); return Answer(new { said, state = Project(s, DefaultParts, 20, 0, null) }); }
+        catch (InvalidOperationException ex) { return Refuse(ex.Message); }
+    }
+
+    /// <summary>The <c>nudge</c> verb: the window's Nudge button, by the same path; <c>op</c> abort stops a running one.</summary>
+    static async Task<CallToolResult> NudgeOnUi(IWorkbenchSurface s, string? refKey, string? op)
+    {
+        var sc = SceneOr(s, out var none); if (sc is null) return none!;
+        if (string.Equals(op?.Trim(), "abort", StringComparison.OrdinalIgnoreCase)) return Answer(new { said = sc.AbortNudge(), nudge = sc.NudgeState });
+        if (op is { Length: > 0 }) return Refuse($"'{op}' is not a nudge operation; give no op to start one, or abort to stop it.");
+        FormKey k;
+        if (refKey is not null) { var key = Key(refKey, out var bad); if (key is null) return bad!; k = key.Value; }
+        else if (sc.Session.Selected is { } sel) k = sel;
+        else return Refuse("nudge needs ref, or a selected reference.");
+        try { var said = await sc.NudgeAsync(k); return Answer(new { said, nudge = sc.NudgeState }); }
         catch (InvalidOperationException ex) { return Refuse(ex.Message); }
     }
 
@@ -549,7 +568,7 @@ internal sealed class StateTools
                 continue;
             }
             if (ContextCache.Read(sc, h) is not { } read) continue;
-            try { said.Add($"{h}: " + ContextRead.StaysBehind(await read, ContextCache.MovedWith(sc, h))); }
+            try { said.Add($"{h}: " + ContextRead.StaysBehind(await read, ContextCache.MovedWith(sc, h), FormKey.TryFactory(h, out var nk) && sc.Session.IsNudged(nk))); }
             catch (Exception ex) { said.Add($"{h}: what stays behind could not be read: {ex.GetBaseException().Message}"); }
         }
         return said.Count == 0 ? "" : " " + string.Join(" ", said);
@@ -923,7 +942,7 @@ internal sealed class StateTools
             d["pending"] = sc?.Session.Pending.Select(e => new
             {
                 @ref = e.Ref.ToString(), sentence = EditSession.Sentence(e, sc.Session.IsDrawn(e.Ref) ? sc.Session.RefOf(e.Ref).Ref.BaseEditorId : null),
-                disable = e.Disable, before = PoseJson(e.Before), after = PoseJson(e.After),
+                disable = e.Disable, nudge = e.Nudge, before = PoseJson(e.Before), after = PoseJson(e.After),
                 moved = new[] { e.After.Position.X - e.Before.Position.X, e.After.Position.Y - e.Before.Position.Y, e.After.Position.Z - e.Before.Position.Z },
             }).ToList();
             d["written"] = sc?.Session.Written.Select(kv => new { @ref = kv.Key.ToString(), patch = kv.Value.Patch, pose = PoseJson(kv.Value.Pose), disabled = sc.Session.WrittenDisabled.Contains(kv.Key) }).ToList();

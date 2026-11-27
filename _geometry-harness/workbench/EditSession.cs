@@ -9,7 +9,7 @@ namespace Workbench;
 
 /// <summary>One staged edit: the reference and its pose before and after, or (<paramref name="Disable"/>) the reference to be
 /// written "initially disabled" at the pose it has. Nothing is on disk until a commit.</summary>
-internal sealed record PendingEdit(FormKey Ref, RefPlacementEdit.Pose Before, RefPlacementEdit.Pose After, bool Disable = false);
+internal sealed record PendingEdit(FormKey Ref, RefPlacementEdit.Pose Before, RefPlacementEdit.Pose After, bool Disable = false, string? Nudge = null);
 
 /// <summary>The workbench's session state: the selected reference and the ordered list of staged edits. The window and
 /// (stage 5) the MCP state tools both call these methods; nothing keeps a second copy of the state.
@@ -71,6 +71,21 @@ internal sealed class EditSession
     readonly Dictionary<FormKey, (string Patch, RefPlacementEdit.Pose Pose)> _written = new();
     readonly HashSet<FormKey> _writtenDisabled = new();
 
+    /// <summary>The written edits that came from a nudge (Gate C): the re-check after the write runs contactprobe for them and
+    /// says what it did not check, until the edit is undone.</summary>
+    internal IReadOnlyCollection<FormKey> WrittenNudged => _writtenNudged;
+    readonly HashSet<FormKey> _writtenNudged = new();
+
+    /// <summary>The object's edit came from a nudge: its last staged edit is one, or its written edit was.</summary>
+    internal bool IsNudged(FormKey key) => _pending.LastOrDefault(e => e.Ref == key) is { } p ? p.Nudge is not null : _writtenNudged.Contains(key);
+
+    /// <summary>A written edit restored from the session file came from a nudge (Gate C).</summary>
+    internal void MarkWrittenNudged(FormKey key) { if (_written.ContainsKey(key)) _writtenNudged.Add(key); }
+
+    /// <summary>The objects a patch holds by a nudge, for its re-check (contactprobe and the words).</summary>
+    internal IReadOnlyList<string> NudgedIn(string plugin) => _writtenNudged
+        .Where(k => string.Equals(_written[k].Patch, plugin, StringComparison.OrdinalIgnoreCase)).Select(k => k.ToString()).OrderBy(k => k, StringComparer.Ordinal).ToList();
+
     /// <summary>The written edits that are disables ("initially disabled" in their patch), not moves.</summary>
     internal IReadOnlyCollection<FormKey> WrittenDisabled => _writtenDisabled;
 
@@ -83,6 +98,7 @@ internal sealed class EditSession
         {
             _written[e.Ref] = (patch, e.After);
             if (e.Disable) _writtenDisabled.Add(e.Ref); else _writtenDisabled.Remove(e.Ref);
+            if (e.Nudge is not null) _writtenNudged.Add(e.Ref); else _writtenNudged.Remove(e.Ref);
         }
         _pending.Clear();
         Changed?.Invoke($"{net.Count} edit(s) written to {patch}; the view keeps them where the patch puts them (the patch is not enabled)");
@@ -95,6 +111,7 @@ internal sealed class EditSession
         RefPlacementEdit.Apply(RefOf(key), pose);
         _written[key] = (patch, pose);
         _writtenDisabled.Remove(key);
+        _writtenNudged.Remove(key);
         Changed?.Invoke($"{key} drawn as {patch} places it ({Describe(pose)})");
     }
 
@@ -117,6 +134,7 @@ internal sealed class EditSession
         Replacing?.Invoke();
         _written.Remove(key);
         _writtenDisabled.Remove(key);
+        _writtenNudged.Remove(key);
         RefPlacementEdit.Apply(RefOf(key), Current(key));
         Changed?.Invoke($"{key}'s written edit is gone; the view shows it where the load order places it");
     }
@@ -144,7 +162,7 @@ internal sealed class EditSession
     internal RefPlacementEdit.Edit Preview(FormKey key, RefPlacementEdit.Pose pose) => RefPlacementEdit.Apply(RefOf(key), pose);
 
     /// <summary>Stage one edit: re-place the reference and append it to the pending list.</summary>
-    internal PendingEdit Stage(FormKey key, RefPlacementEdit.Pose after)
+    internal PendingEdit Stage(FormKey key, RefPlacementEdit.Pose after, string? nudge = null)
     {
         RefOf(key);
         if (IsDisabled(key))
@@ -152,9 +170,9 @@ internal sealed class EditSession
         Replacing?.Invoke();
         var before = Current(key);
         var applied = RefPlacementEdit.Apply(RefOf(key), after);
-        var e = new PendingEdit(key, before, after);
+        var e = new PendingEdit(key, before, after, Nudge: nudge);
         _pending.Add(e);
-        Changed?.Invoke($"staged {key}: {Describe(before)} -> {Describe(after)}"
+        Changed?.Invoke($"staged {(nudge is null ? "" : "a nudge of ")}{key}: {Describe(before)} -> {Describe(after)}"
                         + (applied.Stale.Count > 0 ? "; " + string.Join("; ", applied.Stale) : ""));
         return e;
     }
@@ -198,7 +216,7 @@ internal sealed class EditSession
         var last = _pending[^1];
         _pending.RemoveAt(_pending.Count - 1);
         RefPlacementEdit.Apply(RefOf(last.Ref), last.Before);
-        Changed?.Invoke(last.Disable ? $"undid the disable of {last.Ref}: it is shown again" : $"undid {last.Ref}: back at {Describe(last.Before)}");
+        Changed?.Invoke(last.Disable ? $"undid the disable of {last.Ref}: it is shown again" : $"undid {(last.Nudge is null ? "" : "the nudge of ")}{last.Ref}: back at {Describe(last.Before)}");
         return last;
     }
 
@@ -220,7 +238,8 @@ internal sealed class EditSession
     {
         var order = new List<FormKey>();
         foreach (var e in _pending) if (!order.Contains(e.Ref)) order.Add(e.Ref);
-        return order.Select(k => new PendingEdit(k, RefPlacementEdit.BakedPose(RefOf(k).Ref), Current(k), _pending.Any(e => e.Ref == k && e.Disable))).ToList();
+        return order.Select(k => new PendingEdit(k, RefPlacementEdit.BakedPose(RefOf(k).Ref), Current(k), _pending.Any(e => e.Ref == k && e.Disable),
+                                                 _pending.Last(e => e.Ref == k).Nudge)).ToList();
     }
 
     static string N(float v) => v.ToString("0.##", CultureInfo.InvariantCulture);
@@ -232,6 +251,8 @@ internal sealed class EditSession
     {
         string name = baseName ?? e.Ref.ToString();
         if (e.Disable) return $"Disable {name} (written initially disabled)";
+        if (e.Nudge is not null)
+            return $"Nudged {name} {NudgeRule.Move(e.Before, e.After)}; {NudgeRule.Checked}; {NudgeRule.RoutesNotChecked}";
         var d = new Vector3(e.After.Position.X - e.Before.Position.X, e.After.Position.Y - e.Before.Position.Y, e.After.Position.Z - e.Before.Position.Z);
         var parts = new List<string>();
         void Part(float v, string pos, string neg) { if (MathF.Abs(v) >= 0.005f) parts.Add($"{N(MathF.Abs(v))} units {(v > 0 ? pos : neg)}"); }
