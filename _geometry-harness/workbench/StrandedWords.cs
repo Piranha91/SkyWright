@@ -41,7 +41,7 @@ internal static partial class StrandedWords
         {
             string text = $"{An(m.Groups["type"].Value)} from {m.Groups["a"].Value} is out of reach in {m.Groups["cell"].Value}: with {m.Groups["b"].Value}'s navmesh it is "
                           + $"{Units(m.Groups["w"].Value)} from anywhere a character can walk, and {Units(m.Groups["o"].Value)} with the navmesh {m.Groups["a"].Value} was made for. "
-                          + "Nothing of another mod is near it.";
+                          + "It touches nothing of another mod.";
             string cs = ClassSentence(m.Groups["cls"].Value);
             return char.ToUpperInvariant(text[0]) + text[1..] + (cs.Length > 0 ? " " + cs : "");
         }

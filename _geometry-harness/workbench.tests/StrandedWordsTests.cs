@@ -28,7 +28,7 @@ public sealed class StrandedWordsTests
     {
         var s = StrandedWords.Sentence(StrandedWords.CheckId, Reported("decoration (light)"))!;
         Assert.Equal("A light from Lux.esp is out of reach in MorthalAlvasHouse: with COTN - Morthal.esp's navmesh it is 613 units from anywhere a character "
-                     + "can walk, and 100 units with the navmesh Lux.esp was made for. Nothing of another mod is near it. It is a light.", s);
+                     + "can walk, and 100 units with the navmesh Lux.esp was made for. It touches nothing of another mod. It is a light.", s);
         Plain(s);
     }
 
