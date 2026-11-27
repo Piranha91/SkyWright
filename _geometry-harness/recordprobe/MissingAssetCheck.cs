@@ -118,11 +118,12 @@ static class MissingAssetCheck
         var full = files.Zip(Ask(ctx.Call, files, "the files the selection's records use")).ToDictionary(x => x.First, x => x.Second, StringComparer.OrdinalIgnoreCase);
         var verdicts = new List<(Use U, string? Archive, LinkEnd? Shipper, LinkEnd? Hider, RecordVerdict V)>();
         var lost = new List<Use>();
+        var found = new List<(Use U, string Why)>();   // every file not asked again, for the rows file
         foreach (var u in uses.Values)
         {
             var st = full[u.Path];
-            if (st.Error is not null) { Add(unjudged, PathRefused); continue; }
-            if (st.Exists) { Add(setAside, Present); continue; }
+            if (st.Error is not null) { Add(unjudged, PathRefused); found.Add((u, PathRefused)); continue; }
+            if (st.Exists) { Add(setAside, Present); found.Add((u, Present)); continue; }
             if (st.MaybeIncomplete) { Add(unjudged, Incomplete); continue; }
             lost.Add(u);
         }
@@ -173,6 +174,9 @@ static class MissingAssetCheck
 
         var rows = new List<Conflict>();
         var detail = new List<object>();
+        foreach (var (u, why) in found)
+            detail.Add(new { check = Id, plugin = u.Plugin, file = u.Path, formid = u.FormId, type = u.Type, editorid = u.EditorId, records = u.Records,
+                             archive = (string?)null, shipperMod = (string?)null, hiderMod = (string?)null, row = false, reason = why });
         foreach (var (u, archive, shipper, hider, v) in verdicts)
         {
             detail.Add(new { check = Id, plugin = u.Plugin, file = u.Path, formid = u.FormId, type = u.Type, editorid = u.EditorId, records = u.Records,
