@@ -166,17 +166,24 @@ internal static class ContextRead
     static string P(Vec3 v) => FormattableString.Invariant($"({v.X:0.##}, {v.Y:0.##}, {v.Z:0.##})");
 
     /// <summary>The commit's sentence: what moves with the reference and what stays behind.</summary>
-    internal static string StaysBehind(ContextAnswer a, IReadOnlyCollection<string> movingWith)
+    /// <summary>For a nudged object (Gate C): what the drawn shapes show resting on it was judged by the nudge's proof with
+    /// placement contact (collision), which left nothing in the air; it is not said to stay in the air.</summary>
+    internal static string NudgedResting(IEnumerable<string> keys) =>
+        $"What the drawn shapes show resting on it ({string.Join(", ", keys)}) was judged by the nudge's proof with placement contact, which found nothing left in the air.";
+
+    internal static string StaysBehind(ContextAnswer a, IReadOnlyCollection<string> movingWith, bool nudged = false)
     {
         var moving = new HashSet<string>(movingWith, StringComparer.OrdinalIgnoreCase);
         var stay = new List<string>();
         foreach (var d in a.Doors.Where(d => !moving.Contains(d.Key)))
             stay.Add($"door {d.Key} ({d.Label})" + (d.FarDoor is not null ? $", whose far side {d.FarDoor} is unchanged" : ""));
         foreach (var n in a.Names.Where(n => !moving.Contains(n.Key))) stay.Add($"{n.Key}, which names it as {n.Field}");
-        foreach (var r in a.Resting.Where(r => !moving.Contains(r.Key))) stay.Add(r.Sentence);
+        var resting = a.Resting.Where(r => !moving.Contains(r.Key)).ToList();
+        if (!nudged) foreach (var r in resting) stay.Add(r.Sentence);
         var said = new List<string>();
         said.Add(moving.Count == 0 ? "Nothing moves with it on its own." : $"Moving with it by the same move: {string.Join(", ", moving.OrderBy(x => x, StringComparer.Ordinal))}.");
         said.Add(stay.Count == 0 ? "Nothing near it, naming it or resting on it stays behind." : "These stay behind: " + string.Join("; ", stay) + ".");
+        if (nudged && resting.Count > 0) said.Add(NudgedResting(resting.Select(r => r.Key)));
         foreach (var d in a.Doors.Where(d => moving.Contains(d.Key) && d.FarDoor is not null))
             said.Add($"Door {d.Key} moves with it, but its far side {d.FarDoor} in cell {d.FarCell ?? "unknown"} still holds the old arrival point "
                      + (d.Arrival is { } p ? P(p) : "(not read)") + ", so a player coming through it arrives at the old doorstep; this write does not carry the far door's TeleportDestination.");

@@ -110,6 +110,7 @@ overlapprobe: bounded strict render-surface scene capture
   --instance DIR --game DIR --profile NAME --order CANDIDATE.json
   --self-check-imported-accounting FIXTURE.json (no load order; prints the accounting receipt)
   --self-check-declared-cells FIXTURE.json (no load order; prints each declared cell's presence outcome)
+  --nudge REQUEST.json --nudge-out ANSWER.json --order CANDIDATE.json (Gate C: judge one object's nudge candidates; NudgeJudge.cs)
 Scene candidates require explicit Mods asset priority; preflight checks MO2 names and relative priority, and refuses
 an arm whose plugins name meshes its Mods lack while an installed folder outside them has them.
 An exterior persistent cell cannot define a bounded scope. Unknown geometry remains explicit.
@@ -268,6 +269,7 @@ string? declaredCellsFixture = null;
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 string? orderFile = null;
+string? nudgeRequestPath = null, nudgeOutPath = null;   // --nudge REQUEST --nudge-out ANSWER (Gate C, NudgeJudge.cs)
 // --population FILE (P25): the plan's population (_shared/PopulationScope.cs); --population-audit EMIT OUT writes, for every
 // row of EMIT, whether it is in that population (the equivalence check reads it).
 string? populationPath = null, populationAuditEmit = null, populationAuditOut = null;
@@ -342,6 +344,8 @@ try
         else if (flag == "--self-check-imported-accounting") { accountingFixture = NeedValue(i, flag); i++; }
         else if (flag == "--self-check-declared-cells") { declaredCellsFixture = NeedValue(i, flag); i++; }
         else if (flag == "--order") { orderFile = NeedValue(i, flag); i++; }
+        else if (flag == "--nudge") { nudgeRequestPath = NeedValue(i, flag); i++; }
+        else if (flag == "--nudge-out") { nudgeOutPath = NeedValue(i, flag); i++; }
         else if (flag == "--population") { populationPath = NeedValue(i, flag); i++; }
         else if (flag == "--mesh-reach") { meshReachPath = NeedValue(i, flag); i++; }
         else if (flag == "--population-audit")
@@ -369,6 +373,12 @@ if (accountingFixture is not null) return ImportedReferenceAccounting.SelfCheck(
 if (declaredCellsFixture is not null) return DeclaredCellPresence.SelfCheck(declaredCellsFixture);
 
 bool sceneCapture = sceneId is not null;
+if ((nudgeRequestPath is null) != (nudgeOutPath is null)) { Console.Error.WriteLine("--nudge REQUEST and --nudge-out ANSWER go together"); return 2; }
+if (nudgeRequestPath is not null && (sceneCapture || scenePreflight || emitPath is not null || populationPath is not null || geometryManifestPath is not null || responsiblePairNames.Count > 0))
+{
+    Console.Error.WriteLine("--nudge judges one object's candidate positions; it does not combine with --emit, --population, scene capture, --scene-preflight, --geometry-manifest or --responsible-pair");
+    return 2;
+}
 if (sceneCapture && orderFile is null)
 {
     Console.Error.WriteLine("scene capture requires --order CANDIDATE with an explicit Mods list; bare-profile and --enable/--disable source scenes are refused before loading the order");
@@ -1483,6 +1493,15 @@ __run.Stage("render-geometry", "preparing strict render geometry and candidates"
     __run.Advance();
     return result;
 }
+// --nudge (Gate C): the cheap judge of one object's candidate positions (NudgeJudge.cs), over the same candidates, the base
+// game included, in the object's neighbourhood only; then stop.
+if (nudgeRequestPath is not null)
+    return NudgeJudge.Run(nudgeRequestPath, nudgeOutPath!, idx,
+        include => idx.SurfaceCandidates(CandidateGeometryOf, Obstructing, _ => false, out var nudgeSkips, enabledOf, include, MarkerModel)
+                      .Where(c => StateGates(c, nudgeSkips)).ToList(),
+        IsBaseGame, PluginName,
+        k => enabledOf?.Invoke(k) != false && idx.RefBase.TryGetValue(k, out var nb) && idx.BaseInfo.TryGetValue(nb, out var nbi) && Obstructing.Contains(nbi.Type)
+             && !idx.BaseIsMarker.Contains(nb) && DetectorModel.ClassifyHost(nbi.Type, nbi.Edid) != HostClass.Marker && !MarkerModel(nb) && SurfaceGeometryOf(nb).Soup is null);
 var candidates = idx.SurfaceCandidates(CandidateGeometryOf, Obstructing, ExcludeResponsible, out var skips, enabledOf,
     sceneCapture ? InSceneScope : null, MarkerModel);
 candidates = candidates.Where(BoundsInSceneScope).ToList();

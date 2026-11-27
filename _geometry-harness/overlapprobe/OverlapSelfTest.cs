@@ -39,5 +39,8 @@ static class OverlapSelfTest
 
         // Track P: the pair-loop timers and the acceleration's identity cases (AccelSelfTest.cs).
         AccelSelfTest.Run(t);
+
+        // Gate C: the nudge judge's rule (NudgeSelfTest.cs).
+        NudgeSelfTest.Run(t);
     });
 }
