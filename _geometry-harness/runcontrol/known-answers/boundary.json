@@ -1,5 +1,5 @@
 {
- "$comment": "The rows an AI-side evaluation fills and the adapter kinds only they use, as settled at Gate B of step 3 of the SkyWright / houseCARL boundary (GATE-B.md, 4.1): none may be in the app's registry or its validator's vocabulary. Read by the boundary self-test (SelfTestBoundary.cs).",
+ "$comment": "The rows an AI-side evaluation fills and the adapter kinds only they use, as settled at Gate B of step 3 of the SkyWright / houseCARL boundary (GATE-B.md, 4.1): none may be in the app's registry or its validator's vocabulary. Read by the boundary self-test (SelfTestBoundary.cs). loadability.dangling-references left the rows on 2026-11-27: the app runs it itself (recordprobe, in C#, no model and no houseCARL program; record checks unit 1), and the module's own mcp-only row of that id stays until the module calls recordprobe.",
  "aiSideKinds": [
   "mcp-only",
   "live-import",
@@ -8,7 +8,6 @@
   "adviceprobe"
  ],
  "aiSideRows": [
-  "loadability.dangling-references",
   "loadability.missing-assets",
   "records.contested-fields",
   "records.cell-attributes",
