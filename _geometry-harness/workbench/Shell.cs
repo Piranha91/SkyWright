@@ -550,6 +550,11 @@ internal static class Shell
             var t = LightRows.Target(r.Row);
             if (t.WhyNot is { } why) { SetBanner(why); LastLanding = "refused: " + why; return; }
             PendingPoint = t.FixtureAt is { } fa ? (fa, $"the magenta diamond marks where {r.Row.Light.FixtureEdid ?? r.Row.OtherKey ?? "the fixture"} stood in its own setup") : null;
+            // a light has no model, so the scene never draws it and the click planner would refuse it; when the scene already shows the
+            // row's cell, land here (its stand-in or its record's place) instead
+            if (Current is { } h && !h.ReadOnly && t.Cell is not null && string.Equals(h.SceneCell, t.Cell, StringComparison.OrdinalIgnoreCase)
+                && FormKey.TryFactory(t.RefKey!, out var fk))
+            { h.Land(fk); return; }
             OpenRef(t.RefKey!, t.Cell);
             return;
         }
