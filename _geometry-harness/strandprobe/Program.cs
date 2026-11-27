@@ -30,6 +30,8 @@ using SkyWright.Engine;
 
 using var __run = RunLog.BeginProcess("strandprobe", args);
 if (args.Length == 1 && args[0] == "--self-test") return StrandSelfTest.Run();
+// --write-ks09-emits DIR: the self-test, writing KS09's three emits for runcontrol's self-test (a test fixture, not a check run)
+if (args.Length == 2 && args[0] == "--write-ks09-emits") return StrandSelfTest.Run(args[1]);
 
 string Instance = HarnessTarget.Instance, GamePath = HarnessTarget.Game, profileName = HarnessTarget.Profile;
 string? orderFile = null, emitPath = null, basePath = null, tablePath = null; HashSet<string>? cells = null; bool mirror = true;

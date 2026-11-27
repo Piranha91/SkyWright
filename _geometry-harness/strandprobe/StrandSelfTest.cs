@@ -89,15 +89,23 @@ static class StrandSelfTest
     sealed record Expect(string Id, string What, FormKey Subject, StrandedState State, string? ReasonHas = null, string? ClassIs = null,
                          Func<ScanRow, string?>? Extra = null);
 
-    public static int Run()
+    /// <summary><paramref name="ks09Out"/>: also write KS09's three emits there (baseline.json: the order without SfA;
+    /// arm.json: the full order with --base the baseline; reverse.json: the order without SfA with --base the arm), each with a
+    /// synthetic configuration identity, for runcontrol's self-test to run the real conflictdiff over.</summary>
+    public static int Run(string? ks09Out = null)
     {
         string dir = Path.Combine(Path.GetTempPath(), "strandprobe-selftest-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(dir);
-        try { return RunIn(dir); }
+        try { return RunIn(dir, ks09Out); }
         finally { try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
     }
 
-    static int RunIn(string dir)
+    static ConfigurationIdentity Identity(IReadOnlyList<string> paths) => ConfigurationIdentity.Compute("synthetic:strandprobe-selftest",
+        paths.Select(p => new ConfigPlugin(Path.GetFileName(p), p, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(p))).ToLowerInvariant(),
+                                           new FileInfo(p).Length, "data", p.EndsWith(".esm", StringComparison.OrdinalIgnoreCase), false, Array.Empty<string>())).ToList(),
+        new[] { new ConfigProvider("Data", "data") }, Array.Empty<ConfigOverlay>(), "load-time", "baseline");
+
+    static int RunIn(string dir, string? ks09Out)
     {
         var m = new Build(M); var a = new Build(A); var ax = new Build(AX); var d = new Build(D); var b = new Build(B); var b2 = new Build(B2);
         var c = new Build(C); var p = new Build(P);
@@ -251,6 +259,16 @@ static class StrandSelfTest
         var fullFile = StrandEmit.File(res, null, null, "self-test", null, true);
         var withoutPaths = new[] { M, D, B, C }.Select(k => written[k]).ToList();
         var without = Scan(withoutPaths);
+        if (ks09Out is not null)
+        {
+            Directory.CreateDirectory(ks09Out);
+            var baseFile = StrandEmit.File(without, null, null, "self-test", Identity(withoutPaths), true);
+            var armFile = StrandEmit.File(res, baseFile, "baseline.json", "self-test", Identity(full), true);
+            ConflictIo.Write(Path.Combine(ks09Out, "baseline.json"), baseFile);
+            ConflictIo.Write(Path.Combine(ks09Out, "arm.json"), armFile);
+            ConflictIo.Write(Path.Combine(ks09Out, "reverse.json"), StrandEmit.File(without, armFile, "arm.json", "self-test", Identity(withoutPaths), true));
+            Console.WriteLine($"   wrote KS09's emits (baseline, arm, reverse) -> {ks09Out}; the subject is {s01}");
+        }
         var pred09 = StrandEmit.Predicates(fullFile, without).FirstOrDefault(x => x.FormKey == s01.ToString());
         Line("KS09", "absent from the setup without SfA: reported with it, its row Gone without it",
              !rows.TryGetValue(s01, out var r09) || r09.Verdict.State != StrandedState.Reported ? "not reported in the full order"
