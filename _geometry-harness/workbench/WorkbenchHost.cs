@@ -264,6 +264,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         string written = _session.Selected is { } dk && _session.IsDisabled(dk)
                            ? "\nthe view hides " + dk + ": it is " + (_session.WrittenDisabled.Contains(dk) ? $"written initially disabled to {_session.Written[dk].Patch}, not enabled" : "staged to be disabled") + " (hold Space to see it)"
                        : _session.Selected is { } wk && _session.Written.TryGetValue(wk, out var wv) ? "\n" + EditSession.WrittenLabel(wk, wv.Patch)
+                       : _session.Selected is { } sk2 && _session.Pending.Any(e => e.Ref == sk2) ? "\nthe view shows " + sk2 + " at its staged place" + (_session.IsNudged(sk2) ? " (a nudge)" : "") + " (hold Space to see where the load order places it)"
                        : _session.Selected is { } bk ? "\nthe view shows " + bk + " where the load order places it" : "";
         string recheck = Rechecking ? "re-checking" : LastRecheck is { } lr ? $"last re-check: {lr.Row.Word}, {lr.New.Count} new" : RecheckRefusal is { } rr ? "re-check refused: " + rr : "";
         if (ReadOnly)
@@ -2105,7 +2106,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         foreach (var d in a.Doors)
             Tickable(d.Key, $"door {d.Key}: {d.Label}" + (d.FarDoor is { } far ? $"; leads to {far} in cell {d.FarCell ?? "?"}" : ""));
         foreach (var n in a.Names) Tickable(n.Key, $"{n.Key} names it ({n.Field})");
-        foreach (var r in a.Resting) Tickable(r.Key, r.Sentence);
+        bool nudged = _session.IsNudged(k);
+        foreach (var r in a.Resting) Tickable(r.Key, nudged ? $"{r.Key} rests on it by the drawn shapes" : r.Sentence);
+        if (nudged && a.Resting.Count > 0) Line(ContextRead.NudgedResting(a.Resting.Select(r => r.Key)), System.Windows.Media.Brushes.DimGray);
         foreach (var (name, text) in a.Sections) if (name != "navmesh") Line($"{name}: {text}", System.Windows.Media.Brushes.DimGray);
         Line(string.Join("; ", a.Navmesh.Select(n => $"{n.Navmesh}: {n.Triangles} triangle(s)")) is { Length: > 0 } nv ? $"navmesh under it (green): {nv}" : "no navmesh under it", System.Windows.Media.Brushes.DarkGreen);
         Line(a.Sections.TryGetValue("navmesh", out var rule) ? rule : ContextRead.NavRule, System.Windows.Media.Brushes.DimGray);
@@ -2113,7 +2116,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         if (ticks.Count > 0)
             _contextRows.Children.Add(B("Move ticked with it", "stage the selected reference's move for each ticked reference", () =>
                 Do(() => MoveWithRule.Apply(scene, k, ticks.Where(t => t.Box.IsChecked == true).Select(t => t.Key).ToList()))));
-        Line("Before a commit: " + ContextRead.StaysBehind(a, ContextCache.MovedWith(scene, key)));
+        Line("Before a commit: " + ContextRead.StaysBehind(a, ContextCache.MovedWith(scene, key), nudged));
         if (a.Box is { } box)
             _viewState.HighlightNav(ContextRead.TrianglesUnder(_opt.NavTris, box).Select(t => (t.A, t.B, t.C)));
         Invalidate();
@@ -2142,7 +2145,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 };
                 DockPanel.SetDock(revert, Dock.Right);
                 line.Children.Add(revert);
-                line.Children.Add(new TextBlock { Text = (staged ? "staged: " : "") + text, VerticalAlignment = VerticalAlignment.Center });
+                line.Children.Add(new TextBlock { Text = (staged ? "staged: " : "") + text, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap });
                 _pendingRows.Children.Add(line);
             }
         }

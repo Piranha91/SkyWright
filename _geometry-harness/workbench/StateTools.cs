@@ -568,7 +568,7 @@ internal sealed class StateTools
                 continue;
             }
             if (ContextCache.Read(sc, h) is not { } read) continue;
-            try { said.Add($"{h}: " + ContextRead.StaysBehind(await read, ContextCache.MovedWith(sc, h))); }
+            try { said.Add($"{h}: " + ContextRead.StaysBehind(await read, ContextCache.MovedWith(sc, h), FormKey.TryFactory(h, out var nk) && sc.Session.IsNudged(nk))); }
             catch (Exception ex) { said.Add($"{h}: what stays behind could not be read: {ex.GetBaseException().Message}"); }
         }
         return said.Count == 0 ? "" : " " + string.Join(" ", said);
