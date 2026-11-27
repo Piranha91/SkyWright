@@ -14,7 +14,12 @@ sealed class CheckRefused(string message) : Exception(message);
 /// <summary>What a check reads with: houseCARL's tools in process, and the order (each plugin's masters as its header
 /// names them, null when the header could not be read). <paramref name="Instrument"/>: the lost-edit checks' known-answer
 /// mode (LostEditCheck), never a scan.</summary>
-sealed record RecordContext(Func<string, IReadOnlyDictionary<string, object?>, string> Call, IReadOnlyList<OrderPlugin> Order, bool Instrument = false);
+sealed record RecordContext(Func<string, IReadOnlyDictionary<string, object?>, string> Call, IReadOnlyList<OrderPlugin> Order, bool Instrument = false,
+                            Selection? Selection = null);
+
+/// <summary>The plan's selection as the population file names it: its plugins and its mod folders (null when no population
+/// file was given and every plugin of the order is in the selection).</summary>
+sealed record Selection(IReadOnlyCollection<string> Plugins, IReadOnlyCollection<string> Mods);
 
 /// <summary>A check's result: its rows and its coverage, in the conflict file's shape, and each row's values in full
 /// (written beside the emit as OUT.json.rows.json; null when the check has none).</summary>
@@ -38,6 +43,25 @@ static class RecordChecks
     /// <summary>A plugin in words: "JKs Skyrim.esp (mod JK's Skyrim)", or the plugin's name alone when it is a mod of its own.</summary>
     public static string Named(OrderPlugin? p, string name) =>
         p is not null && p.Mod.StartsWith("folder:", StringComparison.Ordinal) ? $"{name} (mod {RecordClashRule.ModName(p.Mod)})" : name;
+
+    public const string SelectionLooked = "plugins and mod folders of the selection, looked for in this load order";
+    public const string PluginNotLoaded = "a plugin of the selection this load order does not load, so nothing here can involve it";
+    public const string ModNoPlugin = "a mod folder of the selection with no plugin in this load order, so nothing here can involve it";
+
+    /// <summary>When no plugin of the order is in the selection (the arm without the selected mods), what was looked at: each
+    /// plugin and mod folder the selection names, none of it loaded here, so no record fact on this arm can involve it and
+    /// every row the arm with them gives is new with them (review finding U2-F1: a coverage of nothing judged is refused, and
+    /// the arm's rows then read "not compared"). Null when the selection has a plugin in the order, or when it names nothing.</summary>
+    public static CoverageLine? NothingSelectedHere(RecordContext ctx)
+    {
+        if (ctx.Order.Any(p => p.Selected) || ctx.Selection is not { } sel) return null;
+        long plugins = sel.Plugins.Count, mods = sel.Mods.Count;
+        if (plugins + mods == 0) return null;
+        var aside = new Dictionary<string, long>(StringComparer.Ordinal);
+        if (plugins > 0) aside[PluginNotLoaded] = plugins;
+        if (mods > 0) aside[ModNoPlugin] = mods;
+        return new CoverageLine(SelectionLooked, plugins + mods, null, aside, "none of the selection is in this load order");
+    }
 }
 
 /// <summary>loadability.dangling-references: a record that points at a record of another mod's plugin which the installed

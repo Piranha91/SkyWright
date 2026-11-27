@@ -88,7 +88,11 @@ static class LostEditCheck
 
         var selected = order.Where(p => p.Selected).Select(p => p.Name).ToList();
         if (selected.Count == 0)
-            return new CheckResult(Array.Empty<Conflict>(), new[] { new CoverageLine(population, 0, null, null, "rows 0; the selection holds no plugin") }, Array.Empty<object>());
+        {
+            var lines = new List<CoverageLine> { new(population, 0, null, null, "rows 0; the selection holds no plugin in this load order") };
+            if (RecordChecks.NothingSelectedHere(ctx) is { } looked) lines.Add(looked);
+            return new CheckResult(Array.Empty<Conflict>(), lines, Array.Empty<object>());
+        }
 
         // the selection: every record a selected plugin touches; contested ones (override depth above one) are read
         var summary = Ask(ctx, new() { ["plugins"] = new Dictionary<string, object?> { ["names"] = selected }, ["project"] = new Dictionary<string, object?> { ["form"] = "summary" } }, "the selection's records");

@@ -105,7 +105,8 @@ CheckResult result;
 try
 {
     using var svc = HousecarlCalls.Open(dataDir, modsDir, view, hcData, CorpusRulebook.CorpusPath);
-    result = run(new RecordContext((tool, a) => HousecarlCalls.Invoke(svc, tool, a), order, instrument));
+    result = run(new RecordContext((tool, a) => HousecarlCalls.Invoke(svc, tool, a), order, instrument,
+        selPlugins is null ? null : new Selection(selPlugins, selMods ?? new HashSet<string>())));
 }
 catch (CheckRefused ex) { Console.Error.WriteLine($"recordprobe: {ex.Message}"); return 2; }
 try { Directory.Delete(Path.Combine(hcData, "results"), true); } catch (IOException) { } catch (UnauthorizedAccessException) { }

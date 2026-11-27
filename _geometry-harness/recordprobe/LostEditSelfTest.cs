@@ -103,8 +103,18 @@ static class LostEditSelfTest
         return fx;
     }
 
-    static CheckResult Run(Fx fx, bool cells = false, bool instrument = false) =>
-        LostEditCheck.Run(new RecordContext(fx.Call, fx.Order, instrument), cells);
+    static CheckResult Run(Fx fx, bool cells = false, bool instrument = false, Selection? sel = null) =>
+        LostEditCheck.Run(new RecordContext(fx.Call, fx.Order, instrument, sel), cells);
+
+    /// <summary>The setup without the selected mods: LE3's order with Base.esp (the selection, mod Base Mod) not loaded.</summary>
+    static Fx Without()
+    {
+        var fx = Moved("Other.esp");
+        fx.Order = fx.Order.Where(p => p.Mod != "folder:Base Mod").ToList();
+        fx.Recs[0] = fx.Recs[0] with { Touchers = new[] { "Skyrim.esm", "Other.esp" }, VsWinner = new() };
+        return fx;
+    }
+    static readonly Selection BaseSelected = new(new[] { "Base.esp" }, new[] { "Base Mod" });
 
     static string Show(IReadOnlyDictionary<string, long>? d) => string.Join(", ", (d ?? new Dictionary<string, long>()).Select(kv => $"{kv.Key} {kv.Value}"));
 
@@ -280,8 +290,21 @@ static class LostEditSelfTest
                    ?? (Paths(shipped).SequenceEqual(new[] { "Placement.Position" }) && Paths(instrument).SequenceEqual(new[] { "Placement.Rotation", "Placement.Position" })
                        ? null : $"paths {string.Join(",", Paths(shipped))} and under the instrument {string.Join(",", Paths(instrument))}, not Placement.Position and Placement.Rotation,Placement.Position");
         }),
+        ("LE25 review U2-F1: the setup without the selected mods gives 0 rows and says what it looked at, the selection's plugin and mod folder, neither loaded", () =>
+        {
+            var r = Run(Without(), sel: BaseSelected);
+            if (r.Rows.Count != 0) return $"{r.Rows.Count} rows";
+            var looked = r.Coverage.FirstOrDefault(c => c.Population == RecordChecks.SelectionLooked);
+            if (looked is null) return $"no '{RecordChecks.SelectionLooked}' line; coverage: {string.Join(" | ", r.Coverage.Select(c => $"{c.Population} judged {c.Judged}"))}";
+            var sa = looked.SetAside ?? new Dictionary<string, long>();
+            return looked.Judged == 2 && sa.Count == 2 && sa.GetValueOrDefault(RecordChecks.PluginNotLoaded) == 1 && sa.GetValueOrDefault(RecordChecks.ModNoPlugin) == 1
+                ? null : $"judged {looked.Judged}, no row: {Show(sa)}; not judged 2 with the plugin 1 and the mod folder 1";
+        }),
     };
 
     /// <summary>LE3's emit, for runcontrol's self-test: one row between two mods.</summary>
     public static CheckResult CrossModEmit() => Run(Moved("Other.esp", "Base.esp"));
+
+    /// <summary>LE25's emit, for runcontrol's self-test: the setup without the selected mods.</summary>
+    public static CheckResult WithoutSelectionEmit() => Run(Without(), sel: BaseSelected);
 }

@@ -170,6 +170,11 @@ static class RecordSelfTest
         var lePath = Path.Combine(dir, "lostedit.json");
         ConflictIo.Write(lePath, new ConflictFile("recordprobe", @"X:\inst", DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), le.Rows, le.Coverage, null, null, "load-time", "baseline"));
         Console.WriteLine($"wrote {le.Rows.Count} row(s) -> {lePath}");
+        // LE25's emit: the setup without the selected mods (runcontrol's SelfTestLostEdits: it is accepted, not refused)
+        var wo = LostEditSelfTest.WithoutSelectionEmit();
+        var woPath = Path.Combine(dir, "lostedit-without.json");
+        ConflictIo.Write(woPath, new ConflictFile("recordprobe", @"X:\inst", DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), wo.Rows, wo.Coverage, null, null, "load-time", "baseline"));
+        Console.WriteLine($"wrote {wo.Rows.Count} row(s) -> {woPath}");
         return 0;
     }
 }

@@ -49,7 +49,7 @@ static class SelfTestLostEdits
             return null;
         });
 
-        const string emitCase = "lost edits: the real recordprobe writes a conflict file with exactly its one lost edit between two mods and its coverage";
+        const string emitCase = "lost edits: the real recordprobe writes a conflict file with exactly its one lost edit between two mods and its coverage, and the setup without the selected mods is accepted with none";
         string rp = Checkout.Program("recordprobe");
         if (!File.Exists(rp)) { Skip(emitCase, "no built recordprobe in this build"); return; }
         Case(emitCase, () =>
@@ -64,7 +64,13 @@ static class SelfTestLostEdits
                 var cov = Py.L(emit["Coverage"]).Select(Py.D).ToList();
                 if (rows.Count != 1 || Py.S(rows[0]["Kind"]) != "LOST-EDIT" || Py.S(rows[0]["A"]) != "Base.esp" || Py.S(rows[0]["B"]) != "Other.esp")
                     return $"{rows.Count} row(s), not the one LOST-EDIT row Base.esp / Other.esp";
-                return cov.Count == 1 && (long)PyValue.Int(cov[0]["Judged"]) == 1 ? null : "the coverage does not judge exactly the one version";
+                if (!(cov.Count == 1 && (long)PyValue.Int(cov[0]["Judged"]) == 1)) return "the coverage does not judge exactly the one version";
+                // review U2-F1: the setup without the selected mods has no rows and is accepted, so the other setup's rows are
+                // compared with it (refused, they read "not compared")
+                var without = PyValue.Dict(PyJson.Loads(File.ReadAllText(Path.Combine(dir, "lostedit-without.json"))));
+                if (Py.L(without["Conflicts"]).Count != 0) return "the setup without the selected mods has rows";
+                return Validator.NothingAssessed(Validator.CoverageLines(without)) is { } refused
+                    ? "the validator refuses the setup without the selected mods: " + refused : null;
             }
             finally { try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
         });
