@@ -291,6 +291,9 @@ public static class Registry
             if (!admitted && !(c.Get("held") is string held && held.Length > 0)) problems.Add($"{cid}: class {at} is held and says not what it waits on (held)");
             if (admitted && c.Get("held") != null) problems.Add($"{cid}: class {at} is admitted, so it cannot also be held");
             if (admitted && c.Get("count") is true) problems.Add($"{cid}: class {at} is a count, never a clash, so it cannot be admitted");
+            // finding 4: a stranded light that also lights nothing is listed once, in that class, or in both (data, read by the app)
+            if (c.ContainsKey("whenItLightsNothing") && c["whenItLightsNothing"] is not ("merge-into-lights-nothing" or "list-both"))
+                problems.Add($"{cid}: class {at}: whenItLightsNothing must be \"merge-into-lights-nothing\" or \"list-both\"");
             foreach (string flag in new[] { "provisional", "count" })
                 if (c.ContainsKey(flag) && c[flag] is not bool) problems.Add($"{cid}: class {at}: {flag}, when present, must be true or false");
         }

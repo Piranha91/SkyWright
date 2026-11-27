@@ -120,6 +120,7 @@ public static class SelfTestLighting
                 (new PyDict { ["id"] = "x", ["title"] = "X", ["admitted"] = true, ["held"] = "why", ["evidence"] = "e" }, "cannot also be held"),
                 (new PyDict { ["id"] = "x", ["title"] = "X", ["admitted"] = true, ["count"] = true, ["evidence"] = "e" }, "a count, never a clash"),
                 (new PyDict { ["id"] = "x", ["title"] = "X", ["evidence"] = "e" }, "admitted must be true or false"),
+                (new PyDict { ["id"] = "x", ["title"] = "X", ["admitted"] = true, ["evidence"] = "e", ["whenItLightsNothing"] = "sometimes" }, "whenItLightsNothing must be"),
             })
             {
                 var problems = new List<string>();

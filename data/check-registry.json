@@ -900,6 +900,7 @@
           "admitted": true,
           "provisional": true,
           "held": null,
+          "whenItLightsNothing": "merge-into-lights-nothing",
           "evidence": "Provisional (Gate A review decision 5): 0 rows on Bethesda's sides of 62 hosted lights (95 % bound 4.7 %); 45 rows on Group 6, every one a light the patch author edited (C:/hc-runs/2026-11-26-lighting-check/GATE-A.md section 6; gate-b/null.txt; gate-b/compare-g6-rows.txt)."
         },
         {

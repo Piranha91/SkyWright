@@ -23,9 +23,12 @@ public sealed class LightRowsTests
     }
 
     /// <summary>The registry's lighting row (the real one, from data/check-registry.json), optionally with one class's admission flipped.</summary>
-    static string Registry(string? flip = null)
+    static string Registry(string? flip = null, string? whenItLightsNothing = null)
     {
         var reg = JsonNode.Parse(File.ReadAllText(Path.Combine(ReviewSpeedPart2Tests.RepoRoot(), "data", "check-registry.json")))!;
+        if (whenItLightsNothing is not null)
+            reg["checks"]!.AsArray().First(c => (string?)c!["id"] == LightRows.CheckId)!["classes"]!.AsArray()
+               .First(c => (string?)c!["id"] == "light-no-fixture")!["whenItLightsNothing"] = whenItLightsNothing;
         if (flip is not null)
         {
             var row = reg["checks"]!.AsArray().First(c => (string?)c!["id"] == LightRows.CheckId)!;
@@ -38,12 +41,12 @@ public sealed class LightRowsTests
     }
 
     static object Row(string cls, string verdict, string subject, string summary, string kind = "interior", int? x = null, int? y = null,
-                      float[]? fixtureAt = null, string? cell = Cell) => new
+                      float[]? fixtureAt = null, string? cell = Cell, object? readings = null) => new
     {
         @class = cls, verdict, scene = "MorthalThonnirsHouse", sceneId = kind == "interior" ? Cell : "00003C:Skyrim.esm@-11,23", kind,
         space = kind == "interior" ? Cell : "00003C:Skyrim.esm", x, y, cell, subject, subjectEdid = "LuxLight01", fixture = Candle, fixtureEdid = "CandleHornTable01",
         subjectMod = new { mod = "Lux", plugin = "Lux.esp" }, otherMods = new[] { new { mod = "Cities of the North - Morthal", plugin = "COTN - Morthal.esp" } },
-        summary, reason = verdict == "not judged" ? summary : null, at = new[] { 100f, 200f, 30f }, fixtureAt,
+        summary, reason = verdict == "not judged" ? summary : null, at = new[] { 100f, 200f, 30f }, fixtureAt, readings = readings ?? new { },
     };
 
     /// <summary>One row of each kind the reader sorts: listed in each class, not judged, a whole scene not judged, the over-limit count.</summary>
@@ -129,5 +132,43 @@ public sealed class LightRowsTests
         Assert.Equal(("00003C:Skyrim.esm", (-11, 23), "00ABCD:Skyrim.esm"), (t.Worldspace, t.Grid!.Value, t.Cell));
         var scene = LightRows.Target(Read(Registry()).Rows.Single(r => r.Light!.Class == LightRows.SceneClass));
         Assert.Contains("whole scene that was not judged", scene.WhyNot);
+    }
+
+    /// <summary>Finding 4's shape: two stranded lights that reach surfaces (10 and 40 of 64 hits) and one that also lights nothing.</summary>
+    static string StrandedOutput() => Temp("candidate-01.json", JsonSerializer.Serialize(new
+    {
+        identity = new { schema = "skywright.light-check/1" },
+        rows = new object[]
+        {
+            Row("light-no-fixture", "listed", "000810:Lux.esp", "L10 sits at a candle, which COTN removes; 10 of 64 checks from the light hit a surface.", readings: new { hits = 10 }),
+            Row("light-no-fixture", "listed", Light, "L sits at CandleHornTable01, which COTN removes; 0 of 64 checks from the light hit a surface; it reaches very little.",
+                fixtureAt: new[] { 1f, 2f, 3f }, readings: new { hits = 0, alsoLightsNothing = true }),
+            Row("light-no-fixture", "listed", "000840:Lux.esp", "L40 sits at a candle, which COTN removes; 40 of 64 checks from the light hit a surface.", readings: new { hits = 40 }),
+            Row("light-lights-nothing", "listed", Light, "Lux's light L lights nothing with COTN installed: no surface is in its reach. Harmless to look at; safe to disable.",
+                fixtureAt: new[] { 1f, 2f, 3f }, readings: new
+                {
+                    strandedSummary = "Lux's light L sat at CandleHornTable01, which Cities of the North - Morthal removes; with Cities of the North - Morthal installed it lights nothing: no surface is in its reach. Harmless to look at; safe to disable.",
+                    strandedOtherMods = new[] { new { mod = "Cities of the North - Morthal", plugin = "COTN - Morthal.esp" } },
+                }),
+        },
+    }));
+
+    [Fact]
+    public void A_stranded_light_that_lights_nothing_is_one_row_in_the_lights_nothing_class_as_the_registry_says()
+    {
+        // finding 4; rejects: the same light listed twice, the fixture fact lost from the merged row, the merge done in code whatever
+        // the registry says, or the merged light dropped from the count; and stranded lights that reach more surfaces listed later
+        var (rows, lines) = LightRows.Read(StrandedOutput(), LightRows.Classes(Registry()), "x");
+        Assert.Equal(new[] { "000840:Lux.esp", "000810:Lux.esp" }, rows.Where(r => r.Light!.Class == "light-no-fixture").Select(r => r.RefKey));
+        var nothing = Assert.Single(rows, r => r.Light!.Class == "light-lights-nothing");
+        Assert.Contains("which Cities of the North - Morthal removes", nothing.Summary);
+        Assert.Contains("lights nothing", nothing.Summary);
+        Assert.Equal(new Vector3(1, 2, 3), nothing.Light!.FixtureAt);
+        Assert.Contains(lines, l => l.StartsWith("1 light(s) left with no fixture also light nothing, so each is listed once"));
+
+        var both = LightRows.Read(StrandedOutput(), LightRows.Classes(Registry(whenItLightsNothing: "list-both")), "x");
+        Assert.Equal(3, both.Rows.Count(r => r.Light!.Class == "light-no-fixture"));
+        Assert.StartsWith("Lux's light L lights nothing with COTN installed", both.Rows.Single(r => r.Light!.Class == "light-lights-nothing").Summary);
+        Assert.DoesNotContain(both.Lines, l => l.Contains("listed once"));
     }
 }
