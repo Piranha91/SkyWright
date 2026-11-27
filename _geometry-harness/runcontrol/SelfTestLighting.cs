@@ -73,7 +73,8 @@ public static class SelfTestLighting
                 var plan = new PyDict
                 {
                     ["arms"] = new List<object?> { new PyDict { ["armId"] = "baseline", ["kind"] = "baseline", ["candidatePath"] = rf }, arm },
-                    ["targets"] = new List<object?> { new PyDict { ["name"] = Cotn } },
+                    // a target named as Mod Organizer shows the mod: the selection must not come from a name match against it
+                    ["targets"] = new List<object?> { new PyDict { ["name"] = "Cities of the North - Morthal" } },
                 };
                 string outDir = PyPath.Join(root, "outputs", LightingArrangements.CheckId);
                 if (LightingArrangements.Write(outDir, plan, arm, M) is { } why) return "refused: " + why;

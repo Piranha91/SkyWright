@@ -56,16 +56,19 @@ public static class LightingArrangements
     public static string PathOf(string outDir, string role) => PyPath.Join(Folder(outDir), role + ".json");
 
     /// <summary>Write the three order files for <paramref name="arm"/> (the combination) under <paramref name="outDir"/>; null when
-    /// written, else one sentence. The rest is the plan's baseline arm; the selection is the plan's targets.</summary>
+    /// written, else one sentence. The rest is the plan's baseline arm; the selection is what the combination loads and the rest does not.</summary>
     public static string? Write(string outDir, PyDict plan, PyDict arm, Func<string, IReadOnlyList<string>?> masters)
     {
         string armId = Ev.Str(arm["armId"]);
         var restArm = Ev.Items(plan.Get("arms")).OfType<PyDict>().FirstOrDefault(a => Ev.Eq(a.Get("kind"), "baseline") && Ev.Str(a["armId"]) != armId);
         if (restArm is null)
             return "The lighting check needs the load order with and without the selected mods, and this run has no second setup; start it as a scan from the app.";
-        var selection = Ev.Items(plan.Get("targets")).OfType<PyDict>().Where(t => PyValue.Truthy(t.Get("name"))).Select(t => Ev.Str(t["name"])).ToList();
         var cDoc = Py.D(PyJson.ReadPipelineFile(Ev.Str(arm["candidatePath"])));
         var rDoc = Py.D(PyJson.ReadPipelineFile(Ev.Str(restArm["candidatePath"])));
+        // the selection's plugins are the ones the combination loads and the profile without the selection does not (the in-place
+        // resolution's own subject rule), never a name match against the plan's targets
+        var restSet = new HashSet<string>(Py.Strs(rDoc["Plugins"]), StringComparer.OrdinalIgnoreCase);
+        var selection = Py.Strs(cDoc["Plugins"]).Where(p => !restSet.Contains(p)).ToList();
         var lists = Lists(Py.Strs(cDoc["Plugins"]), Py.Strs(rDoc["Plugins"]), selection, masters, out var refusal);
         if (lists is not { } l) return refusal;
         Directory.CreateDirectory(Folder(outDir));
