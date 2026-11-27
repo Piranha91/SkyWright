@@ -41,13 +41,19 @@ static class StrandEmit
     {
         var conflicts = res.Rows.Select(r => new Conflict(Kind, r.Placer, r.NavPlugin ?? "", Summary(r),
             new[] { new ConflictRecord(r.Ref.ToString(), "object", r.CellEdid, Physical(r.Verdict.State),
-                    r.Verdict.State == StrandedState.Reported ? $"winning {r.Winning:0.0} u, own {r.Own:0.0} u, clearance {r.Clearance:0.0} u" : r.Verdict.Reason) })).ToList();
+                    r.Verdict.State == StrandedState.Reported ? $"{r.Winning:0.0} u from walkable ground, {r.Own:0.0} u with the navmesh its mod was made with, {r.Clearance:0.0} u from another mod's object" : r.Verdict.Reason) })).ToList();
+        // judged: every object of the population the rule reached a verdict on (a row reported, or no row with its reason);
+        // unjudgeable: the rows not judged, by reason; set aside: what is outside the population by definition
+        var notJudged = res.Rows.Where(r => r.Verdict.State == StrandedState.NotJudged).GroupBy(r => StrandedRule.ReasonKey(r.Verdict.Reason))
+                           .ToDictionary(g => g.Key, g => (long)g.Count());
+        var outside = new HashSet<string> { StrandedRule.Outdoors, StrandedRule.DisabledAtLoad, StrandedRule.EditorMarker };
+        var noRow = res.Coverage.Where(kv => kv.Key != "reported" && !kv.Key.StartsWith("not judged", StringComparison.Ordinal) && !outside.Contains(kv.Key));
         var coverage = new List<CoverageLine>
         {
-            new("interior objects there at load (stranded)", res.Rows.Count(r => r.Verdict.State == StrandedState.Reported),
-                res.Rows.Where(r => r.Verdict.State == StrandedState.NotJudged).GroupBy(r => StrandedRule.ReasonKey(r.Verdict.Reason)).ToDictionary(g => g.Key, g => (long)g.Count()),
-                res.Coverage.Where(kv => kv.Key != "reported" && !kv.Key.StartsWith("not judged", StringComparison.Ordinal)).ToDictionary(kv => kv.Key, kv => kv.Value),
-                $"population {res.Population}, measured after the identity cut {res.LeftByCut}" + (mirror ? "" : "; instrument run: --no-mirror")),
+            new("interior objects there at load (stranded)", res.Population - notJudged.Values.Sum(), notJudged,
+                res.Coverage.Where(kv => outside.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value),
+                $"population {res.Population}; reported {res.Rows.Count(r => r.Verdict.State == StrandedState.Reported)}; measured after the identity cut {res.LeftByCut}; no row: "
+                + string.Join("; ", noRow.Select(kv => $"{kv.Key} {kv.Value}")) + (mirror ? "" : "; instrument run: --no-mirror")),
         };
         return new ConflictFile("strandprobe", instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage,
                                 baseFile is null ? null : Predicates(baseFile, res), basePath, "load-time", "baseline", identity);
