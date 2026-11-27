@@ -188,5 +188,28 @@ public sealed class DisableWorld : IDisposable
         return r;
     }
 
+    internal static readonly ModKey NamerMod = new("HcWbDisableNamer", ModType.Plugin);
+    internal static readonly FormKey Namer = new(NamerMod, 0x800);
+
+    /// <summary>Change the load order: a new plugin, loaded last, whose new reference names <paramref name="target"/> as its
+    /// linked reference.</summary>
+    internal void AddNamer(FormKey target)
+    {
+        var mod = new SkyrimMod(NamerMod, Rel);
+        var cell = new SkCell(Cell, Rel) { EditorID = "HcWbDisCell", Flags = SkCell.Flag.IsInteriorCell };
+        var r = Ref(Namer, Stat, 50); var l = new LinkedReferences(); l.Reference.SetTo(target); r.LinkedReferences.Add(l); cell.Temporary.Add(r);
+        var block = new CellBlock { BlockNumber = 2, GroupType = GroupTypeEnum.InteriorCellBlock };
+        var sub = new CellSubBlock { BlockNumber = 0, GroupType = GroupTypeEnum.InteriorCellSubBlock };
+        sub.Cells.Add(cell); block.SubBlocks.Add(sub); mod.Cells.Records.Add(block);
+        var dir = Path.Combine(Mods, "DisNamer"); Directory.CreateDirectory(dir);
+        using var master = SkyrimMod.CreateFromBinaryOverlay(MasterPath, Rel);
+        mod.BeginWrite.ToPath(Path.Combine(dir, NamerMod.FileName.String)).WithLoadOrder(new ISkyrimModGetter[] { master }).Write();
+        var profile = Path.Combine(Instance, "profiles", "Default");
+        var eol = Environment.NewLine;
+        File.AppendAllText(Path.Combine(profile, "loadorder.txt"), NamerMod.FileName + eol);
+        File.AppendAllText(Path.Combine(profile, "plugins.txt"), "*" + NamerMod.FileName + eol);
+        File.WriteAllText(Path.Combine(profile, "modlist.txt"), string.Join(eol, "# header", "+DisNamer", "+DisLater", "+DisMaster") + eol);
+    }
+
     public void Dispose() { try { Directory.Delete(Root, true); } catch { /* best effort */ } }
 }

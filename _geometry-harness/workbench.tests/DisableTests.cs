@@ -130,6 +130,33 @@ public sealed class DisableTests : IClassFixture<DisableWorld>
     }
 
     [Fact]
+    public async Task A_commit_asks_the_rule_again_and_refuses_a_disable_something_has_named_since_it_was_staged()
+    {
+        using var world = new DisableWorld();                                  // its own instance: this test changes the load order
+        var ro = Drawn(DisableWorld.Plain, new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f);
+        var s = new EditSession(new[] { ro });
+        var output = Path.Combine(world.Root, "out"); Directory.CreateDirectory(output);
+        PatchWriter Open() => PatchWriter.OpenInProcess(new WriteTarget(world.Instance, "Default", world.DataDir, output),
+            Path.Combine(world.Root, "hcdata-" + Guid.NewGuid().ToString("N")), TestCorpus.Path, _ => { });
+        await using (var before = Open())
+        {
+            var f = await DisableRule.ReadAsync(new ServerContextSource(Task.FromResult(before), _ => null), DisableWorld.Plain);
+            Assert.Null(DisableRule.Refusal(f));                                // allowed when staged
+        }
+        s.StageDisable(DisableWorld.Plain);
+        world.AddNamer(DisableWorld.Plain);                                     // the load order changes: a new plugin's reference links to it
+        await using var w = Open();
+        foreach (var dry in new[] { true, false })
+        {
+            var ex = await Record.ExceptionAsync(() => w.CommitAsync(s.Net(), "WbDisStale" + (dry ? "Dry" : ""), dryRun: dry));
+            Assert.True(ex is InvalidOperationException && ex.Message.Contains(DisableWorld.Namer.ToString(), StringComparison.OrdinalIgnoreCase)
+                        && ex.Message.Contains("linked reference", StringComparison.Ordinal),
+                $"the {(dry ? "dry run" : "commit")} did not refuse with the naming sentence: {ex?.Message ?? "it was written"}");
+        }
+        Assert.Empty(Directory.GetFiles(output, "*.esp", SearchOption.AllDirectories));
+    }
+
+    [Fact]
     public async Task A_read_back_that_finds_the_persistent_bit_lost_is_an_error()
     {
         // a patch written the wrong way (a plain Set), read back by the app's reader, which is not the writer
@@ -192,7 +219,7 @@ public sealed class DisableTests : IClassFixture<DisableWorld>
         await using var w = Writer();
         var ex = await Record.ExceptionAsync(() => w.CommitAsync(new[]
         {
-            DisableOf(DisableWorld.LinkTarget, new Vec3(400, 0, 0), new Vec3(0, 0, 0)),
+            DisableOf(DisableWorld.MoveTarget, new Vec3(1200, 0, 0), new Vec3(0, 0, 0)),
             DisableOf(DisableWorld.Plain, new Vec3(0, 0, 0), new Vec3(0, 0, 0)),
         }, "WbDisUndo", dryRun: false));
         Assert.True(ex is null, $"the disable was not written: {ex?.Message}");
@@ -201,7 +228,7 @@ public sealed class DisableTests : IClassFixture<DisableWorld>
         using var patch = SkyrimMod.CreateFromBinaryOverlay(plugin, SkyrimRelease.SkyrimSE);
         var left = patch.EnumerateMajorRecords<IPlacedGetter>().Select(x => x.FormKey).ToList();
         Assert.True(!left.Contains(DisableWorld.Plain), $"an override of {DisableWorld.Plain} is still in the patch after undo ({said})");
-        Assert.Contains(DisableWorld.LinkTarget, left);                                    // the other written disable stays
+        Assert.Contains(DisableWorld.MoveTarget, left);                                    // the other written disable stays
         Assert.Contains(DisableWorld.Cell.ToString(), said);                              // the carried cell stays: said
         Assert.Contains("nothing else", said);                                            // and what went with it: said
     }

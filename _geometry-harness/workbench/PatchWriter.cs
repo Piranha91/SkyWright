@@ -59,6 +59,11 @@ internal sealed class PatchWriter : IAsyncDisposable
     internal async Task<string> CallAsync(string tool, Dictionary<string, object?> args, CancellationToken ct = default) =>
         HousecarlAnswer.Checked(tool, await _library.CallAsync(tool, args, ct));
 
+    /// <summary>The reads <see cref="DisableRule"/> is asked with at a commit, through this writer's own houseCARL; kept, so
+    /// the large-reference lists are read once per load order.</summary>
+    ServerContextSource Rules => _rules ??= new ServerContextSource(Task.FromResult(this), _ => null);
+    ServerContextSource? _rules;
+
     static string F(float v) => v.ToString("R", CultureInfo.InvariantCulture);
     static string V(SkyWright.Engine.Vec3 v) => $"{F(v.X)},{F(v.Y)},{F(v.Z)}";
 
@@ -76,30 +81,6 @@ internal sealed class PatchWriter : IAsyncDisposable
 
     internal static Dictionary<string, object?> DisableOp(Mutagen.Bethesda.Plugins.FormKey key) =>
         new() { ["formid"] = key.ToString(), ["field_path"] = "SkyrimMajorRecordFlags", ["op"] = "Add", ["value"] = "InitiallyDisabled" };
-
-    /// <summary>A disabled reference's winner, read before the write: refused when it is already initially disabled or
-    /// deleted (the scene and the load order then differ).</summary>
-    async Task<string?> DisableStateRefusalAsync(Mutagen.Bethesda.Plugins.FormKey key, CancellationToken ct)
-    {
-        var text = await CallAsync("housecarl_records", new Dictionary<string, object?>
-        {
-            ["formids"] = new[] { key.ToString() }, ["format"] = "json",
-            ["project"] = new Dictionary<string, object?> { ["form"] = "fields", ["fields"] = new[] { "MajorRecordFlagsRaw", "IsDeleted" }, ["depth"] = 1 },
-        }, ct);
-        using var doc = JsonDocument.Parse(text);
-        long raw = 0; bool deleted = false;
-        foreach (var el in doc.RootElement.GetProperty("records").EnumerateArray())
-            foreach (var f in el.TryGetProperty("fields", out var fs) ? fs.EnumerateArray() : default)
-            {
-                var path = f.TryGetProperty("path", out var p) ? p.GetString() : null;
-                var value = f.TryGetProperty("value", out var v) ? (v.ValueKind == JsonValueKind.String ? v.GetString() : v.GetRawText()) : null;
-                if (path == "MajorRecordFlagsRaw" && long.TryParse(value, out var n)) raw = n;
-                if (path == "IsDeleted") deleted = value == "True";
-            }
-        if (deleted || (raw & DisableRule.DeletedBit) != 0) return $"{key} is deleted in the load order now, so it is not disabled; reopen the scene, which no longer matches {Target}.";
-        if ((raw & DisableRule.InitiallyDisabled) != 0) return $"{key} is already initially disabled in the load order now, so it is not disabled again; reopen the scene, which no longer matches {Target}.";
-        return null;
-    }
 
     /// <summary>The winner's Placement as the server reads it: (position, rotation), or a refusal.</summary>
     internal async Task<(SkyWright.Engine.Vec3 Pos, SkyWright.Engine.Vec3 Rot)> ReadPlacementAsync(string formKey, string? source = null, CancellationToken ct = default)
@@ -157,7 +138,10 @@ internal sealed class PatchWriter : IAsyncDisposable
         {
             var (pos, rot) = await ReadPlacementAsync(e.Ref.ToString(), ct: ct);
             if (Mismatch(e.Ref, pos, rot, e.Before, tolerance) is { } why) throw new InvalidOperationException(why);
-            if (e.Disable && await DisableStateRefusalAsync(e.Ref, ct) is { } no) throw new InvalidOperationException(no);
+            // the one rule asked again for every disable, dry run included: the load order may have changed since it was
+            // staged (or since the session that staged it was saved), and something may name the object now
+            if (e.Disable && DisableRule.Refusal(await DisableRule.ReadAsync(Rules, e.Ref)) is { } no)
+                throw new InvalidOperationException(no);
         }
         var args = new Dictionary<string, object?> { ["ops"] = Ops(net), ["dry_run"] = dryRun };
         if (into is not null) args["into"] = into;
