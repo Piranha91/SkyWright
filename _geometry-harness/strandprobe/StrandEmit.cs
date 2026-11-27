@@ -1,0 +1,71 @@
+using System.Text.Json;
+using HarnessShared;
+using SkyWright.Engine;
+
+/// <summary>The mod a plugin of the game's Data folder belongs to, by its file name cut at " - " and "." (houseCARL lane S's
+/// family rule): "SfA - Extra.esp" and "SfA.esp" are one mod. A plugin in an MO2 mod folder is that folder instead.</summary>
+static class StrandFamily
+{
+    public static string ByName(string plugin) => plugin.Split(" - ")[0].Split('.')[0].ToLowerInvariant();
+}
+
+/// <summary>The conflict file and its sidecar.</summary>
+static class StrandEmit
+{
+    public const string Kind = "STRANDED";
+
+    static PhysicalState Physical(StrandedState s) => s == StrandedState.Reported ? PhysicalState.Holds : PhysicalState.Unmeasured;
+
+    static string Summary(ScanRow r) => r.Verdict.State == StrandedState.Reported
+        ? $"{r.BaseType ?? "object"} {r.BaseEdid} from {r.Placer} in {r.CellEdid ?? r.Cell.ToString()}: {r.Winning:0.0} u from walkable ground with {r.NavPlugin}'s navmesh, {r.Own:0.0} u with its own; {r.Verdict.Class}"
+        : $"{r.BaseType ?? "object"} {r.BaseEdid} from {r.Placer} in {r.CellEdid ?? r.Cell.ToString()}: not judged, {r.Verdict.Reason}";
+
+    /// <summary>Each row of <paramref name="baseFile"/> re-measured under this order: Holds (reported here), Unmeasured (not
+    /// judged here), Gone (no row here: within reach, the same navmesh, or not in this order at all).</summary>
+    public static List<Predicate> Predicates(ConflictFile baseFile, ScanResult here)
+    {
+        var mine = here.Rows.ToDictionary(r => r.Ref.ToString(), r => r, StringComparer.OrdinalIgnoreCase);
+        var list = new List<Predicate>();
+        foreach (var c in baseFile.Conflicts.Where(c => c.Kind == Kind))
+            foreach (var n in c.Necessary)
+            {
+                var (state, detail) = mine.TryGetValue(n.FormKey, out var r)
+                    ? (Physical(r.Verdict.State), r.Verdict.State == StrandedState.Reported ? "stranded under this order too" : "not judged under this order: " + r.Verdict.Reason)
+                    : (PhysicalState.Gone, "no stranded row under this order");
+                list.Add(new Predicate(Kind, c.A, c.B, n.FormKey, null, state, detail));
+            }
+        return list;
+    }
+
+    public static ConflictFile File(ScanResult res, ConflictFile? baseFile, string? basePath, string instance, ConfigurationIdentity? identity, bool mirror)
+    {
+        var conflicts = res.Rows.Select(r => new Conflict(Kind, r.Placer, r.NavPlugin ?? "", Summary(r),
+            new[] { new ConflictRecord(r.Ref.ToString(), "object", r.CellEdid, Physical(r.Verdict.State),
+                    r.Verdict.State == StrandedState.Reported ? $"winning {r.Winning:0.0} u, own {r.Own:0.0} u, clearance {r.Clearance:0.0} u" : r.Verdict.Reason) })).ToList();
+        var coverage = new List<CoverageLine>
+        {
+            new("interior objects there at load (stranded)", res.Rows.Count(r => r.Verdict.State == StrandedState.Reported),
+                res.Rows.Where(r => r.Verdict.State == StrandedState.NotJudged).GroupBy(r => r.Verdict.Reason.Split(':')[0]).ToDictionary(g => g.Key, g => (long)g.Count()),
+                res.Coverage.Where(kv => kv.Key != "reported" && !kv.Key.StartsWith("not judged", StringComparison.Ordinal)).ToDictionary(kv => kv.Key, kv => kv.Value),
+                $"population {res.Population}, measured after the identity cut {res.LeftByCut}" + (mirror ? "" : "; instrument run: --no-mirror")),
+        };
+        return new ConflictFile("strandprobe", instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage,
+                                baseFile is null ? null : Predicates(baseFile, res), basePath, "load-time", "baseline", identity);
+    }
+
+    public static void Write(string path, ScanResult res, ConflictFile? baseFile, string? basePath, string instance, ConfigurationIdentity? identity, bool mirror)
+    {
+        ConflictIo.Write(path, File(res, baseFile, basePath, instance, identity, mirror));
+        var rows = res.Rows.Select(r => new
+        {
+            id = r.Ref.ToString(), cell = r.CellEdid ?? r.Cell.ToString(), placer = r.Placer, navmesh = r.NavPlugin, baseType = r.BaseType, baseEdid = r.BaseEdid,
+            geometry = r.Geometry, trigger = r.Trigger, winning = r.Winning, own = r.Own, clearance = r.Clearance, nearest = r.Nearest,
+            state = r.Verdict.State.ToString(), reason = r.Verdict.Reason, cls = r.Verdict.Class,
+        });
+        System.IO.File.WriteAllText(path + ".reach.json", JsonSerializer.Serialize(new
+        {
+            rule = new { StrandedRule.Reach, StrandedRule.Tolerance, band = new[] { StrandedRule.BandLo, StrandedRule.BandHi }, mirror },
+            population = res.Population, leftByCut = res.LeftByCut, measured = res.Measured, coverage = res.Coverage, rows,
+        }, new JsonSerializerOptions { WriteIndented = true }));
+    }
+}

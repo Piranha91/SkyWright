@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- strandprobe: the geometry.stranded-object check (objects another mod's navmesh leaves out of reach). The rule is
+       SkyWright.Engine.StrandedRule; this program walks the order, measures and writes the conflict file. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>strandprobe</AssemblyName>
+    <NoWarn>CA1416</NoWarn>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\_shared\PluginOpen.cs" Link="PluginOpen.cs" />
+    <Compile Include="..\_shared\LastSighting.cs" Link="LastSighting.cs" />
+    <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
+    <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
+    <Compile Include="..\_shared\ConflictReport.cs" Link="ConflictReport.cs" />
+    <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
+    <Compile Include="..\_shared\OrderMasters.cs" Link="OrderMasters.cs" />
+    <Compile Include="..\_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />
+    <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
+    <Compile Include="..\_shared\EnablePopulation.cs" Link="EnablePopulation.cs" />
+    <ProjectReference Include="$(HousecarlSrc)housecarl-core\housecarl-core.csproj" />
+    <ProjectReference Include="$(SkyWrightSrc)SkyWright.Engine\SkyWright.Engine.csproj" />
+  </ItemGroup>
+</Project>
