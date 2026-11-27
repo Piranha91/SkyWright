@@ -25,6 +25,8 @@ internal sealed record ConflictRow(
     string? Cell, string? RefBaseType, string? RefBaseEditorId, string? OtherBaseType, string? OtherBaseEditorId,
     string EvidenceStrength, bool? NewOnArm, MeshCause? Mesh = null)
 {
+    /// <summary>A lighting row's own facts (class, verdict, scene, where the view opens); null on every other check's row.</summary>
+    internal LightDetail? Light { get; init; }
     /// <summary>For a row a mod folder's mesh alone creates (<see cref="Mesh"/> set): what happens, in a modder's words.</summary>
     internal string? MeshSentence => Mesh is not { } m ? null
         : Kind == "CONTACT"
@@ -41,19 +43,23 @@ internal sealed record ConflictRow(
 /// <summary>A ticked check's state on the arm: ran (with its rows), rejected, blocked, not-applicable, and why. In a manual
 /// run's bundle <paramref name="Rows"/> counts the rows reported (new on the arm, or not compared) and
 /// <paramref name="Before"/> the rows the setup without the selected mods has too, which are not reported.</summary>
-internal sealed record CheckStatus(string CheckId, string State, int? Rows, string? Why, int? Before = null);
+internal sealed record CheckStatus(string CheckId, string State, int? Rows, string? Why, int? Before = null)
+{
+    /// <summary>Lines the check adds to its status (the lighting check: each held class's count and what it waits on, the over-limit count).</summary>
+    internal IReadOnlyList<string> Lines { get; init; } = Array.Empty<string>();
+}
 
 /// <summary>A check's rows in words: in a manual run, how many are new with the selected mods and how many were there before.</summary>
 internal static class CheckStatusWords
 {
-    internal static string Rows(CheckStatus c) => c.Before is { } b
+    internal static string Rows(CheckStatus c) => (c.Before is { } b
         ? $"{c.Rows} new row(s) with the selected mods; {b} were there before and are not listed"
-        : $"{c.Rows} row(s)";
+        : $"{c.Rows} row(s)") + string.Concat(c.Lines.Select(l => "; " + l));
 }
 
 internal sealed class BundleConflicts
 {
-    internal static readonly string[] PlacedChecks = { "geometry.object-overlap", "geometry.placement-contact", "geometry.fixture-empty-space" };
+    internal static readonly string[] PlacedChecks = { "geometry.object-overlap", "geometry.placement-contact", "geometry.fixture-empty-space", LightRows.CheckId };
 
     internal required string Dir { get; init; }
     internal required string PlanId { get; init; }
@@ -200,6 +206,7 @@ internal sealed class BundleConflicts
         if (names is null) notes.Add("the bundle carries no names enrichment, so no base type is known and every row's severity reads 'unread'");
         var rows = new List<ConflictRow>();
         var seen = new HashSet<string>();
+        var checkLines = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         var read = new List<(string, string)>();
 
         foreach (var check in PlacedChecks)
@@ -213,6 +220,18 @@ internal sealed class BundleConflicts
             var rec = rdoc.RootElement;
             if (!(rec.TryGetProperty("validation", out var val) && val.TryGetProperty("accepted", out var acc) && acc.GetBoolean()))
             { notes.Add($"{key} was not accepted, so its rows are not shown"); continue; }
+            if (check == LightRows.CheckId)
+            {
+                // the lighting check's rows are its probe's json (the first output; the rest are the order files it read), and which
+                // classes are clashes is the bundle's registry's data. Every row needs both sides, so none is "there before".
+                var (lrel, lfull) = Outputs(key).FirstOrDefault();
+                if (lfull is null) { notes.Add($"{key} has no json output, so it gives no lighting rows"); continue; }
+                read.Add((key, lrel));
+                var (lrows, llines) = LightRows.Read(lfull, LightRows.Classes(Path.Combine(dir, "registry", "check-registry.json")), strength.GetValueOrDefault(check, "unknown"));
+                foreach (var lr in lrows) if (seen.Add(lr.Identity)) rows.Add(lr);
+                checkLines[check] = llines;
+                continue;
+            }
             HashSet<string>? newOnArm = arm == baselineArm ? null : NewRows(dir, check, arm, notes);
             if (newOnArm is not null && BaselineEmit(check) is { } be && ArmEmit(key) is { } ae)
             {
@@ -320,7 +339,8 @@ internal sealed class BundleConflicts
                          : exec.StartsWith("blocked") ? "blocked" : exec.Length == 0 ? "no result" : exec;
             int before = manual ? rows.Count(x => x.CheckId == check && x.NewOnArm == false) + findings.Count(x => x.CheckId == check && x.NewOnArm == false) : 0;
             int count = rows.Count(x => x.CheckId == check) + findings.Count(x => x.CheckId == check) - before;
-            checks.Add(new CheckStatus(check, state, state == "ran" ? count : null, state == "ran" ? null : why, state == "ran" && manual ? before : null));
+            checks.Add(new CheckStatus(check, state, state == "ran" ? count : null, state == "ran" ? null : why, state == "ran" && manual && !checkLines.ContainsKey(check) ? before : null)
+                       { Lines = state == "ran" ? checkLines.GetValueOrDefault(check) ?? new List<string>() : new List<string>() });
         }
         // a reference filed in its worldspace's persistent cell has no cell of its own to build; a Findings row names one
         // reference, so it says so instead of handing the viewer a cell it cannot open
