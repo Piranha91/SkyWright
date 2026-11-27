@@ -211,9 +211,10 @@ internal sealed record DisableRecheckResult(RowVerdict Row, IReadOnlyList<RowVer
 /// Anything the disable strands is a created contact row, shown as new, never hidden.</summary>
 internal static class DisableRecheck
 {
-    internal static DisableRecheckResult Of(DifferentialRows.Credited overlap, DifferentialRows.Credited? contact, string key, string openId)
+    internal static DisableRecheckResult Of(DifferentialRows.Credited overlap, DifferentialRows.Credited? contact, IReadOnlyCollection<string> keys, string openId)
     {
-        bool Names(DifferentialRows.Row r) => string.Equals(r.FormKey, key, StringComparison.OrdinalIgnoreCase) || string.Equals(r.Other, key, StringComparison.OrdinalIgnoreCase);
+        var set = new HashSet<string>(keys, StringComparer.OrdinalIgnoreCase);
+        bool Names(DifferentialRows.Row r) => set.Contains(r.FormKey) || (r.Other is { } o && set.Contains(o));
         var others = overlap.Outcome.Keys
             .Where(id => id != openId && ((overlap.Before.TryGetValue(id, out var b) && Names(b)) || (overlap.After.TryGetValue(id, out var a) && Names(a))))
             .OrderBy(id => id, StringComparer.Ordinal).Select(id => RecheckRule.Of(overlap, id)).ToList();

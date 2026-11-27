@@ -319,7 +319,7 @@ public sealed class DisableTests : IClassFixture<DisableWorld>
     {
         var overlap = DifferentialRows.Credit(ConflictIo.Read(Fixture("overlap-unpatched.json")), ConflictIo.Read(Fixture("overlap-patched.json")));
         var contact = DifferentialRows.Credit(ConflictIo.Read(Fixture("contact-unpatched.json")), ConflictIo.Read(Fixture("contact-patched.json")));
-        var said = DisableRecheck.Of(overlap, contact, "000848:Ultimate Markarth.esp", Id("001FBB:JKs Skyrim.esp"));
+        var said = DisableRecheck.Of(overlap, contact, new[] { "000848:Ultimate Markarth.esp" }, Id("001FBB:JKs Skyrim.esp"));
         Assert.Equal("resolved", said.Row.Word);                                                  // as measured: Holds -> Gone
         var other = said.Others.SingleOrDefault(o => o.Id == Id("001FBC:JKs Skyrim.esp"));
         Assert.True(other is { Word: "resolved" }, $"the other row naming the disabled object, re-measured Gone, does not read resolved: {other?.Sentence ?? "not reported"}");
@@ -329,6 +329,35 @@ public sealed class DisableTests : IClassFixture<DisableWorld>
         Assert.DoesNotContain(said.Others, o => o.Id.Contains("001fe3", StringComparison.OrdinalIgnoreCase));   // a row not naming it
         Assert.True(said.New.Any(n => n.Word == "new" && n.Id.Contains("001fbb", StringComparison.OrdinalIgnoreCase)),
             "the fixture the disable left in the air is not shown as new: " + string.Join("; ", said.New.Select(n => n.Id)));
+    }
+
+    [Fact]
+    public void A_patch_that_disables_two_objects_reports_the_rows_naming_each()
+    {
+        var overlap = DifferentialRows.Credit(ConflictIo.Read(Fixture("overlap-unpatched.json")), ConflictIo.Read(Fixture("overlap-patched.json")));
+        // 001FE3's row (against 06D2DB) is in both runs: a second disabled object whose row the patch left as it was
+        var said = DisableRecheck.Of(overlap, null, new[] { "000848:Ultimate Markarth.esp", "001FE3:JKs Skyrim.esp" }, Id("001FBB:JKs Skyrim.esp"));
+        Assert.Contains(said.Others, o => o.Id.Contains("001fbc", StringComparison.OrdinalIgnoreCase) && o.Word == "resolved");
+        Assert.True(said.Others.Any(o => o.Id.Contains("001fe3", StringComparison.OrdinalIgnoreCase) && o.Word == "still there"),
+            "the row naming the second disabled object is not reported: " + string.Join("; ", said.Others.Select(o => o.Id + " " + o.Word)));
+    }
+
+    [Fact]
+    public void A_bundle_scanned_without_placement_contact_still_gives_the_overlap_answer_and_says_what_was_not_judged()
+    {
+        // a bundle whose receipts hold the overlap check only
+        var dir = Path.Combine(_w.Root, "bundle-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "receipts"));
+        File.WriteAllText(Path.Combine(dir, "receipts", "geometry.object-overlap__baseline__arm.json"), "{ \"adapter\": { \"args\": [] } }");
+        var (adapter, why) = Recheck.ContactArm(dir, "baseline", new[] { "000848:Ultimate Markarth.esp" });
+        Assert.Null(adapter);
+        Assert.True(why is not null && why.Contains("000848:Ultimate Markarth.esp") && why.Contains("placement contact") && why.Contains("not judged") && why.EndsWith("."),
+            $"no sentence says what rested on the object was not judged: {why ?? "none"}");
+        // the overlap answer is still given, and "resolved" never stands without that sentence beside it
+        var r = new RecheckResult(new RowVerdict(Id("001FBB:JKs Skyrim.esp"), "resolved", "repaired", "resolved"), Array.Empty<RowVerdict>(), "DIFFERENTIAL-VERIFIED",
+                                  Array.Empty<string>(), "same build", 70.0, Array.Empty<RowVerdict>(), "000848:Ultimate Markarth.esp", why);
+        var banner = Recheck.Banner(8, r);
+        Assert.Contains("resolved as an overlap, but " + why!.TrimEnd('.'), banner);
     }
 
     // ---- helpers ------------------------------------------------------------------------------------------------------

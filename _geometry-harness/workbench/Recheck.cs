@@ -10,7 +10,8 @@ internal sealed record ProbeRun(string Label, string Emit, string BuildDigest, d
 
 /// <summary>A re-check's answer for the open conflict row.</summary>
 internal sealed record RecheckResult(RowVerdict Row, IReadOnlyList<RowVerdict> New, string Verdict, IReadOnlyList<string> Lines,
-                                     string BuildSentence, double WallSeconds, IReadOnlyList<RowVerdict>? Others = null, string? Disabled = null);
+                                     string BuildSentence, double WallSeconds, IReadOnlyList<RowVerdict>? Others = null, string? Disabled = null,
+                                     string? ContactNote = null);
 
 /// <summary>The detector re-run on the touched cell (DESIGN.md section 5, as built in stage 4). The probe that produced the
 /// row runs twice on the population of the patch alone (the run engine's <c>population</c>), with the same build: on the arm's order,
@@ -167,7 +168,7 @@ internal static class Recheck
     /// <summary>The whole re-check, off the UI thread. <paramref name="say"/> gets one line per step.</summary>
     internal static RecheckResult RunAll(string bundleDir, string arm, ConflictRow row, string patchPlugin, string patchFolder,
         string instance, string profile, string game, string workDir, RunEngine engine, string conflictdiffExe,
-        IEnumerable<string> buildDirs, string? localProbesRoot, Action<string> say, string? disabled = null)
+        IEnumerable<string> buildDirs, string? localProbesRoot, Action<string> say, IReadOnlyList<string>? disabled = null)
     {
         var clock = Stopwatch.StartNew();
         Directory.CreateDirectory(workDir);
@@ -222,9 +223,11 @@ internal static class Recheck
         // A disable also re-runs contactprobe (Gate B step 1): what rested on the disabled object is judged there, and
         // whatever it strands is a created row, shown as new. Every word is the frozen rule's (DisableRecheck).
         DifferentialRows.Credited? contact = null;
-        if (probe != "contactprobe")
+        string? contactNote = null;
+        var (cadapterOrNull, why) = probe != "contactprobe" ? ContactArm(bundleDir, arm, disabled) : (null, null);
+        if (why is not null) { contactNote = why; say(why); }
+        else if (cadapterOrNull is { } cadapter)
         {
-            var (cadapter, _) = FromBundle(bundleDir, "geometry.placement-contact", arm);
             var (cu, cp, cbuild) = Arms("contactprobe", cadapter, "contact-");
             var (_, _, cverdict, clines) = Compare(cu, cp, row.Identity, conflictdiffExe);
             File.WriteAllLines(Path.Combine(workDir, "contact-conflictdiff.txt"), clines);
@@ -234,6 +237,30 @@ internal static class Recheck
         }
         var d = DisableRecheck.Of(DifferentialRows.Credit(ConflictIo.Read(un.Emit), ConflictIo.Read(pa.Emit)), contact, disabled, row.Identity);
         clock.Stop();
-        return new RecheckResult(d.Row, d.New, verdict, lines, buildSentence, clock.Elapsed.TotalSeconds, d.Others, disabled);
+        return new RecheckResult(d.Row, d.New, verdict, lines, buildSentence, clock.Elapsed.TotalSeconds, d.Others, string.Join(", ", disabled), contactNote);
+    }
+
+    /// <summary>The placement-contact arm a disable's re-check adds: the bundle's receipt for that check, or, when the scan
+    /// did not include it, no adapter and the one sentence the re-check says instead.</summary>
+    internal static (JsonElement? Adapter, string? Why) ContactArm(string bundleDir, string arm, IReadOnlyList<string> disabled)
+    {
+        try { return (FromBundle(bundleDir, "geometry.placement-contact", arm).Adapter, null); }
+        catch (InvalidOperationException)
+        {
+            return (null, $"what rested on {string.Join(", ", disabled)} was not judged, because this scan did not include placement contact; "
+                          + "scan again with the placement-contact check ticked to have it judged.");
+        }
+    }
+
+    /// <summary>The banner a finished re-check says: the open row's word, and for a disable every other row naming a
+    /// disabled object and, beside the word, the sentence when what rested on it was not judged.</summary>
+    internal static string Banner(int rank, RecheckResult r)
+    {
+        string what = r.Disabled is null ? "the moved reference" : $"the disabled object(s) {r.Disabled}";
+        string news = r.New.Count == 0 ? $"no new conflict involving {what}" : $"{r.New.Count} new conflict(s) involving {what}: " + string.Join("; ", r.New.Select(n => n.Id));
+        string word = r.ContactNote is { } note ? $"{r.Row.Word} as an overlap, but {note}" : r.Row.Word;
+        if (r.Others is { Count: > 0 } others)
+            news += $". The {others.Count} other row(s) naming them: " + string.Join(", ", others.GroupBy(o => o.Word).Select(g => $"{g.Count()} {g.Key}"));
+        return FormattableString.Invariant($"re-check of conflict {rank}: {word}. {news}. ({r.Verdict}; {r.WallSeconds:0.0} s)");
     }
 }
