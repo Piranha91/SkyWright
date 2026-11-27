@@ -84,7 +84,9 @@ public sealed class StrandedWordsTests
         var held = Launcher.Registry().Where(c => c.Held).ToList();
         Assert.Contains(held, c => c.Id == StrandedWords.CheckId);
         var l = new Launcher();
-        foreach (var c in held) Assert.Equal(Launcher.HeldWhy, l.WhyNotHere(c));
+        // each held check gives its own reason when the registry names one (heldWhy), else the general one
+        foreach (var c in held) { Assert.Equal(c.HeldReason ?? Launcher.HeldWhy, l.WhyNotHere(c)); Plain(l.WhyNotHere(c)!); Assert.Single(System.Text.RegularExpressions.Regex.Matches(l.WhyNotHere(c) + ".", @"[.!?](\s|$)")); }
+        Assert.Contains(held, c => c.Id == "loadability.dangling-references" && c.HeldReason == "it is held back until it has found a real clash between two mods");
         // the same check not held is not greyed: the field decides, not the id
         Assert.Null(l.WhyNotHere(held[0] with { Held = false }));
         Plain(Launcher.HeldWhy);
