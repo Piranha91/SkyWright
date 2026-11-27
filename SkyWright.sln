@@ -105,6 +105,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SkyWright.Engine.Tests", "s
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SkyWright.Guards", "src\SkyWright.Guards\SkyWright.Guards.csproj", "{28777FB4-03FB-491C-97F4-354A8A6FA880}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "strandprobe", "_geometry-harness\strandprobe\strandprobe.csproj", "{C4D36E27-7748-4612-A378-48DD05950317}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -679,6 +681,18 @@ Global
 		{28777FB4-03FB-491C-97F4-354A8A6FA880}.Release|x64.Build.0 = Release|Any CPU
 		{28777FB4-03FB-491C-97F4-354A8A6FA880}.Release|x86.ActiveCfg = Release|Any CPU
 		{28777FB4-03FB-491C-97F4-354A8A6FA880}.Release|x86.Build.0 = Release|Any CPU
+		{C4D36E27-7748-4612-A378-48DD05950317}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C4D36E27-7748-4612-A378-48DD05950317}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C4D36E27-7748-4612-A378-48DD05950317}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{C4D36E27-7748-4612-A378-48DD05950317}.Debug|x64.Build.0 = Debug|Any CPU
+		{C4D36E27-7748-4612-A378-48DD05950317}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{C4D36E27-7748-4612-A378-48DD05950317}.Debug|x86.Build.0 = Debug|Any CPU
+		{C4D36E27-7748-4612-A378-48DD05950317}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C4D36E27-7748-4612-A378-48DD05950317}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C4D36E27-7748-4612-A378-48DD05950317}.Release|x64.ActiveCfg = Release|Any CPU
+		{C4D36E27-7748-4612-A378-48DD05950317}.Release|x64.Build.0 = Release|Any CPU
+		{C4D36E27-7748-4612-A378-48DD05950317}.Release|x86.ActiveCfg = Release|Any CPU
+		{C4D36E27-7748-4612-A378-48DD05950317}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -731,5 +745,6 @@ Global
 		{1C5BE571-9ADE-478C-A459-E9A9469507BC} = {034F5ECB-81AE-90EE-0798-CB9E1DCA2CA2}
 		{5615D08D-548A-4EA7-9042-4E4F2078ABA7} = {034F5ECB-81AE-90EE-0798-CB9E1DCA2CA2}
 		{28777FB4-03FB-491C-97F4-354A8A6FA880} = {034F5ECB-81AE-90EE-0798-CB9E1DCA2CA2}
+		{C4D36E27-7748-4612-A378-48DD05950317} = {8AFE4D18-5D5E-4488-5F08-05028A10D277}
 	EndGlobalSection
 EndGlobal

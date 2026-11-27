@@ -5,10 +5,10 @@ using ViewProbe;
 namespace Workbench;
 
 /// <summary>A staged edit as saved: the reference and its pose before and after.</summary>
-internal sealed record SavedEdit(string Ref, RefPlacementEdit.Pose Before, RefPlacementEdit.Pose After);
+internal sealed record SavedEdit(string Ref, RefPlacementEdit.Pose Before, RefPlacementEdit.Pose After, bool Disable = false);
 
 /// <summary>A written edit as saved: the reference and the patch (and its folder) that holds it.</summary>
-internal sealed record SavedWritten(string Ref, string Patch, string PatchFolder);
+internal sealed record SavedWritten(string Ref, string Patch, string PatchFolder, bool Disable = false);
 
 /// <summary>One review's session: selection, open row, camera, staged and written edits.</summary>
 internal sealed record SessionData(string PlanId, string Arm, string? Selected, int? OpenConflict, float[]? Camera,
@@ -50,9 +50,9 @@ internal static class SessionFile
     {
         if (s.PlanId is not { } plan || s.Arm is not { } arm) return null;
         var sc = s.Scene;
-        var staged = sc?.Session.Pending.Select(e => new SavedEdit(e.Ref.ToString(), e.Before, e.After)).ToList() ?? new List<SavedEdit>();
+        var staged = sc?.Session.Pending.Select(e => new SavedEdit(e.Ref.ToString(), e.Before, e.After, e.Disable)).ToList() ?? new List<SavedEdit>();
         var written = sc is null ? new List<SavedWritten>()
-            : sc.Session.Written.Select(kv => new SavedWritten(kv.Key.ToString(), kv.Value.Patch, sc.PatchFolderOf(kv.Value.Patch) ?? "")).ToList();
+            : sc.Session.Written.Select(kv => new SavedWritten(kv.Key.ToString(), kv.Value.Patch, sc.PatchFolderOf(kv.Value.Patch) ?? "", sc.Session.WrittenDisabled.Contains(kv.Key))).ToList();
         return new SessionData(plan, arm, sc?.Session.Selected?.ToString(), s.OpenRow?.Rank, sc?.Camera, staged, written, sc?.Cell);
     }
 
@@ -96,7 +96,7 @@ internal static class SessionFile
         foreach (var w in data.Written)
         {
             if (!FormKey.TryFactory(w.Ref, out var k) || !session.IsDrawn(k)) { notes.Add($"{w.Ref}'s written edit in {w.Patch} is kept for its cell; it is drawn again when that cell is open."); continue; }
-            if (readWritten(k, w) is { } pose) session.ShowWritten(k, pose, w.Patch);
+            if (readWritten(k, w) is { } pose) { if (w.Disable) session.ShowWrittenDisabled(k, pose, w.Patch); else session.ShowWritten(k, pose, w.Patch); }
             else notes.Add($"{w.Ref}'s written edit was not restored: {w.Patch} no longer holds it.");
         }
         var stale = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -111,7 +111,7 @@ internal static class SessionFile
                 stale.Add(e.Ref);
                 continue;
             }
-            session.Stage(k, e.After);
+            if (e.Disable) session.StageDisable(k); else session.Stage(k, e.After);
         }
         if (data.Selected is { } sel && FormKey.TryFactory(sel, out var sk) && session.IsDrawn(sk)) session.Select(sk);
         return notes;

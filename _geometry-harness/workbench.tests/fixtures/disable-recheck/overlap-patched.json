@@ -1,0 +1,407 @@
+{
+ "Probe": "overlapprobe",
+ "Instance": "X:\\Skyrim Conflict Lab",
+ "GeneratedUtc": "2026-11-27 00:11:08Z",
+ "Conflicts": [
+  {
+   "Kind": "OVERLAP",
+   "A": "Ultimate Markarth.esp",
+   "B": "JKs Skyrim.esp",
+   "Summary": "Static from JKs Skyrim.esp / Static from Ultimate Markarth.esp: crossing, containment unassessed, 2 triangle pairs in 020EE6:Skyrim.esm (ext) [mm] 001FE3:JKs Skyrim.esp / 06D2DB:Skyrim.esm",
+   "Necessary": [
+    {
+     "FormKey": "001FE3:JKs Skyrim.esp",
+     "Role": "placed-ref",
+     "Label": "020EE6:Skyrim.esm (ext)",
+     "Physical": "Holds",
+     "PhysicalDetail": "actual render surfaces: crossing; containment unassessed; 2 triangle pairs [mm]"
+    }
+   ],
+   "Alternative": [
+    {
+     "FormKey": "06D2DB:Skyrim.esm",
+     "Role": "placed-ref"
+    }
+   ]
+  }
+ ],
+ "Coverage": [
+  {
+   "Population": "plugins",
+   "Judged": 15,
+   "Unjudgeable": {
+    "UnreadablePlugin": 0
+   }
+  },
+  {
+   "Population": "base records (strict render geometry)",
+   "Judged": 7248,
+   "Unjudgeable": {
+    "missing_asset": 185,
+    "partial_geometry": 1155,
+    "missing_vertices": 5
+   },
+   "Note": "policy NiflySharp-1.1.0+houseCARL-render-reader-v2|nif-render-triangles-v1|actual_triangle_mesh_v2|tolerance=1E-05; record ObjectBounds unused"
+  },
+  {
+   "Population": "candidate refs",
+   "Judged": 156179,
+   "Unjudgeable": {
+    "NoGeometry": 21834,
+    "InvalidTransform": 0,
+    "DegenerateTransform": 0
+   },
+   "SetAside": {
+    "Deleted": 198,
+    "NotPresentAtLoad": 35975,
+    "NonObstructingType": 29622,
+    "BaseGameResponsible": 668031,
+    "EditorMarker": 11925
+   },
+   "Note": "population load-time / state baseline"
+  },
+  {
+   "Population": "cross-responsible actual-shape queries",
+   "Judged": 2744,
+   "Unjudgeable": {},
+   "Note": "intersections 935; separated results remain measured and are not conflicts"
+  },
+  {
+   "Population": "actual-surface intersection counterfactuals",
+   "Judged": 935,
+   "Unjudgeable": {},
+   "Note": "class 334; unknown counterfactual rows have null provenance and are withheld from the class"
+  },
+  {
+   "Population": "population scope",
+   "Judged": 906,
+   "Unjudgeable": {},
+   "SetAside": {
+    "OutsidePopulation": 155273
+   },
+   "Note": "pairs measured only where a reference is in the plan's population; population 8217cdd6d606 (C:\\hc-runs\\2026-11-26-repair-disable-nudge\\gateb-step1\\d1\\population.json): 1 plugin(s), 1 mod folder(s); 1 delta references, 1 cells, 2 other records, 2 mod files; seeds 1 (S1 delta plugin record 1)"
+  },
+  {
+   "Population": "mesh responsibility",
+   "Judged": 0,
+   "Unjudgeable": {},
+   "SetAside": {
+    "CrossesWithoutTheFolderMesh": 0,
+    "MeshEqualsReplaced": 0,
+    "NewMeshNoFallback": 0,
+    "BaseGameReadmitted": 0,
+    "JointSwap": 0,
+    "SeenFolderRows": 0,
+    "SeenNotTested": 0,
+    "SeenNotReadmitted": 0,
+    "ChangedRegionClear": 0,
+    "TouchingNotCredited": 0,
+    "MeshUnknownJudgedByPluginRule": 0
+   },
+   "Note": "credited: the population's folders (C:/hc-runs/2026-11-26-repair-disable-nudge/gateb-step1\\d1\\out\\houseCARL - GateBDisabled1); 0 model path(s) a credited folder reshapes; 0 target reference(s), 0 base-game partner(s) readmitted; readmission 0.7s, counterfactuals 0.0s"
+  }
+ ],
+ "Predicates": [
+  {
+   "Kind": "OVERLAP",
+   "A": "Ultimate Markarth Expanded.esp",
+   "B": "JKs Skyrim.esp",
+   "FormKey": "001FBB:JKs Skyrim.esp",
+   "Other": "000848:Ultimate Markarth.esp",
+   "Physical": "Gone",
+   "Detail": "a ref is disabled at runtime under this state"
+  },
+  {
+   "Kind": "OVERLAP",
+   "A": "Ultimate Markarth Expanded.esp",
+   "B": "JKs Skyrim.esp",
+   "FormKey": "001FBC:JKs Skyrim.esp",
+   "Other": "000848:Ultimate Markarth.esp",
+   "Physical": "Gone",
+   "Detail": "a ref is disabled at runtime under this state"
+  }
+ ],
+ "BaseEmit": "overlap-unpatched.json",
+ "Population": "load-time+population:8217cdd6d606",
+ "State": "baseline",
+ "Configuration": {
+  "SchemaVersion": 1,
+  "Fingerprint": "e17a270fb3709766850e8bc0701b06e17557ba7e20640f00488a8036219bef7c",
+  "Source": "candidate:order-patched.json",
+  "Plugins": [
+   {
+    "Name": "Skyrim.esm",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\Skyrim.esm",
+    "Sha256": "e198c3b85e5e48e0c92a6580d8f66e644256b68d812ee32b61735cf9b753df73",
+    "Bytes": 249752131,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": []
+   },
+   {
+    "Name": "Update.esm",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\Update.esm",
+    "Sha256": "b298b0f65fa0127fd13c1f5ef6bb30eaf9d21fd19f5e6f8f91f829c9007d3280",
+    "Bytes": 19121864,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm"
+    ]
+   },
+   {
+    "Name": "Dawnguard.esm",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\Dawnguard.esm",
+    "Sha256": "fc8f92cb7ed55217046ee96b84caa54c058c12f7c408ac2a71da880a7bd3eab7",
+    "Bytes": 25884488,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm"
+    ]
+   },
+   {
+    "Name": "HearthFires.esm",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\HearthFires.esm",
+    "Sha256": "0f681496771e6d1983c6c1c9dd6602964068837f015bfa21e69a149c3b050047",
+    "Bytes": 3979105,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm"
+    ]
+   },
+   {
+    "Name": "Dragonborn.esm",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\Dragonborn.esm",
+    "Sha256": "635f21a938a17b8677f524cf41210933afc7f23820f2e210ab3bb6d3cd837046",
+    "Bytes": 64664159,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm"
+    ]
+   },
+   {
+    "Name": "ccbgssse001-fish.esm",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\ccbgssse001-fish.esm",
+    "Sha256": "0036c3bb38754d1681529f6f828987506efbecc97fe6008753ac05e7c6738fff",
+    "Bytes": 1425176,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "Dawnguard.esm",
+     "HearthFires.esm",
+     "Dragonborn.esm"
+    ]
+   },
+   {
+    "Name": "ccqdrsse001-survivalmode.esl",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\ccqdrsse001-survivalmode.esl",
+    "Sha256": "0aeb0734128137f77fed4c2c329fd4ce71a4d043a2093871886ad84e5821ac47",
+    "Bytes": 240724,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": true,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "Dawnguard.esm",
+     "HearthFires.esm",
+     "Dragonborn.esm"
+    ]
+   },
+   {
+    "Name": "ccbgssse037-curios.esl",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\ccBGSSSE037-Curios.esl",
+    "Sha256": "75209dbb177ea27f3abd164b6ecf07670ecdc3858cc01e4a3db8d1e2443136fe",
+    "Bytes": 37476,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": true,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "Dawnguard.esm",
+     "HearthFires.esm",
+     "Dragonborn.esm"
+    ]
+   },
+   {
+    "Name": "ccbgssse025-advdsgs.esm",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\ccbgssse025-advdsgs.esm",
+    "Sha256": "070784062525ac872b98503cf60918bcd7e7b8aede7fcedd86839a57467add5b",
+    "Bytes": 812873,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "Dawnguard.esm",
+     "HearthFires.esm",
+     "Dragonborn.esm"
+    ]
+   },
+   {
+    "Name": "_ResourcePack.esl",
+    "Path": "C:\\Games\\Steam\\steamapps\\common\\Skyrim Special Edition\\Data\\_ResourcePack.esl",
+    "Sha256": "3479f3aa9002e28d206a1e7366d613e52d7ba93fc6b96c207a1fcf89051a67db",
+    "Bytes": 78483,
+    "Provider": "Data",
+    "MasterFlag": true,
+    "LightFlag": true,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "HearthFires.esm"
+    ]
+   },
+   {
+    "Name": "Unofficial Skyrim Special Edition Patch.esp",
+    "Path": "X:\\Skyrim Conflict Lab\\mods\\R2 SUP - Dependencies - USSEP\\unofficial skyrim special edition patch.esp",
+    "Sha256": "2df73db3622005e04470e3603f804e2fd855ae932a9847073f386bd8013e9d98",
+    "Bytes": 21106651,
+    "Provider": "R2 SUP - Dependencies - USSEP",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "Dawnguard.esm",
+     "HearthFires.esm",
+     "Dragonborn.esm",
+     "ccbgssse001-fish.esm",
+     "ccqdrsse001-survivalmode.esl",
+     "ccbgssse037-curios.esl",
+     "ccbgssse025-advdsgs.esm",
+     "_ResourcePack.esl"
+    ]
+   },
+   {
+    "Name": "Ultimate Markarth.esp",
+    "Path": "X:\\Skyrim Conflict Lab\\mods\\Ultimate Markarth\\Ultimate Markarth.esp",
+    "Sha256": "cf8b17b7daf7637712bdbedad5f09faba38a1924812a134dde0feaa73e436cb7",
+    "Bytes": 1063827,
+    "Provider": "Ultimate Markarth",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "HearthFires.esm",
+     "Dragonborn.esm",
+     "Unofficial Skyrim Special Edition Patch.esp"
+    ]
+   },
+   {
+    "Name": "Ultimate Markarth Expanded.esp",
+    "Path": "X:\\Skyrim Conflict Lab\\mods\\Ultimate Markarth Expanded\\Ultimate Markarth Expanded.esp",
+    "Sha256": "cf5844cba8f1aeb6a783fc4fb14a4a7bf140fd179c7767493a4fab0995a03e0d",
+    "Bytes": 2466610,
+    "Provider": "Ultimate Markarth Expanded",
+    "MasterFlag": true,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "Dawnguard.esm",
+     "HearthFires.esm",
+     "Dragonborn.esm",
+     "Ultimate Markarth.esp"
+    ]
+   },
+   {
+    "Name": "JKs Skyrim.esp",
+    "Path": "X:\\Skyrim Conflict Lab\\mods\\JK's Skyrim\\JKs Skyrim.esp",
+    "Sha256": "6f0e2551017806ad9ab7acb074003a81457fa9606ab5e7b2833a862ce393f646",
+    "Bytes": 3157818,
+    "Provider": "JK's Skyrim",
+    "MasterFlag": false,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "Dawnguard.esm",
+     "HearthFires.esm",
+     "Dragonborn.esm"
+    ]
+   },
+   {
+    "Name": "GateBDisabled1.esp",
+    "Path": "C:/hc-runs/2026-11-26-repair-disable-nudge/gateb-step1\\d1\\out\\houseCARL - GateBDisabled1\\GateBDisabled1.esp",
+    "Sha256": "062be8d1c28116661ca0b313b040dec0409afb35bc13059e43797ee00aec0643",
+    "Bytes": 11578,
+    "Provider": "C:/hc-runs/2026-11-26-repair-disable-nudge/gateb-step1\\d1\\out\\houseCARL - GateBDisabled1",
+    "MasterFlag": false,
+    "LightFlag": false,
+    "Masters": [
+     "Skyrim.esm",
+     "Update.esm",
+     "Ultimate Markarth.esp"
+    ]
+   }
+  ],
+  "Providers": [
+   {
+    "Name": "overwrite",
+    "Kind": "overwrite"
+   },
+   {
+    "Name": "C:/hc-runs/2026-11-26-repair-disable-nudge/gateb-step1\\d1\\out\\houseCARL - GateBDisabled1",
+    "Kind": "mod"
+   },
+   {
+    "Name": "JK's Skyrim",
+    "Kind": "mod"
+   },
+   {
+    "Name": "Ultimate Markarth Expanded",
+    "Kind": "mod"
+   },
+   {
+    "Name": "Ultimate Markarth",
+    "Kind": "mod"
+   },
+   {
+    "Name": "R2 SUP - Dependencies - USSEP",
+    "Kind": "mod"
+   },
+   {
+    "Name": "Data",
+    "Kind": "data"
+   }
+  ],
+  "Overlays": [],
+  "Population": "load-time+population:8217cdd6d606",
+  "State": "baseline",
+  "Limits": [
+   "candidate names 'GateBDisabled1.esp', which the base profile's loadorder.txt does not list: its position comes from the candidate file and MO2 has no position of its own for it, so this order is not one the profile could be switched into without registering the plugin first."
+  ],
+  "Unknown": {
+   "installerChoices": "not modelled: MO2 keeps no per-mod record of the FOMOD options taken; the installed files are the evidence",
+   "gameBuild": "not read: the executable version and SKSE/plugin set are not part of a records run",
+   "distributors": "not read: SPID / KID / SkyPatcher layers are not scanned; only BOS ini files are listed as overlays",
+   "saveState": "not applicable: a records run judges a fresh load, never a save"
+  },
+  "Short": "e17a270fb370 (15 plugins, 7 providers, load-time+population:8217cdd6d606/baseline, candidate:order-patched.json)"
+ },
+ "MeasurementPolicy": "NiflySharp-1.1.0+houseCARL-render-reader-v2|nif-render-triangles-v1|actual_triangle_mesh_v2|tolerance=1E-05",
+ "PairLimits": {
+  "MaxTrianglePairs": 2000000,
+  "PairSeconds": 120
+ },
+ "PopulationIdentity": "load-time+population:8217cdd6d606 / state baseline",
+ "_trimmed": "trimmed from gateb-step1/d1/overlapprobe-patched.json: one unchanged row (001FE3:JKs Skyrim.esp) and the real --base predicates of 001FBB:JKs Skyrim.esp and 001FBC:JKs Skyrim.esp against 000848; the predicate of 001FC7:JKs Skyrim.esp is LEFT OUT on purpose, so that row is merely absent from the patched run"
+}

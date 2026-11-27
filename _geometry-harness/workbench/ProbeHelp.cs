@@ -68,6 +68,16 @@ internal static class ProbeHelp
             Supports it cannot read are counted as not judged. Outdoors the ground itself is not treated as a support here, so it may point at an object that is really standing on the ground.
             """),
 
+        ["geometry.stranded-object"] = new(
+            "Finds objects left out of reach after another mod moved the walkable ground away from them, such as lights and decorations left behind when a mod rebuilds a room somewhere else.",
+            """
+            Characters and the player walk on the navmesh, the invisible floor plan the game uses for walking. When a later mod replaces or moves the navmesh of a room, objects another mod placed for the old room can end up far from anywhere a character can walk.
+
+            For each object indoors, the probe measures how far it lies from the walkable ground that wins in your load order, and how far it lay from the walkable ground its own mod was made with. An object more than 150 units away now (the distance at which the player can use something) but within that distance before is reported, unless it touches a solid object of another mod, which suggests it still stands in that mod's room. Distances within 12 units of the limit are not judged, because the walkable ground and the real floor can differ by that much. Triggers are judged by whether a standing person could still step into them.
+
+            It does not report objects when the mod that changed the walkable ground was made with the object's mod loaded, or when both are the game's own files. Editor markers are left out. No result of this probe has yet been confirmed in the game, so a scan does not run it until one has.
+            """),
+
         ["geometry.fixture-empty-space"] = new(
             "Finds fixtures such as weapon racks, shelves and wall decorations left hanging in empty space after another mod removed or moved the room around them.",
             """

@@ -59,7 +59,7 @@ internal static class CheckStatusWords
 
 internal sealed class BundleConflicts
 {
-    internal static readonly string[] PlacedChecks = { "geometry.object-overlap", "geometry.placement-contact", "geometry.fixture-empty-space", LightRows.CheckId };
+    internal static readonly string[] PlacedChecks = { "geometry.object-overlap", "geometry.placement-contact", "geometry.fixture-empty-space", "geometry.stranded-object", LightRows.CheckId };
 
     internal required string Dir { get; init; }
     internal required string PlanId { get; init; }

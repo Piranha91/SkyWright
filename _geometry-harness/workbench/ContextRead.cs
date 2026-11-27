@@ -33,6 +33,8 @@ internal interface IContextSource
     Task<string?> BaseTypeAsync(string key);
     /// <summary>The reference's own enable parent, if it has one.</summary>
     Task<string?> EnableParentAsync(FormKey key);
+    /// <summary>The reference's own facts a disable is judged on (<see cref="DisableRule"/>); what names it is read apart.</summary>
+    Task<DisableFacts> DisableFactsAsync(FormKey key) => throw new InvalidOperationException("this scene's context source cannot read what a disable depends on.");
     /// <summary>Why the server's record for the reference is not the one drawn (F4), or null when it is.</summary>
     Task<string?> MismatchAsync(FormKey key);
 }

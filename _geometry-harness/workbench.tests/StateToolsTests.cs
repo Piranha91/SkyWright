@@ -1212,6 +1212,41 @@ public sealed class StateToolsTests : IAsyncLifetime
         public Task<string?> MismatchAsync(FormKey key) => Task.FromResult<string?>(null);
     }
 
+    /// <summary>A context source whose own-record facts and names a test sets: what a disable is judged on.</summary>
+    sealed class DisableSource : IContextSource
+    {
+        internal IReadOnlyList<(string Key, string Field)> Names = Array.Empty<(string, string)>();
+        public Task<IReadOnlyList<string>> DoorsNearAsync(FormKey key, double within) => Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+        public Task<IReadOnlyList<(string Key, string Field)>> NamesAsync(FormKey key) => Task.FromResult(Names);
+        public Task<(string? FarDoor, string? FarCell, SkyWright.Engine.Vec3? Arrival)> DestinationAsync(string door) => Task.FromResult(((string?)null, (string?)null, (SkyWright.Engine.Vec3?)null));
+        public Task<string?> BaseTypeAsync(string key) => Task.FromResult<string?>("Static");
+        public Task<string?> EnableParentAsync(FormKey key) => Task.FromResult<string?>(null);
+        public Task<string?> MismatchAsync(FormKey key) => Task.FromResult<string?>(null);
+        public Task<DisableFacts> DisableFactsAsync(FormKey key) =>
+            Task.FromResult(new DisableFacts(key.ToString(), "PlacedObject", 0, false, null, null, false, null, Array.Empty<(string, string)>(), 0));
+    }
+
+    [Fact]
+    public async Task The_disable_verb_stages_the_selected_object_refuses_one_a_record_names_and_undo_takes_it_back()
+    {
+        var src = new DisableSource();
+        _scene.ContextSource = src;
+        _scene.Session.Select(FormKey.Factory(RefKey));
+        var j = await Ok("workbench_act", A(("verb", "disable")));
+        Assert.Contains("disable", P(j, "said").GetString());
+        Assert.True(_scene.Session.IsDisabled(FormKey.Factory(RefKey)), "the verb did not stage a disable of the selected object");
+        var st = await Ok("workbench_state", A(("project", new[] { "pending" })));
+        Assert.True(P(st, "pending")[0].GetProperty("disable").GetBoolean(), "the staged list does not show the disable");
+        var u = await Ok("workbench_act", A(("verb", "undo")));
+        Assert.Contains("undid the disable", P(u, "said").GetString());
+        Assert.False(_scene.Session.IsDisabled(FormKey.Factory(RefKey)));
+
+        src.Names = new[] { ("000817:HcWbTest.esp", "LinkedReferences") };
+        var no = await Refused("workbench_act", A(("verb", "disable")));
+        Assert.Contains("000817:HcWbTest.esp (its linked reference)", no);
+        Assert.Empty(_scene.Session.Pending);
+    }
+
     // C3: choose says what the candidate leaves behind, with the move_with hint
     [Fact]
     public async Task C3a_choose_names_the_two_objects_resting_on_the_reference_and_the_move_with_hint()

@@ -7,6 +7,6 @@
             "geometry.fixture-empty-space": "contact", "records.contested-fields": "record",
             "records.cell-attributes": "cell", "state.conditional-geometry": "state",
             "geometry.navmesh-ownership": "navmesh", "geometry.placement-contact": "contact",
-            "environment.lighting": "light"},
+            "environment.lighting": "light", "geometry.stranded-object": "stranded"},
   "otherType": "other"
 }

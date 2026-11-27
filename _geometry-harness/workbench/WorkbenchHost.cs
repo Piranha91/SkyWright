@@ -118,7 +118,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _input = new ViewInput(_session, _gizmo, Project, RayAt, PickAt, () => _gizmo.FitTo(_eye))
         {
             Holding = () => _viewState.ShowingOriginal,
-            Locked = () => ReadOnly ? ReadOnlyWhy : null,
+            Locked = () => ReadOnly ? ReadOnlyWhy
+                : _session.Selected is { } sk && _session.IsDisabled(sk) ? $"{sk} is to be disabled, and an object takes one fix, a move or a disable; undo the disable first to move it." : null,
             Refused = s => { Say(s); Shell.SetBanner(s); },
         };
     }
@@ -261,7 +262,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         string target = _writer?.Target.ToString() ?? (TargetFromEnv()?.ToString() ?? "no write target set");
         string marks = !_marks.Enabled ? "marks off" : _marks.Selected is null ? "" :
             PartnerNote ?? "";
-        string written = _session.Selected is { } wk && _session.Written.TryGetValue(wk, out var wv) ? "\n" + EditSession.WrittenLabel(wk, wv.Patch)
+        string written = _session.Selected is { } dk && _session.IsDisabled(dk)
+                           ? "\nthe view hides " + dk + ": it is " + (_session.WrittenDisabled.Contains(dk) ? $"written initially disabled to {_session.Written[dk].Patch}, not enabled" : "staged to be disabled") + " (hold Space to see it)"
+                       : _session.Selected is { } wk && _session.Written.TryGetValue(wk, out var wv) ? "\n" + EditSession.WrittenLabel(wk, wv.Patch)
                        : _session.Selected is { } bk ? "\nthe view shows " + bk + " where the load order places it" : "";
         string recheck = Rechecking ? "re-checking" : LastRecheck is { } lr ? $"last re-check: {lr.Row.Word}, {lr.New.Count} new" : RecheckRefusal is { } rr ? "re-check refused: " + rr : "";
         if (ReadOnly)
@@ -1874,6 +1877,13 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             AfterStage();
             return $"staged: {EditSession.Sentence(_session.Pending[^1], _session.RefOf(k).Ref.BaseEditorId)}";
         })));
+        row.Children.Add(B("Disable", "stage the selected object to be written initially disabled in the patch plugin (never deleted); refused when another record depends on it. " + DisableRule.Limits, async () =>
+        {
+            if (_session.Selected is not { } k) { Shell.SetBanner("select an object first"); return; }
+            try { var s = await DisableAction.StageAsync(this, k); Say(s); Shell.SetBanner(s); }
+            catch (InvalidOperationException ex) { Say("disable refused: " + ex.Message); Shell.SetBanner(ex.Message); }
+            UpdateStatus(); Invalidate();
+        }));
         var snap = new ComboBox { Margin = new Thickness(4), ToolTip = "snap moves to a grid and turns to a step", ItemsSource = new[] { "no snap", "grid 1", "grid 8", "grid 32", "grid 128", "turn 5°", "turn 15°", "turn 45°" }, SelectedIndex = 0 };
         snap.SelectionChanged += (_, _) =>
         {
@@ -1975,7 +1985,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 var line = new DockPanel { Margin = new Thickness(6, 1, 6, 1) };
                 bool staged = _session.Pending.Any(e => e.Ref == k);
                 string text = staged
-                    ? EditSession.Sentence(new PendingEdit(k, _session.Pending.First(e => e.Ref == k).Before, _session.Current(k)), _session.RefOf(k).Ref.BaseEditorId)
+                    ? EditSession.Sentence(new PendingEdit(k, _session.Pending.First(e => e.Ref == k).Before, _session.Current(k), _session.IsDisabled(k)), _session.RefOf(k).Ref.BaseEditorId)
+                    : _session.WrittenDisabled.Contains(k) ? $"written to {_session.Written[k].Patch}: {_session.RefOf(k).Ref.BaseEditorId ?? k.ToString()}, initially disabled (the plugin is not enabled)"
                     : $"written to {_session.Written[k].Patch}: {_session.RefOf(k).Ref.BaseEditorId ?? k.ToString()}";
                 var revert = new Button { Content = "Revert", Margin = new Thickness(4, 0, 0, 0), ToolTip = staged ? "drop this object's staged edits" : "remove this object's override from its patch" };
                 var key = k;
@@ -2091,6 +2102,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         using var mod = Mutagen.Bethesda.Skyrim.SkyrimMod.CreateFromBinaryOverlay(plugin, Mutagen.Bethesda.Skyrim.SkyrimRelease.SkyrimSE);
         var r = mod.EnumerateMajorRecords<Mutagen.Bethesda.Skyrim.IPlacedObjectGetter>().FirstOrDefault(x => x.FormKey == key);
         if (r?.Placement is not { } p) return null;
+        if (w.Disable && (r.MajorRecordFlagsRaw & 0x800) == 0) return null;            // the patch no longer disables it
         return new RefPlacementEdit.Pose(new Vec3(p.Position.X, p.Position.Y, p.Position.Z), new Vec3(p.Rotation.X, p.Rotation.Y, p.Rotation.Z), r.Scale ?? 1f);
     }
 
@@ -2193,9 +2205,16 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             var t = _writer?.Target ?? TargetFromEnv() ?? throw new InvalidOperationException("no write target is set, so the patch cannot be found.");
             var plugin = patchName.EndsWith(".esp", StringComparison.OrdinalIgnoreCase) ? patchName : patchName + ".esp";
             var mod = Recheck.PatchFolder(t.PatchRoot, plugin);
+            // every object this patch disables, the open row's own object and its other first
+            var disabledHere = _session.WrittenDisabled.Where(k => string.Equals(_session.Written[k].Patch, plugin, StringComparison.OrdinalIgnoreCase))
+                .Select(k => k.ToString())
+                .OrderBy(k => string.Equals(k, open.Row.RefKey, StringComparison.OrdinalIgnoreCase) || string.Equals(k, open.Row.OtherKey, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(k => k, StringComparer.Ordinal).ToList();
+            IReadOnlyList<string>? disabled = disabledHere.Count > 0 ? disabledHere : null;
             // The view shows the edited reference where this patch puts it (read back from the patch), never silently
-            // where the load order still has it (stage-4 review M-1).
-            if (FormKey.TryFactory(open.Row.RefKey, out var rk) && _session.IsDrawn(rk)
+            // where the load order still has it (stage-4 review M-1); the open row's own object, when it is the one this
+            // patch disables, has no new place to show.
+            if (FormKey.TryFactory(open.Row.RefKey, out var rk) && !disabledHere.Contains(rk.ToString(), StringComparer.OrdinalIgnoreCase) && _session.IsDrawn(rk)
                 && !(_session.Written.TryGetValue(rk, out var wr) && string.Equals(wr.Patch, plugin, StringComparison.OrdinalIgnoreCase)))
             {
                 var wtr = await WriterAsync();
@@ -2211,16 +2230,17 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             var game = Path.GetDirectoryName(Path.GetFullPath(t.DataDir.TrimEnd('\\', '/')))!;
             var work = Path.Combine(_outDir, "recheck-" + DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss"));
             Rechecking = true; RecheckRefusal = null;
-            Shell.SetBanner($"re-checking conflict {open.Rank} ({open.Row.Kind}) with {plugin}: the detector runs on the patch's cell, unpatched and patched; the window stays usable.");
+            Shell.SetBanner($"re-checking conflict {open.Rank} ({open.Row.Kind}) with {plugin}: the detector runs on the patch's cell, unpatched and patched{(disabled is null ? "" : ", and placement contact for what rested on the disabled object")}; the window stays usable.");
             UpdateStatus();
             var row = open.Row; var arm = b.Arm; var dir = b.Dir;
             var r = await Task.Run(() => Recheck.RunAll(dir, arm, row, plugin, mod, t.Instance, t.Profile, game, work, engine, conflictdiff,
-                buildDirs, harness, s => _window?.Dispatcher.BeginInvoke(() => Say("re-check: " + s))));
+                buildDirs, harness, s => _window?.Dispatcher.BeginInvoke(() => Say("re-check: " + s)), disabled));
             LastRecheck = r;
-            string news = r.New.Count == 0 ? "no new conflict involving the moved reference" : $"{r.New.Count} new conflict(s) involving the moved reference: " + string.Join("; ", r.New.Select(n => n.Id));
-            Shell.SetBanner(FormattableString.Invariant($"re-check of conflict {open.Rank}: {r.Row.Word}. {news}. ({r.Verdict}; {r.WallSeconds:0.0} s)"));
+            Shell.SetBanner(Recheck.Banner(open.Rank, r));
             Say("re-check: row " + r.Row.Id + ": " + r.Row.Sentence);
             foreach (var n in r.New) Say("re-check: new row " + n.Id + ": " + n.Sentence);
+            foreach (var o in r.Others ?? Array.Empty<RowVerdict>()) Say("re-check: other row naming a disabled object " + o.Id + ": " + o.Sentence);
+            if (r.ContactNote is { } cn) Say("re-check: " + cn);
             Say("re-check: " + r.BuildSentence);
             Say(FormattableString.Invariant($"re-check: wall time {r.WallSeconds:0.0} s; conflictdiff's lines in {Path.Combine(work, "conflictdiff.txt")}"));
             return r.Row.Word;

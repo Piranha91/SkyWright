@@ -234,7 +234,11 @@ internal sealed class Launcher : IAsyncDisposable
     /// <summary>The registry's checks whose adapter runs a probe; every other kind is not a probe.</summary>
     internal static readonly string[] ProbeKinds = { "scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target" };
 
-    internal sealed record RegistryCheck(string Id, string Kind, string Title, string? Exe);
+    /// <param name="Held">The registry marks the check opt-in (`optIn`): built, not yet confirmed in game, so a scan does not run it.</param>
+    internal sealed record RegistryCheck(string Id, string Kind, string Title, string? Exe, bool Held = false);
+
+    /// <summary>The greyed line of a check the registry holds back (its `optIn` field, never its id).</summary>
+    internal const string HeldWhy = "it is held back until a look in the game confirms what it finds";
 
     static IReadOnlyList<RegistryCheck>? _registry;
     internal static IReadOnlyList<RegistryCheck> Registry()
@@ -247,7 +251,8 @@ internal sealed class Launcher : IAsyncDisposable
         {
             var ad = c.TryGetProperty("adapter", out var a) && a.ValueKind == JsonValueKind.Object ? a : default;
             string? S(JsonElement e, string k) => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
-            return new RegistryCheck(c.GetProperty("id").GetString()!, S(ad, "kind") ?? "unsupported", S(c, "title") ?? "", S(ad, "exe"));
+            bool held = c.TryGetProperty("optIn", out var oi) && oi.ValueKind == JsonValueKind.True;
+            return new RegistryCheck(c.GetProperty("id").GetString()!, S(ad, "kind") ?? "unsupported", S(c, "title") ?? "", S(ad, "exe"), held);
         }).ToList();
         return _registry;
     }
@@ -320,6 +325,7 @@ internal sealed class Launcher : IAsyncDisposable
     internal string? WhyNotHere(RegistryCheck c)
     {
         if (!ProbeKinds.Contains(c.Kind)) return $"it is not a probe; it {ProbeNames.NotAProbe(c.Kind)}";
+        if (c.Held) return HeldWhy;
         if (Instance is null) return null;
         var mods = Path.Combine(Mo2Instance.LayoutRoot(Instance), "mods");
         if (c.Id == "geometry.bos-overlay")

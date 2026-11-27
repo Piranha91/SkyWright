@@ -29,6 +29,7 @@ internal static class ProbeNames
         "geometry.object-overlap" => "Objects one mod placed or moved into another mod's objects.",
         "geometry.placement-contact" => "Objects left floating, or sunk, after a later plugin moved what they sat on.",
         "geometry.fixture-empty-space" => "Fixtures left hanging in empty air after another mod removed the room around them.",
+        "geometry.stranded-object" => "Objects left out of reach after another mod moved the walkable ground away from them.",
         "geometry.declared-dependencies" => "Objects tied to another object (enable parent, linked reference, activate parent) that a later plugin moved apart.",
         "geometry.bos-overlay" => "Which objects the game really shows once Base Object Swapper's _SWAP.ini files apply.",
         "geometry.route-cut" => "Objects placed across a path NPCs walk.",
