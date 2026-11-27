@@ -101,8 +101,10 @@ public sealed class NavGraphFunnelTests
                     if (Vector2.Distance(cs[i], cs[i + 1]) < 1e-3f) { bad.Add($"{a} -> {b}: {Show(cs)}"); break; }
             }
         Assert.True(bad.Count == 0, "consecutive equal corners: " + string.Join(" | ", bad));
+        // round the notch's south side, 135.76 + 64 + 45.25 = 245.02 u; the north side (-128,64, -64,64) walks
+        // 101.19 + 64 + 101.19 = 266.38 u, and was this line's answer until the taut path tried each hole's other side
         var (_, round) = Solve(nodes, new(-224, 32), new(-32, -32));
-        Assert.Equal(new Vector2[] { new(-224, 32), new(-128, 64), new(-64, 64), new(-32, -32) }, round);
+        Assert.Equal(new Vector2[] { new(-224, 32), new(-128, -64), new(-64, -64), new(-32, -32) }, round);
     }
 
     // C2303: round the notch the path bends at the notch's own corners, and its length is the taut 250.94 u
@@ -145,7 +147,8 @@ public sealed class NavGraphFunnelTests
     }
 
     // C2305 (preservation): the taut path is never longer than the funnel over A*'s own channel, and where that funnel
-    // already bends only at the boundary the channel and corners are A*'s, unchanged.
+    // already bends only at the boundary the channel and corners are A*'s unless the other side of the notch is shorter
+    // (a funnel that bends only at the boundary can still go round a hole by its longer side, as C2302's pair does).
     [Fact]
     public void C2305_the_taut_path_is_never_longer_than_A_stars_channel_and_keeps_a_taut_one()
     {
@@ -163,7 +166,8 @@ public sealed class NavGraphFunnelTests
                 if (Length(cs) > Length(plain) + 1e-3f) bad.Add($"{a} -> {b}: longer, {Length(cs):0.###} vs {Length(plain):0.###}");
                 bool plainTaut = true;
                 for (int i = 1; i + 1 < plain.Count; i++) if (InteriorVertex(plain[i])) plainTaut = false;
-                if (plainTaut && !channel.SequenceEqual(astar)) bad.Add($"{a} -> {b}: a taut channel was changed");
+                if (plainTaut && !channel.SequenceEqual(astar) && Length(cs) >= Length(plain) - 1e-3f)
+                    bad.Add($"{a} -> {b}: a taut channel was changed for one no shorter ({Length(cs):0.###} vs {Length(plain):0.###})");
             }
         Assert.True(bad.Count == 0, string.Join(" | ", bad));
     }
