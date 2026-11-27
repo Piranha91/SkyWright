@@ -375,7 +375,9 @@ internal sealed class BundleConflicts
                          : exec.StartsWith("blocked") ? "blocked" : exec.Length == 0 ? "no result" : exec;
             int before = manual ? rows.Count(x => x.CheckId == check && x.NewOnArm == false) + findings.Count(x => x.CheckId == check && x.NewOnArm == false) : 0;
             int count = rows.Count(x => x.CheckId == check) + findings.Count(x => x.CheckId == check && x.Role != "counted, not a clash") - before;
-            checks.Add(new CheckStatus(check, state, state == "ran" ? count : null, state == "ran" ? null : why, state == "ran" && manual && !checkLines.ContainsKey(check) ? before : null)
+            // "new with the selected mods" only when every row of the check was compared with the setup without them
+            bool compared = !rows.Any(x => x.CheckId == check && x.NewOnArm is null) && !findings.Any(x => x.CheckId == check && x.NewOnArm is null && x.Role != "counted, not a clash");
+            checks.Add(new CheckStatus(check, state, state == "ran" ? count : null, state == "ran" ? null : why, state == "ran" && manual && compared && !checkLines.ContainsKey(check) ? before : null)
                        { Lines = state == "ran" ? checkLines.GetValueOrDefault(check) ?? new List<string>() : new List<string>() });
         }
         // a reference filed in its worldspace's persistent cell has no cell of its own to build; a Findings row names one

@@ -34,6 +34,20 @@ public sealed class LostEditWordsTests
     }
 
     [Fact]
+    public void U2_F1_a_row_compared_with_the_setup_without_the_selected_mods_leads_with_its_sentence_and_says_it_is_new_with_them()
+    {
+        const string s = "Base.esp (mod Base Mod) changed the Scale of the placed object 000801 in Skyrim.esm to 2; Other.esp (mod Other Mod) wins with 1 and was not made with Base.esp, so the change is lost in game.";
+        var row = new FindingRow("records.contested-fields", "LOST-EDIT", "Base.esp", "Other.esp", s, Rec, "000D00:Skyrim.esm", null, "finding", "id") { NewOnArm = true };
+        var line = FindingWords.Line(new RankedFinding(1, row, true, "new on this arm", 0), manual: true);
+        Assert.Equal("1. " + s + "   (new with the selected mods; finding; records.contested-fields)", line);
+        // not compared (no accepted receipt of the setup without them): it never says new
+        var notCompared = FindingWords.Line(new RankedFinding(1, row with { NewOnArm = null }, true, "not compared", 0), manual: true);
+        Assert.StartsWith("1. " + s, notCompared);
+        Assert.Contains("(not compared;", notCompared);
+        Assert.DoesNotContain("new with", notCompared);
+    }
+
+    [Fact]
     public void Both_checks_are_held_with_their_own_reason_a_plain_line_and_help()
     {
         foreach (var id in new[] { "records.contested-fields", "records.cell-attributes" })
