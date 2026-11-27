@@ -35,7 +35,8 @@ public sealed class RecordFieldScope
     readonly HashSet<string> _file;
     readonly Dictionary<string, HashSet<string>> _group, _merged, _generated, _derived;
     readonly Dictionary<string, double> _tolerance;
-    readonly HashSet<string> _mergedRecords, _angles;
+    readonly HashSet<string> _mergedRecords, _angles, _registration;
+    readonly Dictionary<string, HashSet<string>> _itemLists;
     readonly Dictionary<string, Dictionary<string, long>> _masks;
     readonly Dictionary<string, Dictionary<string, Dictionary<string, long>>> _enumNames;
     readonly Dictionary<string, long> _flagBits;
@@ -65,6 +66,8 @@ public sealed class RecordFieldScope
         _mergedRecords = Set(G("runtimeMergedRecords"));
         _angles = Set(G("anglesRadians"));
         _derived = Map(G("derivedData"));
+        _registration = Set(G("registrationTypes"));
+        _itemLists = Map(G("itemLists"));
         _tolerance = G("positionTolerance").ValueKind == JsonValueKind.Object
             ? G("positionTolerance").EnumerateObject().ToDictionary(t => t.Name, t => t.Value.GetDouble(), StringComparer.Ordinal) : new(StringComparer.Ordinal);
         _masks = G("integerMasks").ValueKind == JsonValueKind.Object
@@ -102,6 +105,16 @@ public sealed class RecordFieldScope
         if (ChildGroups.Contains(top)) return "child records";
         return null;
     }
+
+    /// <summary>A registration or dialogue record type (registrationTypes): the registration and dialogue check's, which the
+    /// other lost-edit checks set aside.</summary>
+    public bool Registration(string rtype) => _registration.Contains(rtype);
+
+    /// <summary>A top-level list of a record type judged item by item (itemLists).</summary>
+    public bool ItemList(string rtype, string top) => _itemLists.TryGetValue(rtype, out var l) && l.Contains(top);
+
+    /// <summary>The lists of a record type judged item by item (itemLists); empty for most types.</summary>
+    public IReadOnlyCollection<string> ItemLists(string rtype) => _itemLists.TryGetValue(rtype, out var l) ? l : Array.Empty<string>();
 
     /// <summary>A record type the game merges at run time, whose every field is left out.</summary>
     public bool RuntimeMergedRecord(string rtype) => _mergedRecords.Contains(rtype);
