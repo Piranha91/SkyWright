@@ -1860,7 +1860,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             AfterStage();
             return $"staged: {EditSession.Sentence(_session.Pending[^1], _session.RefOf(k).Ref.BaseEditorId)}";
         })));
-        row.Children.Add(B("Disable", "stage the selected object to be written initially disabled in the patch plugin (never deleted); refused when another record depends on it", async () =>
+        row.Children.Add(B("Disable", "stage the selected object to be written initially disabled in the patch plugin (never deleted); refused when another record depends on it. " + DisableRule.Limits, async () =>
         {
             if (_session.Selected is not { } k) { Shell.SetBanner("select an object first"); return; }
             try { var s = await DisableAction.StageAsync(this, k); Say(s); Shell.SetBanner(s); }

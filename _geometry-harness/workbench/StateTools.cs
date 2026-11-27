@@ -117,7 +117,7 @@ internal sealed class StateTools
                  "(selection, pending, recheck). Verbs: select (open a conflict by its rank with `conflict`, which lands the camera on its " +
                  "reference; or select a drawn reference with `ref`, or ref \"none\"); stage (move and/or turn a reference: relative with `delta` " +
                  "and `turn_degrees`, or absolute with `position` and `rotation_degrees`; the selected reference unless `ref` names one); " +
-                 "disable (stage the selected reference, or `ref`, to be written initially disabled in the patch plugin, never deleted: refused in one sentence when another record depends on it, such as an enable parent, a linked reference, an activate parent, a door's far side, a quest, a package, a script property, or a large-reference list; an object takes one fix, a move or a disable); " +
+                 "disable (stage the selected reference, or `ref`, to be written initially disabled in the patch plugin, never deleted: refused in one sentence when another record depends on it, such as an enable parent, a linked reference, an activate parent, a door's far side, a quest, a package, a script property, or a large-reference list; an object takes one fix, a move or a disable. " + DisableRule.Limits + "); " +
                  "undo (the last staged edit, a disable too); commit (write the staged edits to the new patch plugin `patch`: `dry_run` true, the default, " +
                  "previews the values and masters and writes nothing; false writes, and then re-checks the open conflict in the background, " +
                  "about 70-80 s, read with workbench_state wait_seconds); recheck (re-check the open conflict against the written patch `patch`). " +

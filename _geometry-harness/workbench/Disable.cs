@@ -106,7 +106,7 @@ internal static class DisableRule
         ? $"{f.Key} cuts the navmesh; disabled, the cut opens, and NPCs may walk where it stood."
         : null;
 
-    /// <summary>The limits of what is read, said with every allowed disable.</summary>
+    /// <summary>The limits of what is read, said in the Disable button's tooltip and the disable verb's description.</summary>
     internal const string Limits = "What names it is read from the winning records (links, aliases, packages and script properties); "
         + "a script that finds it at run time, a package that picks furniture by type, and LOD built from it are not read.";
 }
