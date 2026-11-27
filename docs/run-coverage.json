@@ -785,44 +785,6 @@
       ]
     },
     {
-      "id": "lightclash",
-      "kind": "script",
-      "lang": "python",
-      "path": "_geometry-harness/lightclash.py",
-      "adapter": "python",
-      "stageSource": "single-stage",
-      "note": "Folds lightprobe outputs of the four setups and the patched order into per-light clash readings and per-edit verdicts; one short in-memory step.",
-      "answers": [
-        "Does a patch edit on a light fix a lighting clash that only the combination of two mods produces (orphaned, leaking, doubled or over-limit lights)?"
-      ],
-      "useWhen": "Judge patch edits on model-less lights with four-setup attribution instead of reading them as cannot tell.",
-      "evidence": [
-        {
-          "path": "_geometry-harness/lightclash.py",
-          "anchor": "Light-clash fold over lightprobe outputs"
-        }
-      ],
-      "inputs": [
-        "lightprobe JSON for the combined, single-mod, dependency-only and patched orders, and the patch edits."
-      ],
-      "outputs": [
-        "Per light and per edit: each class's reading and attribution, and a verdict with its reason."
-      ],
-      "flagCoverage": {
-        "parser": "argparse",
-        "path": "_geometry-harness/lightclash.py"
-      },
-      "modifiers": {
-        "--arm": "NAME=lightprobe.json for u, plusa, plusb, dep and p (repeat).",
-        "--mods": "The two mods' plugin file names, plusa's then plusb's.",
-        "--edits": "JSON list of {id, action, records} to judge.",
-        "--out": "Write the per-edit readings and verdicts here.",
-        "--host-radius": "H: a light is hosted by the placed object whose emitting part (lightprobe emitters) is within this distance of it (default 64 u).",
-        "--emit-threshold": "The smallest emissive value (max RGB x multiple) that counts as emitting (default 0.02).",
-        "--leak-threshold": "Required: the leak magnitude's threshold from the calibration (printed only, never decides)."
-      }
-    },
-    {
       "id": "lightprobe",
       "kind": "csharp-exe",
       "path": "_geometry-harness/lightprobe/lightprobe.csproj",
@@ -8452,27 +8414,6 @@
       ]
     },
     {
-      "id": "_geometry-harness/tests/test_lightclash.py",
-      "path": "_geometry-harness/tests/test_lightclash.py",
-      "kind": "script",
-      "answers": [
-        "Does the light-clash fold attribute and decide orphaned, leaking, doubled and over-limit lights correctly?"
-      ],
-      "useWhen": "Check light-clash rule changes against constructed arrangements with known answers.",
-      "evidence": [
-        {
-          "path": "_geometry-harness/tests/test_lightclash.py",
-          "anchor": "Known answers for lightclash.py"
-        }
-      ],
-      "inputs": [
-        "Controlled fixtures for test_lightclash."
-      ],
-      "outputs": [
-        "Assertion results for: Does the light-clash fold attribute and decide orphaned, leaking, doubled and over-limit lights correctly?"
-      ]
-    },
-    {
       "id": "_geometry-harness/tests/test_mask_evidence.py",
       "path": "_geometry-harness/tests/test_mask_evidence.py",
       "kind": "script",
@@ -9879,7 +9820,7 @@
       "evidence": [
         {
           "path": "_geometry-harness/tests/test_solid_rule_named.py",
-          "anchor": "motionprobe sweep and lightprobe outputs name the solid rule their results depend on (cases 1960-1968)."
+          "anchor": "motionprobe sweep and lightprobe outputs name the solid rule their results depend on (cases 1960-1967; 1968 retired with lightclash.py)."
         }
       ],
       "inputs": [

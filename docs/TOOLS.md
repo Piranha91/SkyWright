@@ -56,7 +56,6 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does a navmesh comparison request get its measured top-down camera, both states and its refusals offline?](#tool-integration-housecarl-tests-test_capture_navmesh.py) — `integration/housecarl/tests/test_capture_navmesh.py`
 - [Does a navmesh vignette's earlier-version caption, on the reel strip and in the report, name the plugin the historical frame's own --nav-version draws (never the plan's re-cut history, and none when the frame names none), say which mod replaced that version, and keep a name ending in s free of an "s's" possessive, in the narration too?](#tool-integration-housecarl-tests-test_navmesh_caption.py) — `integration/housecarl/tests/test_navmesh_caption.py`
 - [Does a neighbour mod's page state a clash with the evaluated mod?](#tool-adviceprobe) — `adviceprobe`
-- [Does a patch edit on a light fix a lighting clash that only the combination of two mods produces (orphaned, leaking, doubled or over-limit lights)?](#tool-lightclash) — `lightclash`
 - [Does a placed light shine through an opaque surface, sit behind a wall or inside a solid, and how many lights reach each drawn shape?](#tool-lightprobe) — `lightprobe`
 - [Does a placed-object geometry row that holds in one order of a free pair and not the other reach the report as a load-order risk, with rows in both orders left out, unmeasured rows counted, drifted plugins named and mismatched orders refused?](#tool-integration-housecarl-tests-test_order_geometry.py) — `integration/housecarl/tests/test_order_geometry.py`
 - [Does a refused camera plan leave a labelled top-down fallback and keep its refusal?](#tool-_geometry-harness-viewprobe-tools-test_shotplan_fallback.py) — `_geometry-harness/viewprobe/tools/test_shotplan_fallback.py`
@@ -134,7 +133,6 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does the flip-plan generator keep branches apart, keep source order and name every call it does not plan?](#tool-integration-housecarl-tests-test_flipplan.py) — `integration/housecarl/tests/test_flipplan.py`
 - [Does the idle gate refuse probes by command line and blockers by name?](#tool-integration-housecarl-tests-test_machineidle.py) — `integration/housecarl/tests/test_machineidle.py`
 - [Does the interrupted report publication diagnostic satisfy its expected contract?](#tool-viewprobe.report-sink-kill-arm) — `viewprobe.report-sink-kill-arm`
-- [Does the light-clash fold attribute and decide orphaned, leaking, doubled and over-limit lights correctly?](#tool-_geometry-harness-tests-test_lightclash.py) — `_geometry-harness/tests/test_lightclash.py`
 - [Does the live driver keep a launch's cleanup when the reading rule's owner cannot be asked?](#tool-integration-housecarl-tests-test_switchflip_rule_unavailable.py) — `integration/housecarl/tests/test_switchflip_rule_unavailable.py`
 - [Does the live driver refuse a bad flip plan and export one arm's reading correctly?](#tool-integration-housecarl-tests-test_switchflip_plan.py) — `integration/housecarl/tests/test_switchflip_plan.py`
 - [Does the live switch check's population rule keep unknowns open and answer not-applicable only when nothing driven touches a target?](#tool-integration-housecarl-tests-test_switchflip_scope.py) — `integration/housecarl/tests/test_switchflip_scope.py`
@@ -1069,21 +1067,6 @@ Outputs: Assertion results per case (C1990-C1993); NOT RUN without game data.
 Source: [_geometry-harness/tests/test_ledge_link_counts.py](../_geometry-harness/tests/test_ledge_link_counts.py) — `Known answers: viewprobe --route-solve says which cross-mesh links it held`
 
 
-<a id="tool-_geometry-harness-tests-test_lightclash.py"></a>
-
-### _geometry-harness/tests/test_lightclash.py
-
-**Does the light-clash fold attribute and decide orphaned, leaking, doubled and over-limit lights correctly?**
-
-Check light-clash rule changes against constructed arrangements with known answers.
-
-Inputs: Controlled fixtures for test_lightclash.
-
-Outputs: Assertion results for: Does the light-clash fold attribute and decide orphaned, leaking, doubled and over-limit lights correctly?
-
-Source: [_geometry-harness/tests/test_lightclash.py](../_geometry-harness/tests/test_lightclash.py) — `Known answers for lightclash.py`
-
-
 <a id="tool-_geometry-harness-tests-test_mask_evidence.py"></a>
 
 ### _geometry-harness/tests/test_mask_evidence.py
@@ -1556,7 +1539,7 @@ Inputs: The Release motionprobe and lightprobe (or HC_SR_HARNESS); proofprobe --
 
 Outputs: Assertion results for: Do motionprobe sweep and lightprobe outputs name the solid rule their results depend on, and say none when no solid rule applied?
 
-Source: [_geometry-harness/tests/test_solid_rule_named.py](../_geometry-harness/tests/test_solid_rule_named.py) — `motionprobe sweep and lightprobe outputs name the solid rule their results depend on (cases 1960-1968).`
+Source: [_geometry-harness/tests/test_solid_rule_named.py](../_geometry-harness/tests/test_solid_rule_named.py) — `motionprobe sweep and lightprobe outputs name the solid rule their results depend on (cases 1960-1967; 1968 retired with lightclash.py).`
 
 
 <a id="tool-_geometry-harness-tests-test_state_marker_box_and_actors.py"></a>
@@ -4445,31 +4428,6 @@ Outputs: Evidence that covered geometry moved, disappeared or was replaced.
 
 Source: [_geometry-harness/leftbehindprobe/Program.cs](../_geometry-harness/leftbehindprobe/Program.cs) — `// LEFT-BEHIND OCCLUSION PANELS — for a mod combination, was the geometry each occlusion panel was authored against`
 
-
-<a id="tool-lightclash"></a>
-
-### lightclash
-
-**Does a patch edit on a light fix a lighting clash that only the combination of two mods produces (orphaned, leaking, doubled or over-limit lights)?**
-
-Judge patch edits on model-less lights with four-setup attribution instead of reading them as cannot tell.
-
-Inputs: lightprobe JSON for the combined, single-mod, dependency-only and patched orders, and the patch edits.
-
-Outputs: Per light and per edit: each class's reading and attribution, and a verdict with its reason.
-
-Source: [_geometry-harness/lightclash.py](../_geometry-harness/lightclash.py) — `Light-clash fold over lightprobe outputs`
-
-
-Modifiers (do not select a separate mode):
-
-- `--arm` — NAME=lightprobe.json for u, plusa, plusb, dep and p (repeat).
-- `--edits` — JSON list of {id, action, records} to judge.
-- `--emit-threshold` — The smallest emissive value (max RGB x multiple) that counts as emitting (default 0.02).
-- `--host-radius` — H: a light is hosted by the placed object whose emitting part (lightprobe emitters) is within this distance of it (default 64 u).
-- `--leak-threshold` — Required: the leak magnitude's threshold from the calibration (printed only, never decides).
-- `--mods` — The two mods' plugin file names, plusa's then plusb's.
-- `--out` — Write the per-edit readings and verdicts here.
 
 <a id="tool-lightprobe"></a>
 
