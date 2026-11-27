@@ -371,21 +371,17 @@ if (mode == "reach")
             node.Add("placement", placement);
             rows.Add(node);
         }
-        TriangleSoup? world = null; string geometry = "position";
-        string? geometryNote = null;
-        if (r.Base is { } b && baseMesh.TryGetValue(b, out var bm))
+        // the shape the distance is measured from (SkyWright.Engine.SubjectGeometry, the choice the stranded check makes too);
+        // this instrument measures an unread body from the position and says so in geometryNote
+        string? model = r.Base is { } b && baseMesh.TryGetValue(b, out var bm) ? bm.Mesh : null;
+        var shape = SubjectGeometry.Of(r, model, mesh =>
         {
-            var full = bm.Mesh.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? bm.Mesh : Path.Combine("meshes", bm.Mesh);
+            var full = mesh.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? mesh : Path.Combine("meshes", mesh);
             var res = assets.ResolveForPlacement(full);
-            var bytes = res.Sources.Count == 0 ? null : AssetResolver.ReadPlacementSource(res.Sources[0]).Bytes;
-            var g = bytes is null ? null : NifGeometry.MeasureVisibleRender(bytes, includeTriangles: true);
-            if (g?.Model is { Soup: { TriangleCount: > 0 } soup } m && m.RenderComplete && m.Shapes.Where(x => !x.Hidden).All(x => x.PoseIssue is null))
-            { world = SpatialOverlap.TransformSoup(soup, r.Position, r.Rotation, r.Scale); geometry = "render (stored pose)"; }
-            else geometryNote = bytes is null ? "mesh unresolved: the position is used" : "render geometry partial or posed at runtime: the position is used";
-        }
-        else if (r.Primitive is { } prim && NavmeshReach.PrimitiveBoxSoup(prim.Type, new Vector3(prim.Bounds.X, prim.Bounds.Y, prim.Bounds.Z)) is { } boxSoup)
-        { world = SpatialOverlap.TransformSoup(boxSoup, r.Position, r.Rotation, r.Scale); geometry = "primitive box"; }
-        else geometryNote = r.Primitive is { } pr2 ? $"primitive {pr2.Type} is not a box: the position is used" : "no model: the position is used";
+            return res.Sources.Count == 0 ? null : AssetResolver.ReadPlacementSource(res.Sources[0]).Bytes;
+        });
+        TriangleSoup? world = shape.World; string geometry = shape.Geometry;
+        string? geometryNote = shape.Note;
         var d = world is not null ? NavmeshReach.FromSoup(world, tris) : NavmeshReach.FromPoint(new Vector3(r.Position.X, r.Position.Y, r.Position.Z), tris);
         object? floor = null;
         if (d.Status == "measured" && d.Triangle is { } ti && tris.FirstOrDefault(x => x.Index == ti && x.Navmesh == d.Navmesh) is var nt)
