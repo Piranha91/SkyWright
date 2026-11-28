@@ -84,6 +84,8 @@ public sealed class WorldRead
     public int Prepared { get; private set; }
     /// <summary>Plugins whose prepared file was already present and read.</summary>
     public int Reused { get; private set; }
+    /// <summary>Prepared files rebuilt during a read because a cell's data failed its hash on disk after the open.</summary>
+    public int Rebuilt { get; private set; }
     /// <summary>Schema, Engine version and the ordered plugin names with their content hashes, for receipts.</summary>
     public string Identity { get; private set; } = "";
     public WorldReadTimings Timings { get; private set; } = new(0, 0, 0);
@@ -195,7 +197,7 @@ public sealed class WorldRead
         {
             lock (_rebuild)
             {
-                if (ReferenceEquals(_files[plugin], f)) _files[plugin] = Prepare(_cache, _paths[plugin], _shas[plugin]);
+                if (ReferenceEquals(_files[plugin], f)) { _files[plugin] = Prepare(_cache, _paths[plugin], _shas[plugin]); Rebuilt++; }
                 var nf = _files[plugin];
                 var cell = f.Cells[row].Cell;
                 int nrow = Array.FindIndex(nf.Cells, c => c.Cell == cell);

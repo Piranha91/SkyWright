@@ -90,6 +90,8 @@ static class WorldReadFile
     const int KindPlacements = 1, KindMeta = 2, KindCells = 3, KindDirectory = 4, KindBases = 5;
     const int FixedHeader = 8 + 4 + 16 + 32 + 8 + 4, SectionRow = 4 + 8 + 8 + 32;
     static readonly int[] Kinds = { KindPlacements, KindMeta, KindCells, KindDirectory, KindBases };
+    /// <summary>The header's length; the first cell's data starts here.</summary>
+    internal static int HeaderLength => FixedHeader + Kinds.Length * SectionRow;
 
     /// <summary>Where the prepared file of a plugin with this content and name lives in the cache folder. The name is
     /// part of the key because a plugin's own records take their FormKeys from its file name.</summary>
