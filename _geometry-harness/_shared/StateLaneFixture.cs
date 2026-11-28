@@ -34,6 +34,12 @@ namespace HarnessShared;
 //   AD    the same                                the humanoid at (0,0,0), enabled at baseline: it LEAVES with the switch
 //   AK    the same                                a creature (race MxGoatRace, no ActorTypeNPC keyword) at (0,0,0)
 //   AL    the same                                a placed leveled actor (base a LeveledNpc) at (0,0,0)
+//
+// And one exterior worldspace, MxOutside, of two cells side by side: EA at grid (0,0), EB at grid (1,0). EA's navmesh is
+// 10 x 10 squares of 64 u at x 3456..4096, y 0..640; EB's the same at x 4096..4736. A floor slab (the AC slab) at
+// (4096,320,-10) in EA. Both switches and members are in EA:
+//   EN    the humanoid at (4200,320,0): in EA, 104 u inside EB's navmesh (the cell's own navmesh ends at x 4096)
+//   EO    the humanoid at (4200,1000,0): in EA, beyond both navmeshes (they end at y 640)
 public static class StateLaneFixture
 {
     public const SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
@@ -55,6 +61,22 @@ public static class StateLaneFixture
     public static FormKey BarrierRef(int j) => K(0x880u + (uint)j);
     public static FormKey SwitchRef(int j) => KO(0x900u + (uint)j);
     public static FormKey MemberRef(int j) => KO(0x920u + (uint)j);
+
+    public static readonly string[] ExteriorCases = { "EN", "EO" };
+    public static readonly FormKey Outside = K(0x8A0), CellEA = K(0x8A1), CellEB = K(0x8A2), NavEA = K(0x8A3), NavEB = K(0x8A4),
+        FloorEA = K(0x8A5);
+    public static FormKey ExteriorSwitch(int k) => KO(0x940u + (uint)k);
+    public static FormKey ExteriorMember(int k) => KO(0x960u + (uint)k);
+
+    static SkCell Exterior(FormKey key, string edid, int gx) =>
+        new(key, Rel) { EditorID = edid, Flags = default, Grid = new CellGrid { Point = new P2Int(gx, 0) } };
+
+    static NavigationMesh ExteriorNav(FormKey key, FormKey cell, int gx, float fromX)
+    {
+        var nav = BlockFixture.Grid(key, cell, 10, 10, 64f, fromX, 0f);
+        nav.Data!.Parent = new WorldspaceNavmeshParent { Parent = new FormLink<IWorldspaceGetter>(Outside), Coordinates = new P2Int16((short)gx, 0) };
+        return nav;
+    }
 
     public sealed record Written(IReadOnlyList<string> Order, string ModsDir);
 
@@ -148,6 +170,14 @@ public static class StateLaneFixture
             }
             MovedRefFixture.FileInterior(room, cell);
         }
+        var ea = Exterior(CellEA, "MxOutsideEA", 0);
+        ea.NavigationMeshes.Add(ExteriorNav(NavEA, CellEA, 0, 3456f));
+        ea.Temporary.Add(Ref(FloorEA, Floor, 4096, 320, -10));
+        var eb = Exterior(CellEB, "MxOutsideEB", 1);
+        eb.NavigationMeshes.Add(ExteriorNav(NavEB, CellEB, 1, 4096f));
+        var outside = MovedRefFixture.World(Outside, null, ea, eb);
+        outside.EditorID = "MxOutside";
+        room.Worldspaces.Add(outside);
         var roomPath = Save(room);
         using var roomOv = SkyrimMod.CreateFromBinaryOverlay(roomPath, Rel);
 
@@ -159,6 +189,18 @@ public static class StateLaneFixture
             cell.Temporary.Add(Member(j, SwitchRef(j)));
             MovedRefFixture.FileInterior(objs, cell);
         }
+        var eaObjs = Exterior(CellEA, "MxOutsideEA", 0);
+        for (int k = 0; k < ExteriorCases.Length; k++)
+        {
+            string c = ExteriorCases[k];
+            eaObjs.Temporary.Add(Ref(ExteriorSwitch(k), Switch, 4096, 320, 400, $"MxSw{c}"));
+            var n = new PlacedNpc(ExteriorMember(k), Rel) { Placement = At(4200, c == "EN" ? 320 : 1000, 0), EnableParent = Parent(ExteriorSwitch(k), opposite: true) };
+            n.Base.SetTo(Human);
+            eaObjs.Temporary.Add(n);
+        }
+        var outsideObjs = MovedRefFixture.World(Outside, null, eaObjs);
+        outsideObjs.EditorID = "MxOutside";
+        objs.Worldspaces.Add(outsideObjs);
         Save(objs, roomOv);
 
         var mods = Path.Combine(d, "mods");
