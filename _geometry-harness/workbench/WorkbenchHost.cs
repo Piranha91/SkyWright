@@ -1405,8 +1405,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var dir = Path.Combine(_outDir, "preload");
         Directory.CreateDirectory(dir);
         var file = Path.Combine(dir, FormattableString.Invariant($"area_{at.X}_{at.Y}.bin"));
-        var psi = new System.Diagnostics.ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "viewprobe.exe"))
-        { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = dir };
+        var psi = RunLogFolder.Start(Path.Combine(AppContext.BaseDirectory, "viewprobe.exe"), RunLogFolder.In(dir));
+        psi.CreateNoWindow = true; psi.RedirectStandardOutput = true; psi.RedirectStandardError = true; psi.WorkingDirectory = dir;
         foreach (var a in new[] { FormattableString.Invariant($"grid:{at.X},{at.Y}@{_opt.Worldspace}"), "--ring", SceneDirector.LiveReach.ToString(CultureInfo.InvariantCulture) }
                      .Concat(order.Args()).Concat(new[] { "--prepare-out", file, "--no-nav", "--no-weather", "--size", "64", "--out", dir,
                      "--eye", FormattableString.Invariant($"{at.X * 4096 + 2048},{at.Y * 4096 + 2048},20000"), "--look", FormattableString.Invariant($"{at.X * 4096 + 2048},{at.Y * 4096 + 2058},0") }))
