@@ -95,7 +95,8 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
           island member, the masters (2681); each refusal in one sentence (2682); a member refused for another reason, and
           undo: a refused or failing set leaves the output folder as it was (2683); the repair plan carries a pair as one set,
           its second row carried with it, written by R1 (2684); self-test of the row carried with an earlier set (2685)
-    2686  review of Gate C: the two-way read-back judges only borders with a member at one end
+    2686-2688  review of Gate C: the two-way read-back judges only borders with a member at one end (2686); a link into a
+          member its version does not return is refused at plan time and grown in (2687)
 
 The write of the plan through houseCARL's server program, its read-back and the re-check (2494-2499, 2504, 2505) are the
 module's suite integration/housecarl/tests/test_navmesh_repair_write.py, on this fixture: only the module holds that
@@ -1194,7 +1195,7 @@ from navi_bytes import not_returned  # noqa: E402
 
 SET_ORDER = ["Skyrim.esm", "SetP.esp", "Revert.esp", "Touch.esp"]
 SA, SB, SO, SS, SR, SC, SX, SW, SDN, DZ = (sk(x) for x in ("000B20", "000B21", "000B22", "000B23", "000B24", "000B25", "000B26", "000B27", "000B28", "000D40"))
-SQ = sk("000B29")
+SQ, SK, SL = sk("000B29"), sk("000B2A"), sk("000B2B")
 _SETLAB = {}
 
 
@@ -1421,6 +1422,21 @@ def t2686():
     assert not mine, f"raw: member borders not two-way: {mine}"
 
 
+def t2687():
+    """Rejects (review of Gate C, decision 2): an outside navmesh's link into a member that the member's version does not
+    return planned (it would be one-way), refused without naming that navmesh in one sentence, or not taken in by growth when
+    the plugin has its own version of it. SL links into SK at its west and its north; SetP's SK links back only west. SK
+    alone is refused naming SL's north link; grown, SetP's own SL (which links only west) joins, and the set plans."""
+    rows, _, _ = set_plan([{"navmesh": SK, "use_version": "SetP.esp"}], "InboundAlone")
+    whys = (rows[0].get("why") or []) if rows else []
+    assert rows and rows[0]["status"] == "refused", f"SK alone: {row_said(rows)}"
+    assert any(x.startswith(f"{SL}'s triangle 2 links into {SK} triangle 0 of SetP.esp's version, whose edge there does not link back to {SL}, so carrying it would leave that border one-way")
+               and one_sentence(x) for x in whys), f"SK alone: {whys}"
+    rows, _, _ = set_plan([{"navmesh": SK, "use_version": "SetP.esp", "with_neighbours": True}], "InboundGrown")
+    assert rows and rows[0]["status"] == "planned", f"SK grown: {row_said(rows)}"
+    assert members(rows[0]) == [SK.lower(), SL.lower()], f"SK grown: members {members(rows[0])}"
+
+
 CASES = [
     ("2450 the fixture's five plugins in order", t2450),
     ("2451 a link into a deleted navmesh is EDGE-NAV naming the deleter", t2451),
@@ -1510,6 +1526,7 @@ CASES = [
     ("2684 R1, set-ground: the repair plan carries the pair as one set, the second row carried with it", t2684),
     ("2685 self-test: a repair plan row carried with an earlier set of the same plugin; another plugin's set clashes", lambda: selftest("2685")),
     ("2686 navedit, set: a re-pointed neighbour's broken border to a third navmesh does not refuse the set", t2686),
+    ("2687 navedit, set: a link into a member its version does not return is refused, and grown in", t2687),
 ]
 
 if __name__ == "__main__":

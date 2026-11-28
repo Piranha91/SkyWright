@@ -418,11 +418,14 @@ static class NavRepairFixture
     //   Revert.esp  SA, SO, SC and SD back to vanilla; its NAVI (the winner) restates Skyrim's.
     //   Touch.esp   SB back to vanilla (so SB's winner is a plugin SA's is not).
     //   (review of Gate C, 2026-11-27) SQ (x 12300, y 200): SS's west edge links into it one way in Skyrim.esm, an already
-    //   broken border of a navmesh the set re-points, which the two-way read-back must not judge.
+    //   broken border of a navmesh the set re-points, which the two-way read-back must not judge. Row y 3300: SK, and SL
+    //   (an L: a square west of SK and a strip north of it), linked both ways at both; SetP re-cuts SK linking only west, and
+    //   its own SL links back only there, so SL's north link into SK is not returned by SetP's SK unless SL is carried too.
+    //   Revert wins SK and SL.
     // "set-ground" (navownprobe's repair plan): Skyrim.esm SA and SB vanilla at z 0, unlinked; Mover.esp raises (3,0) to 200
     // and re-cuts both at z 200 linked to each other; Revert.esp puts both back to vanilla.
     public static readonly FormKey SA = S(0xB20), SB = S(0xB21), SO = S(0xB22), SS = S(0xB23), SR = S(0xB24), SC = S(0xB25),
-        SX = S(0xB26), SW = S(0xB27), SDn = S(0xB28), DZ = S(0xD40), SQ = S(0xB29);
+        SX = S(0xB26), SW = S(0xB27), SDn = S(0xB28), DZ = S(0xD40), SQ = S(0xB29), SK = S(0xB2A), SLn = S(0xB2B);
     public static readonly string[] SetOrder = { "Skyrim.esm", "SetP.esp", "Revert.esp", "Touch.esp" };
     public static readonly string[] SetVariants = { "set", "set-ground" };
 
@@ -440,6 +443,10 @@ static class NavRepairFixture
     static NavigationMesh Strip((FormKey, short)? left, (FormKey, short)? right, (FormKey, short)? west = null)
         => Nav(SS, InGrid(3), new[] { (12600f, 200f, 0f), (12900f, 200f, 0f), (13200f, 200f, 0f), (12600f, 500f, 0f), (12900f, 500f, 0f), (13200f, 500f, 0f) },
                new T3(0, 4, 3, E12: left, E20: west), new T3(0, 1, 4), new T3(1, 5, 4, E12: right), new T3(1, 2, 5));
+    /// <summary>SL: a square west of SK (triangles 0, 1) and a strip north of it (2, 3); its east and south edges as given.</summary>
+    static NavigationMesh LNav((FormKey, short)? east, (FormKey, short)? south)
+        => Nav(SLn, InGrid(3), new[] { (12300f, 3300f, 0f), (12600f, 3300f, 0f), (12600f, 3600f, 0f), (12300f, 3600f, 0f), (12600f, 3600f, 0f), (12900f, 3600f, 0f), (12900f, 3900f, 0f), (12600f, 3900f, 0f) },
+               new T3(0, 1, 2, E12: east), new T3(0, 2, 3), new T3(4, 5, 6, E01: south), new T3(4, 6, 7));
 
     public static string WriteSetCase(string dir, string variant)
     {
@@ -475,7 +482,7 @@ static class NavRepairFixture
         NavigationMapInfo[] VanillaNavi() => new[]
         {
             Info(SA, 3, 12600, 500, SO, SS), Info(SB, 3, 12900, 500, SS, SR), Info(SO, 3, 12300, 500, SA), Info(SS, 3, 12600, 200, SA, SB, SQ),
-            Info(SQ, 3, 12300, 200),
+            Info(SQ, 3, 12300, 200), Info(SK, 3, 12600, 3300, SLn), Info(SLn, 3, 12300, 3300, SK),
             Info(SR, 3, 13200, 500, SB), Info(SC, 3, 12600, 1500), Info(SX, 3, 12900, 1500), Info(SW, 3, 12300, 1500), Info(SDn, 3, 12600, 2500),
         };
         var sky = new SkyrimMod(SkyKey, Rel);
@@ -483,6 +490,7 @@ static class NavRepairFixture
         foreach (var n in new[]
         {
             VSA(), VSB(), VSO(), Strip((SA, 0), (SB, 0), (SQ, 0)), Square(SR, 13200, 500, false, w: (SB, 0)), Square(SQ, 12300, 200, false),
+            Square(SK, 12600, 3300, false, w: (SLn, 0), n: (SLn, 2)), LNav((SK, 1), (SK, 1)),
             Square(SW, 12300, 1500, false), Square(SC, 12600, 1500, false), Square(SX, 12900, 1500, false), Square(SDn, 12600, 2500, false),
         }) c3.NavigationMeshes.Add(n);
         sky.Worldspaces.Add(World(c3));
@@ -501,6 +509,7 @@ static class NavRepairFixture
         {
             Square(SA, 12600, 500, true, s: (SS, 0), e: (SB, 3), w: (SO, 0)), pSB, pSR, Square(SO, 12300, 500, false),
             Square(SC, 12600, 1500, true, e: (SX, 1), w: (SW, 0)), Square(SW, 12300, 1500, false), pSD,
+            Square(SK, 12600, 3300, true, w: (SLn, 0)), LNav((SK, 3), null),
         }) p3.NavigationMeshes.Add(n);
         p.Worldspaces.Add(World(p3));
         var sbInfo = Island(Info(SB, 3, 12900, 500, SA, SS, SR), Isl((12900, 500, 0), (13200, 800, 0), new[] { (12900f, 500f, 0f), (13200f, 500f, 0f), (13200f, 800f, 0f) }, (0, 1, 2)));
@@ -514,6 +523,7 @@ static class NavRepairFixture
         var r3 = GridCell(3, null);
         r3.NavigationMeshes.Add(VSA()); r3.NavigationMeshes.Add(VSO());
         r3.NavigationMeshes.Add(Square(SC, 12600, 1500, false)); r3.NavigationMeshes.Add(Square(SDn, 12600, 2500, false));   // so SetP's SC and SD lose
+        r3.NavigationMeshes.Add(Square(SK, 12600, 3300, false, w: (SLn, 0), n: (SLn, 2))); r3.NavigationMeshes.Add(LNav((SK, 1), (SK, 1)));
         rev.Worldspaces.Add(World(r3));
         rev.NavigationMeshInfoMaps.Add(Navi(VanillaNavi()));
         rev.BeginWrite.ToPath(Path.Combine(dir, "Revert.esp")).WithLoadOrder(skyRead).Write();

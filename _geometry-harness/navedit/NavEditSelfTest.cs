@@ -971,6 +971,12 @@ static class NavEditSelfTest
             var oneWay = NavEdit.UseVersion(wl, barel, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = nl2 }, tol);
             var (wr, nr0) = Pair(linkN: false);
             var notReturned = NavEdit.UseVersion(wr, wr, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = nr0 }, tol);
+            // the version keeps its link into N from triangle 2 only; N's triangle 5 still links into triangle 6, which no longer links back
+            var (wi, ni) = Pair();
+            var vt = wi.Triangles.ToList(); vt[6] = vt[6] with { Flags = vt[6].Flags & ~2, EdgeLink12 = -1 };
+            var inNotReturned = NavEdit.UseVersion(wi, wi with { Triangles = vt }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = ni }, tol);
+            if (!inNotReturned.Why.Any(x => x.StartsWith($"{NK}'s triangle 5 links into {K} triangle 6 of Ver.esp's version, whose edge there does not link back to {NK}") && OneSentenceU(x)))
+                return "a link in that the version does not return: " + string.Join(" | ", inNotReturned.Why);
             string Kind(string why) => NavUseVersionPlan.ReasonKind(why);
             var want = new (string Case, UseVersionResult R, Func<string, string> Expect)[]
             {
@@ -980,6 +986,8 @@ static class NavEditSelfTest
                 ("a dropped neighbour that still links in", oneWay, why => why.Contains("one-way border") ? "neighbour that still links in, dropped" : Kind(why)),
                 ("neighbour's ledge renumbered", ledgeIn, _ => "neighbour link into it that cannot be re-pointed"),
                 ("a border the neighbour does not return", notReturned, _ => "border link the neighbour does not return"),
+                // review of Gate C, decision 2: a neighbour's link into the navmesh that the version does not return
+                ("a link in the version does not return", inNotReturned, why => why.Contains("so carrying it would leave that border one-way") ? "neighbour link into it the version does not return" : Kind(why)),
             };
             var bad = new List<string>();
             foreach (var (c, r, expect) in want)

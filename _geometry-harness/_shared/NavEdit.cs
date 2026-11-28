@@ -909,6 +909,13 @@ public static class NavEdit
                         var hit = Keep(Along(V, o.Vertices[pa], o.Vertices[pb]), named);
                         if (hit.Count != 1) { Border(key, ok, $"{ok}'s triangle {u} edge {Where(o.Vertices[pa], o.Vertices[pb])} links into {key}, but {(hit.Count == 0 ? $"no edge of {fromPlugin}'s version lies along it" : $"{hit.Count} triangles of {fromPlugin}'s version lie along it")}, so that link cannot be re-pointed"); continue; }
                         if (oassigned.TryGetValue(j, out var prev) && prev != hit[0]) { Border(key, ok, $"{ok}'s link entry {j} serves edges into {key} that meet different triangles ({prev} and {hit[0]}) of {fromPlugin}'s version, so that table cannot be kept as it is"); continue; }
+                        // the member version's edge there must link back to the outside navmesh, or the re-pointed link is one-way
+                        // (the review of Gate C, decision 2: 10925D into USSEP's 10925E on CV-clockwork)
+                        if (!LinksBack(V, hit[0], o.Vertices[pa], o.Vertices[pb], ok, tol))
+                        {
+                            Border(key, ok, $"{ok}'s triangle {u} links into {key} triangle {hit[0]} of {fromPlugin}'s version, whose edge there does not link back to {ok}, so carrying it would leave that border one-way");
+                            continue;
+                        }
                         oassigned[j] = (short)hit[0];
                     }
                 foreach (var (j, to) in oassigned) olinks[j] = olinks[j] with { TriangleIndex = to };
@@ -1321,7 +1328,8 @@ public static class NavUseVersionPlan
     /// are no longer reasons: both are carried. A repair plan names the kinds of a refused row in its one sentence, so a
     /// reader sees every cause, not only the first (the master's condition, 2026-11-22).</summary>
     public static string ReasonKind(string why) =>
-        why.Contains("whose edge there does not link back to") ? "border link the neighbour does not return"
+        why.Contains("so carrying it would leave that border one-way") ? "neighbour link into it the version does not return"
+        : why.Contains("whose edge there does not link back to") ? "border link the neighbour does not return"
         : why.Contains("no edge of its winning version lies along it") || why.Contains(" of its triangles lie along it") || why.Contains("'s version of it lies along it") ? "border link meeting no edge"
         : why.Contains("lies along it") || why.Contains("triangles of ") && why.Contains("'s version lie along it") || why.Contains("cannot be re-pointed") ? "neighbour link into it that cannot be re-pointed"
         : why.Contains("The navmesh info map cannot follow the version") ? "navmesh info map entry that cannot follow"

@@ -198,6 +198,8 @@ a clobber, where a later mod's version replaced an earlier one's).
     re-pointed neighbour's winner;
   - one refused member refuses the whole set, nothing written; in a set each sentence starts with its member. Refused too:
     a navmesh named twice, a stated member the plugin already wins or has no version of;
+  - an outside navmesh's link into a member is re-pointed only where the member's version links back there; otherwise it is
+    a border refusal naming that navmesh (so a grown set takes it in when the plugin has its own version of it);
   - the read-back adds a two-way check on the written patch (`NavRepairReadBack.TwoWay`): every border link out of a member,
     and every link into a member from any navmesh of the order with the patch last, must be returned by the triangle it
     names (ledges are not judged). A link between two navmeshes neither of which is a member is not judged, even when the
