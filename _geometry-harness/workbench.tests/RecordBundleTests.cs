@@ -44,7 +44,8 @@ public sealed class RecordBundleTests : IDisposable
             ["targets"] = new JsonArray(new JsonObject { ["name"] = "Base.esp" }),
             ["checks"] = new JsonArray(
                 new JsonObject { ["checkId"] = "records.contested-fields", ["evidence"] = new JsonObject { ["strength"] = "record-fact" } },
-                new JsonObject { ["checkId"] = "loadability.missing-assets", ["evidence"] = new JsonObject { ["strength"] = "record-fact" } }),
+                new JsonObject { ["checkId"] = "loadability.missing-assets", ["evidence"] = new JsonObject { ["strength"] = "record-fact" } },
+                new JsonObject { ["checkId"] = "records.registration-and-dialogue", ["evidence"] = new JsonObject { ["strength"] = "record-fact" } }),
         }.ToJsonString());
         const string T = "2026-11-27 00:00:00Z";
         // the setup without the selected mods: no row, and what it looked at (the selection's plugin, not loaded)
@@ -58,6 +59,9 @@ public sealed class RecordBundleTests : IDisposable
         // an AI-side evaluation's import of the missing-assets id, which the app now runs itself
         var imported = new Conflict("MISSING-ASSET", "Base.esp", "", "meshes/x.nif has no provider in this view", new[] { new ConflictRecord("000802:Base.esp", "record", null, PhysicalState.Holds) });
         Receipt("loadability.missing-assets__candidate-01", "loadability.missing-assets", "imports/ma/result.json", new ConflictFile("recordprobe", "i", T, new[] { imported }), "mcp-import");
+        // an AI-side evaluation's import of the registration and dialogue id (unit 4), which the app now runs itself
+        var script = new Conflict("UNBOUND-SCRIPT-PROPERTY", "Base.esp", "Base.esp", "Npc 000803:Base.esp: unbound script property", new[] { new ConflictRecord("000803:Base.esp", "record", null, PhysicalState.Holds) });
+        Receipt("records.registration-and-dialogue__candidate-01", "records.registration-and-dialogue", "imports/rd/result.json", new ConflictFile("recordprobe", "i", T, new[] { script }), "mcp-import");
         File.WriteAllText(Verify, new JsonObject
         {
             ["bundle"] = new JsonObject { ["structurallyValid"] = true, ["complete"] = true, ["defects"] = new JsonArray(), ["mismatched"] = new JsonArray(), ["missing"] = new JsonArray() },
@@ -93,6 +97,29 @@ public sealed class RecordBundleTests : IDisposable
         var help = ProbeHelp.Of(c.Id);
         Assert.NotNull(help);
         Assert.Contains("archive", help!.What + help.How);
+    }
+
+    [Fact]
+    public void Unit_4_the_registration_tile_is_held_with_its_own_reason_a_plain_line_and_help()
+    {
+        var c = Assert.Single(Launcher.Registry(), x => x.Id == "records.registration-and-dialogue");
+        Assert.True(c.Held);
+        Assert.Equal("probe-emit", c.Kind);
+        Assert.Equal("it is held back until it has found a real clash between two mods", c.HeldReason);
+        Assert.Equal(c.HeldReason, new Launcher().WhyNotHere(c));
+        Assert.Contains("form list", ProbeNames.Says(c.Id));
+        var help = ProbeHelp.Of(c.Id);
+        Assert.NotNull(help);
+        Assert.Contains("item by item", help!.How);
+    }
+
+    [Fact]
+    public void Unit_4_an_AI_side_import_of_the_registration_id_stays_out_of_the_apps_Findings()
+    {
+        var b = BundleConflicts.Read(Dir, "candidate-01", Verify, "verify: fixture verdict");
+        Assert.DoesNotContain(b.Findings, x => x.CheckId == "records.registration-and-dialogue");
+        Assert.DoesNotContain(b.Checks, c => c.CheckId == "records.registration-and-dialogue");
+        Assert.Contains(b.Notes, n => n.Contains("checks this SkyWright does not list", StringComparison.Ordinal) && n.Contains("records.registration-and-dialogue", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -12,17 +12,26 @@ static class LostEditSelfTest
 {
     const string Mods = @"X:\inst\mods";
 
-    sealed record Rec(string FormId, string Type, string[] Touchers, Dictionary<string, string[]> VsWinner, string? Edid = null,
+    internal sealed record Rec(string FormId, string Type, string[] Touchers, Dictionary<string, string[]> VsWinner, string? Edid = null,
                       HashSet<string>? Incomplete = null, bool NoDepth = false);
 
-    sealed class Fx
+    internal sealed class Fx
     {
         public List<OrderPlugin> Order = new();
         public List<Rec> Recs = new();
         public Dictionary<(string Source, string Versus, string FormId), string[]> Auth = new();
+        /// <summary>The registration check's reads (RegistrationSelfTest): each copy's form-list items, by plugin and record,
+        /// and the item a copy's read could not give (its line a note); and houseCARL's errors-check answer.</summary>
+        public Dictionary<(string Source, string FormId), string[]> Items = new();
+        public HashSet<(string Source, string FormId)> ItemNote = new();
+        public string? CheckAnswer;
 
         public string Call(string tool, IReadOnlyDictionary<string, object?> args)
         {
+            // the check tool: the case's own answer, else houseCARL's answer with no record with scripts and no seed reached
+            if (tool == ToolNames.Check)
+                return CheckAnswer ?? "{\"families\":{\"scripts\":{\"records_with_scripts\":0,\"unbound\":0,\"unverifiable\":0,\"records\":[]},"
+                                    + "\"dialogue\":{\"seeds_validated\":0,\"seeds_unreachable_total\":0,\"findings_found\":0,\"seeds\":[]}}}";
             if (tool != ToolNames.Records) throw new InvalidOperationException($"the fixture answers {ToolNames.Records} only, not {tool}");
             string form = (string)((Dictionary<string, object?>)args["project"]!)["form"]!;
             var ids = args.TryGetValue("formids", out var f) && f is string[] fs ? fs : Array.Empty<string>();
@@ -33,6 +42,8 @@ static class LostEditSelfTest
                 "tree" => new Dictionary<string, object?> { ["form"] = "tree", ["count"] = ids.Length, ["truncated"] = false, ["rows"] = ids.Select(id => Tree(R(id))).ToList() },
                 "delta" => new Dictionary<string, object?> { ["form"] = "delta", ["count"] = ids.Length, ["truncated"] = false,
                     ["rows"] = ids.Select(id => Delta(R(id), (string)args["source"]!, (string)args["versus"]!)).ToList() },
+                "fields" => new Dictionary<string, object?> { ["count"] = ids.Length, ["truncated"] = false,
+                    ["records"] = ids.Select(id => Fields(R(id), (string)args["source"]!)).ToList() },
                 _ => throw new InvalidOperationException("form " + form),
             };
             return JsonSerializer.Serialize(reply);
@@ -59,6 +70,17 @@ static class LostEditSelfTest
                                                     ["deltas"] = r.VsWinner.GetValueOrDefault(t) ?? Array.Empty<string>() }).ToList(),
         };
 
+        object Fields(Rec r, string source)
+        {
+            if (!Items.TryGetValue((source, r.FormId), out var items))
+                return new Dictionary<string, object?> { ["formid"] = r.FormId, ["error"] = $"source: '{source}' has no version of {r.FormId}." };
+            var fields = new List<Dictionary<string, object?>> { new() { ["path"] = "Items", ["value"] = $"[{items.Length} item(s)]" } };
+            for (int i = 0; i < items.Length; i++)
+                fields.Add(ItemNote.Contains((source, r.FormId)) && i == 0 ? new() { ["path"] = $"Items[{i}]", ["note"] = "UNREADABLE (a fault reading the link)" }
+                                                                          : new() { ["path"] = $"Items[{i}]", ["value"] = items[i] });
+            return new Dictionary<string, object?> { ["formid"] = r.FormId, ["type"] = r.Type, ["source"] = source, ["fields"] = fields };
+        }
+
         object Delta(Rec r, string source, string versus)
         {
             if (versus == "previous_provider")
@@ -71,12 +93,12 @@ static class LostEditSelfTest
         }
     }
 
-    static OrderPlugin P(string name, string? folder, bool selected, params string[] masters) =>
+    internal static OrderPlugin P(string name, string? folder, bool selected, params string[] masters) =>
         new(name, RecordClashRule.ModOf(folder is null ? Path.Combine(@"X:\game\Data", name) : Path.Combine(Mods, folder, name), Mods),
             RecordChecks.IsGameFile(name), selected, masters);
 
     /// <summary>The order every case uses; <paramref name="selected"/> names the selection.</summary>
-    static List<OrderPlugin> Order(params string[] selected)
+    internal static List<OrderPlugin> Order(params string[] selected)
     {
         bool S(string n) => selected.Contains(n);
         return new()

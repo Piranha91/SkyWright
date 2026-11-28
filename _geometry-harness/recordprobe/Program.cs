@@ -18,7 +18,7 @@ using Mutagen.Bethesda.Skyrim;
 // usage: recordprobe --self-test
 //        recordprobe --check ID [--order CANDIDATE.json] --emit OUT.json [--population FILE] [--instrument] --instance DIR --profile NAME --game DIR
 //   --check       the registry id: loadability.dangling-references, loadability.missing-assets, records.contested-fields,
-//                 records.cell-attributes
+//                 records.cell-attributes, records.registration-and-dialogue
 //   --instrument  the lost-edit checks only: the earlier Python capture's rule (the selection's plugins as the only losers,
 //                 each against the plugin beneath it, no between-mods clause), a known answer; never in the registry, never a scan
 //   --population  the plan's population file: its plugins and mod folders are the selection; without it every plugin is
@@ -57,8 +57,8 @@ for (int i = 0; i < args.Length; i++)
 }
 if (check is null || !RecordChecks.ById.TryGetValue(check, out var run))
 { Console.Error.WriteLine($"recordprobe: --check must name one of {string.Join(", ", RecordChecks.ById.Keys)}; name the check to run."); return 2; }
-if (instrument && check is not (LostEditCheck.FieldsId or LostEditCheck.CellsId))
-{ Console.Error.WriteLine($"recordprobe: --instrument is a mode of {LostEditCheck.FieldsId} and {LostEditCheck.CellsId} only; drop it or name one of them."); return 2; }
+if (instrument && check is not (LostEditCheck.FieldsId or LostEditCheck.CellsId or RegistrationCheck.Id))
+{ Console.Error.WriteLine($"recordprobe: --instrument is a mode of {LostEditCheck.FieldsId}, {LostEditCheck.CellsId} and {RegistrationCheck.Id} only; drop it or name one of them."); return 2; }
 if (emitPath is null) { Console.Error.WriteLine("recordprobe: no --emit OUT.json was given, so the rows would go nowhere; name the file to write."); return 2; }
 Instance = HarnessTarget.Require(Instance, "MO2 instance directory", "instance", "--instance");
 GamePath = HarnessTarget.Require(GamePath, "game directory", "game", "--game");
