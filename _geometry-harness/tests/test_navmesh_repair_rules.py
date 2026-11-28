@@ -96,7 +96,8 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
           undo: a refused or failing set leaves the output folder as it was (2683); the repair plan carries a pair as one set,
           its second row carried with it, written by R1 (2684); self-test of the row carried with an earlier set (2685)
     2686-2688  review of Gate C: the two-way read-back judges only borders with a member at one end (2686); a link into a
-          member its version does not return is refused at plan time and grown in (2687)
+          member its version does not return is refused at plan time and grown in (2687); a clobber moved to a re-pointing
+          patch is one unchanged row in the re-check (2688, navownprobe's self-test)
 
 The write of the plan through houseCARL's server program, its read-back and the re-check (2494-2499, 2504, 2505) are the
 module's suite integration/housecarl/tests/test_navmesh_repair_write.py, on this fixture: only the module holds that
@@ -1527,6 +1528,7 @@ CASES = [
     ("2685 self-test: a repair plan row carried with an earlier set of the same plugin; another plugin's set clashes", lambda: selftest("2685")),
     ("2686 navedit, set: a re-pointed neighbour's broken border to a third navmesh does not refuse the set", t2686),
     ("2687 navedit, set: a link into a member its version does not return is refused, and grown in", t2687),
+    ("2688 self-test: a clobber moved from the winner to a re-pointing patch is one unchanged row", lambda: selftest("2688")),
 ]
 
 if __name__ == "__main__":

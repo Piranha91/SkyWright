@@ -407,6 +407,21 @@ static class NavRepairSelfTest
             return bad.Count == 0 ? null : string.Join(" | ", bad);
         });
 
+        // C2688 (review of Gate C, decision 3): a patch that overrides a navmesh only to re-point its links carries the previous
+        // winner's geometry, so the clobber of a loser's version moves from that winner to the patch and is one unchanged row:
+        // a CLOBBERED row against the patch matches the base's CLOBBERED row for the same navmesh and loser. A clobber against the
+        // patch of a loser the base had no clobber for stays new; without the patch named, the C2555 rule stands.
+        Case("2688 rows-at-relabelled-clobber", () =>
+        {
+            Conflict Clob(string a, string b, params string[] navs) => new("CLOBBERED", a, b, "re-cut", navs.Select(n => new ConflictRecord(n, "navmesh", null)).ToList());
+            var relabel = RowsAt.Compare(new[] { Clob("U.esp", "W.esp", A) }, new[] { Clob("U.esp", "Patch.esp", A) }, A, "Patch.esp");
+            var fresh = RowsAt.Compare(new[] { Clob("U.esp", "W.esp", A) }, new[] { Clob("U.esp", "Patch.esp", A), Clob("V.esp", "Patch.esp", A) }, A, "Patch.esp");
+            var plain = RowsAt.Compare(new[] { Clob("U.esp", "W.esp", A) }, new[] { Clob("U.esp", "Patch.esp", A) }, A);
+            return relabel.Gone.Count == 0 && relabel.New.Count == 0 && relabel.Same.Count == 1 && fresh.New.Count == 1 && fresh.New[0].Contains("V.esp>Patch.esp")
+                   && fresh.Gone.Count == 0 && plain.Gone.Count == 1 && plain.New.Count == 1
+                ? null : $"relabel {relabel.Gone.Count}/{relabel.New.Count}/{relabel.Same.Count}; a new loser [{string.Join(",", fresh.New)}] gone {fresh.Gone.Count}; no patch named {plain.Gone.Count}/{plain.New.Count}";
+        });
+
         // C2591: the plan for a band one-way row writes no link back across the band: refused by name.
         Case("2591 band-oneway-repair-refused", () =>
         {

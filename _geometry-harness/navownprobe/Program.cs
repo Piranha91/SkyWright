@@ -1144,7 +1144,13 @@ if (emitPath is not null)
         else
             foreach (var nav in overridden)
             {
-                var (gone, fresh, same) = RowsAt.Compare(baseConflicts, conflicts, nav.ToString());
+                // a patch carrying the previous winner's vertices and triangle corners (its links re-pointed only) takes over that
+                // winner's clobbers unchanged (RowsAt.Compare's patch); held here, where the geometry is read (review of Gate C)
+                var prov = navProviders[nav];
+                string? samePatch = prov.Count >= 2 && NavUseVersionPlan.Winning(paths[prov[^1]], nav) is { } nowG && NavUseVersionPlan.Winning(paths[prov[^2]], nav) is { } wasG
+                    && nowG.Vertices.SequenceEqual(wasG.Vertices) && nowG.Triangles.Select(t => (t.A, t.B, t.C)).SequenceEqual(wasG.Triangles.Select(t => (t.A, t.B, t.C)))
+                    ? pluginKey[prov[^1]].FileName.String : null;
+                var (gone, fresh, same) = RowsAt.Compare(baseConflicts, conflicts, nav.ToString(), samePatch);
                 Console.WriteLine($"OVERRIDDEN {nav} ({pluginKey[navProviders[nav][^1]].FileName}): rows gone {gone.Count}, new {fresh.Count}, unchanged {same.Count}"
                                 + (gone.Count + fresh.Count > 0 ? "  [" + string.Join("; ", gone.Select(k => "gone " + k).Concat(fresh.Select(k => "new " + k)).Take(12)) + "]" : ""));
             }

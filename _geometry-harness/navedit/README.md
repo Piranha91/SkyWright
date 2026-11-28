@@ -204,7 +204,8 @@ a clobber, where a later mod's version replaced an earlier one's).
     and every link into a member from any navmesh of the order with the patch last, must be returned by the triangle it
     names (ledges are not judged). A link between two navmeshes neither of which is a member is not judged, even when the
     patch holds one of them to re-point its links: that border is as the order had it, and navownprobe's re-check files it
-    (review of Gate C, 2026-11-27). In a repair plan a row whose navmesh an earlier set of the same plugin carries is planned
+    (review of Gate C, 2026-11-27). navownprobe's `--base`/`--enable` re-check counts a CLOBBERED row moved from the previous
+    winner to a patch carrying that winner's geometry (links re-pointed only) as unchanged. In a repair plan a row whose navmesh an earlier set of the same plugin carries is planned
     "carried with" that set, with no edits of its own.
 - **The navmesh info map follows the version** (2026-11-22, houseCARL's items 2 and 3). The entry's linked doors become the
   version's door table, in order, and its MergedTo and PreferredMerges together the version's link-table targets: a
