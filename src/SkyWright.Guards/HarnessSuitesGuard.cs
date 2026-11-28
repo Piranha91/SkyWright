@@ -25,6 +25,11 @@ internal static class HarnessSuitesGuard
 
     internal sealed record Runner(string Name, string Exe, string[] Args, bool FullOnly);
 
+    /// <summary>The run log (houseCARL's HOUSECARL_RUNLOG_DIR) of every runner this guard starts: a folder of this guard run's
+    /// own, never the user's shared store, which a probe started bare reads whole at start-up and appends to (316.5 MB,
+    /// 196,129 lines on 2026-11-27). runcontrol does the same for a scan's probes, under the run's folder.</summary>
+    internal static readonly string SuiteRunLog = Path.Combine(Path.GetTempPath(), $"skywright-harness-suites-runlog-{Environment.ProcessId}");
+
     internal static readonly Config SkyWright = new(
         PythonFolders: new[] { "_geometry-harness/tests", "_geometry-harness/viewprobe/tools", "_geometry-harness/planeassess", "integration/housecarl/tests" },
         PythonSingles: Array.Empty<string>(),
@@ -83,6 +88,13 @@ internal static class HarnessSuitesGuard
         Console.WriteLine($"  build     {build.Root}");
         var moduleBuild = IntegrationLayout.Root(repo);
         Console.WriteLine($"  module    {moduleBuild}");
+        Console.WriteLine($"  run log   {SuiteRunLog}");
+        foreach (var (ok, label) in RunLogCheck(repo, build.Root)) Check(ok, "run log: " + label);
+        if (args.Contains("--run-log-check"))   // that check alone, without running the suites
+        {
+            try { Directory.Delete(SuiteRunLog, true); } catch { /* temp cleanup best-effort */ }
+            return fail == 0 ? 0 : 1;
+        }
         var (runners, problems) = Plan(repo, SkyWright, build.Root, moduleBuild);
         foreach (var p in problems) Check(false, p);
         foreach (var (path, reason) in SkyWright.Excluded) Console.WriteLine($"  excluded  {path} — {reason}");
@@ -96,6 +108,7 @@ internal static class HarnessSuitesGuard
             if (code != 0) foreach (var line in tail) Console.WriteLine("        | " + line);
         }
         Console.WriteLine(fail == 0 ? "\n  harness suites: all passed" : $"\n  harness suites: {fail} failed");
+        try { Directory.Delete(SuiteRunLog, true); } catch { /* temp cleanup best-effort */ }
         return fail == 0 ? 0 : 1;
     }
 
@@ -175,7 +188,7 @@ internal static class HarnessSuitesGuard
     static string ModuleProbeExe(string? moduleBuild, string probe) =>
         moduleBuild is null ? Path.Combine("(no module build)", probe + ".exe") : IntegrationLayout.ProgramExe(moduleBuild, probe);
 
-    static (int Code, double Secs, List<string> Tail) Run(string repo, Runner r)
+    static (int Code, double Secs, List<string> Tail) Run(string repo, Runner r, IReadOnlyDictionary<string, string>? env = null)
     {
         var sw = Stopwatch.StartNew();
         var tail = new Queue<string>();
@@ -184,6 +197,8 @@ internal static class HarnessSuitesGuard
         var psi = new ProcessStartInfo(r.Exe) { WorkingDirectory = repo, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
         foreach (var a in r.Args) psi.ArgumentList.Add(a);
         psi.Environment["PYTHONIOENCODING"] = "utf-8";
+        psi.Environment["HOUSECARL_RUNLOG_DIR"] = SuiteRunLog;
+        foreach (var (k, v) in env ?? new Dictionary<string, string>()) psi.Environment[k] = v;
         using var p = Process.Start(psi)!;
         p.OutputDataReceived += (_, e) => Keep(e.Data);
         p.ErrorDataReceived += (_, e) => Keep(e.Data);
@@ -197,6 +212,27 @@ internal static class HarnessSuitesGuard
         }
         p.WaitForExit();
         return (p.ExitCode, sw.Elapsed.TotalSeconds, tail.ToList());
+    }
+
+    /// <summary>The run log's known answer: a probe started here, with the user's store moved to a decoy (HOUSECARL_DATA_DIR),
+    /// writes its run record to <see cref="SuiteRunLog"/> and nothing to the decoy.</summary>
+    static IEnumerable<(bool Ok, string Label)> RunLogCheck(string repo, string build)
+    {
+        var decoy = Path.Combine(Path.GetTempPath(), "skywright-harness-suites-decoy-store-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            static int Lines(string f) => File.Exists(f) ? File.ReadLines(f).Count(l => l.Length > 0) : 0;
+            string ours = Path.Combine(SuiteRunLog, "history.jsonl"), shared = Path.Combine(decoy, "runs", "history.jsonl");
+            int before = Lines(ours);
+            var probe = new Runner("contactprobe", ProbeExe(build, "contactprobe"),
+                                   new[] { "--base", Path.Combine(decoy, "no-such-base.json"), "--emit", Path.Combine(decoy, "e.json") }, false);
+            var (code, _, tail) = Run(repo, probe, new Dictionary<string, string> { ["HOUSECARL_DATA_DIR"] = decoy });
+            int added = Lines(ours) - before, leaked = Lines(shared);
+            yield return (code == 2 && added >= 1 && leaked == 0,
+                          $"a probe started by the guard (contactprobe refusing a missing --base, exit {code}) wrote {added} run record(s) to the guard's run log and {leaked} to the user's store (a decoy here)"
+                          + (code != 2 ? ": " + string.Join(" | ", tail.TakeLast(3)) : ""));
+        }
+        finally { try { Directory.Delete(decoy, true); } catch { /* temp cleanup best-effort */ } }
     }
 
     /// <summary>The guard's own known answers, on fixture trees in a temp folder.</summary>
