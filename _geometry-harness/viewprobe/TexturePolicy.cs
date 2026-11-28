@@ -79,7 +79,8 @@ internal sealed record TexturePolicy(int? MaxFinalMip, bool Explicit, string? Se
         }
         return $"texture uploads ({Current.Label}): {Part("compressed-authored", "compressed")}, {Part("decoded", "decoded")}, "
              + $"{d.Count(x => x.Route == "resident"):N0} already resident, {d.Count(x => x.Route == "error"):N0} failed; "
-             + $"decoded on the CPU: {cache.TotalDecodeCalls:N0} texture(s), {MiB(cache.TotalDecodedBytes)}, {MiB(cache.CachedDecodedBytes)} held";
+             + $"decoded on the CPU: {cache.TotalDecodeCalls:N0} texture(s), {MiB(cache.TotalDecodedBytes)} in {cache.TotalDecodeMs:0} ms, "
+             + $"{MiB(cache.CachedDecodedBytes)} held";
     }
 
     /// <summary>A cache whose frozen policy is not the one this run records refuses: its pictures would carry the wrong
