@@ -56,9 +56,13 @@ public sealed class PreloadRunTests
             var stale = Path.Combine(PreloadRun.RunLogOf(dir, file), "history.jsonl");
             Directory.CreateDirectory(Path.GetDirectoryName(stale)!);
             File.WriteAllLines(stale, new[] { "{}", "{}", "{}" });
-            var (exit, text) = Preload(dir, file);
-            Assert.True(exit == 2, $"the stand-in exit {exit}: {text}");
-            Assert.True(!File.Exists(stale), $"the earlier records are still there ({Lines(stale)} lines): this preload read them at start-up");
+            // a stand-in that says how many records its run log holds as it starts, which is when a probe reads them all
+            var psi = PreloadRun.Start("python", dir, file, new[] { "-c",
+                "import os; p = os.path.join(os.environ['HOUSECARL_RUNLOG_DIR'], 'history.jsonl'); print('AT-START', sum(1 for _ in open(p)) if os.path.exists(p) else 0)" });
+            var (exit, o, e) = PreloadRun.Run(psi, _ => { });
+            Assert.True(exit == 0 && o.Contains("AT-START"), $"the stand-in exit {exit}: {o}{e}");
+            Assert.True(o.Contains("AT-START 0"), $"the preload started with an earlier preload's records in its run log: {o.Trim()}");
+            Assert.True(!File.Exists(stale), $"the earlier records are still there ({Lines(stale)} lines)");
         }
         finally { Directory.Delete(root, true); }
     }
