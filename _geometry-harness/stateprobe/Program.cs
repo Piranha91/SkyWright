@@ -318,6 +318,22 @@ if (routeOn)
     Console.WriteLine($"route oracle: winning navmesh read for {winNav.Count:N0} of {wantedCells.Count:N0} cells; actor band fallback {fallbackSrc}; the band stands on the physical floor (Q24: {floorRefsByWorld.Values.Sum(w => w.Values.Sum(d => d.Count)):N0} exterior floor refs filed for {cellGridOf.Count:N0} exterior cells' neighbourhoods)  ({sw.Elapsed.TotalSeconds:0.0}s)");
     // The navmesh and its walkable graph do not depend on the state; the floor and the band do (see FieldFor).
     var navIndex = new System.Collections.Concurrent.ConcurrentDictionary<FormKey, Lazy<NavCell>>();
+    // The actor reading's own: an exterior cell's index holds its navmesh and its eight neighbours' (RouteWalk.GridNav), since
+    // an actor near a border can stand on the next cell's navmesh. An interior cell reads its own, as the route does.
+    var actorNavIndex = new System.Collections.Concurrent.ConcurrentDictionary<FormKey, Lazy<NavCell>>();
+    List<NavmeshGeometry> ActorNavs(FormKey cell, out string where)
+    {
+        if (!cellGridOf.TryGetValue(cell, out var gp))
+        {
+            where = "the cell's winning navmesh";
+            return winNav.TryGetValue(cell, out var own) ? own.Values.ToList() : new List<NavmeshGeometry>();
+        }
+        where = "the winning navmesh of the cell or the eight around it";
+        var all = new List<NavmeshGeometry>();
+        for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++)
+            if (rwalk.GridNav.TryGetValue((gp.Wrld, gp.X + dx, gp.Y + dy), out var d)) all.AddRange(d.Values);
+        return all;
+    }
     // One field per (cell, state) — see FieldFor below. Null when the cell's band is unjudgeable in that state.
     var fieldByCellState = new System.Collections.Concurrent.ConcurrentDictionary<(FormKey Cell, string State), Lazy<((float Top, FloorField Floor)? Field, string Why)>>();
     routeFloorLine = () =>
@@ -494,8 +510,9 @@ if (routeOn)
             if (idx.History.Winning(key) is not { } w) { detail = "no winning placement"; return ActorPlacement.Unmeasured; }
             var bk = cidx!.WinnerBase(key);
             if (!Humanoid(bk, out var top, out var hwhy)) { detail = hwhy; return ActorPlacement.Unmeasured; }
-            if (!winNav.TryGetValue(w.Cell, out var navs) || navs.Count == 0) { detail = "the cell has no navmesh"; return ActorPlacement.Unmeasured; }
-            var ni = navIndex.GetOrAdd(w.Cell, _ => new Lazy<NavCell>(() => new NavCell(NavmeshIndex.Build(navs.Values.ToList(), out var _)))).Value;
+            var navs = ActorNavs(w.Cell, out var navWhere);
+            if (navs.Count == 0) { detail = cellGridOf.ContainsKey(w.Cell) ? "neither the cell nor the eight around it has a navmesh" : "the cell has no navmesh"; return ActorPlacement.Unmeasured; }
+            var ni = actorNavIndex.GetOrAdd(w.Cell, _ => new Lazy<NavCell>(() => new NavCell(NavmeshIndex.Build(navs, out var _)))).Value;
             if (FieldFor(w.Cell, arm, out var fwhy) is not { } field) { detail = fwhy; return ActorPlacement.Unmeasured; }
             var at = w.Pos;
             // solid first: a body inside a solid is that whatever the navmesh under it says
@@ -519,7 +536,7 @@ if (routeOn)
                 var (a, b, c) = (g.Vertices[t.A], g.Vertices[t.B], g.Vertices[t.C]);
                 if (ZAt(a, b, c, at.X, at.Y) is { } z && z >= at.Z - ActorNavBelow && z <= at.Z + ActorNavAbove && (navZ is null || MathF.Abs(z - at.Z) < MathF.Abs(navZ.Value - at.Z))) navZ = z;
             }
-            if (navZ is null) { detail = $"no non-deleted triangle of the cell's winning navmesh under the placed point ({ActorNavBelow:0} u down to {ActorNavAbove:0} u up)"; return ActorPlacement.OffNavmesh; }
+            if (navZ is null) { detail = $"no non-deleted triangle of {navWhere} under the placed point ({ActorNavBelow:0} u down to {ActorNavAbove:0} u up)"; return ActorPlacement.OffNavmesh; }
             float floor = field.Floor.FloorAt(at.X, at.Y, navZ.Value), gap = at.Z - floor;
             if (gap > ActorFloorBand) { detail = $"the feet stand {gap:0.#} u above the state's floor"; return ActorPlacement.Floating; }
             if (gap < -ActorFloorBand) { detail = $"the feet stand {-gap:0.#} u below the state's floor"; return ActorPlacement.Buried; }
