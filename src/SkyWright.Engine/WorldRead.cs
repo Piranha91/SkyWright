@@ -177,13 +177,24 @@ public sealed class WorldRead
     static WorldFile Prepare(string cache, string path, string sha)
     {
         string name = Path.GetFileName(path);
-        string at;
-        try { at = WorldReadFile.WriteFor(path, sha, WorldReadFile.PathFor(cache, sha, name), Schema, EngineVersion); }
+        string at, final = WorldReadFile.PathFor(cache, sha, name);
+        try { at = WorldReadFile.WriteFor(path, sha, final, Schema, EngineVersion); }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             throw new WorldReadException($"The plugin {name} could not be read for the world read ({ex.GetType().Name}: {ex.Message}); check that it is a complete Skyrim Special Edition plugin, or take it out of the load order.", ex);
         }
-        try { return WorldReadFile.Load(at, sha, name, Schema, EngineVersion); }
+        try
+        {
+            var f = WorldReadFile.Load(at, sha, name, Schema, EngineVersion);
+            if (at != final)
+            {
+                // The rename failed (another reader holds the old file): keep this complete copy in memory and delete it,
+                // so no temporary file is left; the next open tries the rename again.
+                f.Bytes = File.ReadAllBytes(at);
+                try { File.Delete(at); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            }
+            return f;
+        }
         catch (WorldFileUnreadable why)
         { throw new WorldReadException($"The world read's prepared file for {name} could not be read back ({why.Message}); check the cache folder {cache} is not being changed by another program.", why); }
     }

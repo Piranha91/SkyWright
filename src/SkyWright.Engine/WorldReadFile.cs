@@ -47,6 +47,9 @@ sealed class WorldFile
     public required byte[] DirFlags { get; init; }
     public required ulong[] BaseKeys { get; init; }
     public required WorldFileBase[] Bases { get; init; }
+    /// <summary>The whole file, held in memory when it could not be renamed into place (another reader held the old
+    /// one): its temporary copy is then deleted at once, so none is left behind.</summary>
+    public byte[]? Bytes { get; set; }
 
     public const byte FlagPersistent = 1, FlagDeleted = 2, FlagPlacement = 4;
 
@@ -65,6 +68,12 @@ sealed class WorldFile
     public List<WorldEntry> ReadCell(int cellIndex)
     {
         var c = Cells[cellIndex];
+        if (Bytes is { } all)
+        {
+            var mem = all.AsSpan(checked((int)c.Offset), c.Length);
+            if (WorldReadFile.Check(mem) != c.Check) throw new WorldFileUnreadable("cell blob hash differs");
+            return WorldReadFile.DecodeCell(mem.ToArray(), Keys);
+        }
         var buf = new byte[c.Length];
         using (var h = File.OpenHandle(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
         {
