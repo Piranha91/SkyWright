@@ -131,7 +131,11 @@ public class FramePacerTests
         var (iv, by) = Intervals(Next, 1500);
         Assert.Equal("compositor", by);
         Assert.InRange(iv[iv.Length / 2], Period - 2.5, Period + 3);
-        Assert.True(iv[^1] < 2.4 * Period, $"worst interval {iv[^1]:F1} ms; waiting for the late composition gives about {3 * Period:F0}");
+        // each late composition (3 or 4 in the run) held a frame back about 3 periods if the pacer waited for it; one long interval
+        // alone is a frame thread the scheduler kept off the CPU (a busy machine, measured 2026-11-27: 1 run in 10 under 16
+        // spinning processes, 51 ms), so that one is allowed
+        var longOnes = iv.Where(x => x >= 2.4 * Period).ToArray();
+        Assert.True(longOnes.Length <= 1, $"{longOnes.Length} intervals of 2.4 periods or more ({string.Join(", ", longOnes.Select(x => x.ToString("F1")))} ms); waiting for each late composition gives about {3 * Period:F0}");
     }
 
     [Fact]
