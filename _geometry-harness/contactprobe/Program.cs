@@ -413,9 +413,14 @@ if (selectedModes == 0)
     // Built now, while memory is there: a real exhaustion may leave the handler nothing to allocate with.
     oomSentence = $"contactprobe: memory: ran out of memory before the memory route was decided (this process may use "
                 + $"{GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / 1e9:0.0} GB) and wrote no emit or rows; run it on a machine with more memory, or raise the limit.";
+    // The handler first, so a reserve that cannot be had still ends in the sentence (CR-21).
+    AppDomain.CurrentDomain.UnhandledException += (_, e) => OnUnhandled(e.ExceptionObject as Exception);
+    // The run log's start-up estimate read the whole run history (315 MB on 2026-11-27: about 480 MiB of heap, all garbage
+    // now). Under a heap limit the reserve's large allocation failed: a forced collection frees those objects but keeps their
+    // memory committed, and the limit counts committed memory. Aggressive decommits it (CR-21: forced still failed 8 of 10).
+    GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
     oomReserve = GC.AllocateUninitializedArray<byte>(OomReserveBytes, pinned: false);
     for (int k = 0; k < oomReserve.Length; k += 4096) oomReserve[k] = 1;   // committed, so freeing it returns real room
-    AppDomain.CurrentDomain.UnhandledException += (_, e) => OnUnhandled(e.ExceptionObject as Exception);
 }
 List<FormKey>? traceKeys = null;
 if (traceKeysPath is not null && File.Exists(traceKeysPath))
