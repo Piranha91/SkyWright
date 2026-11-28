@@ -62,6 +62,62 @@ public class TexturePolicyTests
         Assert.Equal(tokens.Count, tokens.Distinct(StringComparer.Ordinal).Count());
     }
 
+    sealed class NoBsa : IBsaArchiveProvider
+    {
+        public void EnsureAllArchivesOpened() { }
+        public bool TryLocateInBsa(string subpath, out string? containingBsaPath) { containingBsaPath = null; return false; }
+        public bool TryLocateInScopedBsa(string subpath, string folderPath, IReadOnlyList<string> modKeyFileNames, out string? containingBsaPath)
+        { containingBsaPath = null; return false; }
+        public bool TryExtractToDisk(string containingBsaPath, string subpath, string destPath, out string? error)
+        { error = "the texture policy test resolves no assets"; return false; }
+    }
+
+    /// <summary>A cache the library builds with both names set, and the policy the owner records then: SkyRender has no
+    /// test of its new-name-over-legacy precedence, so this one holds the cache itself to it.</summary>
+    static (AssetCache Cache, TexturePolicy Recorded) CacheWith(string? current, string? legacy, int? initializer = -1)
+    {
+        string? oldCurrent = Environment.GetEnvironmentVariable(DdsMipPolicy.EnvironmentVariable);
+        string? oldLegacy = Environment.GetEnvironmentVariable(DdsMipPolicy.LegacyEnvironmentVariable);
+        try
+        {
+            Environment.SetEnvironmentVariable(DdsMipPolicy.EnvironmentVariable, current);
+            Environment.SetEnvironmentVariable(DdsMipPolicy.LegacyEnvironmentVariable, legacy);
+            var logger = new ConsoleCvLogger(); var gate = new RenderLogGate();
+            var resolver = new GameAssetResolver(new HcDataFolder(Path.Combine(Path.GetTempPath(), "texture-policy-test")), new NoBsa(), gate, logger);
+            var cache = initializer == -1 ? new AssetCache(resolver, logger, gate, new CvSettings())
+                : new AssetCache(resolver, logger, gate, new CvSettings()) { DdsMaximumFinalMipDimension = initializer };
+            return (cache, TexturePolicy.FromEnvironment());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(DdsMipPolicy.EnvironmentVariable, oldCurrent);
+            Environment.SetEnvironmentVariable(DdsMipPolicy.LegacyEnvironmentVariable, oldLegacy);
+        }
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("decoded", "unlimited")]
+    [InlineData("unlimited", "decoded")]
+    [InlineData(null, "decoded")]
+    [InlineData("8", null)]
+    public void The_policy_recorded_is_the_one_the_cache_froze(string? current, string? legacy)
+    {
+        var (cache, recorded) = CacheWith(current, legacy);
+        Assert.Equal(cache.DdsMaximumFinalMipDimension, recorded.MaxFinalMip);
+        recorded.RequireSameAs(cache);   // no refusal
+    }
+
+    [Fact]
+    public void A_cache_frozen_under_another_policy_refuses_in_one_sentence()
+    {
+        var (cache, recorded) = CacheWith(null, null, initializer: null);   // the cache decoded, the run records compressed
+        var ex = Assert.Throws<TexturePolicyRefusal>(() => recorded.RequireSameAs(cache));
+        Assert.Contains("'decoded'", ex.Message);
+        Assert.Contains("'compressed, last mip at most 4 px'", ex.Message);
+        Assert.EndsWith(".", ex.Message);
+    }
+
     [Fact]
     public void An_unreadable_setting_refuses_in_one_sentence_instead_of_rendering_decoded()
     {
