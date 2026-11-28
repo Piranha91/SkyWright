@@ -58,7 +58,10 @@ internal static class Recheck
         CancellationToken ct = default)
     {
         SameBuildOrRefuse(unpatched, patched);
-        var (exit, text) = Run(conflictdiffExe, new[] { unpatched.Emit, patched.Emit }, null, ct);
+        var psi = RunLogFolder.Start(conflictdiffExe, RunLogFolder.Beside(patched.Emit));   // no log of its own: its run records beside the emits
+        psi.RedirectStandardOutput = true; psi.RedirectStandardError = true;
+        psi.ArgumentList.Add(unpatched.Emit); psi.ArgumentList.Add(patched.Emit);
+        var (exit, text) = Run(psi, null, ct);
         var lines = text.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0).ToList();
         if (exit != 0)
             throw new InvalidOperationException($"conflictdiff refused the comparison (exit {exit}): " + (lines.FirstOrDefault(l => l.Contains("REFUSED") || l.Contains("! ")) ?? lines.LastOrDefault() ?? "no output").Trim());
