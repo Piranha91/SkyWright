@@ -198,9 +198,11 @@ a clobber, where a later mod's version replaced an earlier one's).
     re-pointed neighbour's winner;
   - one refused member refuses the whole set, nothing written; in a set each sentence starts with its member. Refused too:
     a navmesh named twice, a stated member the plugin already wins or has no version of;
-  - the read-back adds a two-way check on the written patch (`NavRepairReadBack.TwoWay`): every border link of every navmesh
-    the patch holds, and of every navmesh outside it linking into a member, must be returned by the triangle it names
-    (ledges are not judged). In a repair plan a row whose navmesh an earlier set of the same plugin carries is planned
+  - the read-back adds a two-way check on the written patch (`NavRepairReadBack.TwoWay`): every border link out of a member,
+    and every link into a member from any navmesh of the order with the patch last, must be returned by the triangle it
+    names (ledges are not judged). A link between two navmeshes neither of which is a member is not judged, even when the
+    patch holds one of them to re-point its links: that border is as the order had it, and navownprobe's re-check files it
+    (review of Gate C, 2026-11-27). In a repair plan a row whose navmesh an earlier set of the same plugin carries is planned
     "carried with" that set, with no edits of its own.
 - **The navmesh info map follows the version** (2026-11-22, houseCARL's items 2 and 3). The entry's linked doors become the
   version's door table, in order, and its MergedTo and PreferredMerges together the version's link-table targets: a

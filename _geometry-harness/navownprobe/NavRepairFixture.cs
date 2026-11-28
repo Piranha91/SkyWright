@@ -417,10 +417,12 @@ static class NavRepairFixture
     //               SR, SO, SC, SW, SD as its own links have them.
     //   Revert.esp  SA, SO, SC and SD back to vanilla; its NAVI (the winner) restates Skyrim's.
     //   Touch.esp   SB back to vanilla (so SB's winner is a plugin SA's is not).
+    //   (review of Gate C, 2026-11-27) SQ (x 12300, y 200): SS's west edge links into it one way in Skyrim.esm, an already
+    //   broken border of a navmesh the set re-points, which the two-way read-back must not judge.
     // "set-ground" (navownprobe's repair plan): Skyrim.esm SA and SB vanilla at z 0, unlinked; Mover.esp raises (3,0) to 200
     // and re-cuts both at z 200 linked to each other; Revert.esp puts both back to vanilla.
     public static readonly FormKey SA = S(0xB20), SB = S(0xB21), SO = S(0xB22), SS = S(0xB23), SR = S(0xB24), SC = S(0xB25),
-        SX = S(0xB26), SW = S(0xB27), SDn = S(0xB28), DZ = S(0xD40);
+        SX = S(0xB26), SW = S(0xB27), SDn = S(0xB28), DZ = S(0xD40), SQ = S(0xB29);
     public static readonly string[] SetOrder = { "Skyrim.esm", "SetP.esp", "Revert.esp", "Touch.esp" };
     public static readonly string[] SetVariants = { "set", "set-ground" };
 
@@ -435,9 +437,9 @@ static class NavRepairFixture
                                  (FormKey, short)? n = null, (FormKey, short)? w = null, float z = 0)
         => recut ? Nav(key, InGrid(3), SqV(x0, y0, z, true), new T3(2, 3, 4, E01: n), new T3(1, 2, 4, E01: e), new T3(0, 1, 4, E01: s), new T3(3, 0, 4, E01: w))
                  : Nav(key, InGrid(3), SqV(x0, y0, z, false), new T3(0, 1, 2, E01: s, E12: e), new T3(0, 2, 3, E12: n, E20: w));
-    static NavigationMesh Strip((FormKey, short)? left, (FormKey, short)? right)
+    static NavigationMesh Strip((FormKey, short)? left, (FormKey, short)? right, (FormKey, short)? west = null)
         => Nav(SS, InGrid(3), new[] { (12600f, 200f, 0f), (12900f, 200f, 0f), (13200f, 200f, 0f), (12600f, 500f, 0f), (12900f, 500f, 0f), (13200f, 500f, 0f) },
-               new T3(0, 4, 3, E12: left), new T3(0, 1, 4), new T3(1, 5, 4, E12: right), new T3(1, 2, 5));
+               new T3(0, 4, 3, E12: left, E20: west), new T3(0, 1, 4), new T3(1, 5, 4, E12: right), new T3(1, 2, 5));
 
     public static string WriteSetCase(string dir, string variant)
     {
@@ -472,14 +474,15 @@ static class NavRepairFixture
         NavigationMesh VSO() => Square(SO, 12300, 500, false, e: (SA, 1));
         NavigationMapInfo[] VanillaNavi() => new[]
         {
-            Info(SA, 3, 12600, 500, SO, SS), Info(SB, 3, 12900, 500, SS, SR), Info(SO, 3, 12300, 500, SA), Info(SS, 3, 12600, 200, SA, SB),
+            Info(SA, 3, 12600, 500, SO, SS), Info(SB, 3, 12900, 500, SS, SR), Info(SO, 3, 12300, 500, SA), Info(SS, 3, 12600, 200, SA, SB, SQ),
+            Info(SQ, 3, 12300, 200),
             Info(SR, 3, 13200, 500, SB), Info(SC, 3, 12600, 1500), Info(SX, 3, 12900, 1500), Info(SW, 3, 12300, 1500), Info(SDn, 3, 12600, 2500),
         };
         var sky = new SkyrimMod(SkyKey, Rel);
         var c3 = GridCell(3, Flat(LandK(3), 0));
         foreach (var n in new[]
         {
-            VSA(), VSB(), VSO(), Strip((SA, 0), (SB, 0)), Square(SR, 13200, 500, false, w: (SB, 0)),
+            VSA(), VSB(), VSO(), Strip((SA, 0), (SB, 0), (SQ, 0)), Square(SR, 13200, 500, false, w: (SB, 0)), Square(SQ, 12300, 200, false),
             Square(SW, 12300, 1500, false), Square(SC, 12600, 1500, false), Square(SX, 12900, 1500, false), Square(SDn, 12600, 2500, false),
         }) c3.NavigationMeshes.Add(n);
         sky.Worldspaces.Add(World(c3));

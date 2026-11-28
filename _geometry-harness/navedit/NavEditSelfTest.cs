@@ -903,15 +903,20 @@ static class NavEditSelfTest
         Case("2677 two-way-read-back", () =>
         {
             var (w, n) = Pair(linkN: false);
-            var one = NavRepairReadBack.TwoWayBorders(new Dictionary<FormKey, NavmeshGeometry> { [K] = w, [NK] = n }, new[] { K }, tol);
+            var one = NavRepairReadBack.TwoWayBorders(new Dictionary<FormKey, NavmeshGeometry> { [K] = w, [NK] = n }, new[] { K }, tol, new[] { K });
             var want = $"{K}'s triangle 2 links into {NK} triangle 1, which does not link back; the patch was not written.";
             if (!one.Contains(want) || one.Count != 2) return $"one-way: [{string.Join(" | ", one)}] (want 2, among them '{want}')";
             var (w3, n3) = Pair(linkW: false);
-            var inn = NavRepairReadBack.TwoWayBorders(new Dictionary<FormKey, NavmeshGeometry> { [K] = w3, [NK] = n3 }, new[] { NK }, tol);
+            var inn = NavRepairReadBack.TwoWayBorders(new Dictionary<FormKey, NavmeshGeometry> { [K] = w3, [NK] = n3 }, new[] { NK }, tol, new[] { K });
             if (inn.Count != 2 || !inn.All(x => x.StartsWith($"{NK}'s triangle"))) return "an outside link not returned: " + string.Join(" | ", inn);
             var (w2, n2) = Pair();
-            var ok = NavRepairReadBack.TwoWayBorders(new Dictionary<FormKey, NavmeshGeometry> { [K] = w2, [NK] = n2 }, new[] { K, NK }, tol);
-            return ok.Count == 0 ? null : "a two-way pair: " + string.Join(" | ", ok);
+            var ok = NavRepairReadBack.TwoWayBorders(new Dictionary<FormKey, NavmeshGeometry> { [K] = w2, [NK] = n2 }, new[] { K, NK }, tol, new[] { K });
+            if (ok.Count != 0) return "a two-way pair: " + string.Join(" | ", ok);
+            // CORRECTED 2026-11-27 (review of Gate C, decision 1): only borders with a member at one end are judged; a one-way
+            // link between two navmeshes neither of which is carried (a re-pointed neighbour's border to a third) is as the
+            // order had it, and is not the read-back's to refuse
+            var notMine = NavRepairReadBack.TwoWayBorders(new Dictionary<FormKey, NavmeshGeometry> { [K] = w, [NK] = n }, new[] { K, NK }, tol, new[] { OS });
+            return notMine.Count == 0 ? null : "a border between two navmeshes that are not members was judged: " + string.Join(" | ", notMine);
         });
 
         // C2678: the sentences. A plain single use_version's border refusal names the edit that would carry the neighbour, and no

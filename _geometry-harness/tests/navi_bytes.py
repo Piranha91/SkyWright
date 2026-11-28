@@ -266,9 +266,10 @@ def border_links(nav):
     return out
 
 
-def not_returned(taken, sources):
+def not_returned(taken, sources, members=None):
     """Each non-ledge border link of every navmesh in sources (keys of taken, {key: Navmesh} as the game takes them) that the
-    navmesh it names does not return, as one line each; empty when every such border is two-way."""
+    navmesh it names does not return, as one line each; empty when every such border is two-way. With members (a set of
+    keys), only links with a member at one end are judged."""
     bad = []
     for k in sources:
         nav = taken[k]
@@ -276,7 +277,7 @@ def not_returned(taken, sources):
             if typ is None:
                 bad.append(f"{k} triangle {i} edge {e} names a link entry past its table")
                 continue
-            if typ in LEDGE_TYPES or tgt == k:
+            if typ in LEDGE_TYPES or tgt == k or (members is not None and k not in members and tgt not in members):
                 continue
             far = taken.get(tgt)
             if far is None or not 0 <= tt < len(far.triangles):

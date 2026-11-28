@@ -95,6 +95,7 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
           island member, the masters (2681); each refusal in one sentence (2682); a member refused for another reason, and
           undo: a refused or failing set leaves the output folder as it was (2683); the repair plan carries a pair as one set,
           its second row carried with it, written by R1 (2684); self-test of the row carried with an earlier set (2685)
+    2686  review of Gate C: the two-way read-back judges only borders with a member at one end
 
 The write of the plan through houseCARL's server program, its read-back and the re-check (2494-2499, 2504, 2505) are the
 module's suite integration/housecarl/tests/test_navmesh_repair_write.py, on this fixture: only the module holds that
@@ -1193,6 +1194,7 @@ from navi_bytes import not_returned  # noqa: E402
 
 SET_ORDER = ["Skyrim.esm", "SetP.esp", "Revert.esp", "Touch.esp"]
 SA, SB, SO, SS, SR, SC, SX, SW, SDN, DZ = (sk(x) for x in ("000B20", "000B21", "000B22", "000B23", "000B24", "000B25", "000B26", "000B27", "000B28", "000D40"))
+SQ = sk("000B29")
 _SETLAB = {}
 
 
@@ -1231,12 +1233,14 @@ def raw_taken(fx, order, patch):
     return taken, pp
 
 
-def raw_two_way(fx, order, patch):
-    """navi_bytes' two-way check over every navmesh the patch holds and every navmesh linking into one of them."""
+def raw_two_way(fx, order, patch, carried=None):
+    """navi_bytes' two-way check, as the game takes the navmeshes with the patch last. With carried (the members' keys), the
+    borders with a member at one end (review of Gate C, decision 1); without, every border of every navmesh the patch holds
+    and of every navmesh linking into one of them."""
     taken, pp = raw_taken(fx, order, patch)
-    held = set(pp.navmeshes())
+    held = set(carried) if carried is not None else set(pp.navmeshes())
     sources = held | {k for k, n in taken.items() if any(l[1] in held for l in n.links)}
-    return not_returned(taken, sorted(sources, key=str)), pp
+    return not_returned(taken, sorted(sources, key=str), held if carried is not None else None), pp
 
 
 def members(row):
@@ -1286,7 +1290,7 @@ def t2680():
     rows, _, d, w, out = grown_set()
     assert w is not None and w.returncode == 0, f"navedit write {write_said(w)} (plan {row_said(rows)})"
     tmp, _, _, fx, order = set_lab()
-    bad, pp = raw_two_way(fx, order, out)
+    bad, pp = raw_two_way(fx, order, out, {rk(SA), rk(SB)})
     assert not bad, f"raw: borders not two-way: {bad}"
     assert sorted(p.name for p in out.parent.iterdir()) == [out.name], f"the output folder holds {sorted(p.name for p in out.parent.iterdir())}"
     nav, src = pp.navmeshes(), RawPlugin(fx / "SetP.esp").navmeshes()
@@ -1296,7 +1300,8 @@ def t2680():
     L = {k: [(l[1], l[2], l[0]) for l in nav[rk(k)].links] for k in (SA, SB, SO, SS)}
     assert (rk(SB), 3, 0) in L[SA] and (rk(SA), 1, 0) in L[SB], f"inner links SA {L[SA]}, SB {L[SB]} (want SB 3 and SA 1, SetP's own numbering)"
     assert (rk(SO), 0, 0) in L[SA], f"SA's link into SO {L[SA]} (want Revert's SO triangle 0)"
-    assert L[SS] == [(rk(SA), 2, 0), (rk(SB), 2, 0)], f"SS's links {L[SS]} (want both re-pointed to triangle 2: one merged change)"
+    # CORRECTED 2026-11-27 (review of Gate C): SS also links one way into SQ now, a border the set does not touch
+    assert [x for x in L[SS] if x[0] != rk(SQ)] == [(rk(SA), 2, 0), (rk(SB), 2, 0)], f"SS's links {L[SS]} (want both re-pointed to triangle 2: one merged change)"
     assert L[SO] == [(rk(SA), 3, 0)], f"SO's links {L[SO]} (want re-pointed to SA's triangle 3)"
     assert (rk(SR), 1, 2) in L[SB], f"SB's ledge into SR {L[SB]}"
 
@@ -1392,12 +1397,28 @@ def t2684():
     out = d / "out" / "SetGround.esp"
     w = run([buildlayout.program_under(PROBES, "navedit"), "write", "--repair-plan", d / "plan.json", "--out", out])
     assert w.returncode == 0, f"R1 {write_said(w)}"
-    bad, pp = raw_two_way(fx, order, out)
+    bad, pp = raw_two_way(fx, order, out, {rk(SA), rk(SB)})
     assert not bad, f"raw: borders not two-way: {bad}"
     assert set(pp.navmeshes()) == {rk(SA), rk(SB)}, f"the patch holds {sorted(pp.navmeshes())}"
     rb = json.loads(out.with_name("SetGround.readback.json").read_text(encoding="utf-8"))
     assert rb["holds"] is True, f"the read-back: {[r for r in rb['records'] if not r['holds']]}"
 
+
+
+def t2686():
+    """Rejects (review of Gate C, decision 1): a set refused at the two-way read-back for a border neither end of which is a
+    member. SS, which the set re-points and so holds whole, links one way into SQ in Skyrim.esm itself; that border is as the
+    order had it. The grown set [SA, SB] must write, navedit's read-back saying its borders are two-way, and the raw reader
+    must find SS -> SQ broken (the fixture really has it) but every member border two-way. That a member's one-way border is
+    still refused is C2677 (the read-back) and arm 8 (the raw reader)."""
+    rows, _, d, w, out = grown_set()
+    assert w is not None and w.returncode == 0, f"navedit write {write_said(w)} (plan {row_said(rows)})"
+    assert "is two-way" in w.stdout, f"no two-way line in the read-back: {write_said(w)}"
+    tmp, _, _, fx, order = set_lab()
+    every, _ = raw_two_way(fx, order, out)
+    assert any(f"{rk(SS)} triangle 0 links into {rk(SQ)}" in x for x in every), f"the fixture's SS -> SQ border is not broken as written: {every}"
+    mine, _ = raw_two_way(fx, order, out, {rk(SA), rk(SB)})
+    assert not mine, f"raw: member borders not two-way: {mine}"
 
 
 CASES = [
@@ -1488,6 +1509,7 @@ CASES = [
     ("2683 navedit, set: a member refused for another reason refuses the set; a refused or failing set leaves the output folder as it was", t2683),
     ("2684 R1, set-ground: the repair plan carries the pair as one set, the second row carried with it", t2684),
     ("2685 self-test: a repair plan row carried with an earlier set of the same plugin; another plugin's set clashes", lambda: selftest("2685")),
+    ("2686 navedit, set: a re-pointed neighbour's broken border to a third navmesh does not refuse the set", t2686),
 ]
 
 if __name__ == "__main__":
