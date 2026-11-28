@@ -132,6 +132,20 @@ def main():
         except RuntimeError: stale=True
         check(stale,"changed input identity refuses before launch or resume")
         identity_file.write_bytes(b'one')
+        # the texture policy changes a frame's pixels: a batch pinned under one policy refuses to resume under another,
+        # though its manifest lists no environment
+        policy='SKYRENDER_DDS_MAX_FINAL_MIP_DIMENSION'; old_policy=os.environ.get(policy)
+        try:
+            os.environ[policy]='decoded'
+            pinned_policy=rb.input_state([worklist],[])
+            os.environ[policy]='unlimited'
+            try: rb.require_unchanged(pinned_policy,[worklist],[]); policy_msg=None
+            except RuntimeError as e: policy_msg=str(e)
+        finally:
+            if old_policy is None: os.environ.pop(policy,None)
+            else: os.environ[policy]=old_policy
+        check(policy_msg is not None and policy in policy_msg,
+              f"a batch pinned under another texture policy refuses to resume ({policy_msg!r})")
         plan_manifest=root/'plan-manifest.json'; plan_out=root/'plan.json'
         plan_manifest.write_text(json.dumps({'mode':'plan','items':[campaign[0]],
             'need':{'graphicsMiB':1,'systemMiB':1,'source':'test'},'askedParallel':1,

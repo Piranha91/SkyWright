@@ -350,6 +350,37 @@ def case_112_the_per_request_identity_sees_a_renderer_code_change_the_apphost_do
     assert reused is None, "a request rendered by the old viewprobe.dll was reused"
 
 
+def case_120_a_capture_made_under_another_texture_policy_is_captured_again():
+    """The texture policy changes a frame's texture pixels: a result captured under one is never reused under another,
+    and one captured under the same policy still is."""
+    names = toolidentity.TEXTURE_POLICY_ENVIRONMENT
+    saved = {n: os.environ.get(n) for n in names}
+    try:
+        with tempfile.TemporaryDirectory() as t:
+            fb = fake_build(Path(t))
+            for n in names:
+                os.environ.pop(n, None)
+            os.environ[names[0]] = "decoded"
+            before = CA.capture_tool_identity(str(fb["viewprobe"]))
+            qdir = Path(t) / "capture-p"
+            (qdir / "sequence").mkdir(parents=True)
+            (qdir / "sequence" / "capture-result.json").write_text(json.dumps(
+                {"request": "capture-p", "status": "captured", "toolIdentity": before}), encoding="utf-8")
+            same = EP.reusable_capture({"id": "capture-p"}, qdir, CA.capture_tool_identity(str(fb["viewprobe"])))
+            os.environ.pop(names[0], None)
+            after = CA.capture_tool_identity(str(fb["viewprobe"]))
+            reused = EP.reusable_capture({"id": "capture-p"}, qdir, after)
+    finally:
+        for n, v in saved.items():
+            if v is None:
+                os.environ.pop(n, None)
+            else:
+                os.environ[n] = v
+    assert before != after, "the texture policy changed and the per-request capture identity did not"
+    assert reused is None, "a request captured under another texture policy was reused"
+    assert same is not None, "a request captured under the same texture policy was not reused"
+
+
 def _provenance_files():
     """Every program folder this build writes, by the layouts' own markers."""
     app = buildlayout.root()

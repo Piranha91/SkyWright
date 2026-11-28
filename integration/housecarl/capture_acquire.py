@@ -152,7 +152,8 @@ def utcnow() -> str:
 
 def capture_tool_identity(vp=None) -> dict:
     """The capture's tool identity: this module, the point picker and the renderer build, the last as toolidentity's
-    package digest of viewprobe's folder (its code, not its apphost, which a code change leaves byte-identical). A part
+    package digest of viewprobe's folder (its code, not its apphost, which a code change leaves byte-identical), and
+    the texture policy viewprobe inherits from this process (toolidentity.texture_policy_setting). A part
     that is missing or unreadable is None, and evalpipeline.reusable_capture never reuses a result under such an
     identity, nor one taken with another identity."""
     import toolidentity
@@ -166,6 +167,8 @@ def capture_tool_identity(vp=None) -> dict:
     except toolidentity.Unreadable:
         rec_ = {}
     out_["viewprobe"] = rec_.get("digest") if rec_.get("state") == "present" else None
+    # the texture policy viewprobe inherits from here changes a frame's texture pixels (toolidentity)
+    out_["texturePolicy"] = toolidentity.texture_policy_setting()
     return out_
 
 

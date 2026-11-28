@@ -29,6 +29,8 @@ ROOT = HERE.parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 from runlog import Runner                                      # noqa: E402,F401
 from renderlimit import Need, plan_limit, read_graphics_free, read_system_free  # noqa: E402,F401
+sys.path.insert(0, str(ROOT / "_geometry-harness"))
+import toolidentity                                            # noqa: E402  the texture policy's variables
 
 KEY_TABLE = HERE / "renderbatch_keys.json"
 LEVEL_COUNTS = {"process": 47, "configuration": 15, "cell": 39, "shot": 90, "none": 10}
@@ -424,7 +426,8 @@ def input_state(paths, environment=()):
         st = p.stat()
         result["files"].append({"path": str(p), "size": st.st_size,
                                 "mtimeNs": st.st_mtime_ns, "sha256": sha256(p)})
-    for name in sorted(environment):
+    # the texture policy changes a frame's pixels, so its variables are pinned whether or not the manifest lists them
+    for name in sorted(set(environment) | set(toolidentity.TEXTURE_POLICY_ENVIRONMENT)):
         result["environment"][name] = os.environ.get(name)
     return result
 

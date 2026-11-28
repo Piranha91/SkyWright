@@ -487,11 +487,11 @@ static class TexturedScene
         return folders;
     }
 
-    static string StaticInputKey(string preparedIdentity, IReadOnlyList<SceneRef> refs,
+    internal static string StaticInputKey(string preparedIdentity, IReadOnlyList<SceneRef> refs,
         IReadOnlyDictionary<string, List<(Vector3 A, Vector3 B, Vector3 C)>> terrainPatches,
         IReadOnlyList<(string Diffuse, List<(Vector3 A, Vector3 B, Vector3 C, float Oa, float Ob, float Oc)> Tris)> terrainLayers,
         IReadOnlyDictionary<FormKey, Covering> coverings, bool keepFx, bool fxStatic,
-        float? cullAbove, bool refSurface, float refSurfaceOpacity)
+        float? cullAbove, bool refSurface, float refSurfaceOpacity, string texturePolicy)
     {
         using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(
             System.Security.Cryptography.HashAlgorithmName.SHA256);
@@ -506,6 +506,7 @@ static class TexturedScene
         Add(preparedIdentity); Add($"fx={keepFx};fxStatic={fxStatic};cull={cullAbove?.ToString("R", System.Globalization.CultureInfo.InvariantCulture)};surface={refSurface};opacity={F(refSurfaceOpacity)}");
         Add(Environment.GetEnvironmentVariable("VP_LAYER_ONLY")); Add(Environment.GetEnvironmentVariable("VP_LAYER_SOLID"));
         Add(Environment.GetEnvironmentVariable("VP_FX_DOUBLESIDED"));
+        Add("textures=" + texturePolicy);   // TexturePolicy.cs: the uploaded textures differ by policy
         foreach (var r in refs)
             Add(string.Join("|", r.MeshRelPath, r.RefKey, r.BaseKey, r.BaseEditorId, H(r.Position), H(r.Rotation),
                 F(r.Scale), r.Highlight, r.Marker, r.BosRecordBase, r.BosLabel, r.BosRandom, r.StateChange,
@@ -670,7 +671,7 @@ static class TexturedScene
         if (graphicsCell is not null && string.IsNullOrWhiteSpace(preparedIdentity))
             throw new InvalidOperationException("retained graphics requires the prepared-cell identity");
         string staticKey = graphicsCell is null ? "unretained" : StaticInputKey(preparedIdentity!, refs,
-            terrainPatches, terrainLayers, coveringsByBase, keepFx, fxStatic, cullAbove, refSurface, refSurfaceOpacity)
+            terrainPatches, terrainLayers, coveringsByBase, keepFx, fxStatic, cullAbove, refSurface, refSurfaceOpacity, TexturePolicy.Current.Token)
             + (depthMeasurement is null ? "" : "|" + DepthMeasurement.Name);   // a retained scene never crosses modes
         // Measurement only (Gate B4, G2 RED): per-component digests of the key's inputs; inert without a RED session.
         if (graphicsCell is not null)

@@ -75,7 +75,8 @@ internal static class MapTileGrid
 }
 
 /// <summary>Where tiles are kept: one folder per load order, named by a digest of its identity (each plugin's path,
-/// size and last-write time in load order, the profile's mod list, the renderer's version and this tile format), then
+/// size and last-write time in load order, the profile's mod list, the renderer's version and texture policy and this
+/// tile format), then
 /// the worldspace, the scale and the grid square. A changed load order gets a new folder, so it never shows stale tiles.</summary>
 internal static class MapTileCache
 {
@@ -97,6 +98,11 @@ internal static class MapTileCache
                                    ?? a.GetName().Version?.ToString() ?? "unknown");
         }
     }
+
+    /// <summary>What a tile is drawn with: the renderer's version and the texture policy (viewprobe TexturePolicy.cs) the
+    /// tile-drawing viewprobe inherits from this process, which changes texture pixels; tiles drawn under another policy are
+    /// another folder.</summary>
+    internal static string RendererIdentity(ViewProbe.TexturePolicy policy) => RendererVersion + "; textures " + policy.Token;
 
     /// <summary>Each plugin file's path, size and last-write time (UTC ticks); a missing file has size -1.</summary>
     internal static IReadOnlyList<(string Path, long Size, long WriteTicks)> Identity(IEnumerable<string> pluginPaths) =>
@@ -131,7 +137,7 @@ internal static class MapTileCache
         var modlist = Path.Combine(order.Instance, "profiles", order.Profile, "modlist.txt");
         string extra = (File.Exists(modlist) ? File.ReadAllText(modlist) : "") + "\n" + (order.OrderFile is { } f && File.Exists(f) ? File.ReadAllText(f) : "");
         var id = Identity(paths);
-        var renderer = RendererVersion;
+        var renderer = RendererIdentity(ViewProbe.TexturePolicy.Current);
         var dir = Path.Combine(Root, OrderKey(id, renderer, extra));
         Directory.CreateDirectory(dir);
         var note = Path.Combine(dir, "order.txt");
