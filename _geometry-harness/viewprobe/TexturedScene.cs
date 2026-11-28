@@ -3462,6 +3462,7 @@ static class TexturedScene
         // fly-through and the absence was briefly mistaken for "no coverings were drawn").
         void PrintBuildCensus()
         {
+        Console.WriteLine("   " + TexturePolicy.UploadSummary(new[] { textures, graphicsCell?.InstallTextures }, cache));
         Console.WriteLine($"   textured: {shapes:N0} shapes ({texturedShapes:N0} with a real diffuse), {missingMesh:N0} refs without a resolvable mesh"
                             + $"; {sizeW}x{sizeH}, {(samples >= 2 ? samples + "x msaa" : "no msaa")}");
             if (depthMeasurement is not null)
@@ -3559,6 +3560,7 @@ static class TexturedScene
         var frameSw = System.Diagnostics.Stopwatch.StartNew();
         ApplyHide();
         var pixels = Draw(pickDepth);
+        Console.WriteLine($"   frame drawn: {frameSw.Elapsed.TotalMilliseconds:0} ms after the scene was built");
         // --lod: the final frame's draw time (GL.Finish inside Draw), since LOD is what adds draws.
         if (DistantLodLayer.Requested) Console.WriteLine($"   lod timing: final frame drawn in {frameSw.Elapsed.TotalMilliseconds:0} ms");
         // --depth-dump: the finished frame's depth buffer, exactly as --pick reads it below — size*size

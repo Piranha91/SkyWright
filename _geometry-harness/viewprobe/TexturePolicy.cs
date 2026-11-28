@@ -65,6 +65,23 @@ internal sealed record TexturePolicy(int? MaxFinalMip, bool Explicit, string? Se
     /// <summary>How it was chosen, for the console line a run log keeps.</summary>
     internal string Source => Explicit ? $"set in the environment ('{Setting}')" : "SkyRender's default";
 
+    /// <summary>The census line for a build: how many textures took each route (SkyRender's own upload diagnostics), the
+    /// bytes uploaded, and what the cache decoded on the CPU since it was made (the decoded route, fallbacks and every CPU
+    /// use of pixels, prefetch included).</summary>
+    internal static string UploadSummary(IEnumerable<GlTextureManager?> managers, AssetCache cache)
+    {
+        var d = managers.OfType<GlTextureManager>().Distinct().SelectMany(m => m.UploadDiagnostics).ToList();
+        static string MiB(long bytes) => (bytes / 1048576.0).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " MiB";
+        string Part(string route, string words)
+        {
+            var r = d.Where(x => x.Route == route).ToList();
+            return $"{r.Count:N0} {words} ({MiB(r.Sum(x => x.UploadedBytes))})";
+        }
+        return $"texture uploads ({Current.Label}): {Part("compressed-authored", "compressed")}, {Part("decoded", "decoded")}, "
+             + $"{d.Count(x => x.Route == "resident"):N0} already resident, {d.Count(x => x.Route == "error"):N0} failed; "
+             + $"decoded on the CPU: {cache.TotalDecodeCalls:N0} texture(s), {MiB(cache.TotalDecodedBytes)}, {MiB(cache.CachedDecodedBytes)} held";
+    }
+
     /// <summary>A cache whose frozen policy is not the one this run records refuses: its pictures would carry the wrong
     /// identity.</summary>
     internal void RequireSameAs(AssetCache cache)
