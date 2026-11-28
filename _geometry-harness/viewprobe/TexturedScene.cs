@@ -331,11 +331,16 @@ static class TexturedScene
     }
 
     /// <summary>The live scene's prefetch (LiveScene.cs): read the meshes of <paramref name="refs"/> into the session's mesh
-    /// table and decode their textures into its pixel cache, off the window's thread, so the slice build that follows mostly
-    /// uploads. Stops early when cancelled. Returns how many meshes it read.</summary>
+    /// table and get their textures ready, off the window's thread, so the slice build that follows mostly uploads. Under the
+    /// decoded texture policy that is a decode into the pixel cache. Under a compressed one (TexturePolicy.cs) a texture the
+    /// library uploads compressed needs no decoded pixels, and which ones fall back is the library's rule, decided at upload:
+    /// so nothing is decoded or kept here, only each path resolved (the archive lookup and any extraction, off the window's
+    /// thread), and the few fallbacks decode on demand at upload, as every CPU use of pixels already does. Stops early when
+    /// cancelled. Returns how many meshes it read.</summary>
     internal static int Prefetch(LiveSession session, IEnumerable<SceneRef> refs, bool parallel, CancellationToken ct)
     {
         int read = 0;
+        bool decode = session.Assets.Cache.DdsMaximumFinalMipDimension is null;   // the cache's frozen policy: decoded
         var rels = refs.Select(r => r.MeshRelPath.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? r.MeshRelPath : Path.Combine("meshes", r.MeshRelPath))
                        .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         // parallel (half the cores) only while nothing is drawn; beside a drawing window one thread, which measured smoother
@@ -357,7 +362,8 @@ static class TexturedScene
             foreach (var b in outcome.Built ?? new List<NifMeshBuilder.BuiltMesh>())
                 foreach (var t in b.TexturePaths.Values)
                     if (t is { Length: > 0 } && !ct.IsCancellationRequested)
-                        try { session.Assets.Cache.GetOrLoadDdsPixels(t); } catch { /* the slice build reports what it cannot read */ }
+                        try { if (decode) session.Assets.Cache.GetOrLoadDdsPixels(t); else session.Assets.Cache.ResolveAssetPath(t); }
+                        catch { /* the slice build reports what it cannot read */ }
             return made;
         }
     }
