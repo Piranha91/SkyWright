@@ -35,6 +35,10 @@ public sealed record ChildResult(string Id, int? ExitCode, double Seconds, strin
     public long? LaunchedExitCodeUnsigned => LaunchedExitCode is { } c ? unchecked((uint)c) : null;
 }
 
+/// <summary>A job whose command line Windows would not take; its message is the one sentence to show, and the job
+/// was not started. A caller turns it into its own refusal.</summary>
+public sealed class CommandLineTooLongException(string sentence) : Exception(sentence);
+
 /// <summary>
 /// Runs child processes one at a time and records each in the run log: the C# equal of
 /// <c>scripts/runlog.py</c>'s <c>Runner</c> (serial path, no retries). Every call to Run opens a
@@ -334,6 +338,18 @@ public sealed class ChildRunner
         return sb.ToString();
     }
 
+    /// <summary>The most characters Windows takes in a command line (CreateProcessW's 32,767, its closing null included).</summary>
+    public const int MaxCommandLine = 32766;
+
+    /// <summary>The sentence for a job whose command line Windows would not take, or null when it fits.</summary>
+    public static string? CommandLineTooLong(ChildJob job)
+    {
+        int length = CommandLine(job.Argv).Length;
+        return length <= MaxCommandLine ? null
+            : $"the command line for {job.Id} would be {length.ToString("#,0", CultureInfo.InvariantCulture)} characters, more than the 32,767 "
+              + "Windows allows, so it was not started; this is a fault in SkyWright, not in your mods: report it with the run folder.";
+    }
+
     // -------------------------------------------------------------- environment --
 
     /// <summary>The child's environment block: the inherited variables, names upper-cased as
@@ -393,6 +409,8 @@ public sealed class ChildRunner
         // Starts the job's process with stdin inherited and stdout/stderr on pipes or on the given files.
         public static Launched Start(ChildJob job, bool pipes, bool suspended, SafeFileHandle? outFile, SafeFileHandle? errFile)
         {
+            // checked before anything is opened: Windows' own refusal (error 206) names a file, not the command line
+            if (CommandLineTooLong(job) is { } tooLong) throw new CommandLineTooLongException(tooLong);
             var me = new Launched();
             var self = Native.GetCurrentProcess();
             IntPtr childIn = IntPtr.Zero, childOut = IntPtr.Zero, childErr = IntPtr.Zero;

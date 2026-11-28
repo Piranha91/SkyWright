@@ -374,7 +374,11 @@ public static partial class SelfTest
             ? D(PyJson.ReadPipelineFile(Value("--order")))
             : new PyDict(L(res["arms"]).Select(D).First(a => a["id"] as string == "combined").Select(kv =>
                 new KeyValuePair<string, object?>(kv.Key == "plugins" ? "Plugins" : kv.Key == "mods" ? "Mods" : kv.Key, kv.Value)));
-        var targets = Enumerable.Range(0, argv.Count - 1).Where(i => argv[i] == "--target").Select(i => argv[i + 1]).ToList();
+        var targets = Listed(argv, "--target", "--target-file");
+        var alsoScanned = Listed(argv, "--also-scan", "--also-scan-file").Select(p => (object?)new PyDict
+        {
+            ["name"] = PyPath.Name(p), ["path"] = p, ["footprintCells"] = new List<object?>(), ["ringCells"] = new List<object?>(), ["unreadable"] = null,
+        }).ToList();
         var doc = new PyDict
         {
             ["complete"] = true, ["walkFailures"] = new List<object?>(), ["unreadableRecords"] = new List<object?>(),
@@ -398,10 +402,53 @@ public static partial class SelfTest
                 },
             }).ToList(),
             ["locationContributors"] = new PyDict { ["complete"] = true, ["locations"] = new List<object?>() },
-            ["nearby"] = new PyDict { ["ring"] = 2L, ["plugins"] = new List<object?>(), ["alsoScanned"] = new List<object?>() },
+            ["nearby"] = new PyDict { ["ring"] = 2L, ["plugins"] = new List<object?>(), ["alsoScanned"] = alsoScanned },
         };
         PyJson.WritePipelineFile(Value("--json"), doc);
         return new ChildResult(job.Id, 0, 0.1, null, 1);
+    }
+
+    // A list scopeprobe takes one argument at a time (`one`) or from a list file (`file`, one entry a line), in argument order,
+    // as the stand-in reads it.
+    static List<string> Listed(List<string> argv, string one, string file)
+    {
+        var got = new List<string>();
+        for (int i = 0; i + 1 < argv.Count; i++)
+        {
+            if (argv[i] == one) got.Add(argv[i + 1]);
+            else if (argv[i] == file) got.AddRange(File.ReadAllText(argv[i + 1]).Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0));
+        }
+        return got;
+    }
+
+    // The command line a job would have had with its list files written out as one argument per entry (the scope stage's
+    // launch before the lists went by file), quoted as the runner quotes it.
+    static int UnlistedLength(IReadOnlyList<string> argv)
+    {
+        var flat = new List<string>();
+        for (int i = 0; i < argv.Count; i++)
+        {
+            if (i + 1 < argv.Count && argv[i] is "--target-file" or "--also-scan-file")
+            {
+                string one = argv[i] == "--target-file" ? "--target" : "--also-scan";
+                foreach (string e in Listed([argv[i], argv[i + 1]], one, argv[i])) flat.AddRange([one, e]);
+                i++;
+            }
+            else flat.Add(argv[i]);
+        }
+        return ChildRunner.CommandLine(flat).Length;
+    }
+
+    // The job started for real (so Windows itself judges its command line), with a small system program in the probe's
+    // place; then the stand-in writes what scopeprobe would.
+    static ChildResult LaunchedThenStoodIn(PyDict res, string op, string outDir, ChildJob job, List<string> launched)
+    {
+        var real = job with { Argv = [Path.Combine(Environment.SystemDirectory, "whoami.exe"), .. job.Argv.Skip(1)] };
+        bool was = RunLog.Enabled;
+        RunLog.Enabled = false;   // a test's launch is not a run of this machine
+        try { new ChildRunner(op, outDir).Run(real); }
+        finally { RunLog.Enabled = was; }
+        return StandInScopeprobe(res, job, launched);
     }
 
     /// <summary>What overlapprobe --mesh-reach writes, stood in for: the population's folders, each with the numbers
@@ -596,6 +643,75 @@ public static partial class SelfTest
             "Tex has no plugin, and no placed object uses a mesh it changes: of the 4 placed objects that use one of its meshes, 1 gets the same bytes "
             + "it had without it, 2 get the copy of a stronger folder (Strong), 1 would read it from an archive the game does not load. Worn and actor "
             + "meshes, its textures (0 files) and other files are not measured." + notAFault));
+        // GATE-C section 10: a profile listing many disabled mods once crashed the scope stage (Windows error 206), because the
+        // combined arm's scopeprobe got one --also-scan per plugin of every disabled mod on its command line. Every launch here
+        // is started for real, so Windows itself judges each command line; the probe's output is stood in for.
+        Case("stages: a profile with more disabled mods than one command line holds is scoped, every disabled plugin read from a list file", () =>
+        {
+            using var t = new Temp();
+            const int many = 240;
+            var disabled = Enumerable.Range(0, many).Select(i => Mod($"Disabled Mod {i:000} With A Name As Long As Real Ones Are",
+                                                                     $"Disabled Plugin {i:000} With A Long Name.esp")).ToArray();
+            var (inst, game) = World(t, ShadowMods.Concat(disabled).ToArray(), ShadowEnabled, ShadowPlugins);
+            var entry = InPlaceEntry(inst, game, ["Sel"], ["geometry.object-overlap"]);
+            var ctx = new RunContext(entry, new PyDict(), t.At("run"));
+            var res = ctx.Resolve();
+            var launched = new List<string>();
+            var jobs = new Dictionary<string, IReadOnlyList<string>>();
+            ChildLaunch.RunJob = (op, outDir, _, job) => { jobs[job.Id] = job.Argv; return LaunchedThenStoodIn(res, op, outDir, job, launched); };
+            try
+            {
+                int exit;
+                string stdout, stderr;
+                try
+                {
+                    (exit, stdout, stderr) = Drive(new Driver { OpenRun = QuietRun, SetsRunLogFolder = false, MakeContext = a => new RunContext(entry, new PyDict(), a.Out!) },
+                                                   new PipelineArgs(Entry: "e.json", Out: t.At("run"), Through: "scope"));
+                }
+                catch (System.ComponentModel.Win32Exception w)
+                {
+                    return $"the scan stopped when Windows would not start a child (error {w.NativeErrorCode}), with no sentence and no stage outcome";
+                }
+                if (exit != Exit.Ok || !stdout.Contains("scope: accepted in ")) return $"the scope stage was not accepted (exit {exit}): {stderr.Trim()}";
+                if (!jobs.TryGetValue("scope-candidate-01", out var argv)) return "the combined arm's scope was never launched";
+                int now = ChildRunner.CommandLine(argv).Length, before = UnlistedLength(argv);
+                if (before <= 32766)
+                    return $"the fixture is too small to test the limit: one argument per plugin would be {before} characters";
+                if (now > 2000) return $"the combined arm's command line is {now} characters; it still grows with the disabled mods";
+                var want = ScopeRules.DisabledPluginFiles(ctx, res).Select(PyOrder.Fwd).ToList();
+                var listed = File.ReadAllText(t.At("run/scope/candidate-01/also-scan.txt")).Split('\n').Where(l => l.Length > 0).ToList();
+                var scanned = L(D(D(PyJson.ReadPipelineFile(t.At("run/scope/candidate-01/scope.json")))["nearby"])["alsoScanned"]).Select(x => S(D(x)["name"])).ToList();
+                var outputs = D(D(D(new StageLedger(t.At("run")).Doc["stages"])["scope"])["outputs"]).Keys.Select(PyPath.Name).ToList();
+                return Same("disabled plugins found", want.Count.ToString(), many.ToString())
+                       ?? Same("the list file", string.Join("|", listed), string.Join("|", want))
+                       ?? Same("plugins the scope read", string.Join("|", scanned), string.Join("|", want.Select(PyPath.Name)))
+                       ?? (outputs.Contains("also-scan.txt") && outputs.Count(o => o == "targets.txt") == 2 ? null
+                           : $"the scope receipt does not fingerprint the list files: {string.Join(", ", outputs)}");
+            }
+            finally { ChildLaunch.RunJob = saved; }
+        });
+        Case("child launch: a command line Windows would not take is refused in one sentence, and nothing is started", () =>
+        {
+            using var t = new Temp();
+            var (inst, game) = World(t, ShadowMods, ShadowEnabled, ShadowPlugins);
+            var ctx = InPlace(t, inst, game, "Sel");
+            var argv = new List<string> { Path.Combine(Environment.SystemDirectory, "whoami.exe") };
+            argv.AddRange(Enumerable.Range(0, 3000).Select(i => $"argument-{i:0000}"));
+            int length = ChildRunner.CommandLine(argv).Length;
+            string want = $"the command line for too-long would be {length.ToString("#,0", System.Globalization.CultureInfo.InvariantCulture)} characters, more than the 32,767 Windows allows, so it was not started; "
+                          + "this is a fault in SkyWright, not in your mods: report it with the run folder.";
+            ChildLaunch.RunJob = saved;
+            bool was = RunLog.Enabled;
+            RunLog.Enabled = false;
+            try
+            {
+                ChildLaunch.Run(ctx, t.At("logs"), "too-long", argv);
+                return "it was started";
+            }
+            catch (Refusal r) { return Same("sentence", r.Message, want) ?? (File.Exists(t.At("logs/too-long.txt")) ? "a log was written, so something ran" : null); }
+            catch (System.ComponentModel.Win32Exception w) { return $"Windows refused it (error {w.NativeErrorCode}) and no sentence was given"; }
+            finally { RunLog.Enabled = was; }
+        });
         Case("stages: a scope that stops on the order reader's refusal names it for the profile without the selection", () =>
         {
             using var t = new Temp();
