@@ -303,8 +303,26 @@ internal static class HarnessSuitesGuard
     {
         var sw = Stopwatch.StartNew();
         var tail = new Queue<string>();
-        void Keep(string? s) { if (s is null) return; lock (tail) { tail.Enqueue(s); while (tail.Count > 25) tail.Dequeue(); } }
-        List<string> Tail() { lock (tail) return tail.ToList(); }
+        var marked = new List<string>();   // a red case's own line, which a long runner's last lines may not reach
+        void Keep(string? s)
+        {
+            if (s is null) return;
+            lock (tail)
+            {
+                var t = s.TrimStart();
+                if ((t.StartsWith("FAIL", StringComparison.Ordinal) || t.StartsWith("RED ", StringComparison.Ordinal)) && marked.Count < 40) marked.Add(s);
+                tail.Enqueue(s); while (tail.Count > 25) tail.Dequeue();
+            }
+        }
+        List<string> Tail()
+        {
+            lock (tail)
+            {
+                var last = tail.ToList();
+                var early = marked.Where(m => !last.Contains(m)).ToList();
+                return early.Count == 0 ? last : early.Append("...").Concat(last).ToList();
+            }
+        }
         if (r.Exe != "python" && !File.Exists(r.Exe)) return new Outcome(-1, 0, new List<string> { $"not built: {r.Exe}" });
         var psi = new ProcessStartInfo(r.Exe) { WorkingDirectory = repo, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
         foreach (var a in r.Args) psi.ArgumentList.Add(a);
