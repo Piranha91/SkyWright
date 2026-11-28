@@ -125,13 +125,20 @@ public static class StageBodies
                 Checkout.ScopeprobeExe, "--order", PyOrder.Fwd(PyPath.Join(ctx.Out, "prepare", "candidates", file)), "--json", PyOrder.Fwd(output),
                 "--assets", "1000000", "--instance", PyOrder.Fwd(ctx.Instance), "--profile", ctx.Profile, "--game", PyOrder.Fwd(ctx.Game),
             };
-            foreach (string t in targets) argv.AddRange(["--target", t]);
+            // the lists grow with the load order, so they go to scopeprobe in files beside the scope, never on its command line
+            string targetList = PyPath.Join(adir, ScopeRules.TargetListName);
+            ScopeRules.WriteList(targetList, targets);
+            argv.AddRange(["--target-file", PyOrder.Fwd(targetList)]);
+            outs.Add(targetList);
             bool combined = ctx.InPlace != null && arm["id"] as string == "combined";
             if (combined)
             {
                 // the scope line: who else touches the footprint or the loaded grid around it, and which disabled mods would
                 argv.AddRange(["--ring", "2"]);
-                foreach (string path in ScopeRules.DisabledPluginFiles(ctx, res)) argv.AddRange(["--also-scan", PyOrder.Fwd(path)]);
+                string scanList = PyPath.Join(adir, ScopeRules.AlsoScanListName);
+                ScopeRules.WriteList(scanList, ScopeRules.DisabledPluginFiles(ctx, res).Select(PyOrder.Fwd));
+                argv.AddRange(["--also-scan-file", PyOrder.Fwd(scanList)]);
+                outs.Add(scanList);
             }
             var r = ChildLaunch.Run(ctx, PyPath.Join(adir, "commands"), "scope-" + stem, argv);
             if (r.ExitCode != 0 || !File.Exists(output))
