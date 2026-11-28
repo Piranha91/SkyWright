@@ -207,6 +207,11 @@ def write_media(run: Path, root: Path) -> Path:
                           "formKey": "0A0001:FixtureBase.esp", "description": "the re-cut navmesh's cell"},
               "state": "baseline", "configurationFingerprint": fp, "fingerprintSource": "asserted",
               "provenance": dict(prov)}
+        if kind == "offline-render":
+            # a render states the one texture policy it was drawn under, as capture_acquire copies it from a real
+            # frame's viewprobe-textures metadata; these 4x4 stand-ins state it in the data, as
+            # evalcontrol/known-answers/media.json does (MediaRule.PolicyRefusal refuses a render without one)
+            it["texturePolicy"] = "compressed-final-mip-4"
         it.update(extra)
         return it
 
