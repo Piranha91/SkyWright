@@ -1405,12 +1405,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var dir = Path.Combine(_outDir, "preload");
         Directory.CreateDirectory(dir);
         var file = Path.Combine(dir, FormattableString.Invariant($"area_{at.X}_{at.Y}.bin"));
-        var psi = RunLogFolder.Start(Path.Combine(AppContext.BaseDirectory, "viewprobe.exe"), RunLogFolder.In(dir));
-        psi.CreateNoWindow = true; psi.RedirectStandardOutput = true; psi.RedirectStandardError = true; psi.WorkingDirectory = dir;
-        foreach (var a in new[] { FormattableString.Invariant($"grid:{at.X},{at.Y}@{_opt.Worldspace}"), "--ring", SceneDirector.LiveReach.ToString(CultureInfo.InvariantCulture) }
+        var psi = PreloadRun.Start(Path.Combine(AppContext.BaseDirectory, "viewprobe.exe"), dir, file, new[] { FormattableString.Invariant($"grid:{at.X},{at.Y}@{_opt.Worldspace}"), "--ring", SceneDirector.LiveReach.ToString(CultureInfo.InvariantCulture) }
                      .Concat(order.Args()).Concat(new[] { "--prepare-out", file, "--no-nav", "--no-weather", "--size", "64", "--out", dir,
-                     "--eye", FormattableString.Invariant($"{at.X * 4096 + 2048},{at.Y * 4096 + 2048},20000"), "--look", FormattableString.Invariant($"{at.X * 4096 + 2048},{at.Y * 4096 + 2058},0") }))
-            psi.ArgumentList.Add(a);
+                     "--eye", FormattableString.Invariant($"{at.X * 4096 + 2048},{at.Y * 4096 + 2048},20000"), "--look", FormattableString.Invariant($"{at.X * 4096 + 2048},{at.Y * 4096 + 2058},0") }));
         var clock = System.Diagnostics.Stopwatch.StartNew();
         var ui = _window.Dispatcher;
         Say($"preloading the cells around {at.X},{at.Y} in the background (another viewprobe process)");
@@ -1419,21 +1416,16 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             string? failed = null;
             try
             {
-                using var p = System.Diagnostics.Process.Start(psi)!;
-                _preloadProcess = p;
-                var err = p.StandardError.ReadToEndAsync();
-                var output = p.StandardOutput.ReadToEnd();
-                p.WaitForExit();
+                var (exit, output, errText) = PreloadRun.Run(psi, p => _preloadProcess = p);
                 // the run's own words, kept beside the area: what it prepared, or why it did not
                 var log = Path.ChangeExtension(file, ".log");
-                File.WriteAllText(log, output + err.Result);
+                File.WriteAllText(log, output + errText);
                 string Last(string text) => text.Split('\n').Select(l => l.Trim()).LastOrDefault(l => l.Length > 0) ?? "";
-                if (p.ExitCode != 0 || !File.Exists(file))
-                    failed = $"viewprobe stopped with exit code {p.ExitCode} without writing the area"
-                           + (Last(err.Result.Length > 0 ? err.Result : output) is { Length: > 0 } e ? $": {e}" : "") + $"; its output is in {log}";
+                if (exit != 0 || !File.Exists(file))
+                    failed = $"viewprobe stopped with exit code {exit} without writing the area"
+                           + (Last(errText.Length > 0 ? errText : output) is { Length: > 0 } e ? $": {e}" : "") + $"; its output is in {log}";
             }
             catch (Exception ex) { failed = ex.Message; }
-            _preloadProcess = null;
             ui.BeginInvoke(() => PreloadDone(at, file, failed, clock.Elapsed.TotalSeconds));
         });
     }
