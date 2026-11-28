@@ -15,6 +15,12 @@ sealed class RouteWalk
     /// the set after every plugin.</summary>
     public readonly Dictionary<FormKey, Dictionary<FormKey, NavmeshGeometry>> WinNav = new();
     readonly LastSightingNavSet _navs = new();
+    /// <summary>(worldspace, grid) -> navmesh key -> geometry: the navmeshes of every exterior cell in <see cref="FloorGrids"/>
+    /// (the 3x3 neighbourhood of each wanted exterior cell), under a last-sighting set of their own, for the actor reading:
+    /// an exterior actor stands on whichever cell's navmesh is under it. The route keeps <see cref="WinNav"/>.</summary>
+    public readonly Dictionary<(FormKey Wrld, int X, int Y), Dictionary<FormKey, NavmeshGeometry>> GridNav = new();
+    readonly LastSightingNavSet _gridNavs = new();
+    readonly Dictionary<FormKey, (FormKey Wrld, int X, int Y)> _gridOfCell = new();
     /// <summary>The wanted cells' references under the last-sighting rule (_shared/LastSighting.cs): each reference in the
     /// one cell of its last sighting, and in none when a later plugin moved it out of the wanted cells or deleted it.
     /// Rebuilt from the set after every plugin.</summary>
@@ -71,7 +77,17 @@ sealed class RouteWalk
             bool wanted = WantedCells.Contains(cp.Cell);
             _held.Observe(cp, (_, _) => wanted);
             _navs.Observe(cp, (_, _) => wanted);
+            bool near = !cp.Interior && cp.Grid is { } g && FloorGrids.Contains((cp.Worldspace, g.X, g.Y));
+            if (near) _gridOfCell[cp.Cell] = (cp.Worldspace, cp.Grid!.Value.X, cp.Grid!.Value.Y);
+            _gridNavs.Observe(cp, (_, _) => near);
         }
+        GridNav.Clear();
+        foreach (var (k, n) in _gridNavs.Navs)
+            if (_gridOfCell.TryGetValue(_gridNavs.CellOf[k], out var at))
+            {
+                if (!GridNav.TryGetValue(at, out var d)) GridNav[at] = d = new Dictionary<FormKey, NavmeshGeometry>();
+                d[k] = n;
+            }
         WinNav.Clear();
         foreach (var (k, n) in _navs.Navs)
         {

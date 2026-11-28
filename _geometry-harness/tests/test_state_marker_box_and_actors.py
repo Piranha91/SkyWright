@@ -28,6 +28,10 @@ Placed actors a state brings in ("changed placed actors"; no actor is ever a row
     1745  arriving with its body through a barrier (MxSwAS): unjudged, ActorInSolid.
     1746  a creature (MxSwAK), a leveled actor (MxSwAL), and the clear actor with the route off: unjudged, ActorUnmeasured.
     1747  guard: no row names an actor in any state, the creature's included.
+Exterior actors (the MxOutside worldspace: EA and EB side by side, each with its own navmesh):
+    1748  an actor arriving in EA 104 u inside EB's navmesh (MxSwEN): judged from placement (ActorClear). The neighbouring
+          cells' navmesh counts; the actor's own cell's alone would read it off the navmesh.
+    1749  guard: an actor arriving in EA beyond both cells' navmeshes (MxSwEO): unjudged, ActorOffNavmesh.
 
 HC_SL_DUMP=DIR keeps every emit and log. Probes come from this checkout's Release builds unless HC_SL_HARNESS names another
 build folder. Each test names the wrong answer it rejects.
@@ -52,6 +56,7 @@ FAILURES, PASSED = [], []
 
 ORDER = ["MxRoom.esm", "MxObjects.esp"]
 CELLS = ["RW", "RB", "RN", "RS", "AC", "AO", "AF", "AS", "AD", "AK", "AL", "AB"]   # StateLaneFixture.Cells
+EXTERIOR = ["EN", "EO"]   # StateLaneFixture.ExteriorCases
 COLLISION_BOX = "000804:MxRoom.esm"                                            # StateLaneFixture.CollisionBox
 TABLE = [{"kind": "base", "value": COLLISION_BOX, "layer": "none", "verdict": "solid", "stops": ["player", "items"], "evidence": "fixture"},
          {"kind": "base", "value": COLLISION_BOX, "layer": "L_NONCOLLIDABLE", "verdict": "not_solid", "stops": [], "evidence": "fixture"}]
@@ -127,6 +132,8 @@ class Lab:
                 raise RuntimeError(f"{key} run exit {lg.returncode}: {lg.stdout[-1500:]} {lg.stderr[-800:]}")
 
         for c in CELLS:
+            go("tab-" + c, "--state", f"MxSw{c}", "--primitive-solidity", self.table)
+        for c in EXTERIOR:
             go("tab-" + c, "--state", f"MxSw{c}", "--primitive-solidity", self.table)
         for c in ("RB", "AC"):
             go("none-" + c, "--state", f"MxSw{c}")
@@ -226,6 +233,11 @@ def main() -> int:
             box = cov(L.doc("tab-AC"), BOX_LINE) or {}
             assert "Actor" not in (box.get("Unjudgeable") or {}), f"the box line still carries Actor: {box}"
 
+        def c1748():
+            # Rejects: an exterior arrival read off the navmesh because only its own cell's navmesh was read.
+            unj, aside, c = actor("tab-EN")
+            assert int(c.get("Judged") or 0) == 1 and not any(unj.values()) and not any(aside.values()), f"want the actor over EB's navmesh judged: {c}"
+
         def c1746():
             for key in ("tab-AK", "tab-AL", "off-AC"):
                 one(key, "ActorUnmeasured", "unj")
@@ -248,7 +260,9 @@ def main() -> int:
                          ("1744 a floating arrival is unjudged by name", lambda: (one("tab-AF", "ActorFloating", "unj"), one("tab-AB", "ActorBuried", "unj"))),
                          ("1745 an arrival inside a solid is unjudged by name", lambda: one("tab-AS", "ActorInSolid", "unj")),
                          ("1746 a creature, a leveled actor and the route off are unmeasured", c1746),
-                         ("1747 guard: no row names an actor", c1747)]:
+                         ("1747 guard: no row names an actor", c1747),
+                         ("1748 an exterior arrival over the neighbouring cell's navmesh is judged", c1748),
+                         ("1749 guard: an exterior arrival beyond every navmesh is off it", lambda: one("tab-EO", "ActorOffNavmesh", "unj"))]:
             check(name, fn)
         if os.environ.get("HC_SL_DUMP"):
             d = Path(os.environ["HC_SL_DUMP"])

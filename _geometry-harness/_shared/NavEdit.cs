@@ -19,7 +19,8 @@ namespace HarnessShared;
 //   - a move that makes a moved triangle overlap another triangle of the navmesh in plan at the same level (their height
 //     ranges within LevelGap of each other; a bridge over a floor is not an overlap).
 // What a vertex move does not touch: the triangles, their edge fields and flags, the link table, cover and door
-// triangles, and the NAVI entry (no neighbour changes). An island navmesh is refused by the caller, which owns NAVI.
+// triangles, and the NAVI entry's neighbours. On an island of the navmesh info map the caller (which owns NAVI) asks
+// NavIsland what the island data becomes (_shared/NavIsland.cs).
 
 /// <summary>Move vertex <paramref name="Vertex"/> to <paramref name="To"/>.</summary>
 public sealed record VertexMove(int Vertex, Vec3 To);
@@ -62,6 +63,17 @@ public sealed record UseVersionResult(string Status, IReadOnlyList<string> Why, 
     public static UseVersionResult Refused(params string[] why) =>
         new("refused", why, null, null, new Dictionary<FormKey, NavmeshGeometry>(), Array.Empty<RepairOp>(), 0, 0, 0, Array.Empty<FormKey>(), Array.Empty<FormKey>());
 }
+
+/// <summary>One member of a carried set (R10): the navmesh as the game takes it now, and the version carried over it.</summary>
+public sealed record SetMember(NavmeshGeometry Winner, NavmeshGeometry Version);
+
+/// <summary>A carried set's outcome (R10): "planned" with each member's result (its geometry, grid and own ops), every outside
+/// navmesh whose links into the set were re-pointed (one merged change each), all the write ops, and how many neighbour links
+/// were re-pointed; or "refused" with why. <see cref="Need"/> names every neighbour a border refusal named (growth by need
+/// reads it).</summary>
+public sealed record UseVersionSetResult(string Status, IReadOnlyList<string> Why, IReadOnlyList<UseVersionResult> Members,
+                                         IReadOnlyDictionary<FormKey, NavmeshGeometry> Others, IReadOnlyList<RepairOp> Ops, int Repointed,
+                                         IReadOnlyList<FormKey> Need);
 
 /// <summary>A door edit's outcome: "planned" with the navmesh as it will stand, the triangle the door is set on, the marker's
 /// distance from it in plan (0: under it) and its height above it, and the write ops; or "refused" with why (and, when
@@ -754,12 +766,41 @@ public static class NavEdit
     /// it (Lost), and the same change makes the entry's neighbour lists the version's link targets.</item>
     /// </list></summary>
     public static UseVersionResult UseVersion(NavmeshGeometry winner, NavmeshGeometry version, string fromPlugin,
-                                              IReadOnlyDictionary<FormKey, NavmeshGeometry> near, EdgeTolerance tol)
+                                              IReadOnlyDictionary<FormKey, NavmeshGeometry> near, EdgeTolerance tol,
+                                              Func<FormKey, string?>? winnerOf = null)
     {
-        var key = winner.FormKey; var why = new List<string>();
-        var V = version; var links = (V.EdgeLinks ?? Array.Empty<NavEdgeLink>()).ToList();
+        // a set of one (R10): UseVersionSet is the one implementation of the rules above
+        var s = UseVersionSet(new[] { new SetMember(winner, version) }, fromPlugin, near, tol, winnerOf);
+        var m = s.Members[0];
+        return s.Status == "planned" ? m with { Others = s.Others, Ops = s.Ops, Repointed = s.Repointed }
+                                     : UseVersionResult.Refused(s.Why.ToArray()) with { DoorsAdded = m.DoorsAdded, DoorsDropped = m.DoorsDropped };
+    }
+
+    /// <summary>CARRY A SET OF NAVMESHES (R10, Gate A C:/hc-runs/2026-11-27-navmesh-r10/GATE-A.md section 1): every member's
+    /// version from <paramref name="fromPlugin"/>, carried whole over its winner in one patch. The rules are use_version's, with
+    /// one change of what a border is matched against: a link between two members is matched against the other member's
+    /// version (the plugin saved them agreeing), and a link to anything else against the navmesh the game takes
+    /// (<paramref name="near"/>, which holds no member). A ledge link into a member from a navmesh of the plugin's own layout
+    /// (a member, or one it already wins: <paramref name="pWins"/>) is carried as the plugin has it while its index is in range;
+    /// from anywhere else it is kept only where the version's triangle stands on the winner's corners. An outside navmesh
+    /// linked into several members gets one merged change. Every refusal that names a neighbour for a border reason (a link
+    /// meeting no edge, or several; one not returned; a link in that cannot be re-pointed; a dropped neighbour still linking in;
+    /// a ledge into a triangle the neighbour lacks) ends with <paramref name="ending"/>(member, neighbour) and puts the
+    /// neighbour in Need. In a set of more than one, each sentence starts with its member.</summary>
+    public static UseVersionSetResult UseVersionSet(IReadOnlyList<SetMember> members, string fromPlugin, IReadOnlyDictionary<FormKey, NavmeshGeometry> near,
+                                                    EdgeTolerance tol, Func<FormKey, string?>? winnerOf = null, Func<FormKey, bool>? pWins = null,
+                                                    Func<FormKey, FormKey, string>? ending = null)
+    {
+        var set = new Dictionary<FormKey, SetMember>();
+        foreach (var m in members) set[m.Winner.FormKey] = m;
+        var why = new List<string>(); var need = new List<FormKey>();
+        string Of(FormKey k) => members.Count > 1 ? $"{k}: " : "";
+        string End(FormKey k, FormKey m) => ending?.Invoke(k, m) ?? $"keep the winner's version, or carry {fromPlugin}'s version of {m} with it (\"with_neighbours\": true).";
+        void Border(FormKey k, FormKey m, string fact) { if (!need.Contains(m)) need.Add(m); why.Add($"{Of(k)}{fact}; {End(k, m)}"); }
+        bool InLayout(FormKey m) => set.ContainsKey(m) || (pWins?.Invoke(m) ?? false);
+        // what a border is matched against: the member's version inside the set, the navmesh the game takes outside it
+        NavmeshGeometry? Facing(FormKey m) => set.TryGetValue(m, out var sm) ? sm.Version : near.TryGetValue(m, out var nm) ? nm : null;
         static bool Open(NavTri t, int e) => Linked(t, e) || Field(t, e) < 0;
-        // the triangles of g with an open edge along a-b within tol (one per triangle)
         List<int> Along(NavmeshGeometry g, Vec3 a, Vec3 b)
         {
             var hit = new List<int>();
@@ -772,8 +813,7 @@ public static class NavEdit
                 }
             return hit;
         }
-        // of several triangles along an edge (a long edge facing two short ones), the one the link already names stands: that
-        // is no guess; naming none of them, the link stays ambiguous
+        // of several triangles along an edge (a long edge facing two short ones), the one the link already names stands
         static bool SameCorners(NavmeshGeometry a, NavmeshGeometry b, int x)
         {
             var ta = a.Triangles[x]; var tb = b.Triangles[x];
@@ -782,115 +822,186 @@ public static class NavEdit
             return pa.SequenceEqual(pb);
         }
         static List<int> Keep(List<int> hit, int named) => hit.Count > 1 && hit.Contains(named) ? new List<int> { named } : hit;
-        string Where(Vec3 a, Vec3 b) => FormattableString.Invariant($"({a.X:0.#}, {a.Y:0.#}, {a.Z:0.#})-({b.X:0.#}, {b.Y:0.#}, {b.Z:0.#})");
+        static string Where(Vec3 a, Vec3 b) => FormattableString.Invariant($"({a.X:0.#}, {a.Y:0.#}, {a.Z:0.#})-({b.X:0.#}, {b.Y:0.#}, {b.Z:0.#})");
 
-        // the version's own links, matched again on this order's neighbours
-        var assigned = new Dictionary<int, short>();
-        int matched = 0, ledges = 0;
-        for (int t = 0; t < V.Triangles.Count; t++)
-            for (int e = 0; e < 3; e++)
-            {
-                if (!Linked(V.Triangles[t], e)) continue;
-                int k = Field(V.Triangles[t], e);
-                if (k < 0 || k >= links.Count) { why.Add($"{fromPlugin}'s triangle {t} edge {e} names link entry {k}, past its table of {links.Count}; that version is broken as it stands."); continue; }
-                var m = links[k].Mesh;
-                if (m == key) continue;                                            // a link into itself keeps its own numbering
-                if (!near.TryGetValue(m, out var n)) { why.Add($"{fromPlugin}'s triangle {t} links into {m}, which no plugin of this order provides; that link cannot be made true."); continue; }
-                if (links[k].Type is 1 or 2)
+        // each member's own links, matched again: against the other members' versions, and against the game's navmeshes
+        var linksOf = new Dictionary<FormKey, List<NavEdgeLink>>();
+        var counts = new Dictionary<FormKey, (int Matched, int Ledges, int Changed)>();
+        foreach (var mem in members)
+        {
+            var key = mem.Winner.FormKey; var V = mem.Version;
+            var links = (V.EdgeLinks ?? Array.Empty<NavEdgeLink>()).ToList();
+            var assigned = new Dictionary<int, short>();
+            var oneWay = new Dictionary<FormKey, List<(int T, int N)>>();
+            int matched = 0, ledges = 0;
+            for (int t = 0; t < V.Triangles.Count; t++)
+                for (int e = 0; e < 3; e++)
                 {
-                    // a LEDGE link (Ledge Up / Down) is not made by edge geometry (navownprobe's border rules count it, never
-                    // judge it): carried as the version has it, unverified, while it names a triangle the neighbour has
-                    if (links[k].TriangleIndex < 0 || links[k].TriangleIndex >= n.Triangles.Count) why.Add($"{fromPlugin}'s triangle {t} has a ledge link into {m} triangle {links[k].TriangleIndex}, which {m}'s winning version does not have ({n.Triangles.Count}); that link cannot be made true.");
-                    else ledges++;
-                    continue;
+                    if (!Linked(V.Triangles[t], e)) continue;
+                    int k = Field(V.Triangles[t], e);
+                    if (k < 0 || k >= links.Count) { why.Add($"{Of(key)}{fromPlugin}'s triangle {t} edge {e} names link entry {k}, past its table of {links.Count}; that version is broken as it stands."); continue; }
+                    var m = links[k].Mesh;
+                    if (m == key) continue;                                            // a link into itself keeps its own numbering
+                    bool inSet = set.ContainsKey(m);
+                    if (Facing(m) is not { } n) { why.Add($"{Of(key)}{fromPlugin}'s triangle {t} links into {m}, which no plugin of this order provides; that link cannot be made true."); continue; }
+                    if (links[k].Type is 1 or 2)
+                    {
+                        // a LEDGE link (Ledge Up / Down) is not made by edge geometry: carried as the version has it, unverified,
+                        // while it names a triangle the navmesh it faces has
+                        if (links[k].TriangleIndex < 0 || links[k].TriangleIndex >= n.Triangles.Count)
+                            Border(key, m, $"{fromPlugin}'s triangle {t} has a ledge link into {m} triangle {links[k].TriangleIndex}, which {(inSet ? $"{fromPlugin}'s version of it" : $"{m}'s winning version")} does not have ({n.Triangles.Count})");
+                        else ledges++;
+                        continue;
+                    }
+                    var (pa, pb) = NavBorderMatch.EdgeVerts(V.Triangles[t], e);
+                    var hit = Keep(Along(n, V.Vertices[pa], V.Vertices[pb]), links[k].TriangleIndex);
+                    if (hit.Count != 1)
+                    {
+                        Border(key, m, $"{fromPlugin}'s triangle {t} edge {Where(V.Vertices[pa], V.Vertices[pb])} links into {m}, but "
+                               + (hit.Count == 0 ? (inSet ? $"no edge of {fromPlugin}'s version of it lies along it" : "no edge of its winning version lies along it")
+                                                 : $"{hit.Count} of its triangles lie along it ({string.Join(", ", hit.Take(4))})"));
+                        continue;
+                    }
+                    if (assigned.TryGetValue(k, out var prev) && prev != hit[0]) { Border(key, m, $"{fromPlugin}'s link entry {k} serves two edges that now meet different triangles of {m} ({prev} and {hit[0]}), so that table cannot be kept as it is"); continue; }
+                    assigned[k] = (short)hit[0]; matched++;
+                    // the far edge must link back into this navmesh, or the carried link is one-way (the review of R7)
+                    if (!LinksBack(n, hit[0], V.Vertices[pa], V.Vertices[pb], key, tol)) (oneWay.TryGetValue(m, out var ow) ? ow : oneWay[m] = new()).Add((t, hit[0]));
                 }
-                var (pa, pb) = NavBorderMatch.EdgeVerts(V.Triangles[t], e);
-                var hit = Keep(Along(n, V.Vertices[pa], V.Vertices[pb]), links[k].TriangleIndex);
-                if (hit.Count != 1) { why.Add($"{fromPlugin}'s triangle {t} edge {Where(V.Vertices[pa], V.Vertices[pb])} links into {m}, but {(hit.Count == 0 ? "no edge of its winning version lies along it" : $"{hit.Count} of its triangles lie along it ({string.Join(", ", hit.Take(4))})")}; relink it by hand or use another version."); continue; }
-                if (assigned.TryGetValue(k, out var prev) && prev != hit[0]) { why.Add($"{fromPlugin}'s link entry {k} serves two edges that now meet different triangles of {m} ({prev} and {hit[0]}); that table cannot be kept as it is."); continue; }
-                assigned[k] = (short)hit[0]; matched++;
-            }
-        int changed = 0;
-        foreach (var (k, to) in assigned) if (links[k].TriangleIndex != to) { links[k] = links[k] with { TriangleIndex = to }; changed++; }
+            foreach (var (m, pairs) in oneWay.OrderBy(kv => kv.Key.ToString(), StringComparer.Ordinal))
+                Border(key, m, $"{fromPlugin}'s version of {key} links {string.Join(", ", pairs.Select(p => $"triangle {p.T}"))} into {m} "
+                        + $"{string.Join(", ", pairs.Select(p => $"triangle {p.N}"))}{(set.ContainsKey(m) ? $" ({fromPlugin}'s version, carried with it)" : winnerOf?.Invoke(m) is { } wp ? $" ({wp}'s version, the one the game takes)" : "")}, "
+                        + $"whose edge there does not link back to {key}, so carrying it would make that border one-way");
+            int changed = 0;
+            foreach (var (k, to) in assigned) if (links[k].TriangleIndex != to) { links[k] = links[k] with { TriangleIndex = to }; changed++; }
+            linksOf[key] = links;
+            counts[key] = (matched, ledges, changed);
+        }
 
-        // every neighbour's links into this navmesh, re-pointed to the version's triangles
+        // every outside navmesh's links into a member, re-pointed to the member version's triangles: one merged change each
+        var oNow = new Dictionary<FormKey, List<NavEdgeLink>>();
+        foreach (var mem in members)
+        {
+            var key = mem.Winner.FormKey; var V = mem.Version;
+            foreach (var (ok, o) in near)
+            {
+                if (set.ContainsKey(ok)) continue;
+                var olinks = (oNow.TryGetValue(ok, out var acc) ? acc : o.EdgeLinks ?? Array.Empty<NavEdgeLink>()).ToList();
+                if (!olinks.Any(l => l.Mesh == key)) continue;
+                var oassigned = new Dictionary<int, short>();
+                for (int u = 0; u < o.Triangles.Count; u++)
+                    for (int f = 0; f < 3; f++)
+                    {
+                        if (!Linked(o.Triangles[u], f)) continue;
+                        int j = Field(o.Triangles[u], f);
+                        if (j < 0 || j >= olinks.Count || olinks[j].Mesh != key) continue;
+                        int named = (o.EdgeLinks ?? Array.Empty<NavEdgeLink>())[j].TriangleIndex;
+                        if (olinks[j].Type is 1 or 2)
+                        {
+                            // a ledge link into this navmesh: from the plugin's own layout it names the version's numbering and is
+                            // kept while in range; from anywhere else, kept where the version's triangle of that index stands on the
+                            // winner's corners. Never re-pointed by position
+                            bool keep = InLayout(ok) ? named >= 0 && named < V.Triangles.Count
+                                                     : named >= 0 && named < V.Triangles.Count && named < mem.Winner.Triangles.Count && SameCorners(V, mem.Winner, named);
+                            if (!keep) Border(key, ok, $"{ok}'s triangle {u} has a ledge link into {key} triangle {named}, which {fromPlugin}'s version does not keep in place; a ledge link cannot be re-pointed by edge position");
+                            continue;
+                        }
+                        var (pa, pb) = NavBorderMatch.EdgeVerts(o.Triangles[u], f);
+                        var hit = Keep(Along(V, o.Vertices[pa], o.Vertices[pb]), named);
+                        if (hit.Count != 1) { Border(key, ok, $"{ok}'s triangle {u} edge {Where(o.Vertices[pa], o.Vertices[pb])} links into {key}, but {(hit.Count == 0 ? $"no edge of {fromPlugin}'s version lies along it" : $"{hit.Count} triangles of {fromPlugin}'s version lie along it")}, so that link cannot be re-pointed"); continue; }
+                        if (oassigned.TryGetValue(j, out var prev) && prev != hit[0]) { Border(key, ok, $"{ok}'s link entry {j} serves edges into {key} that meet different triangles ({prev} and {hit[0]}) of {fromPlugin}'s version, so that table cannot be kept as it is"); continue; }
+                        // the member version's edge there must link back to the outside navmesh, or the re-pointed link is one-way
+                        // (the review of Gate C, decision 2: 10925D into USSEP's 10925E on CV-clockwork)
+                        if (!LinksBack(V, hit[0], o.Vertices[pa], o.Vertices[pb], ok, tol))
+                        {
+                            Border(key, ok, $"{ok}'s triangle {u} links into {key} triangle {hit[0]} of {fromPlugin}'s version, whose edge there does not link back to {ok}, so carrying it would leave that border one-way");
+                            continue;
+                        }
+                        oassigned[j] = (short)hit[0];
+                    }
+                foreach (var (j, to) in oassigned) olinks[j] = olinks[j] with { TriangleIndex = to };
+                oNow[ok] = olinks;
+            }
+        }
+
+        // per member: the neighbours and doors the navmesh info map records
+        var results = new List<UseVersionResult>();
+        foreach (var mem in members)
+        {
+            var key = mem.Winner.FormKey; var V = mem.Version; var winner = mem.Winner;
+            var after = V with { EdgeLinks = linksOf[key] };
+            var was = NavRepairNavi.Neighbours(winner); var now = NavRepairNavi.Neighbours(after);
+            var lost = was.Where(m => m != key && !now.Contains(m)).OrderBy(m => m.ToString()).ToList();
+            // a neighbour the version no longer links into is carried, unless that neighbour, as it will stand, still links into
+            // this navmesh: a one-way border, refused by name
+            foreach (var m in lost.Where(m => (set.TryGetValue(m, out var sm) ? sm.Version : near.GetValueOrDefault(m))?.EdgeLinks is { } el && el.Any(l => l.Mesh == key)))
+                Border(key, m, $"{m} still links into {key}, but {fromPlugin}'s version no longer links back into {m}, so carrying it would leave a one-way border between them");
+            static List<NavDoorTriangle> Beyond(IReadOnlyList<NavDoorTriangle>? a, IReadOnlyList<NavDoorTriangle>? b)
+            {
+                var left = (b ?? Array.Empty<NavDoorTriangle>()).GroupBy(d => d.Door).ToDictionary(g => g.Key, g => g.Count());
+                var o = new List<NavDoorTriangle>();
+                foreach (var d in a ?? Array.Empty<NavDoorTriangle>())
+                    if (left.TryGetValue(d.Door, out var n) && n > 0) left[d.Door] = n - 1; else o.Add(d);
+                return o;
+            }
+            var added = Beyond(V.DoorTriangles, winner.DoorTriangles);
+            var dropped = Beyond(winner.DoorTriangles, V.DoorTriangles);
+            var doorsNow = (V.DoorTriangles ?? Array.Empty<NavDoorTriangle>()).Select(d => d.Door).OrderBy(d => d.ToString()).ToList();
+            var (mc, lc, cc) = counts[key];
+            results.Add(new UseVersionResult("planned", Array.Empty<string>(), after, null, new Dictionary<FormKey, NavmeshGeometry>(), Array.Empty<RepairOp>(), mc, cc, 0,
+                                             now.Where(m => m != key && !was.Contains(m)).OrderBy(m => m.ToString()).ToList(), doorsNow)
+                        { LedgesCarried = lc, DoorsAdded = added, DoorsDropped = dropped, Lost = lost });
+        }
+        if (why.Count > 0)
+            return new UseVersionSetResult("refused", why.Distinct().ToArray(), results.Select(r => UseVersionResult.Refused() with { DoorsAdded = r.DoorsAdded, DoorsDropped = r.DoorsDropped }).ToList(),
+                                           new Dictionary<FormKey, NavmeshGeometry>(), Array.Empty<RepairOp>(), 0, need);
+
+        // planned: each member carried whole, its re-matched link indices set, its grid rebuilt; then every outside change
+        var ops = new List<RepairOp>();
+        for (int i = 0; i < results.Count; i++)
+        {
+            var V = members[i].Version; var after = results[i].After!; string id = members[i].Winner.FormKey.ToString();
+            var grid = NavGrid.Rebuild(after.Vertices, after.Triangles.Select(t => ((int)t.A, (int)t.B, (int)t.C)).ToList());
+            after = after with { Min = grid.Min, Max = grid.Max };
+            var mops = new List<RepairOp> { new(id, "Data", "CopyFrom", FromPlugin: fromPlugin) };
+            var links = after.EdgeLinks!;
+            for (int k = 0; k < links.Count; k++)
+                if (links[k].TriangleIndex != (V.EdgeLinks ?? Array.Empty<NavEdgeLink>())[k].TriangleIndex)
+                    mops.Add(new RepairOp(id, $"Data.EdgeLinks[{k}].TriangleIndex", "Set", Value: links[k].TriangleIndex.ToString(CultureInfo.InvariantCulture)));
+            mops.AddRange(Ops(id, Array.Empty<int>(), after.Vertices, grid));
+            ops.AddRange(mops);
+            results[i] = results[i] with { After = after, Grid = grid, Ops = mops };
+        }
         var others = new Dictionary<FormKey, NavmeshGeometry>();
-        var otherOps = new List<RepairOp>();
         int repointed = 0;
         foreach (var (ok, o) in near)
         {
-            if (ok == key) continue;
-            var olinks = (o.EdgeLinks ?? Array.Empty<NavEdgeLink>()).ToList();
-            if (!olinks.Any(l => l.Mesh == key)) continue;
-            var oassigned = new Dictionary<int, short>();
-            for (int u = 0; u < o.Triangles.Count; u++)
-                for (int f = 0; f < 3; f++)
-                {
-                    if (!Linked(o.Triangles[u], f)) continue;
-                    int j = Field(o.Triangles[u], f);
-                    if (j < 0 || j >= olinks.Count || olinks[j].Mesh != key) continue;
-                    if (olinks[j].Type is 1 or 2)
-                    {
-                        // a neighbour's ledge link into this navmesh: kept where the version's triangle of that index stands on
-                        // the winner's corners; otherwise it cannot be re-pointed by position
-                        int x = olinks[j].TriangleIndex;
-                        if (!(x >= 0 && x < V.Triangles.Count && x < winner.Triangles.Count && SameCorners(V, winner, x)))
-                            why.Add($"{ok}'s triangle {u} has a ledge link into {key} triangle {x}, which {fromPlugin}'s version does not keep in place; a ledge link cannot be re-pointed by edge position.");
-                        continue;
-                    }
-                    var (pa, pb) = NavBorderMatch.EdgeVerts(o.Triangles[u], f);
-                    var hit = Keep(Along(V, o.Vertices[pa], o.Vertices[pb]), olinks[j].TriangleIndex);
-                    if (hit.Count != 1) { why.Add($"{ok}'s triangle {u} edge {Where(o.Vertices[pa], o.Vertices[pb])} links into {key}, but {(hit.Count == 0 ? $"no edge of {fromPlugin}'s version lies along it" : $"{hit.Count} triangles of {fromPlugin}'s version lie along it")}; that link cannot be re-pointed."); continue; }
-                    if (oassigned.TryGetValue(j, out var prev) && prev != hit[0]) { why.Add($"{ok}'s link entry {j} serves two edges that meet different triangles of {fromPlugin}'s version; that table cannot be kept as it is."); continue; }
-                    oassigned[j] = (short)hit[0];
-                }
-            var before = olinks.ToList();
-            foreach (var (j, to) in oassigned) olinks[j] = olinks[j] with { TriangleIndex = to };
+            if (!oNow.TryGetValue(ok, out var olinks)) continue;
+            var before = o.EdgeLinks ?? Array.Empty<NavEdgeLink>();
             var diff = Enumerable.Range(0, olinks.Count).Where(j => olinks[j].TriangleIndex != before[j].TriangleIndex).ToList();
             if (diff.Count == 0) continue;
             repointed += diff.Count;
             others[ok] = o with { EdgeLinks = olinks };
-            foreach (var j in diff) otherOps.Add(new RepairOp(ok.ToString(), $"Data.EdgeLinks[{j}].TriangleIndex", "Set", Value: olinks[j].TriangleIndex.ToString(CultureInfo.InvariantCulture)));
+            foreach (var j in diff) ops.Add(new RepairOp(ok.ToString(), $"Data.EdgeLinks[{j}].TriangleIndex", "Set", Value: olinks[j].TriangleIndex.ToString(CultureInfo.InvariantCulture)));
         }
+        return new UseVersionSetResult("planned", Array.Empty<string>(), results, others, ops, repointed, need);
+    }
 
-        // neighbours and doors, which the navmesh info map records
-        var after = V with { EdgeLinks = links };
-        var was = NavRepairNavi.Neighbours(winner); var now = NavRepairNavi.Neighbours(after);
-        var lost = was.Where(m => m != key && !now.Contains(m)).OrderBy(m => m.ToString()).ToList();
-        // a neighbour the version no longer links into is carried (item 3, 2026-11-22): the navmesh info map's entry drops it
-        // (NavRepairNavi.ForVersion, planned by the caller), and the result and the plan row name it. Unless that neighbour still
-        // links into this navmesh: its link would then cross a border the version does not link back over, a one-way border
-        // navownprobe files as a finding (the review of 2026-11-22), so it is refused by name
-        foreach (var m in lost.Where(m => near.TryGetValue(m, out var ng) && (ng.EdgeLinks ?? Array.Empty<NavEdgeLink>()).Any(l => l.Mesh == key)))
-            why.Add($"{m} still links into {key}, but {fromPlugin}'s version no longer links back into {m}, so carrying it would leave a one-way border between them; keep the winner's version, or carry {m}'s version with it.");
-        var doorsNow = (V.DoorTriangles ?? Array.Empty<NavDoorTriangle>()).Select(d => d.Door).OrderBy(d => d.ToString()).ToList();
-        // the door entries one side has beyond the other, door by door (a door can stand before several triangles)
-        static List<NavDoorTriangle> Beyond(IReadOnlyList<NavDoorTriangle>? a, IReadOnlyList<NavDoorTriangle>? b)
+    /// <summary>Whether triangle <paramref name="tri"/> of <paramref name="n"/> has an open edge along a-b (within
+    /// <paramref name="tol"/>) that links into <paramref name="back"/>: the far side of a border returns it. One owner, for the
+    /// planner and the written patch's two-way read-back.</summary>
+    public static bool LinksBack(NavmeshGeometry n, int tri, Vec3 a, Vec3 b, FormKey back, EdgeTolerance tol)
+    {
+        if (tri < 0 || tri >= n.Triangles.Count) return false;
+        var nt = n.Triangles[tri]; var nl = n.EdgeLinks ?? Array.Empty<NavEdgeLink>();
+        for (int f = 0; f < 3; f++)
         {
-            var left = (b ?? Array.Empty<NavDoorTriangle>()).GroupBy(d => d.Door).ToDictionary(g => g.Key, g => g.Count());
-            var o = new List<NavDoorTriangle>();
-            foreach (var d in a ?? Array.Empty<NavDoorTriangle>())
-                if (left.TryGetValue(d.Door, out var n) && n > 0) left[d.Door] = n - 1; else o.Add(d);
-            return o;
+            if (!(Linked(nt, f) || Field(nt, f) < 0)) continue;
+            var (i, j) = NavBorderMatch.EdgeVerts(nt, f);
+            if (i >= n.Vertices.Count || j >= n.Vertices.Count || !NavBorderMatch.Gap(a, b, n.Vertices[i], n.Vertices[j]).Within(tol)) continue;
+            int x = Field(nt, f);
+            if (Linked(nt, f) && x >= 0 && x < nl.Count && nl[x].Mesh == back) return true;
         }
-        var added = Beyond(V.DoorTriangles, winner.DoorTriangles);
-        var dropped = Beyond(winner.DoorTriangles, V.DoorTriangles);
-        // other doors than the winner's are carried (item 2, 2026-11-22): the navmesh info map's linked doors follow the version's
-        // door table (NavRepairNavi.ForVersion, planned by the caller); the doors added and dropped are named on the row
-        if (why.Count > 0) return UseVersionResult.Refused(why.Distinct().ToArray()) with { DoorsAdded = added, DoorsDropped = dropped };
-
-        var grid = NavGrid.Rebuild(after.Vertices, after.Triangles.Select(t => ((int)t.A, (int)t.B, (int)t.C)).ToList());
-        after = after with { Min = grid.Min, Max = grid.Max };
-        string id = key.ToString();
-        var ops = new List<RepairOp> { new(id, "Data", "CopyFrom", FromPlugin: fromPlugin) };
-        for (int k = 0; k < links.Count; k++)
-            if (links[k].TriangleIndex != (V.EdgeLinks ?? Array.Empty<NavEdgeLink>())[k].TriangleIndex)
-                ops.Add(new RepairOp(id, $"Data.EdgeLinks[{k}].TriangleIndex", "Set", Value: links[k].TriangleIndex.ToString(CultureInfo.InvariantCulture)));
-        ops.AddRange(Ops(id, Array.Empty<int>(), after.Vertices, grid));
-        ops.AddRange(otherOps);
-        return new UseVersionResult("planned", Array.Empty<string>(), after, grid, others, ops, matched, changed, repointed,
-                                    now.Where(m => m != key && !was.Contains(m)).OrderBy(m => m.ToString()).ToList(), doorsNow)
-               { LedgesCarried = ledges, DoorsAdded = added, DoorsDropped = dropped, Lost = lost };
+        return false;
     }
 
     /// <summary>A door's arrival marker may stand this far, in u, above or below the triangle it is set on: past the base game's
@@ -999,11 +1110,20 @@ public static class NavEdit
 /// own why; the ops (the navmesh info map's for any neighbour the version gains included); the expected state of every
 /// navmesh it changes (the read-back's input: the carried navmesh, grid rebuilt, and each neighbour whose links into it
 /// were re-pointed, grid kept); and the plan row's "useVersion" object (null when refused before UseVersion ran).</summary>
+/// <summary>How a use_version edit names its navmeshes (R10): one navmesh, never grown; a stated set, carried exactly; or one
+/// navmesh grown by need ("with_neighbours", and every use_version row of a repair plan).</summary>
+public enum UseVersionSetMode { Single, Stated, Grown }
+
 public sealed record UseVersionPlan(string? Refuse, IReadOnlyList<string> Why, List<RepairOp> Ops,
                                     Dictionary<FormKey, (NavmeshGeometry Geom, int[] OldIndex, string WinnerPath, bool Rebuilt)> Expect,
                                     System.Text.Json.Nodes.JsonObject? Row)
 {
     public bool Planned => Refuse is null && Why.Count == 0;
+    /// <summary>The flag and island data the carried navmesh's entry ends with, when either it or the version's is an island
+    /// (R7; what the read-back holds the entry to); null otherwise.</summary>
+    public NavIslandEntry? IslandAfter { get; init; }
+    /// <summary>R10: each member's island data as the read-back holds it (members on or becoming an island only).</summary>
+    public Dictionary<FormKey, NavIslandEntry> IslandsAfter { get; init; } = new();
 }
 
 /// <summary>THE LOAD-ORDER GLUE AROUND <see cref="NavEdit.UseVersion"/>: its one owner, for navedit's plan and write and for
@@ -1018,66 +1138,164 @@ public static class NavUseVersionPlan
     public static UseVersionPlan Plan(LoadOrderResolver.IndexView view, NaviView navi, IReadOnlyList<string> order, FormKey key,
                                       NavmeshGeometry geom, string winnerPlugin, string from,
                                       Func<Dictionary<FormKey, (string Path, List<NavEdgeLink> Links)>> inbound)
+        => PlanSet(view, navi, order, new[] { key }, from, UseVersionSetMode.Single, inbound, (geom, winnerPlugin));
+
+    /// <summary>THE SET PLANNER (R10, Gate A section 1), the one owner of every use_version: one navmesh (<paramref name="mode"/>
+    /// Single, never grown), a stated set (exactly <paramref name="keys"/>), or one navmesh grown by need (Grown: while a member's
+    /// border refusal names a neighbour <paramref name="from"/> has its own version of and does not already win, that neighbour
+    /// joins; when nothing more can join, any refusal left refuses the whole set). Each member is carried whole from
+    /// <paramref name="from"/> (NavEdit.UseVersionSet); the navmesh info map is changed once for the set
+    /// (NavRepairNavi.ForVersions); the row masters every plugin whose version of any member the patch supersedes.
+    /// <paramref name="seed"/> is the first navmesh's winning geometry and plugin when the caller has them.</summary>
+    public static UseVersionPlan PlanSet(LoadOrderResolver.IndexView view, NaviView navi, IReadOnlyList<string> order, IReadOnlyList<FormKey> keys,
+                                         string from, UseVersionSetMode mode, Func<Dictionary<FormKey, (string Path, List<NavEdgeLink> Links)>> inbound,
+                                         (NavmeshGeometry Geom, string WinnerPlugin)? seed = null)
     {
-        var expect = new Dictionary<FormKey, (NavmeshGeometry, int[], string, bool)>();
         static UseVersionPlan Refused(string why) => new(why, Array.Empty<string>(), new List<RepairOp>(), new(), null);
+        bool stated = mode == UseVersionSetMode.Stated;
         var fromPath = order.FirstOrDefault(p => string.Equals(Path.GetFileName(p), from, StringComparison.OrdinalIgnoreCase));
-        var version = fromPath is null ? null : Winning(fromPath, key);
-        if (fromPath is null) return Refused($"{from} is not in this load order, so its version of {key} (and its masters) cannot be read; enable it, or name a plugin of the order.");
-        if (string.Equals(from, winnerPlugin, StringComparison.OrdinalIgnoreCase)) return Refused($"{from} already wins {key}, so there is no other version to use.");
-        if (version is null) return Refused($"{from} has no version of {key}, or deletes it, so there is nothing to carry.");
-        // this order's winners of every navmesh the version links into and every navmesh linking into the winner
+        if (fromPath is null) return Refused($"{from} is not in this load order, so its version of {keys[0]} (and its masters) cannot be read; enable it, or name a plugin of the order.");
+        string PathOf(string plugin) => order.First(p => string.Equals(Path.GetFileName(p), plugin, StringComparison.OrdinalIgnoreCase));
+        // the navmesh the game takes now, and its plugin
+        (NavmeshGeometry Geom, string Plugin, string Path)? Taken(FormKey m)
+            => view.ResolveWinner(m) is { } w && order.FirstOrDefault(p => string.Equals(Path.GetFileName(p), w.WinnerPlugin, StringComparison.OrdinalIgnoreCase)) is { } wp && Winning(wp, m) is { } g ? (g, w.WinnerPlugin, wp) : null;
+        // what a border to a navmesh outside the set is matched against: the navmesh the game takes
+        NavmeshGeometry? Game(FormKey m) => Taken(m)?.Geom;
+        bool PWins(FormKey m) => string.Equals(view.ResolveWinner(m)?.WinnerPlugin, from, StringComparison.OrdinalIgnoreCase);
+        var versionOf = new Dictionary<FormKey, NavmeshGeometry?>();
+        NavmeshGeometry? VersionOf(FormKey m) => versionOf.TryGetValue(m, out var v) ? v : versionOf[m] = Winning(fromPath, m);
+        // a neighbour joins a grown set when the plugin has its own version of it that the game does not already take
+        bool CanGrow(FormKey m) => !PWins(m) && VersionOf(m) is not null;
+
+        var members = new List<FormKey>();
+        var winners = new Dictionary<FormKey, (NavmeshGeometry Geom, string Plugin, string Path)>();
+        foreach (var k in keys)
+        {
+            if (members.Contains(k)) return Refused($"{k} is named twice in the set; name each navmesh once.");
+            var w = members.Count == 0 && seed is { } s ? ((NavmeshGeometry Geom, string Plugin, string Path)?)(s.Geom, s.WinnerPlugin, PathOf(s.WinnerPlugin)) : Taken(k);
+            if (w is null) return Refused($"{k} is in no plugin of this load order, or its winner deletes it; check the FormKey and the profile.");
+            if (string.Equals(from, w.Value.Plugin, StringComparison.OrdinalIgnoreCase))
+                return Refused(stated ? $"{from} already wins {k}, so there is nothing to carry; leave {k} out of the set." : $"{from} already wins {k}, so there is no other version to use.");
+            if (VersionOf(k) is null) return Refused($"{from} has no version of {k}, or deletes it, so there is nothing to carry.");
+            members.Add(k); winners[k] = w.Value;
+        }
+        string Ending(FormKey k, FormKey m) =>
+            members.Contains(m) ? $"{from}'s own versions of {k} and {m} do not agree there, so keep the winner's version of {k}."
+            : PWins(m) ? $"{from}'s own version of {m}, the one the game takes, does not fit it either, so keep the winner's version of {k}."
+            : VersionOf(m) is null ? $"{from} has no version of {m} to carry with it, so keep the winner's version of {k}."
+            : stated ? $"add {m} to the set, or keep the winner's version of {k}."
+            : $"keep the winner's version, or carry {from}'s version of {m} with it (\"with_neighbours\": true).";
+
+        // planned, and grown, until nothing more can join
         var inboundIndex = inbound();
-        var near = new Dictionary<FormKey, NavmeshGeometry>();
-        foreach (var m in (version.EdgeLinks ?? Array.Empty<NavEdgeLink>()).Select(l => l.Mesh).Distinct())
-            if (m != key && view.ResolveWinner(m) is { } mw && order.FirstOrDefault(p => string.Equals(Path.GetFileName(p), mw.WinnerPlugin, StringComparison.OrdinalIgnoreCase)) is { } mp && Winning(mp, m) is { } mg) near[m] = mg;
-        foreach (var (fk, (p, links)) in inboundIndex)
-            if (fk != key && !near.ContainsKey(fk) && links.Any(l => l.Mesh == key) && Winning(p, fk) is { } og) near[fk] = og;
-        var r = NavEdit.UseVersion(geom, version, Path.GetFileName(fromPath), near, NavRuleDefaults.Edge);
+        UseVersionSetResult r;
+        var asked = members.ToList();
+        while (true)
+        {
+            var near = new Dictionary<FormKey, NavmeshGeometry>();
+            foreach (var k in members)
+            {
+                foreach (var m in (VersionOf(k)!.EdgeLinks ?? Array.Empty<NavEdgeLink>()).Select(l => l.Mesh).Distinct())
+                    if (!members.Contains(m) && !near.ContainsKey(m) && Game(m) is { } g) near[m] = g;
+                foreach (var (fk, (p, links)) in inboundIndex)
+                    if (!members.Contains(fk) && !near.ContainsKey(fk) && links.Any(l => l.Mesh == k) && Game(fk) is { } g) near[fk] = g;
+            }
+            r = NavEdit.UseVersionSet(members.Select(k => new SetMember(winners[k].Geom, VersionOf(k)!)).ToList(), Path.GetFileName(fromPath), near,
+                                      NavRuleDefaults.Edge, m => view.ResolveWinner(m)?.WinnerPlugin, PWins, Ending);
+            if (mode != UseVersionSetMode.Grown || r.Status == "planned") break;
+            var join = r.Need.Where(m => !members.Contains(m) && CanGrow(m)).ToList();
+            if (join.Count == 0) break;
+            foreach (var m in join) { members.Add(m); winners[m] = Taken(m)!.Value; }
+        }
         IReadOnlyList<string> why = r.Why; var ops = r.Ops.ToList();
-        // each door's reference must resolve in this order
-        var badDoors = r.Doors.Where(d => view.ResolveWinner(d) is null).ToList();
-        if (r.Status == "planned" && badDoors.Count > 0) { why = new[] { $"{from}'s version stands before door(s) {string.Join(", ", badDoors)}, which no plugin of this order provides." }; ops = new(); }
-        // the navmesh info map follows the version: the entry's linked doors become its door table, in order; its neighbour lists
-        // become the version's link targets; each neighbour it gains is added both ways (NavRepairNavi.ForVersion; nothing is
-        // written where the entry already stands so)
+        string Of(FormKey k) => members.Count > 1 ? $"{k}: " : "";
+        // each member's doors must resolve in this order, and its island data follow the version plugin's own entry (R7)
+        var islandArgs = new Dictionary<FormKey, NavIslandEntry>(); var islandsAfter = new Dictionary<FormKey, NavIslandEntry>();
+        if (r.Status == "planned")
+        {
+            var memberWhy = new List<string>();
+            for (int i = 0; i < members.Count; i++)
+            {
+                var k = members[i]; var u = r.Members[i];
+                var badDoors = u.Doors.Where(d => view.ResolveWinner(d) is null).ToList();
+                if (badDoors.Count > 0) { memberWhy.Add($"{Of(k)}{from}'s version stands before door(s) {string.Join(", ", badDoors)}, which no plugin of this order provides."); continue; }
+                if (navi.Problem is not null) continue;
+                var taken = navi.Effective.TryGetValue(k, out var tk) ? NavIsland.Of(tk.Src.Map.MapInfos[tk.Index]) : new NavIslandEntry(0, null);
+                var ve = navi.Stated(k, Path.GetFileName(fromPath));
+                var verE = ve is null ? null : NavIsland.Of(ve);
+                var (after, islWhy) = NavIsland.ForVersion(k, from, taken, verE);
+                islWhy ??= verE?.Island is { } vi ? NavIsland.VersionBoxRefusal(k, from, vi, VersionOf(k)!.Min, VersionOf(k)!.Max) : null;
+                if (islWhy is not null) { memberWhy.Add(Of(k) + islWhy); continue; }
+                if (!NavIsland.Same(taken, after)) islandArgs[k] = after;
+                if (taken.Island is not null || after.Island is not null) islandsAfter[k] = after;
+            }
+            if (memberWhy.Count > 0) { why = memberWhy; ops = new(); }
+        }
+        // the navmesh info map follows every member's version, in one change for the set (NavRepairNavi.ForVersions)
         System.Text.Json.Nodes.JsonObject? naviRow = null;
         if (why.Count == 0)
         {
-            var doorTable = (r.After!.DoorTriangles ?? Array.Empty<NavDoorTriangle>()).Select(d => d.Door).ToList();
-            var targets = (r.After.EdgeLinks ?? Array.Empty<NavEdgeLink>()).Select(l => l.Mesh).Where(m => m != key).Distinct().ToList();
-            var (np, refusedNavi) = NavRepairNavi.ForVersion(key, doorTable, targets, r.Gained, navi);
+            var versions = members.Select((k, i) => new NavVersionEntry(k, (r.Members[i].After!.DoorTriangles ?? Array.Empty<NavDoorTriangle>()).Select(d => d.Door).ToList(),
+                                                                        (r.Members[i].After!.EdgeLinks ?? Array.Empty<NavEdgeLink>()).Select(l => l.Mesh).Where(m => m != k).Distinct().ToList(),
+                                                                        r.Members[i].Gained, islandArgs.GetValueOrDefault(k))).ToList();
+            var (np, refusedNavi) = NavRepairNavi.ForVersions(versions, navi);
             if (refusedNavi is not null) { why = new[] { $"The navmesh info map cannot follow the version ({refusedNavi}); keep the winner's version, or give the map an entry the patch can change first." }; ops = new(); }
-            else if (np.Entries.Count > 0) { ops.AddRange(np.Ops); naviRow = NavRepairNavi.NaviJson(np); }   // its entries: what the read-back holds NAVI to
+            else if (np.Entries.Count > 0) { ops.AddRange(np.Ops); naviRow = NavRepairNavi.NaviJson(np); }
         }
+        var expect = new Dictionary<FormKey, (NavmeshGeometry, int[], string, bool)>();
         if (why.Count == 0)
         {
-            expect[key] = (r.After!, Enumerable.Range(0, r.After!.Triangles.Count).ToArray(), fromPath, true);
+            for (int i = 0; i < members.Count; i++) expect[members[i]] = (r.Members[i].After!, Enumerable.Range(0, r.Members[i].After!.Triangles.Count).ToArray(), fromPath, true);
             foreach (var (fk, og) in r.Others) expect[fk] = (og, Enumerable.Range(0, og.Triangles.Count).ToArray(), inboundIndex[fk].Path, false);   // a re-pointed neighbour keeps its own winner's grid
         }
+        // the plugins whose versions of each member the patch supersedes (every one after the source, in load order): the patch
+        // masters each, so nothing can sort it above them and let one win a member again (houseCARL, 2026-11-22)
+        IEnumerable<string> MastersOf(FormKey k) => (view.TouchingPlugins(k) ?? Array.Empty<string>())
+            .SkipWhile(n => !string.Equals(n, Path.GetFileName(fromPath), StringComparison.OrdinalIgnoreCase)).Skip(1);
+        var masters = members.SelectMany(m => MastersOf(m)).Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => order.ToList().FindIndex(p => string.Equals(Path.GetFileName(p), n, StringComparison.OrdinalIgnoreCase))).ToList();
+
         using var session = view.OpenSession();
         static System.Text.Json.Nodes.JsonArray Arr<T>(IEnumerable<T> xs) => new(xs.Select(x => (System.Text.Json.Nodes.JsonNode?)System.Text.Json.Nodes.JsonValue.Create(x)).ToArray());
+        System.Text.Json.Nodes.JsonObject Doors(UseVersionResult u) => new()
+        {
+            ["added"] = new System.Text.Json.Nodes.JsonArray(u.DoorsAdded.Select(d => (System.Text.Json.Nodes.JsonNode)DoorRow(view, session, d)).ToArray()),
+            ["dropped"] = new System.Text.Json.Nodes.JsonArray(u.DoorsDropped.Select(d => (System.Text.Json.Nodes.JsonNode)DoorRow(view, session, d)).ToArray()),
+        };
+        var first = r.Members.Count > 0 ? r.Members[0] : UseVersionResult.Refused();
         var row = new System.Text.Json.Nodes.JsonObject
         {
             ["from"] = from, ["fromPath"] = fromPath,
-            ["vertices"] = new System.Text.Json.Nodes.JsonObject { ["before"] = geom.Vertices.Count, ["after"] = version.Vertices.Count },
-            ["triangles"] = new System.Text.Json.Nodes.JsonObject { ["before"] = geom.Triangles.Count, ["after"] = version.Triangles.Count },
-            ["linksMatched"] = r.Matched, ["linksChanged"] = r.Changed, ["ledgeLinksCarriedUnverified"] = r.LedgesCarried, ["linksCut"] = 0, ["neighbourLinksRepointed"] = r.Repointed,
-            ["navmeshesRepointed"] = Arr(r.Others.Keys.Select(k => k.ToString())), ["doorsChecked"] = r.Doors.Count,
+            ["vertices"] = new System.Text.Json.Nodes.JsonObject { ["before"] = members.Sum(k => winners[k].Geom.Vertices.Count), ["after"] = members.Sum(k => VersionOf(k)!.Vertices.Count) },
+            ["triangles"] = new System.Text.Json.Nodes.JsonObject { ["before"] = members.Sum(k => winners[k].Geom.Triangles.Count), ["after"] = members.Sum(k => VersionOf(k)!.Triangles.Count) },
+            ["linksMatched"] = r.Members.Sum(u => u.Matched), ["linksChanged"] = r.Members.Sum(u => u.Changed), ["ledgeLinksCarriedUnverified"] = r.Members.Sum(u => u.LedgesCarried),
+            ["linksCut"] = 0, ["neighbourLinksRepointed"] = r.Repointed,
+            ["navmeshesRepointed"] = Arr(r.Others.Keys.Select(k => k.ToString())), ["doorsChecked"] = r.Members.Sum(u => u.Doors.Count),
             // ff83e12: each door the version adds or drops, by name, with who places it and where it leads
-            ["doors"] = new System.Text.Json.Nodes.JsonObject
+            ["doors"] = members.Count == 1 ? Doors(first) : null,
+            ["gainedNeighbours"] = Arr(r.Members.SelectMany(u => u.Gained).Distinct().Select(k => k.ToString())),
+            ["lostNeighbours"] = Arr(r.Members.SelectMany(u => u.Lost).Distinct().Select(k => k.ToString())),
+            ["navi"] = naviRow?.DeepClone(), ["grid"] = "rebuilt",
+            ["masters"] = Arr(masters),
+            // R10: how the set was named, what growth added, and each member as it is carried
+            ["set"] = new System.Text.Json.Nodes.JsonObject { ["mode"] = mode.ToString().ToLowerInvariant(), ["asked"] = Arr(asked.Select(k => k.ToString())), ["grown"] = Arr(members.Skip(asked.Count).Select(k => k.ToString())) },
+            ["members"] = new System.Text.Json.Nodes.JsonArray(members.Select((k, i) =>
             {
-                ["added"] = new System.Text.Json.Nodes.JsonArray(r.DoorsAdded.Select(d => (System.Text.Json.Nodes.JsonNode)DoorRow(view, session, d)).ToArray()),
-                ["dropped"] = new System.Text.Json.Nodes.JsonArray(r.DoorsDropped.Select(d => (System.Text.Json.Nodes.JsonNode)DoorRow(view, session, d)).ToArray()),
-            },
-            ["gainedNeighbours"] = Arr(r.Gained.Select(k => k.ToString())), ["lostNeighbours"] = Arr(r.Lost.Select(k => k.ToString())), ["navi"] = naviRow?.DeepClone(), ["grid"] = "rebuilt",
-            // the plugins whose versions of K the patch supersedes (every one after the source, in load order): the patch
-            // masters each, so nothing can sort it above them and let one win K again (houseCARL, 2026-11-22). A neighbour
-            // whose links are only re-pointed needs none.
-            ["masters"] = Arr((view.TouchingPlugins(key) ?? Array.Empty<string>())
-                .SkipWhile(n => !string.Equals(n, Path.GetFileName(fromPath), StringComparison.OrdinalIgnoreCase)).Skip(1)),
+                var u = i < r.Members.Count ? r.Members[i] : UseVersionResult.Refused();
+                var mo = new System.Text.Json.Nodes.JsonObject
+                {
+                    ["navmesh"] = k.ToString(), ["winner"] = new System.Text.Json.Nodes.JsonObject { ["plugin"] = winners[k].Plugin, ["path"] = winners[k].Path },
+                    ["vertices"] = new System.Text.Json.Nodes.JsonObject { ["before"] = winners[k].Geom.Vertices.Count, ["after"] = VersionOf(k)!.Vertices.Count },
+                    ["triangles"] = new System.Text.Json.Nodes.JsonObject { ["before"] = winners[k].Geom.Triangles.Count, ["after"] = VersionOf(k)!.Triangles.Count },
+                    ["doors"] = Doors(u), ["gainedNeighbours"] = Arr(u.Gained.Select(x => x.ToString())), ["lostNeighbours"] = Arr(u.Lost.Select(x => x.ToString())),
+                    ["masters"] = Arr(MastersOf(k)),
+                };
+                if (why.Count == 0 && islandsAfter.TryGetValue(k, out var ia)) mo["islandExpect"] = NavIsland.Json(ia);
+                return (System.Text.Json.Nodes.JsonNode)mo;
+            }).ToArray()),
         };
-        return new UseVersionPlan(null, why, ops, expect, row);
+        if (why.Count == 0 && islandsAfter.TryGetValue(members[0], out var i0)) row["island"] = NavIsland.Json(i0);
+        return new UseVersionPlan(null, why, ops, expect, row) { IslandAfter = why.Count == 0 ? islandsAfter.GetValueOrDefault(members[0]) : null, IslandsAfter = why.Count == 0 ? islandsAfter : new() };
     }
 
     /// <summary>A door as a plan row names it: the door, who places it, its triangle, and where it leads (the partner door
@@ -1110,22 +1328,19 @@ public static class NavUseVersionPlan
     /// are no longer reasons: both are carried. A repair plan names the kinds of a refused row in its one sentence, so a
     /// reader sees every cause, not only the first (the master's condition, 2026-11-22).</summary>
     public static string ReasonKind(string why) =>
-        why.Contains("no edge of its winning version lies along it") || why.Contains(" of its triangles lie along it") ? "border link meeting no edge"
+        why.Contains("so carrying it would leave that border one-way") ? "neighbour link into it the version does not return"
+        : why.Contains("whose edge there does not link back to") ? "border link the neighbour does not return"
+        : why.Contains("no edge of its winning version lies along it") || why.Contains(" of its triangles lie along it") || why.Contains("'s version of it lies along it") ? "border link meeting no edge"
         : why.Contains("lies along it") || why.Contains("triangles of ") && why.Contains("'s version lie along it") || why.Contains("cannot be re-pointed") ? "neighbour link into it that cannot be re-pointed"
         : why.Contains("The navmesh info map cannot follow the version") ? "navmesh info map entry that cannot follow"
         : why.Contains("so carrying it would leave a one-way border") ? "neighbour that still links in, dropped"
         : "other reason";
 
     /// <summary>Why <paramref name="key"/> cannot be edited for the navmesh info map, in one sentence, or null: the map cannot be
-    /// read, or the navmesh is an island in it (the map keeps its own copy of an island's geometry). The rule's one owner,
-    /// for every navedit edit and for navownprobe's use_version rows.</summary>
-    public static string? IslandRefusal(NaviView navi, FormKey key)
-    {
-        if (navi.Problem is { } np) return $"The navmesh info map cannot be read ({np}), so whether {key} is an island is not known.";
-        if (navi.Effective.TryGetValue(key, out var ent) && ent.Src.Map.MapInfos[ent.Index].Island is not null)
-            return $"{key} is an island in the navmesh info map, which keeps its own copy of the geometry; editing islands is not supported yet.";
-        return null;
-    }
+    /// read, so whether the navmesh is an island in it is not known (R7: an island itself is no longer a refusal; NavIsland
+    /// says what its island data becomes). For every navedit edit and navownprobe's use_version rows.</summary>
+    public static string? NaviRefusal(NaviView navi, FormKey key)
+        => navi.Problem is { } np ? $"The navmesh info map cannot be read ({np}), so whether {key} is an island is not known; check the plugins that carry it open in xEdit." : null;
 
     /// <summary>Every navmesh's winning link table on the order: FormKey to (winning plugin path, its links). Read once per
     /// plan, so a triangle edit finds every navmesh whose links name the one it renumbers.</summary>

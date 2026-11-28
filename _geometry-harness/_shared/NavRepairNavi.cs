@@ -38,10 +38,24 @@ public sealed class NaviView
         var keys = inOrder.Select(s => s.Map.FormKey).Distinct().ToList();
         if (keys.Count > 1)
             return new NaviView { Problem = $"the order carries {keys.Count} NAVI records ({string.Join(", ", keys)}), and the plan models one" };
-        var v = new NaviView { Record = keys.Count == 1 ? keys[0] : null, Winner = inOrder.LastOrDefault() };
+        var v = new NaviView { Record = keys.Count == 1 ? keys[0] : null, Winner = inOrder.LastOrDefault(), Sources = inOrder.ToList() };
         foreach (var s in inOrder)
             for (int i = 0; i < s.Map.MapInfos.Count; i++) v.Effective[s.Map.MapInfos[i].NavigationMesh.FormKey] = (s, i);
         return v;
+    }
+
+    /// <summary>Every plugin's NAVI, in load order.</summary>
+    public IReadOnlyList<NaviSource> Sources { get; private init; } = Array.Empty<NaviSource>();
+
+    /// <summary>The entry plugin <paramref name="plugin"/> (a file name) states for <paramref name="nav"/> in its own NAVI, or
+    /// null when it states none (use_version carries that plugin's own island data, R7).</summary>
+    public INavigationMapInfoGetter? Stated(FormKey nav, string plugin)
+    {
+        foreach (var s in Sources.Reverse())
+            if (string.Equals(s.Plugin, plugin, StringComparison.OrdinalIgnoreCase))
+                for (int i = 0; i < s.Map.MapInfos.Count; i++)
+                    if (s.Map.MapInfos[i].NavigationMesh.FormKey == nav) return s.Map.MapInfos[i];
+        return null;
     }
 
     /// <summary>Every plugin's NAVI in <paramref name="paths"/> (load order), opened as binary overlays; the caller disposes them.</summary>
@@ -80,7 +94,13 @@ public sealed record NaviEntryChange(FormKey Nav, string FromPlugin, string From
     /// into them, item 3), each removed once by value.</summary>
     public IReadOnlyList<FormKey> Remove { get; init; } = Array.Empty<FormKey>();
     public IReadOnlyList<FormKey> RemovePreferred { get; init; } = Array.Empty<FormKey>();
+    /// <summary>The flag and island data the entry ends with (NavIsland's rules; null: unchanged).</summary>
+    public NavIslandEntry? IslandAfter { get; init; }
 }
+
+/// <summary>One carried navmesh as the navmesh info map must follow it (R10): its version's door table and link targets, the
+/// neighbours it gains, and the island data its entry ends with (null: the entry's own).</summary>
+public sealed record NavVersionEntry(FormKey Key, IReadOnlyList<FormKey> DoorTable, IReadOnlyCollection<FormKey> Targets, IReadOnlyCollection<FormKey> Gained, NavIslandEntry? Island);
 
 /// <summary>The NAVI change of a relink plan, and its ops for housecarl_apply.</summary>
 public sealed class NaviPlan
@@ -166,15 +186,29 @@ public static class NavRepairNavi
     /// entry already standing so is left alone. Refused in one sentence: the map unreadable, a door table or gained neighbour for
     /// a navmesh no plugin's NAVI states, or a whole interior entry (the write engine's known gap).</summary>
     public static (NaviPlan Plan, string? Refused) ForVersion(FormKey key, IReadOnlyList<FormKey> doorTable, IReadOnlyCollection<FormKey> targets,
-                                                              IReadOnlyCollection<FormKey> gained, NaviView view)
+                                                              IReadOnlyCollection<FormKey> gained, NaviView view, NavIslandEntry? island = null)
+        => ForVersions(new[] { new NavVersionEntry(key, doorTable, targets, gained, island) }, view);
+
+    /// <summary>THE NAVI CHANGE FOR A CARRIED SET (R10): <see cref="ForVersion"/>'s rule for every member of
+    /// <paramref name="versions"/> at once, in one change: each member's entry follows its own version, and a neighbour outside
+    /// the set that several members gain gains each of them in one entry change. A member gained by another member is not
+    /// given a second change: its own entry already names the other (its version links back), so nothing is written twice.</summary>
+    public static (NaviPlan Plan, string? Refused) ForVersions(IReadOnlyList<NavVersionEntry> versions, NaviView view)
     {
         var np = new NaviPlan { Record = view.Record, WinnerPlugin = view.Winner?.Plugin, WinnerPath = view.Winner?.Path };
         if (view.Problem is { } pr) return (np, pr);
+        foreach (var v in versions)
+            if (v.Island is not null && !view.Effective.ContainsKey(v.Key) && v.Island.Island is not null)
+                return (np, view.Record is null ? "no plugin of the order carries a NAVI record" : $"no plugin's NAVI states {v.Key}, so its island data cannot be written");
+        var inSet = versions.Select(v => v.Key).ToHashSet();
+        var islands = versions.Where(v => v.Island is not null).ToDictionary(v => v.Key, v => v.Island!);
         // per entry: what it must name (null: only gain Add), what it gains, and its door table (null: unchanged)
         var want = new SortedDictionary<FormKey, (IReadOnlyCollection<FormKey>? Exactly, IReadOnlyCollection<FormKey> Add, IReadOnlyList<FormKey>? Doors)>(
             Comparer<FormKey>.Create((a, b) => string.CompareOrdinal(a.ToString(), b.ToString())));
-        want[key] = (targets.Union(gained).Where(m => m != key).ToList(), gained, doorTable);
-        foreach (var m in gained) if (m != key) want[m] = (null, new[] { key }, null);
+        foreach (var mv in versions) want[mv.Key] = (mv.Targets.Union(mv.Gained).Where(m => m != mv.Key).ToList(), mv.Gained, mv.DoorTable);
+        foreach (var mv in versions)
+            foreach (var m in mv.Gained)
+                if (m != mv.Key && !inSet.Contains(m)) want[m] = (null, (want.TryGetValue(m, out var w0) ? w0.Add : Array.Empty<FormKey>()).Append(mv.Key).Distinct().ToList(), null);
         foreach (var (n, (_, add, doors)) in want)
             if (!view.Effective.ContainsKey(n) && (add.Count > 0 || doors is { Count: > 0 }))
                 return (np, view.Record is null ? "no plugin of the order carries a NAVI record"
@@ -191,17 +225,21 @@ public static class NavRepairNavi
             var dropP = exactly is null ? new List<FormKey>() : pref.Where(m => !exactly.Contains(m)).ToList();
             int keep = doors is null ? 0 : KeptDoors(e, doors);
             bool doorsChange = doors is not null && (keep < e.LinkedDoors.Count || keep < doors.Count);
-            if (add.Count == 0 && dropM.Count == 0 && dropP.Count == 0 && !doorsChange) { np.Why.Add($"{n}'s entry ({src.Plugin}) already follows the version"); continue; }
+            var islandBefore = NavIsland.Of(e);
+            var islandTo = islands.TryGetValue(n, out var isl) && !NavIsland.Same(islandBefore, isl) ? isl : null;
+            if (add.Count == 0 && dropM.Count == 0 && dropP.Count == 0 && !doorsChange && islandTo is null) { np.Why.Add($"{n}'s entry ({src.Plugin}) already follows the version"); continue; }
             int? wi = src == view.Winner ? idx : null;
             np.Entries.Add(new NaviEntryChange(n, src.Plugin, src.Path, idx, wi, add, merged, pref)
             {
                 DoorsAfter = doorsChange ? doors!.ToList() : null, KeepDoors = doorsChange ? keep : 0, Remove = dropM, RemovePreferred = dropP,
+                IslandAfter = islandTo,
             });
             var what = string.Join(", and ", new[]
             {
                 add.Count > 0 ? $"gains {string.Join(" and ", add)}" : null,
                 dropM.Count + dropP.Count > 0 ? $"drops {string.Join(" and ", dropM.Concat(dropP).Distinct())}, which the version no longer links into" : null,
                 doorsChange ? $"takes the version's door table [{string.Join(", ", doors!)}] as its linked doors (were [{string.Join(", ", e.LinkedDoors.Select(d => d.Door.FormKey))}])" : null,
+                islandTo is not null ? (islandTo.Island is null ? "drops its island data, as the version's own entry has none" : "takes the version's own island data") : null,
             }.Where(x => x is not null));
             if (wi is { } w)
             {
@@ -214,6 +252,7 @@ public static class NavRepairNavi
                     for (int i = e.LinkedDoors.Count - 1; i >= keep; i--) np.Ops.Add(new RepairOp(id, $"MapInfos[{w}].LinkedDoors", "Remove", Key: i.ToString(CultureInfo.InvariantCulture)));
                     for (int j = keep; j < doors!.Count; j++) np.Ops.Add(new RepairOp(id, $"MapInfos[{w}].LinkedDoors", "Add", ComposeNode: LinkedDoor(doors[j])));
                 }
+                if (islandTo is not null) np.Ops.AddRange(NavIsland.Ops(id, w, islandBefore, islandTo));
                 np.Why.Add($"{n}'s entry in {src.Plugin}, the NAVI winner, {what}");
             }
             else if (e.Parent is INavigationMapInfoCellParentGetter)
@@ -222,11 +261,67 @@ public static class NavRepairNavi
                         $"{n}'s entry is stated by {src.Plugin}, not by the NAVI winner {view.Winner!.Plugin}, so it would be added whole, and the write engine cannot yet compose a whole interior entry");
             else
             {
-                np.Ops.Add(new RepairOp(id, "MapInfos", "Add", ComposeNode: Compose(e, add, doorsAfter: doorsChange ? doors : null, drop: dropM.Concat(dropP).ToList())));
+                np.Ops.Add(new RepairOp(id, "MapInfos", "Add", ComposeNode: Compose(e, add, doorsAfter: doorsChange ? doors : null, drop: dropM.Concat(dropP).ToList(), island: islandTo)));
                 np.Why.Add($"{n}'s entry, from {src.Plugin} (the winner {view.Winner!.Plugin} does not state it), is added whole, and it {what}");
             }
         }
         return (np, null);
+    }
+
+    /// <summary>THE NAVI CHANGE FOR AN ISLAND (R7): <paramref name="nav"/>'s entry ends with <paramref name="after"/>'s flag and
+    /// island data (NavIsland's rules decide it). In place on an entry the NAVI winner states, else the entry added whole from
+    /// the plugin that states it; refused in one sentence when no plugin's NAVI states it, or for a whole interior entry (the
+    /// write engine's known gap). Nothing is planned when the entry already stands so.</summary>
+    public static (NaviPlan Plan, string? Refused) ForIsland(FormKey nav, NavIslandEntry after, NaviView view)
+    {
+        var np = new NaviPlan { Record = view.Record, WinnerPlugin = view.Winner?.Plugin, WinnerPath = view.Winner?.Path };
+        if (view.Problem is { } pr) return (np, pr);
+        if (view.Record is null) return (np, "no plugin of the order carries a NAVI record, so the coarse map cannot be told of the island data");
+        if (!view.Effective.TryGetValue(nav, out var ef)) return (np, $"no plugin's NAVI states {nav}, so its island data cannot be changed");
+        var (src, idx) = ef;
+        var e = src.Map.MapInfos[idx];
+        var before = NavIsland.Of(e);
+        if (NavIsland.Same(before, after)) { np.Why.Add($"{nav}'s entry ({src.Plugin}) already holds that island data"); return (np, null); }
+        int? wi = src == view.Winner ? idx : null;
+        if (wi is null && e.Parent is INavigationMapInfoCellParentGetter)
+            return (np, $"{nav}'s navmesh info map entry is stated by {src.Plugin}, not by the NAVI winner {view.Winner!.Plugin}, so it would be added whole, and the write engine cannot yet compose a whole interior entry");
+        var merged = e.MergedTo.Select(x => x.FormKey).ToList(); var pref = e.PreferredMerges.Select(x => x.FormKey).ToList();
+        np.Entries.Add(new NaviEntryChange(nav, src.Plugin, src.Path, idx, wi, Array.Empty<FormKey>(), merged, pref) { IslandAfter = after });
+        string id = view.Record.Value.ToString();
+        if (wi is { } w)
+        {
+            np.Ops.AddRange(NavIsland.Ops(id, w, before, after));
+            np.Why.Add($"{nav}'s entry in {src.Plugin}, the NAVI winner, takes its new island data");
+        }
+        else
+        {
+            np.Ops.Add(new RepairOp(id, "MapInfos", "Add", ComposeNode: Compose(e, Array.Empty<FormKey>(), island: after)));
+            np.Why.Add($"{nav}'s entry, from {src.Plugin} (the winner {view.Winner!.Plugin} does not state it), is added whole with its new island data");
+        }
+        return (np, null);
+    }
+
+    /// <summary>The island changes of a repair plan's follow-the-ground rows (<paramref name="after"/>, each navmesh's entry as it
+    /// must end), added to the plan's one NAVI change beside the relinks' (<paramref name="relinks"/>). A navmesh whose entry the
+    /// relinks change too is refused by name (two changes to one entry in one patch; Gate A review condition 5); so is one whose
+    /// entry cannot be written. Returns the island entries' plan and the refusals.</summary>
+    public static (NaviPlan Plan, Dictionary<FormKey, string> Refused) ForGroundIslands(IReadOnlyDictionary<FormKey, NavIslandEntry> after, NaviView view, NaviPlan relinks)
+    {
+        var np = new NaviPlan { Record = view.Record, WinnerPlugin = view.Winner?.Plugin, WinnerPath = view.Winner?.Path };
+        var refused = new Dictionary<FormKey, string>();
+        var relinked = relinks.Entries.Select(e => e.Nav).ToHashSet();
+        foreach (var (nav, a) in after.OrderBy(kv => kv.Key.ToString(), StringComparer.Ordinal))
+        {
+            if (relinked.Contains(nav))
+            {
+                refused[nav] = $"{nav}'s navmesh info map entry is changed by this plan's relink too, and one patch cannot hold two changes to one entry; follow the ground on {nav} in a patch of its own, after the relink";
+                continue;
+            }
+            var (p, r) = ForIsland(nav, a, view);
+            if (r is not null) { refused[nav] = $"its island data cannot be written to the navmesh info map ({r})"; continue; }
+            np.Entries.AddRange(p.Entries); np.Ops.AddRange(p.Ops); np.Why.AddRange(p.Why);
+        }
+        return (np, refused);
     }
 
     /// <summary>A NAVI change as the plan and the read-back carry it: the record, its winner, and each entry changed.</summary>
@@ -246,6 +341,7 @@ public static class NavRepairNavi
             ["removePreferred"] = new JsonArray(e.RemovePreferred.Select(m => (JsonNode)m.ToString()).ToArray()),
             ["mergedToBefore"] = new JsonArray(e.MergedToBefore.Select(m => (JsonNode)m.ToString()).ToArray()),
             ["preferredMerges"] = new JsonArray(e.PreferredMerges.Select(m => (JsonNode)m.ToString()).ToArray()),
+            ["island"] = e.IslandAfter is null ? null : NavIsland.Json(e.IslandAfter),
         }).ToArray()),
     };
     static string F(float v) => v.ToString("R", CultureInfo.InvariantCulture);
@@ -344,8 +440,10 @@ public static class NavRepairNavi
     /// are those instead (its own kept as far as <see cref="KeptDoors"/> reaches, the rest written new); <paramref name="drop"/>
     /// leaves those neighbours out of its MergedTo and PreferredMerges.</summary>
     public static JsonObject Compose(INavigationMapInfoGetter e, IEnumerable<FormKey> add, IEnumerable<FormKey>? doors = null, IReadOnlyList<FormKey>? doorsAfter = null,
-                                     IReadOnlyCollection<FormKey>? drop = null)
+                                     IReadOnlyCollection<FormKey>? drop = null, NavIslandEntry? island = null)
     {
+        // island (R7): the entry's new flag and island data when given (Gate A review condition 4), else its own
+        var isl = island ?? NavIsland.Of(e);
         var sets = new JsonArray();
         drop ??= Array.Empty<FormKey>();
         foreach (var m in e.MergedTo.Select(x => x.FormKey).Where(x => !drop.Contains(x)).Concat(add)) sets.Add(Set("MergedTo", "Add", m.ToString()));
@@ -373,24 +471,13 @@ public static class NavRepairNavi
             },
             _ => throw new InvalidOperationException($"{e.NavigationMesh.FormKey}'s NAVI entry has a parent of a kind the plan does not model ({e.Parent?.GetType().Name ?? "none"})"),
         }));
-        if (e.Island is { } isl)
-        {
-            var isets = new JsonArray();
-            foreach (var v in isl.Vertices) isets.Add(Set("Vertices", "Add", $"{F(v.X)},{F(v.Y)},{F(v.Z)}"));
-            foreach (var t in isl.Triangles) isets.Add(Set("Triangles", "Add", $"{t.X},{t.Y},{t.Z}"));
-            sets.Add(Set("Island", "Set", compose: new JsonObject
-            {
-                ["type"] = "IslandData",
-                ["fields"] = new JsonObject { ["Min"] = $"{F(isl.Min.X)},{F(isl.Min.Y)},{F(isl.Min.Z)}", ["Max"] = $"{F(isl.Max.X)},{F(isl.Max.Y)},{F(isl.Max.Z)}" },
-                ["sets"] = isets,
-            }));
-        }
+        if (isl.Island is { } data) sets.Add(Set("Island", "Set", compose: NavIsland.Compose(data)));
         return new JsonObject
         {
             ["type"] = "NavigationMapInfo",
             ["fields"] = new JsonObject
             {
-                ["NavigationMesh"] = e.NavigationMesh.FormKey.ToString(), ["Unknown"] = e.Unknown.ToString(CultureInfo.InvariantCulture),
+                ["NavigationMesh"] = e.NavigationMesh.FormKey.ToString(), ["Unknown"] = isl.Unknown.ToString(CultureInfo.InvariantCulture),
                 ["Point"] = $"{F(e.Point.X)},{F(e.Point.Y)},{F(e.Point.Z)}", ["PreferredMergesFlag"] = e.PreferredMergesFlag.ToString(CultureInfo.InvariantCulture),
                 ["Unknown2"] = e.Unknown2.ToString(CultureInfo.InvariantCulture),
             },

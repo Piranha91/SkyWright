@@ -279,6 +279,11 @@ public static class OrderSweep
             if (e.Message.Length > 0) (e.Code == 0 ? Console.Out : Console.Error).WriteLine(e.Message);
             return e.Code;
         }
+        catch (CommandLineTooLongException tooLong)
+        {
+            Console.Error.WriteLine(tooLong.Message);
+            return 1;
+        }
         catch (Exception e)
         {
             Console.Error.WriteLine($"{e.GetType().Name}: {e.Message}");

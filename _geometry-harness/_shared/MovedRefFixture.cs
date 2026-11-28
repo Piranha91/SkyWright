@@ -185,7 +185,7 @@ public static class MovedRefFixture
         if (sub is null) { sub = new CellSubBlock { BlockNumber = subN, GroupType = GroupTypeEnum.InteriorCellSubBlock }; block.SubBlocks.Add(sub); }
         sub.Cells.Add(cell);
     }
-    static Worldspace World(FormKey wk, SkCell? top, params SkCell[] exteriors)
+    internal static Worldspace World(FormKey wk, SkCell? top, params SkCell[] exteriors)
     {
         var ws = new Worldspace(wk, Rel);
         if (top is not null) ws.TopCell = top;

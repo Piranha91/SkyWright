@@ -38,6 +38,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Do the depth-measurement mode's texture keep rule and mask rule give their known answers?](#tool-viewprobe.depth-measurement-selftest) — `viewprobe.depth-measurement-selftest`
 - [Do the frustum test and the occlusion rule's shape classes still give their known answers?](#tool-planeassess.selftest) — `planeassess.selftest`
 - [Do the geometry probes leave out activators and doors whose base record has no model, set editor markers aside by name, and keep a marker carrying a collision primitive unjudged?](#tool-_geometry-harness-tests-test_modelless_activators_doors.py) — `_geometry-harness/tests/test_modelless_activators_doors.py`
+- [Do the island box rule and flag rule hold on every navmesh info map entry of the base game?](#tool-_geometry-harness-tests-navi_floor.py) — `_geometry-harness/tests/navi_floor.py`
 - [Do the load-order and geometry rules pass their constructed known-answer cases?](#tool-proofprobe) — `proofprobe`
 - [Do the report and reel give a verdict and next step per patch, say unfinished testing first, name one patch per outcome, show every produced picture, and plan the reel's counts, labels, pages and closing in the report's terms?](#tool-integration-housecarl-tests-test_reader_rules.py) — `integration/housecarl/tests/test_reader_rules.py`
 - [Do the report and reel say a single case in the singular, one reason per unchecked check, offline renders as renders, the location list's share of the load order, places by name or grid, forward-versus-carry-both, worse patch placements, a patch's lines on its own pair only, and relative PDF links?](#tool-integration-housecarl-tests-test_report_reel_batch.py) — `integration/housecarl/tests/test_report_reel_batch.py`
@@ -320,6 +321,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [What character appearance and runtime outfit occupy this pose?](#tool-viewprobe.npc) — `viewprobe.npc`
 - [What does Base Object Swapper change in this scene?](#tool-viewprobe.bos) — `viewprobe.bos`
 - [What does a lower storey look like with upper geometry sliced away?](#tool-viewprobe.cull-above) — `viewprobe.cull-above`
+- [What does a written plugin's navmesh info map (NAVI entries, island data) and navmesh box hold, read straight from its bytes?](#tool-_geometry-harness-tests-navi_bytes.py) — `_geometry-harness/tests/navi_bytes.py`
 - [What does an app scan list as a lighting clash (the lighting check behind the registry's environment.lighting row)?](#tool-lightprobe) — `lightprobe`
 - [What does each candidate mod touch, which edit kinds does it and its key patches make, and which assets does it override?](#tool-modcensus.run) — `modcensus.run`
 - [What does each edited plane hide, by owner, in each rendered view of a plane-patch group?](#tool-planeassess.score) — `planeassess.score`
@@ -403,6 +405,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Which helpers do the evaluation tools on both sides of the houseCARL integration fence share?](#tool-evalbase) — `evalbase`
 - [Which installed plugins should one new mod be evaluated against, and why is each other plugin left out?](#tool-selectprobe) — `selectprobe`
 - [Which installer patch options were offered but not selected?](#tool-fomodprobe) — `fomodprobe`
+- [Which items did one mod add to a form list, or quest, dialogue, location and package fields did it change, that a later mod's plugin, not made with it, undoes?](#tool-recordprobe) — `recordprobe`
 - [Which kinds of edit does a patch make to a record, in the fixed vocabulary (ADD, DISABLE, MOVE, ENABLE-PARENT, FIELD:<name> and the rest)?](#tool-editkinds) — `editkinds`
 - [Which leads does a pass hold for this mod, this cell or these two plugins?](#tool-orderleads.read) — `orderleads.read`
 - [Which lighting clashes does the combination of the selected mods with the rest of the load order make that neither makes alone (a light left with no fixture, a fixture left with no light, a light behind a wall, a light that lights nothing, a fixture lit twice, and the over-limit count), interiors and exteriors?](#tool-lightprobe) — `lightprobe`
@@ -803,6 +806,36 @@ Modifiers (do not select a separate mode):
 
 - `--out` — where to write the generated fixtures (never the tracked tree)
 - `--registry-from` — Set registry from for this invocation; consult the linked parser for accepted values.
+
+<a id="tool-_geometry-harness-tests-navi_bytes.py"></a>
+
+### _geometry-harness/tests/navi_bytes.py
+
+**What does a written plugin's navmesh info map (NAVI entries, island data) and navmesh box hold, read straight from its bytes?**
+
+Hold a written navmesh patch to a second reader that shares no code with the writer (the navmesh repair suites import it).
+
+Inputs: A plugin file.
+
+Outputs: Its NAVI entries and NAVM navmeshes, fields and raw bytes.
+
+Source: [_geometry-harness/tests/navi_bytes.py](../_geometry-harness/tests/navi_bytes.py) — `A raw-bytes reader of a plugin's navmesh info map`
+
+
+<a id="tool-_geometry-harness-tests-navi_floor.py"></a>
+
+### _geometry-harness/tests/navi_floor.py
+
+**Do the island box rule and flag rule hold on every navmesh info map entry of the base game?**
+
+Measure the vanilla floor of the island rules on the five base-game files (test_navedit.py's real-data case runs it).
+
+Inputs: The game's Data folder (Skyrim.esm, Update.esm and the three DLC).
+
+Outputs: One JSON line per file: entries, islands, empty meshes, box and flag rule counts.
+
+Source: [_geometry-harness/tests/navi_floor.py](../_geometry-harness/tests/navi_floor.py) — `The vanilla floor of the island rules`
+
 
 <a id="tool-_geometry-harness-tests-test_app_bundle_boundary.py"></a>
 
@@ -4715,7 +4748,7 @@ Modifiers (do not select a separate mode):
 - `--navrepair-selftest` — --navrepair-selftest: the navmesh repair plan (_shared/NavRepair.cs) on small in-memory navmeshes, one ok or FAIL line per case, for tests/test_navmesh_repair_rules.py; test-only.
 - `--repair-readback` — --repair-readback PLAN PATCH OUT: hold every navmesh a written repair patch carries to its winner with exactly the plan's change applied (_shared/NavRepairReadBack.cs), written to OUT as JSON; exit 1 names each difference.
 - `--write-edge-link-fixture` — --write-edge-link-fixture DIR: write the edge-link identity fixture (navownprobe/EdgeLinkFixture.cs) that tests/test_navown_edge_identity.py runs the real probe on; test-only.
-- `--write-mover-fixture` — write the navmesh-repair mover fixture (optionally with doors or a neighbour) and print its path
+- `--write-mover-fixture` — write the navmesh-repair mover fixture (optionally with doors or a neighbour, or one island variant: island-version, island-plain-version, island-plain-winner, island-noentry, island-sloppy-version, island-ground, island-ground-whole, island-door) and print its path
 - `--write-navi-master-fixture` — write the navmesh-repair fixture whose NAVI master case a test reads, and print its path
 - `--write-navrepair-fixture` — --write-navrepair-fixture DIR: write the navmesh repair fixture (navownprobe/NavRepairFixture.cs) that tests/test_navmesh_repair_rules.py runs the real probe on; test-only.
 
@@ -5576,22 +5609,24 @@ Modifiers (do not select a separate mode):
 
 **Which files do a mod's records use that the game cannot find because another mod's archive of the same name replaces the one that has them?**
 
-The record checks, one per run (--check). loadability.dangling-references (held: a scan does not run it unless it is ticked, until it finds a real clash between two mods): houseCARL's errors sweep over the whole order, called in process; a link is a row only between two mods' plugins, the target's plugin loaded and either plugin in the selection; links in or into the game's own files, within one plugin or one mod, or into a plugin missing from the order are counted under their reasons. records.contested-fields and records.cell-attributes (on by default since 2026-11-27, when a person read the lab's rows): houseCARL's record tool in process reads each contested record the selection touches and each other version's change against what its plugin was made with; a field one mod changed whose winning value is another mod's, the winner not made with the loser, is a row, both directions judged; made-with pairs, one mod, game files, navmesh and registration records, positions within the field scope's tolerance and derived cell data are counted under their reasons. loadability.missing-assets (held, until it finds a real clash between two mods): each record the selection touches is read as its winning plugin holds it with houseCARL's file-field reading, and houseCARL's file tool in process says whether the game finds each file; a file it does not find is asked again with only the record's own mod and its masters' mods enabled, and is a row only when one of them has it in an archive another mod's archive of the same name replaces; files the game finds, the game's own records and files no such mod has are counted under their reasons. --instrument gives the earlier Python capture's rule as a known answer, never a scan. --self-test runs its known answers; --write-self-test-emit writes runcontrol's fixture.
+**Which items did one mod add to a form list, or quest, dialogue, location and package fields did it change, that a later mod's plugin, not made with it, undoes?**
+
+The record checks, one per run (--check). loadability.dangling-references (held: a scan does not run it unless it is ticked, until it finds a real clash between two mods): houseCARL's errors sweep over the whole order, called in process; a link is a row only between two mods' plugins, the target's plugin loaded and either plugin in the selection; links in or into the game's own files, within one plugin or one mod, or into a plugin missing from the order are counted under their reasons. records.contested-fields and records.cell-attributes (on by default since 2026-11-27, when a person read the lab's rows): houseCARL's record tool in process reads each contested record the selection touches and each other version's change against what its plugin was made with; a field one mod changed whose winning value is another mod's, the winner not made with the loser, is a row, both directions judged; made-with pairs, one mod, game files, navmesh and registration records, positions within the field scope's tolerance and derived cell data are counted under their reasons. loadability.missing-assets (held, until it finds a real clash between two mods): each record the selection touches is read as its winning plugin holds it with houseCARL's file-field reading, and houseCARL's file tool in process says whether the game finds each file; a file it does not find is asked again with only the record's own mod and its masters' mods enabled, and is a row only when one of them has it in an archive another mod's archive of the same name replaces; files the game finds, the game's own records and files no such mod has are counted under their reasons. records.registration-and-dialogue (held, until it finds a real clash between two mods): the same lost-edit rule on quests, topics and their lines, scenes, form lists, locations, story-manager nodes and packages, with a form list's items judged item by item (an item one mod added that the winning list lacks, or removed that it holds, is a row naming the item); houseCARL's own script and dialogue findings on the selection are counted, never rows; the order of a topic's lines is not read. --instrument gives the earlier Python capture's rule as a known answer, never a scan. --self-test runs its known answers; --write-self-test-emit writes runcontrol's fixture.
 
 Inputs: A load order (profile or --order candidate) and the check to run; optionally the plan's population file (--population), whose plugins and mod folders are the selection.
 
-Outputs: A conflict file of the check's rows (DANGLING: the record that uses the missing one, and the missing record; LOST-EDIT: the record, and its field and losing plugin; MISSING-ASSET: the record, and the file and its archive) and its coverage: every link houseCARL reported counted under its reason, and what could not be judged.; Beside it OUT.json.view (the order as houseCARL read it) and OUT.json.housecarl (houseCARL's own store).; For the lost-edit checks, OUT.json.rows.json: each row's record, field, the two plugins and their mods, the lost, winning and made-with values, and whether the winner changed the field itself.; For the missing-assets check, OUT.json.rows.json: every file the game does not find, its plugin, record, archive, the mod with the file and the mod whose archive wins, and the verdict; and OUT.json.own-N (the order with only one plugin's own mods enabled) with its store.
+Outputs: A conflict file of the check's rows (DANGLING: the record that uses the missing one, and the missing record; LOST-EDIT: the record, and its field and losing plugin (and the item, for a form list); MISSING-ASSET: the record, and the file and its archive) and its coverage: every link houseCARL reported counted under its reason, and what could not be judged.; Beside it OUT.json.view (the order as houseCARL read it) and OUT.json.housecarl (houseCARL's own store).; For the lost-edit checks (registration and dialogue too), OUT.json.rows.json: each row's record, field, the two plugins and their mods, the lost, winning and made-with values, whether the winner changed the field itself, and for a form list the item and whether the losing plugin added or removed it.; For the missing-assets check, OUT.json.rows.json: every file the game does not find, its plugin, record, archive, the mod with the file and the mod whose archive wins, and the verdict; and OUT.json.own-N (the order with only one plugin's own mods enabled) with its store.
 
 Source: [_geometry-harness/recordprobe/Program.cs](../_geometry-harness/recordprobe/Program.cs) — `// recordprobe — the record checks: clashes between two mods that houseCARL's record and check tools find`
 
 
 Modifiers (do not select a separate mode):
 
-- `--check` — The registry id of the record check to run (required): loadability.dangling-references, loadability.missing-assets, records.contested-fields or records.cell-attributes.
+- `--check` — The registry id of the record check to run (required): loadability.dangling-references, loadability.missing-assets, records.contested-fields, records.cell-attributes or records.registration-and-dialogue.
 - `--emit` — Write the conflict file here (required).
 - `--game` — Game directory (else the harness config, only for its own instance).
 - `--instance` — MO2 instance directory (else HOUSECARL_MO2_INSTANCE; never the harness config: refused instance-not-explicit).
-- `--instrument` — Lost-edit checks only: the earlier Python capture's rule (the selection's plugins as the only losers, each against the plugin beneath it, no between-mods clause), a known answer; never in the registry, never a scan.
+- `--instrument` — The three lost-edit checks only (a form list compared as one value): the earlier Python capture's rule (the selection's plugins as the only losers, each against the plugin beneath it, no between-mods clause), a known answer; never in the registry, never a scan.
 - `--order` — Read this candidate configuration (CandidateFile) instead of the profile's order.
 - `--population` — The plan's population file: its plugins and mod folders are the selection; without it every plugin is.
 - `--profile` — MO2 profile name (else the harness config, only for its own instance).
@@ -6111,6 +6146,7 @@ Source: [_geometry-harness/scopeprobe/Program.cs](../_geometry-harness/scopeprob
 Modifiers (do not select a separate mode):
 
 - `--also-scan` — Read a plugin file outside the configuration (a disabled mod's) for CELL records in the footprint or its ring, without loading it; repeatable. Results under nearby.alsoScanned.
+- `--also-scan-file` — Read the --also-scan plugin files from a list file, one path a line (UTF-8), so the command line does not grow with the load order; runcontrol's scope stage passes the disabled mods' plugins this way. Missing or unreadable: one sentence, exit 2, no scope.
 - `--assets` — Set assets for this invocation; consult the linked parser for accepted values.
 - `--disable` — Set disable for this invocation; consult the linked parser for accepted values.
 - `--enable` — Set enable for this invocation; consult the linked parser for accepted values.
@@ -6122,6 +6158,7 @@ Modifiers (do not select a separate mode):
 - `--ring` — Also name the plugins whose CELL records sit within N grid cells (0 to 5) of an exterior footprint cell, under nearby.plugins.
 - `--self-test` — Run the known-answer self-test over the probe's synthetic fixture; exit 0 when every case passes.
 - `--target` — Set target for this invocation; consult the linked parser for accepted values.
+- `--target-file` — Read the --target plugin names from a list file, one name a line (UTF-8); runcontrol's scope stage passes its targets this way. Missing or unreadable: one sentence, exit 2, no scope.
 
 <a id="tool-scripts-runlog.py"></a>
 

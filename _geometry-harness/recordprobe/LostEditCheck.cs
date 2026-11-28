@@ -23,8 +23,13 @@ static class LostEditCheck
     public const string NoCompare = "a version houseCARL could not compare";
     const int Batch = 400;
 
+    /// <summary>Which of the three lost-edit checks: records other than cells and registration records, cells, or the
+    /// registration and dialogue records (RegistrationCheck's lost-edit part).</summary>
+    public enum Part { Fields, Cells, Registration }
+
     public static CheckResult Fields(RecordContext ctx) => Run(ctx, cells: false);
     public static CheckResult Cells(RecordContext ctx) => Run(ctx, cells: true);
+    public static CheckResult Run(RecordContext ctx, bool cells) => Run(ctx, cells ? Part.Cells : Part.Fields, out _);
 
     /// <summary>One record tool call in JSON; refuses an error, a non-JSON answer, or an answer cut short.</summary>
     internal static JsonElement Ask(RecordContext ctx, Dictionary<string, object?> args, string what)
@@ -70,8 +75,35 @@ static class LostEditCheck
     sealed record Version(string FormId, string Type, string? EditorId, string Loser, string Winner, IReadOnlyList<string> Touchers,
                           List<string> VsWinner, bool NodeComplete, string? Versus, IReadOnlyDictionary<string, (IReadOnlyList<string> Lines, bool Complete)> Providers);
 
-    public static CheckResult Run(RecordContext ctx, bool cells)
+    /// <summary>Each item of each listed list in one copy of a record, read as houseCARL's fields form gives it
+    /// (<c>Items[0]</c>, <c>Items[1].X</c> ...; an element's leaves joined): null when the copy is absent, its read errs or is
+    /// cut short, or a line under a list is a note other than "no such field".</summary>
+    internal static Dictionary<string, List<string>>? ItemsOf(JsonElement rec, IReadOnlyCollection<string> lists)
     {
+        if (S(rec, "error") is not null || !rec.TryGetProperty("fields", out var fs) || fs.ValueKind != JsonValueKind.Array) return null;
+        var byList = lists.ToDictionary(l => l, _ => new SortedDictionary<int, List<string>>(), StringComparer.Ordinal);
+        foreach (var f in fs.EnumerateArray())
+        {
+            string path = S(f, "path") ?? "";
+            if (path == "…") return null;
+            string top = RecordDelta.Top(path);
+            if (!byList.TryGetValue(top, out var els)) continue;
+            string? value = S(f, "value"), note = S(f, "note");
+            if (value is null && !ReadEngine.IsNoSuchFieldNote(note)) return null;   // a fault or a field not compared: not read in full
+            if (path.Length == top.Length || value is null) continue;               // the list's own summary line
+            int rb = path.IndexOf(']', top.Length + 1);
+            if (path[top.Length] != '[' || rb < 0 || !int.TryParse(path.AsSpan(top.Length + 1, rb - top.Length - 1), out int idx)) continue;
+            string rel = path[(rb + 1)..].TrimStart('.');
+            if (!els.TryGetValue(idx, out var parts)) els[idx] = parts = new();
+            parts.Add(rel.Length == 0 ? value : $"{rel}={value}");
+        }
+        return byList.ToDictionary(kv => kv.Key, kv => kv.Value.Values.Select(p => string.Join("; ", p.OrderBy(x => x, StringComparer.Ordinal))).ToList(), StringComparer.Ordinal);
+    }
+
+    public static CheckResult Run(RecordContext ctx, Part part, out List<JsonElement> matches)
+    {
+        bool cells = part == Part.Cells, registration = part == Part.Registration;
+        matches = new List<JsonElement>();
         var scope = RecordFieldScope.Shipped;
         var order = ctx.Order;
         var names = order.Select(p => p.Name).ToList();
@@ -83,7 +115,8 @@ static class LostEditCheck
         var setAside = new Dictionary<string, long>(StringComparer.Ordinal);
         var unjudged = new Dictionary<string, long>(StringComparer.Ordinal);
         void Add(Dictionary<string, long> d, string why, long n = 1) => d[why] = d.GetValueOrDefault(why) + n;
-        string population = cells ? "versions of contested cells that do not win (one plugin's copy of one cell)"
+        string population = registration ? RegistrationCheck.Population
+                           : cells ? "versions of contested cells that do not win (one plugin's copy of one cell)"
                                   : "versions of contested records other than cells that do not win (one plugin's copy of one record)";
 
         var selected = order.Where(p => p.Selected).Select(p => p.Name).ToList();
@@ -96,7 +129,7 @@ static class LostEditCheck
 
         // the selection: every record a selected plugin touches; contested ones (override depth above one) are read
         var summary = Ask(ctx, new() { ["plugins"] = new Dictionary<string, object?> { ["names"] = selected }, ["project"] = new Dictionary<string, object?> { ["form"] = "summary" } }, "the selection's records");
-        var matches = summary.TryGetProperty("matches", out var ms) && ms.ValueKind == JsonValueKind.Array ? ms.EnumerateArray().ToList() : new List<JsonElement>();
+        matches = summary.TryGetProperty("matches", out var ms) && ms.ValueKind == JsonValueKind.Array ? ms.EnumerateArray().ToList() : new List<JsonElement>();
         long total = summary.TryGetProperty("total", out var tot) && tot.ValueKind == JsonValueKind.Number ? tot.GetInt64() : -1;
         if (total != matches.Count)
             throw new CheckRefused($"houseCARL listed {matches.Count} of the {total} records the selection touches, so the check cannot be complete; scan again, and report it if it repeats.");
@@ -107,6 +140,7 @@ static class LostEditCheck
         {
             bool isCell = S(m, "type") == "Cell";
             if (isCell != cells) continue;
+            if (registration && !scope.Registration(S(m, "type") ?? "")) continue;   // the other two checks read these and set them aside
             if (!m.TryGetProperty("override_depth", out var d) || d.ValueKind != JsonValueKind.Number) { Add(unjudged, NoDepth); continue; }
             if (d.GetInt32() > 1 && S(m, "formid") is { } f) contested.Add(f);
         }
@@ -130,7 +164,7 @@ static class LostEditCheck
                 string loser = RecordDelta.Spelling(S(n, "plugin"), names) ?? S(n, "plugin") ?? "";
                 if (string.Equals(loser, winner, StringComparison.OrdinalIgnoreCase)) continue;
                 var lm = MastersOf(loser); var wm = MastersOf(winner);
-                var admit = LostEditRule.Admit(type, End(byName, loser), End(byName, winner), wm.Closure.Contains(loser), lm.Blind || wm.Blind, ctx.Instrument, scope);
+                var admit = LostEditRule.Admit(type, End(byName, loser), End(byName, winner), wm.Closure.Contains(loser), lm.Blind || wm.Blind, ctx.Instrument, scope, registration);
                 if (!admit.Judge) { if (admit.SetAside is { } sa) Add(setAside, sa); if (admit.NotJudged is { } nj) Add(unjudged, nj); continue; }
                 string? versus = ctx.Instrument ? "previous_provider" : LostEditRule.MadeWithPole(touchers, loser, lm.Closure);
                 pending.Add(new Version(fid, type, S(tree, "editorid"), loser, winner, touchers, Lines(n, "deltas"), Complete(n), versus, providers));
@@ -143,6 +177,42 @@ static class LostEditCheck
             foreach (var (fid, row) in Rows(ctx, g.Select(v => v.FormId), b => new() { ["formids"] = b, ["source"] = g.Key.Loser, ["versus"] = g.Key.Item2, ["project"] = new Dictionary<string, object?> { ["form"] = "delta" } },
                                              $"{g.Key.Loser}'s changes"))
                 deltas[(g.Key.Loser, g.Key.Item2, fid)] = row;
+
+        // the item lists' three copies (the loser, what it was made with, the winner) where the loser's lines name a list the
+        // scope judges item by item; the instrument compares a list as one value, as the Python capture did
+        var itemCopies = new Dictionary<(string Plugin, string FormId), Dictionary<string, List<string>>?>();
+        bool NamesItemList(Version v, IEnumerable<string> lines) => scope.ItemLists(v.Type).Count > 0
+            && lines.Any(l => scope.ItemList(v.Type, RecordDelta.Top(l.Split(':', '=', ' ')[0])));
+        IEnumerable<string> OwnLines(Version v) => v.Versus is null ? v.VsWinner
+            : deltas.TryGetValue((v.Loser, v.Versus, v.FormId), out var dr) ? Lines(dr, "deltas") : Enumerable.Empty<string>();
+        var itemVersions = ctx.Instrument ? new List<Version>() : pending.Where(v => NamesItemList(v, OwnLines(v))).ToList();
+        foreach (var g in itemVersions.SelectMany(v => new[] { (v.Loser, v), (v.Winner, v) }.Concat(v.Versus is null ? Array.Empty<(string, Version)>() : new[] { (v.Versus, v) }))
+                     .GroupBy(x => x.Item1, StringComparer.OrdinalIgnoreCase))
+        {
+            var ids = g.Select(x => x.Item2.FormId).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.Ordinal).ToList();
+            var lists = g.SelectMany(x => scope.ItemLists(x.Item2.Type)).Distinct(StringComparer.Ordinal).ToArray();
+            for (int i = 0; i < ids.Count; i += Batch)
+            {
+                var batch = ids.Skip(i).Take(Batch).ToArray();
+                var root = Ask(ctx, new() { ["formids"] = batch, ["source"] = g.Key, ["project"] = new Dictionary<string, object?> { ["form"] = "fields", ["fields"] = lists, ["depth"] = 2 } },
+                               $"{g.Key}'s form-list items");
+                var recs = root.TryGetProperty("records", out var rs) && rs.ValueKind == JsonValueKind.Array ? rs.EnumerateArray().ToList() : new List<JsonElement>();
+                if (recs.Count < batch.Length)
+                    throw new CheckRefused($"houseCARL's record read ({g.Key}'s form-list items) returned {recs.Count} of {batch.Length} records, so the check cannot be complete; scan again, and report it if it repeats.");
+                foreach (var rec in recs) if (S(rec, "formid") is { } f) itemCopies[(g.Key.ToLowerInvariant(), f.ToLowerInvariant())] = ItemsOf(rec, lists);
+            }
+        }
+        Dictionary<string, ListItems>? ItemsFor(Version v)
+        {
+            if (!registration || ctx.Instrument) return null;
+            var got = new Dictionary<string, ListItems>(StringComparer.Ordinal);
+            Dictionary<string, List<string>>? Copy(string? p) => p is null ? null : itemCopies.GetValueOrDefault((p.ToLowerInvariant(), v.FormId.ToLowerInvariant()));
+            var mine = Copy(v.Loser); var theirs = Copy(v.Winner); var made = Copy(v.Versus);
+            foreach (var l in scope.ItemLists(v.Type))
+                if (mine?.GetValueOrDefault(l) is { } m && theirs?.GetValueOrDefault(l) is { } w && (v.Versus is null || made?.GetValueOrDefault(l) is not null))
+                    got[l] = new ListItems(m, v.Versus is null ? null : made![l], w);
+            return got;   // a list missing here, while a line names it, is not judged
+        }
 
         var found = new List<(Version V, LostField F)>();
         long judged = 0, fields = 0;
@@ -162,7 +232,8 @@ static class LostEditCheck
             }
             var lm = MastersOf(v.Loser);
             // the instrument is the Python capture's rule, which compared rotations and positions as plain numbers and listed derived data
-            var r = LostEditRule.Judge(v.Type, authored, v.VsWinner, names, scope, complete, defines, lm.Closure, v.Providers, lm.Blind, angles: !ctx.Instrument, tolerances: !ctx.Instrument);
+            var r = LostEditRule.Judge(v.Type, authored, v.VsWinner, names, scope, complete, defines, lm.Closure, v.Providers, lm.Blind, angles: !ctx.Instrument, tolerances: !ctx.Instrument,
+                                       items: ItemsFor(v));
             foreach (var (why, n) in r.NotJudged) Add(unjudged, why, n);
             foreach (var (why, n) in r.SetAside ?? new Dictionary<string, long>()) Add(setAside, why, n);
             if (!complete) continue;
@@ -188,13 +259,16 @@ static class LostEditCheck
             else if (!winnerDeltas.TryGetValue((v.Winner, wPole, v.FormId), out var wr) || S(wr, "error") is not null) changed = null;
             else changed = LostEditRule.WinnerChanged(f.Field, Lines(wr, "deltas"), Complete(wr), false, v.Type, names, scope);
             var lp = byName.GetValueOrDefault(v.Loser); var wp = byName.GetValueOrDefault(v.Winner);
-            string sentence = Sentence(lp, v.Loser, wp, v.Winner, v.Type, v.EditorId, v.FormId, f, changed, ctx.Instrument);
+            string sentence = f.Item is not null ? ItemSentence(lp, v.Loser, wp, v.Winner, v.Type, v.EditorId, v.FormId, f)
+                                                 : Sentence(lp, v.Loser, wp, v.Winner, v.Type, v.EditorId, v.FormId, f, changed, ctx.Instrument);
+            string identity = $"{v.FormId}#{f.Field}#{v.Loser}" + (f.Item is null ? "" : $"#{(f.Added == true ? "+" : "-")}{f.Item}");
             rows.Add(new Conflict(Kind, v.Loser, v.Winner, sentence,
                 new[] { new ConflictRecord(v.FormId, "record", v.EditorId, PhysicalState.Holds, $"its {f.Field} field") },
-                new[] { new ConflictRecord($"{v.FormId}#{f.Field}#{v.Loser}", "field", f.Field) }));
+                new[] { new ConflictRecord(identity, "field", f.Field) }));
             detail.Add(new
             {
-                check = cells ? CellsId : FieldsId, formid = v.FormId, type = v.Type, editorid = v.EditorId, field = f.Field, paths = f.Paths,
+                check = registration ? RegistrationCheck.Id : cells ? CellsId : FieldsId, formid = v.FormId, item = f.Item,
+                added = f.Added switch { true => "yes", false => "no", null => null }, type = v.Type, editorid = v.EditorId, field = f.Field, paths = f.Paths,
                 loser = v.Loser, loserMod = lp is null ? null : RecordClashRule.ModName(lp.Mod), lost = f.Lost,
                 winner = v.Winner, winnerMod = wp is null ? null : RecordClashRule.ModName(wp.Mod), winning = f.Winner,
                 madeWith = v.Versus, madeWithValue = f.MadeWith, winnerMadeWith = wPole,
@@ -221,6 +295,24 @@ static class LostEditCheck
 
     /// <summary>A value short and plain enough to say inside the sentence, or null.</summary>
     static string? Sayable(string? v) => v is { Length: > 0 and <= 48 } && !v.Contains(". ") && !v.Contains(';') && !v.EndsWith('.') ? v : null;
+
+    /// <summary>A record or item id in words: "000A01 in Base.esp" for "000A01:Base.esp".</summary>
+    static string IdWords(string formId)
+    {
+        int colon = formId.IndexOf(':');
+        return colon > 0 ? $"{formId[..colon]} in {formId[(colon + 1)..]}" : formId;
+    }
+
+    /// <summary>An item row in a modder's words (the form-list item rule): which item the loser added or removed, which list,
+    /// that the winner's list does not hold it (or still holds it), and that the winner was not made with the loser.</summary>
+    public static string ItemSentence(OrderPlugin? lp, string loser, OrderPlugin? wp, string winner, string type, string? edid, string formId, LostField f)
+    {
+        string list = edid is { Length: > 0 } ? $"the {TypeWords(type)} {edid} ({IdWords(formId)})" : $"the {TypeWords(type)} {IdWords(formId)}";
+        string item = IdWords(f.Item ?? "");
+        return f.Added == true
+            ? $"{RecordChecks.Named(lp, loser)} added {item} to {list}; {RecordChecks.Named(wp, winner)} wins with a list that does not hold it and was not made with {loser}, so the item is not in the list in game."
+            : $"{RecordChecks.Named(lp, loser)} removed {item} from {list}; {RecordChecks.Named(wp, winner)} wins with a list that still holds it and was not made with {loser}, so the item is back in the list in game.";
+    }
 
     /// <summary>The row in a modder's words: what was changed, whose value wins, and that the winner was not made with the loser.</summary>
     public static string Sentence(OrderPlugin? lp, string loser, OrderPlugin? wp, string winner, string type, string? edid, string formId,

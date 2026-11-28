@@ -158,6 +158,14 @@ public static class ScopeRules
         return $" No placed object uses a mesh it changes: of the {Count(r.Refs, "placed object")} that {Use(r.Refs)} one of its meshes, {Split(r)}.";
     }
 
+    /// <summary>The list files the scope stage writes beside each arm's scope for scopeprobe's --target-file and
+    /// --also-scan-file (scopeprobe's ListFile reads them).</summary>
+    public const string TargetListName = "targets.txt", AlsoScanListName = "also-scan.txt";
+
+    /// <summary>Writes a list file for scopeprobe: one entry a line, UTF-8 without a byte order mark.</summary>
+    public static void WriteList(string path, IEnumerable<string> entries) =>
+        File.WriteAllBytes(path, new UTF8Encoding(false).GetBytes(string.Concat(entries.Select(e => e + "\n"))));
+
     /// <summary>The plugins one arm's scope targets.</summary>
     public static List<string> Targets(RunContext ctx, PyDict res, PyDict arm)
     {

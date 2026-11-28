@@ -144,7 +144,7 @@ static class RecordSelfTest
     public static int Run()
     {
         int failed = 0;
-        var all = Cases.Concat(LostEditSelfTest.Cases).Concat(MissingAssetSelfTest.Cases).ToList();
+        var all = Cases.Concat(LostEditSelfTest.Cases).Concat(MissingAssetSelfTest.Cases).Concat(RegistrationSelfTest.Cases).ToList();
         foreach (var (name, check) in all)
         {
             string? why;
@@ -157,7 +157,7 @@ static class RecordSelfTest
         return failed == 0 ? 0 : 1;
     }
 
-    /// <summary>KD3's emit, LE3's, LE25's and MA3's, for runcontrol's self-test.</summary>
+    /// <summary>KD3's emit, LE3's, LE25's, MA3's and RG1's, for runcontrol's self-test.</summary>
     public static int WriteEmit(string dir)
     {
         Directory.CreateDirectory(dir);
@@ -180,6 +180,11 @@ static class RecordSelfTest
         var maPath = Path.Combine(dir, "missingasset.json");
         ConflictIo.Write(maPath, new ConflictFile("recordprobe", @"X:\inst", DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), ma.Rows, ma.Coverage, null, null, "load-time", "baseline"));
         Console.WriteLine($"wrote {ma.Rows.Count} row(s) -> {maPath}");
+        // RG1's emit: one form-list item lost between two mods (runcontrol's SelfTestRegistration)
+        var rg = RegistrationSelfTest.CrossModEmit();
+        var rgPath = Path.Combine(dir, "registration.json");
+        ConflictIo.Write(rgPath, new ConflictFile("recordprobe", @"X:\inst", DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), rg.Rows, rg.Coverage, null, null, "load-time", "baseline"));
+        Console.WriteLine($"wrote {rg.Rows.Count} row(s) -> {rgPath}");
         return 0;
     }
 }

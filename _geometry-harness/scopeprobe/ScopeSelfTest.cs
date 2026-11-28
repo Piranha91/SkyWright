@@ -162,6 +162,44 @@ static class ScopeSelfTest
                 sr3.Exit == 2 && sr3.ErrLines.Count == 1 && sr3.ErrLines[0].StartsWith(head3) && sr3.ErrLines[0].EndsWith(tail3)
                 && sr3.Out.Trim().Length == 0 && !sr3.JsonExists && sr3.RunLogStatus == "Failed",
                 $"exit {sr3.Exit}; json {sr3.JsonExists}; log {sr3.RunLogStatus}; stdout {sr3.Out.Trim().Length} chars; stderr: {string.Join(" / ", sr3.ErrLines)}");
+
+        // SL: the list files runcontrol passes instead of one argument per plugin (ListFile.cs). Two plugin files outside the
+        // configuration (the door plugin and a copy of MrA.esp under another folder) are the disabled mods' plugins.
+        var extraA = door;
+        var extraB = Path.Combine(t.Root, "sl-extra", "MrACopy.esp");
+        Directory.CreateDirectory(Path.GetDirectoryName(extraB)!);
+        File.Copy(mrA, extraB, overwrite: true);
+        string targetList = Path.Combine(t.Root, "sl-targets.txt"), scanList = Path.Combine(t.Root, "sl-also-scan.txt");
+        File.WriteAllText(targetList, "MrA.esp\n", new System.Text.UTF8Encoding(false));
+        File.WriteAllText(scanList, extraA + "\r\n\r\n" + extraB + "\n", new System.Text.UTF8Encoding(false));   // a blank line and both line ends
+        var byArgs = ScopeChild.Run(t.Root, "sl1-args", inst, game, corpus: null, lists: ["--target", "MrA.esp", "--ring", "2", "--also-scan", extraA, "--also-scan", extraB]);
+        var byFile = ScopeChild.Run(t.Root, "sl1-file", inst, game, corpus: null, lists: ["--target-file", targetList, "--ring", "2", "--also-scan-file", scanList]);
+        string Scanned(ScopeChild.Result r) => r.Doc is { } sd
+            ? string.Join(",", sd.RootElement.GetProperty("nearby").GetProperty("alsoScanned").EnumerateArray().Select(x => x.GetProperty("name").GetString())) : "(no scope.json)";
+        string argsText = ScopeChild.Comparable(byArgs.Doc), fileText = ScopeChild.Comparable(byFile.Doc);
+        t.Check("SL-1 the list files give the scope the arguments give: same targets, same also-scanned plugins, same scope.json",
+                byArgs.Exit == 0 && byFile.Exit == 0 && Scanned(byArgs) == "SdDoor.esp,MrACopy.esp" && Scanned(byFile) == Scanned(byArgs)
+                && argsText.Length > 0 && argsText == fileText,
+                $"exit {byArgs.Exit}/{byFile.Exit}; scanned {Scanned(byArgs)} / {Scanned(byFile)}; same file {argsText == fileText} (differing: {ScopeChild.Differing(argsText, fileText)}); stderr {string.Join(" / ", byFile.ErrLines)}");
+
+        // SL-2: a list file that is not there: the one sentence, exit 2, no scope.json (a stale one removed), the run log failed.
+        string absentList = Path.GetFullPath(Path.Combine(t.Root, "absent", "also-scan.txt"));
+        var sl2 = ScopeChild.Run(t.Root, "sl2", inst, game, corpus: null, stale: true, lists: ["--target", "MrA.esp", "--also-scan-file", absentList]);
+        string want4 = $"scopeprobe: the list file {absentList} given to --also-scan-file does not exist; check that path, or pass the entries one by one with --also-scan.";
+        t.Check("SL-2 a missing list file: exit 2, the one sentence, nothing on stdout, no scope.json (stale one removed), run log failed",
+                sl2.Exit == 2 && sl2.ErrLines.Count == 1 && sl2.ErrLines[0] == want4 && sl2.Out.Trim().Length == 0 && !sl2.JsonExists && sl2.RunLogStatus == "Failed",
+                $"exit {sl2.Exit}; json {sl2.JsonExists}; log {sl2.RunLogStatus}; stderr: {string.Join(" / ", sl2.ErrLines)}");
+
+        // SL-3: a list file that cannot be read as text (a folder, and bytes that are not UTF-8): the one sentence, exit 2.
+        string notUtf8 = Path.Combine(t.Root, "sl-latin1.txt");
+        File.WriteAllBytes(notUtf8, [0x4D, 0x72, 0xC4, 0x0A]);
+        var sl3a = ScopeChild.Run(t.Root, "sl3a", inst, game, corpus: null, lists: ["--target-file", t.Root]);
+        var sl3b = ScopeChild.Run(t.Root, "sl3b", inst, game, corpus: null, lists: ["--target-file", notUtf8]);
+        t.Check("SL-3 an unreadable list file (a folder; not UTF-8): exit 2, one sentence each, no scope.json",
+                sl3a.Exit == 2 && sl3a.ErrLines.Count == 1 && sl3a.ErrLines[0] == $"scopeprobe: the list file {t.Root} given to --target-file is a folder, not a file; check that path, or pass the entries one by one with --target."
+                && sl3b.Exit == 2 && sl3b.ErrLines.Count == 1 && sl3b.ErrLines[0] == $"scopeprobe: the list file {notUtf8} given to --target-file is not UTF-8 text; check that path, or pass the entries one by one with --target."
+                && !sl3a.JsonExists && !sl3b.JsonExists,
+                $"exit {sl3a.Exit}/{sl3b.Exit}; stderr: {string.Join(" / ", sl3a.ErrLines)} | {string.Join(" / ", sl3b.ErrLines)}");
     });
 
     static ConfigPlugin Plugin(string name, string path)
@@ -178,7 +216,7 @@ static class ScopeChild
 {
     public sealed record Result(int Exit, string Out, List<string> ErrLines, bool JsonExists, System.Text.Json.JsonDocument? Doc, string? RunLogStatus);
 
-    public static Result Run(string root, string name, string inst, string game, string? corpus, bool stale = false)
+    public static Result Run(string root, string name, string inst, string game, string? corpus, bool stale = false, string[]? lists = null)
     {
         var json = Path.Combine(root, name, "scope.json");
         var runlog = Path.Combine(root, name, "runlog");
@@ -189,7 +227,8 @@ static class ScopeChild
             WorkingDirectory = root, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
             StandardOutputEncoding = System.Text.Encoding.UTF8, StandardErrorEncoding = System.Text.Encoding.UTF8,
         };
-        foreach (var a in new[] { "--instance", inst, "--profile", "P", "--game", game, "--target", "MrA.esp", "--json", json })
+        // `lists` stands in for the one target: the list flags under test, in their place on the command line
+        foreach (var a in new[] { "--instance", inst, "--profile", "P", "--game", game }.Concat(lists ?? new[] { "--target", "MrA.esp" }).Concat(new[] { "--json", json }))
             psi.ArgumentList.Add(a);
         psi.Environment.Remove("WB_CORPUS");
         if (corpus is not null) psi.Environment["WB_CORPUS"] = corpus;
@@ -221,6 +260,27 @@ static class ScopeChild
             catch (System.Text.Json.JsonException) { }
         }
         return status;
+    }
+
+    /// <summary>A scope.json as text without when it was written and how long it took (generatedUtc, wallSeconds), so two runs
+    /// of the same scope compare equal; "" for none.</summary>
+    public static string Comparable(System.Text.Json.JsonDocument? doc)
+    {
+        if (doc is null) return "";
+        var node = System.Text.Json.Nodes.JsonNode.Parse(doc.RootElement.GetRawText())!.AsObject();
+        node.Remove("generatedUtc");
+        node.Remove("wallSeconds");
+        return node.ToJsonString();
+    }
+
+    /// <summary>The top-level keys whose values differ between two comparable scope.json texts.</summary>
+    public static string Differing(string a, string b)
+    {
+        if (a.Length == 0 || b.Length == 0) return "(a scope.json is missing)";
+        var x = System.Text.Json.Nodes.JsonNode.Parse(a)!.AsObject();
+        var y = System.Text.Json.Nodes.JsonNode.Parse(b)!.AsObject();
+        return string.Join(",", x.Select(kv => kv.Key).Union(y.Select(kv => kv.Key))
+            .Where(k => x[k]?.ToJsonString() != y[k]?.ToJsonString()));
     }
 
     /// <summary>One location's contributors as "plugin:kind,kind | plugin:kind", in the document's order.</summary>

@@ -147,12 +147,12 @@ def run_main(stdout, returncode=0, stderr="", argv=()):
     out = io.StringIO()
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            os.environ["HOUSECARL_RUNLOG_DIR"] = tmp
+            _runlog = SW.set_run_log(tmp)
             with contextlib.redirect_stdout(out):
                 code = M.main(list(argv))
     finally:
         M.subprocess.run = real_run
-        os.environ.pop("HOUSECARL_RUNLOG_DIR", None)
+        SW.restore_run_log(_runlog)
     assert seen and seen[0][0] == "powershell", seen
     return code, out.getvalue()
 
@@ -199,12 +199,12 @@ def test_u5_real_powershell_nonterminating_error_refused_as_unavailable():
     out = io.StringIO()
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            os.environ["HOUSECARL_RUNLOG_DIR"] = tmp
+            _runlog = SW.set_run_log(tmp)
             with contextlib.redirect_stdout(out):
                 code = M.main([])
     finally:
         M.PS_SNAPSHOT = real_script
-        os.environ.pop("HOUSECARL_RUNLOG_DIR", None)
+        SW.restore_run_log(_runlog)
     text = out.getvalue()
     assert code == 2 and "unavailable" in text.lower() and "below" not in text, (code, text)
 
@@ -446,4 +446,10 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _runlog = os.environ.get("HOUSECARL_RUNLOG_DIR")   # the caller's run log (the harness-suites guard sets one)
+    _code = main()
+    if os.environ.get("HOUSECARL_RUNLOG_DIR") != _runlog:
+        print(f"FAIL  the suite left HOUSECARL_RUNLOG_DIR as {os.environ.get('HOUSECARL_RUNLOG_DIR')!r}, not the caller's {_runlog!r}: "
+              "a later program would write the user's shared run history")
+        _code = 1
+    sys.exit(_code)

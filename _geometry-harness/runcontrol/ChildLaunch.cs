@@ -65,7 +65,9 @@ public static class ChildLaunch
         var job = new ChildJob(op, args, Checkout.Root, env);
         bool lockBefore = lockFile != null && File.Exists(lockFile);
         double? deadline = deadlineMinutes is { } minutes ? ChildRunner.Now() + 60 * minutes : null;
-        var res = RunJob(LogLabel + "-" + op, PyPath.Str(ledgerDir), deadline, job);
+        ChildResult res;
+        try { res = RunJob(LogLabel + "-" + op, PyPath.Str(ledgerDir), deadline, job); }
+        catch (CommandLineTooLongException tooLong) { throw new Refusal(tooLong.Message); }
         if (lockFile != null) AddWaited(PyPath.Join(ledgerDir, op + ".txt"));
         if (lockFile != null && !lockBefore && !string.IsNullOrEmpty(res.Stopped) && File.Exists(lockFile)) ReleaseStoppedLock(lockFile, res);
         return res;

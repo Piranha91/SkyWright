@@ -20,7 +20,8 @@ navedit --selftest
   the read-back holds. It refuses:
   - a plan made on a different load order;
   - a plan with any refused edit;
-  - an existing PATCH.esp.
+  - an existing PATCH.esp (never touched);
+  - a patch whose read-back fails: it is left unwritten (see Undo below).
 
   Before writing, `write` plans the same edits again and refuses if they no longer come out the same. The read-back
   checks, for every navmesh the plan changes:
@@ -173,12 +174,39 @@ a clobber, where a later mod's version replaced an earlier one's).
     use that instead).
 - **Refused, by name:**
   - a plugin not in the order, the winner itself, or a plugin without a version of K (or deleting it);
-  - an island;
+  - an island whose version's plugin states no navmesh info map entry for it, or gives its island a box that is not its
+    navmesh's (R7, under Islands below);
   - a linked edge that meets no neighbour triangle, or several none of which it names (the edges are listed; a link is
     never cut silently);
   - a neighbour's link into K that meets no edge of the version;
   - a ledge link out of range, or one into K that the version renumbers;
   - a version that no longer links into a neighbour that still links into K (the border would be one-way).
+  - a border link the neighbour does not return (the review of R7). Each border refusal ends with what to do: carry the
+    neighbour with it (`"with_neighbours": true`), or, where the plugin has no version of the neighbour, keep the winner's.
+- **A set of navmeshes (R10, 2026-11-27).** A mod that re-cut several adjacent navmeshes and lost all of them cannot be
+  carried one at a time: each version's borders fit only the others' versions. Two edit shapes carry them in one patch:
+  `{"navmeshes": [K1, K2, ...], "use_version": "Plugin.esp"}` carries exactly those; `{"navmesh": K, "use_version":
+  "Plugin.esp", "with_neighbours": true}` starts with K and adds each neighbour a border refusal names, while the plugin has
+  its own version of it that the game does not already take, until nothing more can join (navownprobe's repair plan grows
+  every use_version row this way). The plan row's `useVersion.members` lists every member, `useVersion.set` what was asked
+  and what growth added. One planner (`NavUseVersionPlan.PlanSet`; plain use_version is a set of one, never grown):
+  - a link between two members is matched against the other member's version; a link to anything else against the navmesh
+    the game takes (a navmesh the plugin already wins is then its own version). A ledge link into a member from a member or
+    a navmesh the plugin wins is kept as the plugin has it while its index is in range;
+  - an outside navmesh linked into several members gets one merged change; the navmesh info map is changed once for the set
+    (`NavRepairNavi.ForVersions`); the patch masters every plugin whose version of any member it supersedes, and each
+    re-pointed neighbour's winner;
+  - one refused member refuses the whole set, nothing written; in a set each sentence starts with its member. Refused too:
+    a navmesh named twice, a stated member the plugin already wins or has no version of;
+  - an outside navmesh's link into a member is re-pointed only where the member's version links back there; otherwise it is
+    a border refusal naming that navmesh (so a grown set takes it in when the plugin has its own version of it);
+  - the read-back adds a two-way check on the written patch (`NavRepairReadBack.TwoWay`): every border link out of a member,
+    and every link into a member from any navmesh of the order with the patch last, must be returned by the triangle it
+    names (ledges are not judged). A link between two navmeshes neither of which is a member is not judged, even when the
+    patch holds one of them to re-point its links: that border is as the order had it, and navownprobe's re-check files it
+    (review of Gate C, 2026-11-27). navownprobe's `--base`/`--enable` re-check counts a CLOBBERED row moved from the previous
+    winner to a patch carrying that winner's geometry (links re-pointed only) as unchanged. In a repair plan a row whose navmesh an earlier set of the same plugin carries is planned
+    "carried with" that set, with no edits of its own.
 - **The navmesh info map follows the version** (2026-11-22, houseCARL's items 2 and 3). The entry's linked doors become the
   version's door table, in order, and its MergedTo and PreferredMerges together the version's link-table targets: a
   neighbour it drops is removed (by value, from the list naming it), one it gains is added to MergedTo, and the neighbour's
@@ -237,8 +265,27 @@ its navmesh info map entry's linked doors (houseCARL's R9 and the linked-doors h
 - Known answers C2565 (navedit) and C2566 (`navownprobe --navrepair-selftest`); sabotage arms red
   (`C:/hc-runs/2026-11-21-navgrid/sabotage_doors.py`).
 
-**Every edit refuses an island navmesh**, whose own copy of the geometry in the navmesh info map would go stale. Fills
-come later (`C:/hc-runs/2026-11-21-navgrid/PLAN.md`, the plan gate).
+**Islands (R7, 2026-11-27).** An entry of the navmesh info map can hold island data: a box and a small mesh of its own,
+the Creation Kit's simplified outline of the navmesh (not a copy of it), with the entry's first Unknown 32 exactly when it
+does. On every entry of the base game's five files the island box is the navmesh's own box, bit for bit
+(`tests/navi_floor.py`). The rules have one owner, `_shared/NavIsland.cs`:
+- a door (and a relink) leaves the island data as it is;
+- `use_version` carries the version plugin's own entry's flag and island data whole. Refused by name: a version whose
+  plugin states no entry for an island navmesh, and a version whose island box is not its own navmesh's box. Two plain
+  entries stay as they are;
+- a height-only vertex move (and following the ground, in a repair plan) makes the island box the navmesh's rebuilt box
+  and moves each island vertex in height by what the navmesh surface under it moved (at its nearest point of the navmesh
+  in plan when it stands off it). This is a design choice, not a measured law. An empty mesh stays empty;
+- a sideways move, a cut, or triangles added or removed: allowed on an island with an empty mesh (the box follows),
+  refused by name on one with a mesh.
+
+The read-back holds the entry the game takes, with the patch last, to the plan: its box bit for bit the box of the
+navmesh the game takes, its flag agreeing with its island data, its mesh vertex for vertex.
+
+**Undo.** Both write paths write and read back in a staging folder beside `--out` (`.navedit-stage-<process>`). The patch
+(and the repair plan's `readback.json`) moves to `--out` only when the read-back holds; otherwise the output folder is
+left as it was and the read-back's lines are on the console. `NAVEDIT_FAIL_READBACK=1` counts a read-back as failed, for
+the suites' undo cases only.
 
 ## Evidence
 

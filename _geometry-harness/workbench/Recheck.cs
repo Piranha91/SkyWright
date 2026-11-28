@@ -58,7 +58,10 @@ internal static class Recheck
         CancellationToken ct = default)
     {
         SameBuildOrRefuse(unpatched, patched);
-        var (exit, text) = Run(conflictdiffExe, new[] { unpatched.Emit, patched.Emit }, null, ct);
+        var psi = RunLogFolder.Start(conflictdiffExe, RunLogFolder.Beside(patched.Emit));   // no log of its own: its run records beside the emits
+        psi.RedirectStandardOutput = true; psi.RedirectStandardError = true;
+        psi.ArgumentList.Add(unpatched.Emit); psi.ArgumentList.Add(patched.Emit);
+        var (exit, text) = Run(psi, null, ct);
         var lines = text.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0).ToList();
         if (exit != 0)
             throw new InvalidOperationException($"conflictdiff refused the comparison (exit {exit}): " + (lines.FirstOrDefault(l => l.Contains("REFUSED") || l.Contains("! ")) ?? lines.LastOrDefault() ?? "no output").Trim());
@@ -129,9 +132,11 @@ internal static class Recheck
         return args;
     }
 
-    internal static (int Exit, string Text) Run(string exe, IEnumerable<string> args, string? logPath, CancellationToken ct = default)
+    /// <summary>Run a re-check's program to its end, its run records beside <paramref name="logPath"/>.</summary>
+    internal static (int Exit, string Text) Run(string exe, IEnumerable<string> args, string logPath, CancellationToken ct = default)
     {
-        var psi = new ProcessStartInfo(exe) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        var psi = RunLogFolder.Start(exe, RunLogFolder.Beside(logPath));
+        psi.RedirectStandardOutput = true; psi.RedirectStandardError = true;
         foreach (var a in args) psi.ArgumentList.Add(a);
         return Run(psi, logPath, ct);
     }
@@ -332,7 +337,8 @@ internal static class Recheck
             {
                 var rows = Path.Combine(workDir, $"{tag}-{label}.route-cut-rows.json");
                 var log = Path.Combine(workDir, $"{tag}-{label}.log");
-                var psi = new ProcessStartInfo(exe) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+                var psi = RunLogFolder.Start(exe, RunLogFolder.Beside(log));
+                psi.RedirectStandardOutput = true; psi.RedirectStandardError = true;
                 foreach (var a in new[] { "--order", order, origin, "--near", key, "--also-at", Place(also), "--rows", rows }) psi.ArgumentList.Add(a);
                 // blockprobe reads the instance, profile and game from the environment (it takes no --instance)
                 psi.Environment["HOUSECARL_MO2_INSTANCE"] = instance; psi.Environment["HOUSECARL_MO2_PROFILE"] = profile; psi.Environment["HOUSECARL_GAME_PATH"] = game;

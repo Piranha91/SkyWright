@@ -1,7 +1,7 @@
 using SkyWright.Guards;
 
 // SkyWright.Guards <guard> [options]: one guard per run, exit 0 when it passes.
-//   harness-suites [--full] [--self-check] [--jobs N] [--area app|module|all]
+//   harness-suites [--full] [--self-check] [--run-log-check] [--jobs N] [--area app|module|all]
 //                                            the Python suites and the probes' self-tests, up to N at once (HarnessSuitesGuard)
 //   run-coverage                             every entry point has a row in docs/run-coverage.json (RegistryGuards)
 //   tool-index [--write]                     docs/TOOLS.md is what that manifest renders to (RegistryGuards)

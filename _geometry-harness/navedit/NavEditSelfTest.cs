@@ -669,14 +669,15 @@ static class NavEditSelfTest
         });
 
         // C2558: N's triangle 1 split at (200, 50) into two along W's edge: two candidates. The link naming one of them keeps
-        // it; a link naming neither is refused as ambiguous.
+        // it; a link naming neither is refused as ambiguous. CORRECTED 2026-11-27 (C2674): N linked nothing back, a one-way
+        // border the version would now be refused for; both halves of N's split edge now link back into W's triangle 2.
         Case("2558 use-version-two-along", () =>
         {
-            var (w, n) = Pair(linkN: false);
+            var (w, n) = Pair();
             var nv = n.Vertices.ToList(); nv.Add(new Vec3(200, 50, 0));
             var nt = n.Triangles.ToList();
-            nt[1] = new NavTri(0, 4, 9, 0) with { EdgeLink01 = nt[1].EdgeLink01, EdgeLink12 = -1, EdgeLink20 = -1 };
-            nt.Add(new NavTri(9, 4, 3, 0) with { EdgeLink01 = -1, EdgeLink12 = nt[1].EdgeLink12, EdgeLink20 = -1 });
+            nt[1] = new NavTri(0, 4, 9, 4) with { EdgeLink01 = nt[1].EdgeLink01, EdgeLink12 = -1, EdgeLink20 = 0 };
+            nt.Add(new NavTri(9, 4, 3, 4) with { EdgeLink01 = -1, EdgeLink12 = -1, EdgeLink20 = 0 });
             var n2 = n with { Vertices = nv, Triangles = nt };
             var near = new Dictionary<FormKey, NavmeshGeometry> { [NK] = n2 };
             var keep = NavEdit.UseVersion(w, w, "Ver.esp", near, tol);
@@ -709,7 +710,8 @@ static class NavEditSelfTest
         {
             var (w, n) = Pair();
             var doors = NavEdit.UseVersion(w, w with { DoorTriangles = new List<NavDoorTriangle> { new(DoorRef, 0) } }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol);
-            var (bare, nn) = Pair(linkW: false, linkN: false);
+            // CORRECTED 2026-11-27 (C2674): N linked nothing back, so the gained border was one-way; N now links back
+            var (bare, nn) = Pair(linkW: false);
             var gained = NavEdit.UseVersion(bare, w, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = nn }, tol);
             return (UsePlanned(doors) is { } dw ? "doors: " + dw : null)
                 ?? (doors.DoorsAdded.Select(d => d.Door).SequenceEqual(new[] { DoorRef }) && doors.DoorsDropped.Count == 0 && doors.After!.DoorTriangles!.Single().Door == DoorRef ? null
@@ -764,9 +766,11 @@ static class NavEditSelfTest
         // C2561: ledge links are not matched by edge geometry: the version's own (Type 2) is carried while it names a triangle N
         // has, and refused when it names one N lacks; N's ledge link into this navmesh is kept where the version's triangle of
         // that index stands on the winner's corners, and refused when the version renumbers it.
+        // CORRECTED 2026-11-27 (C2674): N linked nothing back (the version's ordinary link into N's triangle 5 was one-way);
+        // N now links back, its link into W's triangle 2 meeting the version's ledge edge as an ordinary edge.
         Case("2561 use-version-ledges", () =>
         {
-            var (w, n) = Pair(linkN: false);
+            var (w, n) = Pair();
             var ledge = w with { EdgeLinks = new List<NavEdgeLink> { new(NK, 1, 2), new(NK, 5) } };
             var ok = NavEdit.UseVersion(w with { EdgeLinks = new List<NavEdgeLink> { new(NK, 1, 2), new(NK, 5) } }, ledge, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol);
             var past = NavEdit.UseVersion(w, w with { EdgeLinks = new List<NavEdgeLink> { new(NK, 99, 2), new(NK, 5) } }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol);
@@ -787,6 +791,159 @@ static class NavEditSelfTest
             return UsePlanned(r) ?? (r.Matched == 2 && r.Changed == 0 && r.Repointed == 0 && r.Others.Count == 0 ? null : $"matched {r.Matched}, changed {r.Changed}, re-pointed {r.Repointed}, others {r.Others.Count}");
         });
 
+        // C2674 (the review of R7, 2026-11-27: USSEP's 10925F on CV-clockwork): a version whose border links into a neighbour
+        // whose matching edge links nothing back is refused in one sentence, naming the navmesh, the version's plugin, the
+        // neighbour, its winning plugin and both triangles, and offering to keep the winner's version; the neighbour's link
+        // back is not written. The control: the same version with the neighbour linking back plans. And a neighbour whose
+        // matching edge links somewhere else (not back) is refused too.
+        Case("2674 use-version-border-not-returned", () =>
+        {
+            var (w, n) = Pair(linkN: false);
+            string? Nb(FormKey m) => m == NK ? "Nb.esp" : null;
+            var r = NavEdit.UseVersion(w, w, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol, Nb);
+            if (r.Status != "refused") return $"a border the neighbour does not return was {r.Status}, with {r.Ops.Count} ops (want refused, nothing written)";
+            var s = r.Why.SingleOrDefault(x => x.Contains("does not link back"));
+            if (s is null) return "no refusal names the border the neighbour does not return: " + string.Join(" | ", r.Why);
+            if (!(s.Contains(K.ToString()) && s.Contains("Ver.esp") && s.Contains(NK.ToString()) && s.Contains("Nb.esp") && s.Contains("triangle 2") && s.Contains("triangle 1")
+                  && s.Contains("keep the winner's version") && s.EndsWith('.') && s.TrimEnd('.').Split(". ").Length == 1))
+                return "the refusal does not name the navmesh, the version's plugin, the neighbour, its winning plugin and the triangles in one sentence with what to try: " + s;
+            if (r.Others.Count != 0) return "the neighbour's link back was planned";
+            var (w2, n2) = Pair();
+            var ok = NavEdit.UseVersion(w2, w2, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n2 }, tol, Nb);
+            if (UsePlanned(ok) is { } why) return "the control, where the neighbour links back: " + why;
+            // the neighbour's edge linked elsewhere, into a third navmesh: still not back
+            var other = new FormKey(new ModKey("SelfTest", ModType.Master), 0xE07);
+            var n3 = n2 with { EdgeLinks = new List<NavEdgeLink> { new(other, 0), new(K, 6) } };
+            var r3 = NavEdit.UseVersion(w2, w2, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n3 }, tol, Nb);
+            return r3.Status == "refused" && r3.Why.Any(x => x.Contains("does not link back") && x.Contains("triangle 2") && !x.Contains("triangle 6"))
+                ? null : "a neighbour edge linking into another navmesh was taken as a link back: " + r3.Status + " " + string.Join(" | ", r3.Why);
+        });
+
+        // ---- R10: carry a set of navmeshes (NavEdit.UseVersionSet; Gate A C:/hc-runs/2026-11-27-navmesh-r10/GATE-A.md) ----
+        // W (K) and N (NK) as Pair has them but linking nothing to each other (the winners); their versions from one plugin,
+        // each in reversed numbering (triangle x becomes 7 - x), link each other across x = 200 into each other's numbering.
+        // O, a strip of four 100 u cells south of both (y -100 to 0), links its cell 0 into W's triangle 0 and its cell 2 into
+        // N's triangle 0; W and N, and both versions, link back.
+        FormKey OS = new(new ModKey("SelfTest", ModType.Master), 0xE08);
+        static bool OneSentenceU(string s) => s.EndsWith('.') && !s.Contains('\n') && s.TrimEnd('.').Split(". ").Length == 1;
+        (NavmeshGeometry W, NavmeshGeometry N, NavmeshGeometry VW, NavmeshGeometry VN, NavmeshGeometry O) SetPair()
+        {
+            var (w0, n0) = Pair(linkW: false, linkN: false);
+            NavmeshGeometry South(NavmeshGeometry g, List<NavEdgeLink> extra, Func<List<NavTri>, List<NavTri>> more)
+            {
+                var t = g.Triangles.ToList();
+                t[0] = t[0] with { Flags = t[0].Flags | 1, EdgeLink01 = 0 };
+                return g with { Triangles = more(t), EdgeLinks = extra };
+            }
+            var w = South(w0, new List<NavEdgeLink> { new(OS, 1) }, t => t);
+            var n = South(n0, new List<NavEdgeLink> { new(OS, 5) }, t => t);
+            var vw = Reversed(South(w0, new List<NavEdgeLink> { new(OS, 1), new(NK, 7 - 1), new(NK, 7 - 5) }, t =>
+            {
+                t[2] = t[2] with { Flags = t[2].Flags | 2, EdgeLink12 = 1 }; t[6] = t[6] with { Flags = t[6].Flags | 2, EdgeLink12 = 2 }; return t;
+            }));
+            var vn = Reversed(South(n0, new List<NavEdgeLink> { new(OS, 5), new(K, 7 - 2), new(K, 7 - 6) }, t =>
+            {
+                t[1] = t[1] with { Flags = t[1].Flags | 4, EdgeLink20 = 1 }; t[5] = t[5] with { Flags = t[5].Flags | 4, EdgeLink20 = 2 }; return t;
+            }));
+            var ov = new List<Vec3>();
+            for (int i = 0; i <= 4; i++) ov.Add(new Vec3(100 * i, -100, 0));
+            for (int i = 0; i <= 4; i++) ov.Add(new Vec3(100 * i, 0, 0));
+            var ot = new List<NavTri>();
+            for (int i = 0; i < 4; i++) { ot.Add(new NavTri((short)i, (short)(i + 1), (short)(i + 6), 0)); ot.Add(new NavTri((short)i, (short)(i + 6), (short)(i + 5), 0)); }
+            ot[1] = ot[1] with { Flags = 2, EdgeLink12 = 0 }; ot[5] = ot[5] with { Flags = 2, EdgeLink12 = 1 };
+            var o = Geom(ov, ot, new List<NavEdgeLink> { new(K, 0), new(NK, 0) }) with { FormKey = OS };
+            return (w, n, vw, vn, o);
+        }
+        string? SetPlanned(UseVersionSetResult r) => r.Status == "planned" ? null : "the set was refused: " + string.Join(" | ", r.Why);
+
+        // C2675: two members refused singly for each other's borders are planned as a set. Alone, W's version links into N's
+        // winner, which does not link back: refused, the neighbour named in Need and the sentence naming the edit that carries it.
+        // Together: the inner links name the other version's own triangles (matched against the set's versions, not the
+        // winners: N's winner would match by position but name its own numbering and not link back); the outer link into O is
+        // matched against O as the game takes it; O, linked into both members, is re-pointed in ONE merged change (both its
+        // entries, 0 -> 7 and 1 -> 7), not one member's change over the other's.
+        Case("2675 use-version-set-pair", () =>
+        {
+            var (w, n, vw, vn, o) = SetPair();
+            var alone = NavEdit.UseVersionSet(new[] { new SetMember(w, vw) }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n, [OS] = o }, tol);
+            if (alone.Status != "refused" || !alone.Need.Contains(NK)) return $"alone: {alone.Status}, need [{string.Join(",", alone.Need)}] (want refused, needing {NK})";
+            if (!alone.Why.Any(x => x.Contains(NK.ToString()) && x.Contains("\"with_neighbours\": true") && OneSentenceU(x))) return "alone: no one-sentence refusal names N and the edit that carries it: " + string.Join(" | ", alone.Why);
+            var set = NavEdit.UseVersionSet(new[] { new SetMember(w, vw), new SetMember(n, vn) }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [OS] = o }, tol);
+            if (SetPlanned(set) is { } why) return why;
+            var aw = set.Members[0].After!.EdgeLinks!; var an = set.Members[1].After!.EdgeLinks!;
+            if (aw[1].TriangleIndex != 6 || aw[2].TriangleIndex != 2 || an[1].TriangleIndex != 5 || an[2].TriangleIndex != 1)
+                return $"inner links name W->N {aw[1].TriangleIndex},{aw[2].TriangleIndex} (want 6,2) and N->W {an[1].TriangleIndex},{an[2].TriangleIndex} (want 5,1)";
+            if (aw[0] != new NavEdgeLink(OS, 1) || an[0] != new NavEdgeLink(OS, 5)) return $"outer links into O {aw[0]}, {an[0]} (want O's own triangles 1 and 5)";
+            if (!set.Others.TryGetValue(OS, out var oo) || oo.EdgeLinks![0].TriangleIndex != 7 || oo.EdgeLinks[1].TriangleIndex != 7)
+                return "O's merged change: " + (set.Others.TryGetValue(OS, out var x2) ? string.Join(", ", x2.EdgeLinks!) : "none") + " (want both entries re-pointed to 7)";
+            var oOps = set.Ops.Where(p => p.FormId == OS.ToString()).Select(p => $"{p.FieldPath}={p.Value}").ToList();
+            if (string.Join(" ", oOps) != "Data.EdgeLinks[0].TriangleIndex=7 Data.EdgeLinks[1].TriangleIndex=7") return "O's ops " + string.Join(" ", oOps);
+            return set.Ops.Count(p => p.Op == "CopyFrom") == 2 && set.Repointed == 2 ? null : $"{set.Ops.Count(p => p.Op == "CopyFrom")} CopyFrom ops, {set.Repointed} re-pointed (want 2 and 2)";
+        });
+
+        // C2676: the ledge rule. A neighbour in the plugin's own layout (one it already wins) keeps its ledge link into a renumbered
+        // version as the plugin has it, while the index is in range; the same ledge from a neighbour outside that layout is
+        // still refused (it cannot be re-pointed by edge position), as C2561 has it.
+        Case("2676 use-version-set-ledge-layout", () =>
+        {
+            var (w2, n2) = Pair();
+            var nLedge = n2 with { EdgeLinks = new List<NavEdgeLink> { new(K, 5, 1), new(K, 6) } };
+            var near = new Dictionary<FormKey, NavmeshGeometry> { [NK] = nLedge };
+            var own = NavEdit.UseVersionSet(new[] { new SetMember(w2, Reversed(w2)) }, "Ver.esp", near, tol, pWins: m => m == NK);
+            var other = NavEdit.UseVersionSet(new[] { new SetMember(w2, Reversed(w2)) }, "Ver.esp", near, tol, pWins: _ => false);
+            if (SetPlanned(own) is { } why) return "a ledge from a navmesh the plugin wins: " + why;
+            if (other.Status != "refused" || !other.Why.Any(x => x.Contains("cannot be re-pointed by edge position"))) return $"a ledge from outside the layout: {other.Status} {string.Join(" | ", other.Why)}";
+            var past = NavEdit.UseVersionSet(new[] { new SetMember(w2, Reversed(w2)) }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n2 with { EdgeLinks = new List<NavEdgeLink> { new(K, 9, 1), new(K, 6) } } }, tol, pWins: m => m == NK);
+            return past.Status == "refused" ? null : "a layout ledge naming a triangle past the version was kept";
+        });
+
+        // C2677: the two-way read-back on the written patch (NavRepairReadBack.TwoWayBorders): a border of a navmesh the patch
+        // holds that the far side does not return is one sentence naming both triangles; so is an outside navmesh's link into
+        // it that is not returned; a two-way pair gives nothing.
+        Case("2677 two-way-read-back", () =>
+        {
+            var (w, n) = Pair(linkN: false);
+            var one = NavRepairReadBack.TwoWayBorders(new Dictionary<FormKey, NavmeshGeometry> { [K] = w, [NK] = n }, new[] { K }, tol, new[] { K });
+            var want = $"{K}'s triangle 2 links into {NK} triangle 1, which does not link back; the patch was not written.";
+            if (!one.Contains(want) || one.Count != 2) return $"one-way: [{string.Join(" | ", one)}] (want 2, among them '{want}')";
+            var (w3, n3) = Pair(linkW: false);
+            var inn = NavRepairReadBack.TwoWayBorders(new Dictionary<FormKey, NavmeshGeometry> { [K] = w3, [NK] = n3 }, new[] { NK }, tol, new[] { K });
+            if (inn.Count != 2 || !inn.All(x => x.StartsWith($"{NK}'s triangle"))) return "an outside link not returned: " + string.Join(" | ", inn);
+            var (w2, n2) = Pair();
+            var ok = NavRepairReadBack.TwoWayBorders(new Dictionary<FormKey, NavmeshGeometry> { [K] = w2, [NK] = n2 }, new[] { K, NK }, tol, new[] { K });
+            if (ok.Count != 0) return "a two-way pair: " + string.Join(" | ", ok);
+            // CORRECTED 2026-11-27 (review of Gate C, decision 1): only borders with a member at one end are judged; a one-way
+            // link between two navmeshes neither of which is carried (a re-pointed neighbour's border to a third) is as the
+            // order had it, and is not the read-back's to refuse
+            var notMine = NavRepairReadBack.TwoWayBorders(new Dictionary<FormKey, NavmeshGeometry> { [K] = w, [NK] = n }, new[] { K, NK }, tol, new[] { OS });
+            return notMine.Count == 0 ? null : "a border between two navmeshes that are not members was judged: " + string.Join(" | ", notMine);
+        });
+
+        // C2678: the sentences. A plain single use_version's border refusal names the edit that would carry the neighbour, and no
+        // longer says "once sets of navmeshes are supported"; a link into a member that meets no edge of the member's version
+        // says so and is a "border link meeting no edge"; an outside neighbour's entry serving two edges into a member that meet
+        // different triangles of its version is refused in one sentence naming the member.
+        Case("2678 use-version-set-sentences", () =>
+        {
+            var (w, n) = Pair(linkN: false);
+            var single = NavEdit.UseVersion(w, w, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol);
+            var bad = new List<string>();
+            if (single.Why.Any(x => x.Contains("once sets of navmeshes are supported")) || !single.Why.Any(x => x.Contains("\"with_neighbours\": true")))
+                bad.Add("single: " + string.Join(" | ", single.Why));
+            var (ws, ns, vws, vns, os) = SetPair();
+            var v = vns.Vertices.ToList();
+            foreach (var i in new[] { 0, 3, 6 }) v[i] = v[i] with { X = 210 };   // N's version's west border moved 10 u east
+            var moved = NavEdit.UseVersionSet(new[] { new SetMember(ws, vws), new SetMember(ns, vns with { Vertices = v }) }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [OS] = os }, tol);
+            var nm = moved.Why.FirstOrDefault(x => x.Contains($"links into {NK}") && x.Contains("version of it lies along it"));
+            if (nm is null || NavUseVersionPlan.ReasonKind(nm) != "border link meeting no edge" || !OneSentenceU(nm)) bad.Add($"member border: '{nm}' ({(nm is null ? "" : NavUseVersionPlan.ReasonKind(nm))}) in [{string.Join(" | ", moved.Why)}]");
+            var (w2, n2) = Pair();
+            var shared = n2.Triangles.ToList(); shared[5] = shared[5] with { EdgeLink20 = 0 };
+            var conflict = NavEdit.UseVersionSet(new[] { new SetMember(w2, Reversed(w2)) }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n2 with { Triangles = shared } }, tol);
+            var cs = conflict.Why.FirstOrDefault(x => x.Contains("link entry 0 serves edges into"));
+            if (cs is null || !cs.Contains(K.ToString()) || !OneSentenceU(cs)) bad.Add("entry conflict: " + string.Join(" | ", conflict.Why));
+            return bad.Count == 0 ? null : string.Join(" || ", bad);
+        });
+
         // C2602: every refusal UseVersion gives is classified by NavUseVersionPlan.ReasonKind as the kind its cause is (a repair
         // plan's one sentence counts a refused row's reasons by kind, so a sentence reworded out of its kind must fail here).
         Case("2602 use-version-reason-kinds", () =>
@@ -796,20 +953,30 @@ static class NavEditSelfTest
             var v = w.Vertices.ToList();
             foreach (var i in new[] { 2, 5, 8 }) v[i] = v[i] with { X = 190 };
             var moved = NavEdit.UseVersion(w, w with { Vertices = v }, "Ver.esp", near, tol);
-            var (w0, n0) = Pair(linkN: false);
+            // CORRECTED 2026-11-27 (C2674): the two-along and ledge cases' N linked nothing back (a one-way border, now its own
+            // refusal and its own kind, below); N links back in both
+            var (w0, n0) = Pair();
             var nv = n0.Vertices.ToList(); nv.Add(new Vec3(200, 50, 0));
             var nt = n0.Triangles.ToList();
-            nt[1] = new NavTri(0, 4, 9, 0) with { EdgeLink01 = nt[1].EdgeLink01, EdgeLink12 = -1, EdgeLink20 = -1 };
-            nt.Add(new NavTri(9, 4, 3, 0) with { EdgeLink01 = -1, EdgeLink12 = nt[1].EdgeLink12, EdgeLink20 = -1 });
+            nt[1] = new NavTri(0, 4, 9, 4) with { EdgeLink01 = nt[1].EdgeLink01, EdgeLink12 = -1, EdgeLink20 = 0 };
+            nt.Add(new NavTri(9, 4, 3, 4) with { EdgeLink01 = -1, EdgeLink12 = -1, EdgeLink20 = 0 });
             var two = NavEdit.UseVersion(w0, w0 with { EdgeLinks = new List<NavEdgeLink> { new(NK, 3), new(NK, 5) } }, "Ver.esp",
                                          new Dictionary<FormKey, NavmeshGeometry> { [NK] = n0 with { Vertices = nv, Triangles = nt } }, tol);
-            var (w1, n1) = Pair(linkN: false);
+            var (w1, n1) = Pair();
             var past = NavEdit.UseVersion(w1, w1 with { EdgeLinks = new List<NavEdgeLink> { new(NK, 99, 2), new(NK, 5) } }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n1 }, tol);
             var (w2, n2) = Pair();
             var ledgeIn = NavEdit.UseVersion(w2, Reversed(w2), "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n2 with { EdgeLinks = new List<NavEdgeLink> { new(K, 2, 1), new(K, 6) } } }, tol);
             var (wl, nl2) = Pair();
             var (barel, _) = Pair(linkW: false);
             var oneWay = NavEdit.UseVersion(wl, barel, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = nl2 }, tol);
+            var (wr, nr0) = Pair(linkN: false);
+            var notReturned = NavEdit.UseVersion(wr, wr, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = nr0 }, tol);
+            // the version keeps its link into N from triangle 2 only; N's triangle 5 still links into triangle 6, which no longer links back
+            var (wi, ni) = Pair();
+            var vt = wi.Triangles.ToList(); vt[6] = vt[6] with { Flags = vt[6].Flags & ~2, EdgeLink12 = -1 };
+            var inNotReturned = NavEdit.UseVersion(wi, wi with { Triangles = vt }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = ni }, tol);
+            if (!inNotReturned.Why.Any(x => x.StartsWith($"{NK}'s triangle 5 links into {K} triangle 6 of Ver.esp's version, whose edge there does not link back to {NK}") && OneSentenceU(x)))
+                return "a link in that the version does not return: " + string.Join(" | ", inNotReturned.Why);
             string Kind(string why) => NavUseVersionPlan.ReasonKind(why);
             var want = new (string Case, UseVersionResult R, Func<string, string> Expect)[]
             {
@@ -818,6 +985,9 @@ static class NavEditSelfTest
                 ("ledge past its neighbour", past, _ => "other reason"),
                 ("a dropped neighbour that still links in", oneWay, why => why.Contains("one-way border") ? "neighbour that still links in, dropped" : Kind(why)),
                 ("neighbour's ledge renumbered", ledgeIn, _ => "neighbour link into it that cannot be re-pointed"),
+                ("a border the neighbour does not return", notReturned, _ => "border link the neighbour does not return"),
+                // review of Gate C, decision 2: a neighbour's link into the navmesh that the version does not return
+                ("a link in the version does not return", inNotReturned, why => why.Contains("so carrying it would leave that border one-way") ? "neighbour link into it the version does not return" : Kind(why)),
             };
             var bad = new List<string>();
             foreach (var (c, r, expect) in want)
@@ -979,6 +1149,226 @@ static class NavEditSelfTest
             var r = NavMarker.Check(m, new Vec3(190, 100, 0));
             return r.Verdict == "refused" && r.OpenEdge is { } o && Math.Abs(o.Distance - 10) < 1e-6 && r.Unfollowed.Count == 0
                 ? null : $"got {r.Verdict}, open edge {r.OpenEdge?.Distance}: {string.Join(" ", r.Why)}";
+        });
+
+        // ---- R7, islands of the navmesh info map (_shared/NavIsland.cs; Gate B C:/hc-runs/2026-11-27-navmesh-repair/r7/GATE-B.md) ----
+        // The square (Square(): 3 x 3 vertices 100 apart at z 0) raised so its surface is z = x / 10 everywhere but vertex 4
+        // (100, 100), raised to 40: a height-only move with an uneven rise. Island vertices and what the rule makes of them:
+        //   (50, 50, 0)     on the diagonal 0-4, where the surface rose (0 + 40) / 2 = 20           -> (50, 50, 20)
+        //   (150, 25, 6)    6 u above triangle 2 (1, 2, 5), weights 0.5, 0.25, 0.25: rose 15        -> (150, 25, 21)
+        //   (250, 100, 3)   50 u east of the navmesh in plan; nearest point is vertex 5, rose 20     -> (250, 100, 23)
+        //   (100, 100, -2)  on vertex 4, which rose 40                                               -> (100, 100, 38)
+        (NavmeshGeometry Before, NavmeshGeometry After) Raised()
+        {
+            var (v, t) = Square();
+            var up = v.Select((p, i) => p with { Z = i == 4 ? 40 : p.X / 10 }).ToList();
+            return (Geom(v, t), Geom(up, t));
+        }
+        var islandV = new[] { new Vec3(50, 50, 0), new Vec3(150, 25, 6), new Vec3(250, 100, 3), new Vec3(100, 100, -2) };
+        var islandWant = new[] { new Vec3(50, 50, 20), new Vec3(150, 25, 21), new Vec3(250, 100, 23), new Vec3(100, 100, 38) };
+        var islandT = new[] { ((short)0, (short)1, (short)3), ((short)1, (short)2, (short)3) };
+        NavIslandData Mesh(Vec3 min, Vec3 max) => new(min, max, islandV, islandT);
+        NavIslandData Empty(Vec3 min, Vec3 max) => new(min, max, Array.Empty<Vec3>(), Array.Empty<(short, short, short)>());
+        static bool Close(IReadOnlyList<Vec3> a, IReadOnlyList<Vec3> b) => a.Count == b.Count && a.Zip(b).All(z => MathF.Abs(z.First.X - z.Second.X) < 1e-3f && MathF.Abs(z.First.Y - z.Second.Y) < 1e-3f && MathF.Abs(z.First.Z - z.Second.Z) < 1e-3f);
+        static string Show(IEnumerable<Vec3> vs) => string.Join(" ", vs.Select(v => FormattableString.Invariant($"({v.X},{v.Y},{v.Z})")));
+        static bool OneSentence(string? s) => s is not null && s.EndsWith('.') && !s.Contains('\n') && s.TrimEnd('.').Split(". ").Length == 1;
+
+        // C2651: the height rule, by its definition (an independent statement of it is in tests/test_navmesh_repair_rules.py,
+        // applied to a written patch). Rejects: a vertex left where it was, moved by the wrong sign, by another point's rise, or
+        // dropped; a vertex off the navmesh not moved by its nearest point's rise.
+        Case("2651 island-height-rule", () =>
+        {
+            var (before, after) = Raised();
+            var got = NavIsland.FollowHeights(islandV, before, after);
+            return Close(got, islandWant) ? null : $"island vertices [{Show(got)}], want [{Show(islandWant)}]";
+        });
+
+        // C2652: the island data each kind of edit leaves (NavIsland.ForEdit). Untouched: as it was. Height-only: the box the
+        // navmesh's rebuilt box, the mesh by the height rule, an empty mesh empty. Plan-changing (vertex 2 moved 60 u east): an
+        // empty mesh keeps empty with the rebuilt box (0,0,0)-(260,200,0); a mesh is refused in one sentence naming the
+        // island and what to try. No island: none.
+        Case("2652 island-edit-kinds", () =>
+        {
+            var (before, after) = Raised();
+            var box0 = (before.Min, before.Max);
+            var (v, t) = Square(); v[2] = v[2] with { X = 260 };
+            var moved = Geom(v, t);
+            var bad = new List<string>();
+            var (u, ur) = NavIsland.ForEdit(K, Mesh(box0.Min, box0.Max), before, before, NavIslandEdit.Untouched);
+            if (ur is not null || u is null || u.Min != box0.Min || u.Max != box0.Max || !u.Vertices.SequenceEqual(islandV)) bad.Add($"untouched: {ur ?? "changed"}");
+            var (h, hr) = NavIsland.ForEdit(K, Mesh(box0.Min, box0.Max), before, after, NavIslandEdit.HeightOnly);
+            if (hr is not null || h is null || h.Min != after.Min || h.Max != after.Max || !Close(h.Vertices, islandWant) || !h.Triangles.SequenceEqual(islandT))
+                bad.Add($"height-only: {hr ?? (h is null ? "none" : $"box {h.Min}-{h.Max} (want {after.Min}-{after.Max}), mesh [{Show(h.Vertices)}]")}");
+            var (he, her) = NavIsland.ForEdit(K, Empty(box0.Min, box0.Max), before, after, NavIslandEdit.HeightOnly);
+            if (her is not null || he is null || !he.EmptyMesh || he.Min != after.Min || he.Max != after.Max) bad.Add($"height-only, empty mesh: {her ?? (he is null ? "none" : $"box {he.Min}-{he.Max}, {he.Vertices.Count} vertices")}");
+            var (pe, per) = NavIsland.ForEdit(K, Empty(box0.Min, box0.Max), before, moved, NavIslandEdit.PlanChanging);
+            if (per is not null || pe is null || !pe.EmptyMesh || pe.Min != new Vec3(0, 0, 0) || pe.Max != new Vec3(260, 200, 0)) bad.Add($"plan-changing, empty mesh: {per ?? (pe is null ? "none" : $"box {pe.Min}-{pe.Max}")}");
+            var (pm, pmr) = NavIsland.ForEdit(K, Mesh(box0.Min, box0.Max), before, moved, NavIslandEdit.PlanChanging);
+            if (pm is not null || !OneSentence(pmr) || !pmr!.Contains(K.ToString()) || !pmr.Contains("island") || !pmr.Contains("height only"))
+                bad.Add($"plan-changing with a mesh: want one sentence refusing it, naming {K} and the island and offering a height-only move; got {(pmr ?? "no refusal")}");
+            var (n, nr) = NavIsland.ForEdit(K, null, before, after, NavIslandEdit.HeightOnly);
+            if (n is not null || nr is not null) bad.Add("no island: given one, or refused");
+            return bad.Count == 0 ? null : string.Join(" | ", bad);
+        });
+
+        // C2653: use_version's island data (NavIsland.ForVersion) is the version plugin's own entry's, whole: flag and data
+        // both ways (island over island, plain over island, island over plain); a version whose plugin states no entry is
+        // refused by name when the entry the game takes is an island, and changes nothing when it is not.
+        Case("2653 island-for-version", () =>
+        {
+            var a = new NavIslandEntry(32, Mesh(new Vec3(0, 0, 0), new Vec3(200, 200, 0)));
+            var b = new NavIslandEntry(32, new NavIslandData(new Vec3(1, 2, 3), new Vec3(4, 5, 6), new[] { new Vec3(1, 2, 3), new Vec3(4, 5, 6), new Vec3(1, 5, 6) }, new[] { ((short)0, (short)1, (short)2) }));
+            var plain = new NavIslandEntry(0, null);
+            var bad = new List<string>();
+            static bool Same(NavIslandEntry x, NavIslandEntry y) => x.Unknown == y.Unknown && (x.Island is null) == (y.Island is null)
+                && (x.Island is null || (x.Island.Min == y.Island!.Min && x.Island.Max == y.Island.Max && x.Island.Vertices.SequenceEqual(y.Island.Vertices) && x.Island.Triangles.SequenceEqual(y.Island.Triangles)));
+            foreach (var (name, taken, version, want) in new[] { ("island over island", a, b, b), ("plain over island", a, plain, plain), ("island over plain", plain, b, b) })
+            {
+                var (after, r) = NavIsland.ForVersion(K, "Ver.esp", taken, version);
+                if (r is not null || !Same(after, want)) bad.Add($"{name}: {r ?? $"flag {after.Unknown}, island {(after.Island is null ? "none" : $"{after.Island.Vertices.Count} vertices")}"}");
+            }
+            var (_, none) = NavIsland.ForVersion(K, "Ver.esp", a, null);
+            if (!OneSentence(none) || !none!.Contains("Ver.esp") || !none.Contains(K.ToString()) || !none.Contains("states no")) bad.Add($"no entry, on an island: want one sentence naming Ver.esp, {K} and that it states no entry; got {none ?? "no refusal"}");
+            var (kept, okr) = NavIsland.ForVersion(K, "Ver.esp", plain, null);
+            if (okr is not null || !Same(kept, plain)) bad.Add($"no entry, not an island: {okr ?? "changed"}");
+            return bad.Count == 0 ? null : string.Join(" | ", bad);
+        });
+
+        // C2670 (review F1): two plain entries stay as the game takes them, whatever their first Unknowns: a version's entry with
+        // 64 over a taken entry with 0 (both exist in the base game, neither an island) changes nothing and emits no op, and
+        // the reverse neither. Rejects: R7 changing a use_version row that plans today.
+        Case("2670 island-plain-over-plain", () =>
+        {
+            var bad = new List<string>();
+            foreach (var (taken, version) in new[] { (new NavIslandEntry(0, null), new NavIslandEntry(64, null)), (new NavIslandEntry(64, null), new NavIslandEntry(0, null)) })
+            {
+                var (after, r) = NavIsland.ForVersion(K, "Ver.esp", taken, version);
+                if (r is not null || after.Unknown != taken.Unknown || after.Island is not null) bad.Add($"{taken.Unknown} taken, {version.Unknown} in the version: {r ?? $"ends {after.Unknown}"}");
+                if (NavIsland.Ops("000C00:SelfTest.esm", 0, taken, after).Count != 0) bad.Add($"{taken.Unknown} taken, {version.Unknown} in the version: an op is emitted");
+            }
+            return bad.Count == 0 ? null : string.Join(" | ", bad);
+        });
+
+        // C2654: the in-place ops (NavIsland.Ops) on entry 3: the island data set whole (one Set of MapInfos[3].Island with its
+        // box and its mesh in order), removed (a Remove with no value), the flag set when it differs, the island first; an
+        // empty mesh as a box with no vertex or triangle; nothing when nothing changes. Rejects: a list rewritten piecewise,
+        // a flag left behind, an op when nothing changed.
+        Case("2654 island-ops", () =>
+        {
+            string nv = new FormKey(new ModKey("SelfTest", ModType.Master), 0xC00).ToString();
+            var a = new NavIslandEntry(32, Mesh(new Vec3(0, 0, 0), new Vec3(200, 200, 0)));
+            var b = new NavIslandEntry(32, new NavIslandData(new Vec3(1.5f, 2, 3), new Vec3(4, 5, 6.25f), new[] { new Vec3(1, 2, 3), new Vec3(4, 5, 6) }, new[] { ((short)0, (short)1, (short)0) }));
+            var e = new NavIslandEntry(32, Empty(new Vec3(0, 0, 0), new Vec3(9, 9, 9)));
+            var plain = new NavIslandEntry(0, null);
+            string Ops(NavIslandEntry x, NavIslandEntry y) => string.Join(" | ", NavIsland.Ops(nv, 3, x, y).Select(o => $"{o.FormId} {o.FieldPath} {o.Op} {o.Key ?? "-"} {o.Value ?? "-"} {o.ComposeNode?.ToJsonString() ?? "-"}"));
+            string Set(NavIslandData d) => $"{nv} MapInfos[3].Island Set - - {NavIsland.Compose(d).ToJsonString()}";
+            var want = new (string Name, string Got, string Want)[]
+            {
+                ("island over island", Ops(a, b), Set(b.Island!)),
+                ("removed", Ops(a, plain), $"{nv} MapInfos[3].Island Remove - - - | {nv} MapInfos[3].Unknown Set - 0 -"),
+                ("set on a plain entry", Ops(plain, b), $"{Set(b.Island!)} | {nv} MapInfos[3].Unknown Set - 32 -"),
+                ("empty mesh", Ops(a, e), Set(e.Island!)),
+                ("unchanged", Ops(a, a), ""),
+            };
+            var bad = want.Where(w => w.Got != w.Want).Select(w => $"{w.Name}: [{w.Got}], want [{w.Want}]").ToList();
+            var ec = NavIsland.Compose(e.Island!);
+            if (ec["sets"] is System.Text.Json.Nodes.JsonArray { Count: > 0 }) bad.Add("an empty mesh composes vertices or triangles");
+            if ((string?)NavIsland.Compose(b.Island!)["fields"]!["Min"] != "1.5,2,3") bad.Add("the box is not written in round-trip form");
+            // review F5: every float's text reads back to its own bits: a negative zero, a value that needs nine digits in
+            // general form (0.1f is 0.100000001 there), the smallest subnormal, and a large world coordinate
+            float[] hard = { -0f, 0.1f, 1.00000012f, float.Epsilon, -131071.99f };
+            var tricky = new NavIslandData(new Vec3(hard[0], hard[1], hard[2]), new Vec3(hard[3], hard[4], 0), new[] { new Vec3(hard[0], hard[1], hard[4]) }, Array.Empty<(short, short, short)>());
+            var tc = NavIsland.Compose(tricky);
+            var texts = new[] { (string)tc["fields"]!["Min"]!, (string)tc["fields"]!["Max"]!, (string)tc["sets"]![0]!["value"]! };
+            var want3 = new[] { new[] { hard[0], hard[1], hard[2] }, new[] { hard[3], hard[4], 0f }, new[] { hard[0], hard[1], hard[4] } };
+            for (int i = 0; i < texts.Length; i++)
+            {
+                var parts = texts[i].Split(',').Select(s => float.Parse(s, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+                if (parts.Length != 3 || Enumerable.Range(0, 3).Any(k => BitConverter.SingleToInt32Bits(parts[k]) != BitConverter.SingleToInt32Bits(want3[i][k])))
+                    bad.Add($"'{texts[i]}' does not read back to its floats' bits");
+            }
+            if (!texts[0].StartsWith("-0,")) bad.Add($"negative zero written as '{texts[0]}'");
+            var back = NavIsland.FromJson(NavIsland.Json(new NavIslandEntry(32, tricky)));
+            if (!NavIsland.Same(back.Island, tricky)) bad.Add("the plan's island text does not read back bit for bit");
+            return bad.Count == 0 ? null : string.Join(" | ", bad);
+        });
+
+        // C2655: the read-back of an island entry (NavIsland.Check), against the navmesh's box (0,0,0)-(200,200,0) and the
+        // expected (32, mesh): it holds as written, and each wrong patch Gate A section 5 names is one sentence: a box one float
+        // step off, the flag without data, data without the flag, a vertex dropped, two vertices swapped, a triangle changed.
+        Case("2655 island-readback-check", () =>
+        {
+            Vec3 mn = new(0, 0, 0), mx = new(200, 200, 0);
+            var want = new NavIslandEntry(32, Mesh(mn, mx));
+            var bad = new List<string>();
+            var ok = NavIsland.Check(K, want, "Patch.esp", mn, mx, want);
+            if (ok.Count > 0) bad.Add("a right entry fails: " + string.Join(" ", ok));
+            var swapped = islandV.ToArray(); (swapped[0], swapped[1]) = (swapped[1], swapped[0]);
+            var wrong = new (string Name, NavIslandEntry Got, string Word)[]
+            {
+                ("box a step off", new NavIslandEntry(32, Mesh(mn, mx with { Z = MathF.BitIncrement(0f) })), "box"),
+                ("flag without data", new NavIslandEntry(32, null), "flag"),
+                ("data without flag", new NavIslandEntry(0, Mesh(mn, mx)), "flag"),
+                ("a vertex dropped", new NavIslandEntry(32, new NavIslandData(mn, mx, islandV.Take(3).ToList(), islandT)), "vert"),
+                ("two vertices swapped", new NavIslandEntry(32, new NavIslandData(mn, mx, swapped, islandT)), "vert"),
+                ("a triangle changed", new NavIslandEntry(32, new NavIslandData(mn, mx, islandV, new[] { ((short)0, (short)1, (short)2), ((short)1, (short)2, (short)3) })), "triangle"),
+            };
+            foreach (var (name, got, word) in wrong)
+            {
+                var d = NavIsland.Check(K, got, "Patch.esp", mn, mx, want);
+                if (d.Count == 0 || !d.Any(x => x.Contains(word)) || d.Any(x => !OneSentence(x))) bad.Add($"{name}: [{string.Join(" | ", d)}], want one sentence each, one naming '{word}'");
+            }
+            return bad.Count == 0 ? null : string.Join(" | ", bad);
+        });
+
+        // C2656: the navmesh info map change for an island (NavRepairNavi.ForIsland, and ForVersion's island): in place on the
+        // NAVI winner's entry (its index), the plan's entry carrying the island data it ends with (NaviJson's "island", what
+        // the read-back holds NAVI to); an entry only an earlier plugin states is added whole WITH the new island data and flag
+        // (Gate A review condition 4), never its old; a whole interior entry is still refused, naming the write engine's gap.
+        Case("2656 navi-island-entry-change", () =>
+        {
+            FormKey nv = new(new ModKey("SelfTest", ModType.Master), 0xC00), other = new(new ModKey("SelfTest", ModType.Master), 0xE09);
+            var oldI = Mesh(new Vec3(0, 0, 0), new Vec3(200, 200, 0));
+            var newE = new NavIslandEntry(32, new NavIslandData(new Vec3(0, 0, 0), new Vec3(260, 200, 0), Array.Empty<Vec3>(), Array.Empty<(short, short, short)>()));
+            Mutagen.Bethesda.Skyrim.NavigationMapInfo Entry(FormKey n, bool island, bool cell)
+            {
+                var e = new Mutagen.Bethesda.Skyrim.NavigationMapInfo { NavigationMesh = new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.INavigationMeshGetter>(n) };
+                if (island)
+                {
+                    e.Unknown = 32;
+                    var d = new Mutagen.Bethesda.Skyrim.IslandData { Min = new Noggog.P3Float(0, 0, 0), Max = new Noggog.P3Float(200, 200, 0) };
+                    foreach (var p in oldI.Vertices) d.Vertices.Add(new Noggog.P3Float(p.X, p.Y, p.Z));
+                    foreach (var (x, y, z) in oldI.Triangles) d.Triangles.Add(new Noggog.P3Int16(x, y, z));
+                    e.Island = d;
+                }
+                e.Parent = cell ? new Mutagen.Bethesda.Skyrim.NavigationMapInfoCellParent { ParentCell = new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.ICellGetter>(new FormKey(new ModKey("SelfTest", ModType.Master), 0xCE1)) }
+                    : new Mutagen.Bethesda.Skyrim.NavigationMapInfoWorldParent { ParentWorldspace = new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.IWorldspaceGetter>(new FormKey(new ModKey("SelfTest", ModType.Master), 0x800)) };
+                return e;
+            }
+            NaviView View(params (string Plugin, Mutagen.Bethesda.Skyrim.NavigationMapInfo[] Infos)[] srcs) => NaviView.Of(srcs.Select(s =>
+            {
+                var map = new Mutagen.Bethesda.Skyrim.NavigationMeshInfoMap(nv, Mutagen.Bethesda.Skyrim.SkyrimRelease.SkyrimSE);
+                map.MapInfos.AddRange(s.Infos);
+                return new NaviSource(s.Plugin, "", map);
+            }).ToList());
+            var bad = new List<string>();
+            var (p1, r1) = NavRepairNavi.ForIsland(K, newE, View(("SelfTest.esm", new[] { Entry(other, false, false), Entry(K, true, false) })));
+            var o1 = p1.Ops.Select(o => $"{o.FieldPath} {o.Op}").ToList();
+            if (r1 is not null || !o1.SequenceEqual(new[] { "MapInfos[1].Island Set" }) || p1.Entries.Count != 1 || p1.Entries[0].WinnerIndex != 1 || p1.Entries[0].IslandAfter != newE
+                || NavRepairNavi.NaviJson(p1)["entries"]![0]!["island"] is null)
+                bad.Add($"in place: refused {r1}, ops [{string.Join(", ", o1)}], entries {p1.Entries.Count}");
+            var (p2, r2) = NavRepairNavi.ForIsland(K, newE, View(("SelfTest.esm", new[] { Entry(K, true, false) }), ("Later.esp", new[] { Entry(other, false, false) })));
+            var whole = p2.Ops.SingleOrDefault();
+            var isl = whole?.ComposeNode?["sets"]?.AsArray().FirstOrDefault(s => (string?)s!["path"] == "Island");
+            if (r2 is not null || whole is null || whole.FieldPath != "MapInfos" || whole.Op != "Add" || (string?)whole.ComposeNode!["fields"]!["Unknown"] != "32"
+                || isl is null || (string?)isl["compose"]!["fields"]!["Max"] != "260,200,0" || isl["compose"]!["sets"] is System.Text.Json.Nodes.JsonArray { Count: > 0 })
+                bad.Add($"added whole: refused {r2}, op {whole?.FieldPath} {whole?.Op}, island {isl?.ToJsonString() ?? "none"}");
+            var (_, r3) = NavRepairNavi.ForIsland(K, newE, View(("SelfTest.esm", new[] { Entry(K, true, true) }), ("Later.esp", new[] { Entry(other, false, false) })));
+            if (r3?.Contains("cannot yet compose a whole interior entry") != true) bad.Add($"whole interior: {r3 ?? "not refused"}");
+            var (p4, r4) = NavRepairNavi.ForVersion(K, Array.Empty<FormKey>(), Array.Empty<FormKey>(), Array.Empty<FormKey>(), View(("SelfTest.esm", new[] { Entry(K, true, false) })), newE);
+            if (r4 is not null || !p4.Ops.Any(o => o.FieldPath == "MapInfos[0].Island" && o.Op == "Set") || p4.Entries.SingleOrDefault()?.IslandAfter != newE)
+                bad.Add($"use_version's island: refused {r4}, ops [{string.Join(", ", p4.Ops.Select(o => $"{o.FieldPath} {o.Op}"))}]");
+            return bad.Count == 0 ? null : string.Join(" | ", bad);
         });
 
         Console.WriteLine(fail == 0 ? "navedit self-test: all cases ok" : $"navedit self-test: {fail} failed");
