@@ -415,7 +415,7 @@ static class NavRepairFixture
     //               way, Revert's wins). Re-cuts SC linking into SW (P wins SW; P's SW links nothing back) and SX (P has no
     //               SX). Re-cuts SD standing before door DZ, which no plugin places. Its NAVI states SA, SB (an island IB),
     //               SR, SO, SC, SW, SD as its own links have them.
-    //   Revert.esp  SA and SO back to vanilla; its NAVI (the winner) restates Skyrim's.
+    //   Revert.esp  SA, SO, SC and SD back to vanilla; its NAVI (the winner) restates Skyrim's.
     //   Touch.esp   SB back to vanilla (so SB's winner is a plugin SA's is not).
     // "set-ground" (navownprobe's repair plan): Skyrim.esm SA and SB vanilla at z 0, unlinked; Mover.esp raises (3,0) to 200
     // and re-cuts both at z 200 linked to each other; Revert.esp puts both back to vanilla.
@@ -510,6 +510,7 @@ static class NavRepairFixture
         var rev = new SkyrimMod(new ModKey("Revert", ModType.Plugin), Rel);
         var r3 = GridCell(3, null);
         r3.NavigationMeshes.Add(VSA()); r3.NavigationMeshes.Add(VSO());
+        r3.NavigationMeshes.Add(Square(SC, 12600, 1500, false)); r3.NavigationMeshes.Add(Square(SDn, 12600, 2500, false));   // so SetP's SC and SD lose
         rev.Worldspaces.Add(World(r3));
         rev.NavigationMeshInfoMaps.Add(Navi(VanillaNavi()));
         rev.BeginWrite.ToPath(Path.Combine(dir, "Revert.esp")).WithLoadOrder(skyRead).Write();
