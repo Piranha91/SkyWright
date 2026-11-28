@@ -213,3 +213,78 @@ class Plugin:
                 if s == b"NVNM":
                     out[key] = Navmesh(d, self.resolve, key)
         return out
+
+
+# ---- navmesh link tables (R10: carry a set of navmeshes) ----
+# Each NVNM triangle's edge field is switched by its flag bit (1 << edge): set, the field indexes the navmesh's own link table
+# (type, navmesh, triangle). A border is TWO-WAY when the far triangle the link names has an edge lying along the source edge
+# whose own link names the source navmesh back. "Along" is measured here, apart from the writer: the far edge's projection on
+# the source edge overlaps at least half the shorter of the two, and over that overlap it stays within 8 u in plan and 63 u in
+# height of the source edge. Ledge links (types 1 and 2) are not made by edge geometry and are not judged.
+
+LEDGE_TYPES = (1, 2)
+
+
+def _edge(t, e):
+    return (t[0], t[1]) if e == 0 else (t[1], t[2]) if e == 1 else (t[2], t[0])
+
+
+def along(a, b, c, d, plan=8.0, height=63.0):
+    """True when far edge c-d lies along source edge a-b (points are (x, y, z))."""
+    import math
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    ln = math.hypot(dx, dy)
+    if ln < 1e-6:
+        return False
+    ux, uy = dx / ln, dy / ln
+    tc = (c[0] - a[0]) * ux + (c[1] - a[1]) * uy
+    td = (d[0] - a[0]) * ux + (d[1] - a[1]) * uy
+    lo, hi = max(0.0, min(tc, td)), min(ln, max(tc, td))
+    short = min(ln, math.hypot(d[0] - c[0], d[1] - c[1]))
+    if hi <= lo or short < 1e-3 or (hi - lo) / short < 0.5:
+        return False
+    for s in (lo, hi):
+        k = (s - tc) / (td - tc) if abs(td - tc) > 1e-9 else 0.0
+        f = (c[0] + (d[0] - c[0]) * k, c[1] + (d[1] - c[1]) * k, c[2] + (d[2] - c[2]) * k)
+        g = (a[0] + ux * s, a[1] + uy * s, a[2] + (b[2] - a[2]) * s / ln)
+        if math.hypot(f[0] - g[0], f[1] - g[1]) > plan or abs(f[2] - g[2]) > height:
+            return False
+    return True
+
+
+def border_links(nav):
+    """Every cross-navmesh link of a Navmesh: (triangle, edge, (a, b) the edge's corners, type, target key, target triangle);
+    type, target and triangle are None when the field names an entry past the table."""
+    out = []
+    for i, t in enumerate(nav.triangles):
+        for e in range(3):
+            if t[6] & (1 << e):
+                f = t[3 + e]
+                p, q = _edge(t, e)
+                typ, tgt, tt = nav.links[f] if 0 <= f < len(nav.links) else (None, None, None)
+                out.append((i, e, (nav.vertices[p], nav.vertices[q]), typ, tgt, tt))
+    return out
+
+
+def not_returned(taken, sources):
+    """Each non-ledge border link of every navmesh in sources (keys of taken, {key: Navmesh} as the game takes them) that the
+    navmesh it names does not return, as one line each; empty when every such border is two-way."""
+    bad = []
+    for k in sources:
+        nav = taken[k]
+        for i, e, (a, b), typ, tgt, tt in border_links(nav):
+            if typ is None:
+                bad.append(f"{k} triangle {i} edge {e} names a link entry past its table")
+                continue
+            if typ in LEDGE_TYPES or tgt == k:
+                continue
+            far = taken.get(tgt)
+            if far is None or not 0 <= tt < len(far.triangles):
+                bad.append(f"{k} triangle {i} links into {tgt} triangle {tt}, which the order does not have")
+                continue
+            ft = far.triangles[tt]
+            back = any(ft[6] & (1 << f) and 0 <= ft[3 + f] < len(far.links) and far.links[ft[3 + f]][1] == k
+                       and along(a, b, far.vertices[_edge(ft, f)[0]], far.vertices[_edge(ft, f)[1]]) for f in range(3))
+            if not back:
+                bad.append(f"{k} triangle {i} links into {tgt} triangle {tt}, which does not link back")
+    return bad

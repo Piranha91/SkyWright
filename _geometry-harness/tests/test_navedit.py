@@ -63,6 +63,10 @@
     2602  use_version: every refusal is classified as the kind its cause is (the repair plan counts reasons by kind)
     2674  use_version: a version linking into a neighbour whose matching edge does not link back is refused by name (a
           one-way border); the same with the neighbour linking back plans
+    2675-2678  R10, carry a set of navmeshes (NavEdit.UseVersionSet): two navmeshes refused alone for each other's borders
+          plan as a set, inner links matched against the set's versions, outer against the winners, an outside neighbour of
+          both re-pointed in one merged change (2675); a ledge from a navmesh the plugin wins is kept as it has it (2676); the
+          written patch's two-way border read-back (2677); the refusal sentences and their kinds (2678)
     2651-2656  R7, islands of the navmesh info map (_shared/NavIsland.cs): the height rule (2651); the island data each kind
           of edit leaves, and the refusal of a plan-changing edit on an island with a mesh (2652); use_version's island data
           is the version plugin's own entry's, refused by name when it states none (2653); the in-place ops (2654); the
@@ -298,6 +302,10 @@ CASES = [
     ("2589 a link to a missing triangle is open", lambda: selftest("2589")),
     ("2602 every use_version refusal has its kind", lambda: selftest("2602")),
     ("2674 use_version refuses a border the neighbour does not return", lambda: selftest("2674")),
+    ("2675 use_version set: two navmeshes refused alone plan together; inner, outer and merged links", lambda: selftest("2675")),
+    ("2676 use_version set: the ledge rule keeps a ledge from the plugin's own layout", lambda: selftest("2676")),
+    ("2677 the written patch's two-way border read-back", lambda: selftest("2677")),
+    ("2678 use_version set: the refusal sentences and their kinds", lambda: selftest("2678")),
     ("2651 island height rule", lambda: selftest("2651")),
     ("2652 island data per kind of edit", lambda: selftest("2652")),
     ("2653 use_version's island data is the version's own", lambda: selftest("2653")),

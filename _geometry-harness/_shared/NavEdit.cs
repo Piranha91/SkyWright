@@ -64,6 +64,17 @@ public sealed record UseVersionResult(string Status, IReadOnlyList<string> Why, 
         new("refused", why, null, null, new Dictionary<FormKey, NavmeshGeometry>(), Array.Empty<RepairOp>(), 0, 0, 0, Array.Empty<FormKey>(), Array.Empty<FormKey>());
 }
 
+/// <summary>One member of a carried set (R10): the navmesh as the game takes it now, and the version carried over it.</summary>
+public sealed record SetMember(NavmeshGeometry Winner, NavmeshGeometry Version);
+
+/// <summary>A carried set's outcome (R10): "planned" with each member's result (its geometry, grid and own ops), every outside
+/// navmesh whose links into the set were re-pointed (one merged change each), all the write ops, and how many neighbour links
+/// were re-pointed; or "refused" with why. <see cref="Need"/> names every neighbour a border refusal named (growth by need
+/// reads it).</summary>
+public sealed record UseVersionSetResult(string Status, IReadOnlyList<string> Why, IReadOnlyList<UseVersionResult> Members,
+                                         IReadOnlyDictionary<FormKey, NavmeshGeometry> Others, IReadOnlyList<RepairOp> Ops, int Repointed,
+                                         IReadOnlyList<FormKey> Need);
+
 /// <summary>A door edit's outcome: "planned" with the navmesh as it will stand, the triangle the door is set on, the marker's
 /// distance from it in plan (0: under it) and its height above it, and the write ops; or "refused" with why (and, when
 /// no triangle lies under the marker, the nearest one and how far off it is).</summary>
@@ -917,6 +928,34 @@ public static class NavEdit
                { LedgesCarried = ledges, DoorsAdded = added, DoorsDropped = dropped, Lost = lost };
     }
 
+    /// <summary>R10 STUB (Gate B, red first): a set of more than one navmesh is refused; one member is UseVersion.</summary>
+    public static UseVersionSetResult UseVersionSet(IReadOnlyList<SetMember> members, string fromPlugin, IReadOnlyDictionary<FormKey, NavmeshGeometry> near,
+                                                    EdgeTolerance tol, Func<FormKey, string?>? winnerOf = null, Func<FormKey, bool>? pWins = null,
+                                                    Func<FormKey, FormKey, string>? ending = null)
+    {
+        if (members.Count != 1) return new("refused", new[] { "Carrying a set of navmeshes is not supported yet." }, Array.Empty<UseVersionResult>(), new Dictionary<FormKey, NavmeshGeometry>(), Array.Empty<RepairOp>(), 0, Array.Empty<FormKey>());
+        var r = UseVersion(members[0].Winner, members[0].Version, fromPlugin, near, tol, winnerOf);
+        return new(r.Status, r.Why, new[] { r }, r.Others, r.Ops, r.Repointed, Array.Empty<FormKey>());
+    }
+
+    /// <summary>Whether triangle <paramref name="tri"/> of <paramref name="n"/> has an open edge along a-b (within
+    /// <paramref name="tol"/>) that links into <paramref name="back"/>: the far side of a border returns it. One owner, for the
+    /// planner and the written patch's two-way read-back.</summary>
+    public static bool LinksBack(NavmeshGeometry n, int tri, Vec3 a, Vec3 b, FormKey back, EdgeTolerance tol)
+    {
+        if (tri < 0 || tri >= n.Triangles.Count) return false;
+        var nt = n.Triangles[tri]; var nl = n.EdgeLinks ?? Array.Empty<NavEdgeLink>();
+        for (int f = 0; f < 3; f++)
+        {
+            if (!(Linked(nt, f) || Field(nt, f) < 0)) continue;
+            var (i, j) = NavBorderMatch.EdgeVerts(nt, f);
+            if (i >= n.Vertices.Count || j >= n.Vertices.Count || !NavBorderMatch.Gap(a, b, n.Vertices[i], n.Vertices[j]).Within(tol)) continue;
+            int x = Field(nt, f);
+            if (Linked(nt, f) && x >= 0 && x < nl.Count && nl[x].Mesh == back) return true;
+        }
+        return false;
+    }
+
     /// <summary>A door's arrival marker may stand this far, in u, above or below the triangle it is set on: past the base game's
     /// furthest (781 u, of 1,703 door-table entries in Skyrim.esm, 2026-11-22).</summary>
     public const float DoorHeightLimit = 800f;
@@ -1023,6 +1062,10 @@ public static class NavEdit
 /// own why; the ops (the navmesh info map's for any neighbour the version gains included); the expected state of every
 /// navmesh it changes (the read-back's input: the carried navmesh, grid rebuilt, and each neighbour whose links into it
 /// were re-pointed, grid kept); and the plan row's "useVersion" object (null when refused before UseVersion ran).</summary>
+/// <summary>How a use_version edit names its navmeshes (R10): one navmesh, never grown; a stated set, carried exactly; or one
+/// navmesh grown by need ("with_neighbours", and every use_version row of a repair plan).</summary>
+public enum UseVersionSetMode { Single, Stated, Grown }
+
 public sealed record UseVersionPlan(string? Refuse, IReadOnlyList<string> Why, List<RepairOp> Ops,
                                     Dictionary<FormKey, (NavmeshGeometry Geom, int[] OldIndex, string WinnerPath, bool Rebuilt)> Expect,
                                     System.Text.Json.Nodes.JsonObject? Row)
@@ -1123,6 +1166,18 @@ public static class NavUseVersionPlan
         };
         if (why.Count == 0 && islandAfter is not null) row["island"] = NavIsland.Json(islandAfter);
         return new UseVersionPlan(null, why, ops, expect, row) { IslandAfter = why.Count == 0 ? islandAfter : null };
+    }
+
+    /// <summary>R10 STUB (Gate B, red first): a stated or grown set is refused.</summary>
+    public static UseVersionPlan PlanSet(LoadOrderResolver.IndexView view, NaviView navi, IReadOnlyList<string> order, IReadOnlyList<FormKey> keys,
+                                         string from, UseVersionSetMode mode, Func<Dictionary<FormKey, (string Path, List<NavEdgeLink> Links)>> inbound,
+                                         (NavmeshGeometry Geom, string WinnerPlugin)? seed = null)
+    {
+        if (mode != UseVersionSetMode.Single) return new("Carrying a set of navmeshes is not supported yet.", Array.Empty<string>(), new List<RepairOp>(), new(), null);
+        var key = keys[0];
+        var w = seed ?? (view.ResolveWinner(key) is { } rw && order.FirstOrDefault(p => string.Equals(Path.GetFileName(p), rw.WinnerPlugin, StringComparison.OrdinalIgnoreCase)) is { } wp && Winning(wp, key) is { } g ? (g, rw.WinnerPlugin) : null);
+        if (w is null) return new($"{key} has no geometry in its winner on this load order, so there is nothing to carry over.", Array.Empty<string>(), new List<RepairOp>(), new(), null);
+        return Plan(view, navi, order, key, w.Value.Geom, w.Value.WinnerPlugin, from, inbound);
     }
 
     /// <summary>A door as a plan row names it: the door, who places it, its triangle, and where it leads (the partner door

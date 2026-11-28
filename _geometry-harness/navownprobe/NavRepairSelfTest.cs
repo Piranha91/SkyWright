@@ -390,6 +390,23 @@ static class NavRepairSelfTest
             return bad.Count == 0 ? null : string.Join(" | ", bad);
         });
 
+        // C2685 (R10): a repair plan's use_version row whose navmesh an earlier set of the SAME plugin already carries is
+        // planned "carried with" that set's first navmesh, with no edits of its own; carried by another plugin's set, it is not
+        // (it is planned as its own set, and the clash then refuses it: a set touching what another set changes).
+        Case("2685 use-version-carried-with-set", () =>
+        {
+            FormKey a = K(0xD11), b = K(0xD12), c = K(0xD13);
+            var carried = new Dictionary<FormKey, (FormKey Seed, string Mover)> { [a] = (a, "City.esp"), [b] = (a, "City.esp") };
+            var bad = new List<string>();
+            var same = NavRepairRun.CarriedWith(b, "City.esp", carried);
+            if (same is null || !same.Contains($"carried with {a}'s set") || !same.EndsWith('.')) bad.Add("same plugin: " + same);
+            if (NavRepairRun.CarriedWith(b, "Other.esp", carried) is { } o) bad.Add("another plugin's set: " + o);
+            if (NavRepairRun.CarriedWith(c, "City.esp", carried) is { } n) bad.Add("a navmesh no set carries: " + n);
+            var clash = NavRepairRun.UseVersionClash(c, "Other.esp", new[] { c, b }, Array.Empty<FormKey>(), new HashSet<FormKey>(), new Dictionary<FormKey, FormKey> { [b] = a }, new Dictionary<FormKey, FormKey>());
+            if (clash is null || !clash.Contains("write them as separate patches")) bad.Add("another plugin's set over a member: " + clash);
+            return bad.Count == 0 ? null : string.Join(" | ", bad);
+        });
+
         // C2591: the plan for a band one-way row writes no link back across the band: refused by name.
         Case("2591 band-oneway-repair-refused", () =>
         {

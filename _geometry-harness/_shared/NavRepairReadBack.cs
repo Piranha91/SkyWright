@@ -413,6 +413,9 @@ public static class NavRepairReadBack
         return why;
     }
 
+    /// <summary>R10 STUB (Gate B, red first): the two-way border check finds nothing.</summary>
+    public static List<string> TwoWayBorders(IReadOnlyDictionary<FormKey, NavmeshGeometry> taken, IEnumerable<FormKey> sources, EdgeTolerance tol) => new();
+
     /// <summary>A repair plan's planned use_version rows.</summary>
     public static List<JsonNode> UseVersionRows(JsonNode plan) => (plan["plans"] as JsonArray ?? new JsonArray())
         .Where(p => (string?)p!["class"] == "use_version" && (string?)p["status"] != "refused").Select(p => p!).ToList();

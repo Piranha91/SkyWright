@@ -130,7 +130,12 @@ static class NavEditCli
         {
             foreach (var e in edits)
             {
-                var key = FormKey.Factory((string)e!["navmesh"]!);
+                // R10: {"navmeshes": [K, ...], "use_version": P} carries exactly that set; the row is keyed by its first navmesh
+                var stated = e!["navmeshes"] as JsonArray;
+                bool isSet = stated is not null;
+                if (isSet && (stated!.Count == 0 || e["use_version"] is null || e["navmesh"] is not null || e["with_neighbours"] is not null))
+                    throw new Refusal("navedit plan: \"navmeshes\" names a set to carry: give it one or more navmeshes and \"use_version\", without \"navmesh\" or \"with_neighbours\".");
+                var key = FormKey.Factory((string)(isSet ? stated![0] : e["navmesh"])!);
                 var row = new JsonObject { ["navmesh"] = key.ToString(), ["edit"] = e.DeepClone() };
                 var expect = new Dictionary<FormKey, (NavmeshGeometry, int[], string, bool)>();
                 string? refuse = null; List<RepairOp> ops = new(); IReadOnlyList<string> why = Array.Empty<string>();
@@ -138,7 +143,8 @@ static class NavEditCli
                 var path = w is null ? null : order.FirstOrDefault(p => string.Equals(Path.GetFileName(p), w.Value.WinnerPlugin, StringComparison.OrdinalIgnoreCase));
                 var geom = path is null ? null : Winning(path, key);
                 bool isMove = e["move"] is not null, isTri = e["remove"] is not null || e["add"] is not null, isCut = e["cut"] is not null, isUse = e["use_version"] is not null, isDoor = e["door"] is not null;
-                if (w is null || path is null) refuse = $"{key} is in no plugin of this load order; check the FormKey and the profile.";
+                if (isSet) { }   // each member's winner is the set planner's to check (NavUseVersionPlan.PlanSet)
+                else if (w is null || path is null) refuse = $"{key} is in no plugin of this load order; check the FormKey and the profile.";
                 else if (geom is null) refuse = $"{key} has no geometry in its winner {w.Value.WinnerPlugin} (deleted or empty), so there is nothing to edit.";
                 else if ((isMove ? 1 : 0) + (isTri ? 1 : 0) + (isCut ? 1 : 0) + (isUse ? 1 : 0) + (isDoor ? 1 : 0) != 1) refuse = $"The edit of {key} must do one kind of thing: move vertices, remove and add triangles, cut, use a version, or add a door; split it into separate plans.";
                 else if (NavUseVersionPlan.NaviRefusal(navi, key) is { } nvr) refuse = nvr;
@@ -238,7 +244,11 @@ static class NavEditCli
                 else if (refuse is null && isUse)
                 {
                     // the use_version glue's one owner (_shared/NavEdit.cs NavUseVersionPlan), navownprobe's repair plan calls it too
-                    var u = NavUseVersionPlan.Plan(view, navi, order, key, geom!, w!.Value.WinnerPlugin, (string?)e["use_version"] ?? "", () => inboundIndex ??= InboundIndex(order));
+                    // R10: a stated set ("navmeshes"), or one navmesh grown by need ("with_neighbours": true), or one alone
+                    var mode = isSet ? UseVersionSetMode.Stated : (bool?)e["with_neighbours"] == true ? UseVersionSetMode.Grown : UseVersionSetMode.Single;
+                    var keys = isSet ? stated!.Select(x => FormKey.Factory((string)x!)).ToList() : new List<FormKey> { key };
+                    var u = NavUseVersionPlan.PlanSet(view, navi, order, keys, (string?)e["use_version"] ?? "", mode, () => inboundIndex ??= InboundIndex(order),
+                                                      isSet ? null : (geom!, w!.Value.WinnerPlugin));
                     refuse = u.Refuse; why = u.Why; ops = u.Ops;
                     foreach (var (fk, x) in u.Expect) expect[fk] = x;
                     if (u.Row is not null) row["useVersion"] = u.Row;

@@ -92,6 +92,9 @@ static class NavRepairRun
         return null;
     }
 
+    /// <summary>R10 STUB (Gate B, red first): no row is carried with an earlier set.</summary>
+    public static string? CarriedWith(FormKey nav, string mover, IReadOnlyDictionary<FormKey, (FormKey Seed, string Mover)> carried) => null;
+
     public static JsonObject UseVersionRow(FormKey nav, string mover, string moverPath, string? refused, UseVersionPlan? u)
     {
         bool ok = refused is null && u is { Planned: true };
