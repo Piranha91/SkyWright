@@ -14,12 +14,14 @@ namespace Workbench;
 /// can compose much more slowly than the display refreshes (every few system timer ticks rather than every
 /// refresh), and a view that waits for it then runs at that rate. So a second thread watches the compositions
 /// while frames are wanted, and when two in a row come more than a period and a half apart the pacer keeps time with
-/// its own high-resolution clock at the display's period, until the compositor keeps the rate again (<see cref="PaceChoice"/>).</para></summary>
+/// its own high-resolution clock at the display's period, until the compositor keeps the rate again (<see cref="PaceChoice"/>).
+/// The interval is read from the compositor's own counters (when it composed, and which frame), not from when the watch
+/// woke up: on a busy machine the watch's thread wakes late, and that lateness is not the desktop's.</para></summary>
 internal sealed class FramePacer : IDisposable
 {
     readonly Dispatcher _ui;
     readonly Action _frame;
-    readonly Func<bool> _compose;
+    readonly Func<Composition?> _compose;
     readonly PaceChoice _choice;
     readonly AutoResetEvent _wake = new(false), _composed = new(false), _watchWake = new(false);
     readonly Thread _thread, _watch;
@@ -42,12 +44,13 @@ internal sealed class FramePacer : IDisposable
     /// <summary>Why the compositor wait is not used, when it is not (the pacer then waits on its own clock).</summary>
     internal string? Fallback { get; private set; }
 
-    /// <param name="compose">Test hook: waits for one composition and says whether it could; the default is DwmFlush.</param>
+    /// <param name="compose">Test hook: waits for one composition and says when it happened and which frame it was, by the
+    /// compositor's counters, or null when it could not; the default is DwmFlush, then DwmGetCompositionTimingInfo.</param>
     /// <param name="periodMs">Test hook: the display's refresh period; the default asks the compositor.</param>
-    internal FramePacer(Dispatcher ui, Action frame, Func<bool>? compose = null, double? periodMs = null)
+    internal FramePacer(Dispatcher ui, Action frame, Func<Composition?>? compose = null, double? periodMs = null)
     {
         _ui = ui; _frame = frame;
-        _compose = compose ?? (() => DwmFlush() == 0);
+        _compose = compose ?? (() => DwmFlush() == 0 ? LastComposition() : null);
         _choice = new PaceChoice(periodMs ?? RefreshPeriodMs() ?? 1000.0 / 60);
         _timer = CreateWaitableTimerEx(IntPtr.Zero, null, 0x2 /* CREATE_WAITABLE_TIMER_HIGH_RESOLUTION */, 0x1F0003);
         _thread = new Thread(Loop) { IsBackground = true, Name = "frame pacer", Priority = ThreadPriority.AboveNormal };
@@ -88,21 +91,21 @@ internal sealed class FramePacer : IDisposable
     /// <summary>Waits on each composition while frames are wanted, signals it, and feeds its interval to the choice.</summary>
     void Watch()
     {
-        var clock = Stopwatch.StartNew();
-        double last = -1;
+        Composition? last = null;
         while (!_stop)
         {
-            if (Stopwatch.GetTimestamp() > Volatile.Read(ref _watchUntil)) { last = -1; _choice.Paused(); _watchWake.WaitOne(200); continue; }
-            if (!_compose())
+            if (Stopwatch.GetTimestamp() > Volatile.Read(ref _watchUntil)) { last = null; _choice.Paused(); _watchWake.WaitOne(200); continue; }
+            var c = _compose();
+            if (c is null)
             {
-                Fallback ??= "the desktop compositor's frame wait (DwmFlush) failed, so frames are paced by a 60 Hz clock";
-                _choice.Failed(); last = -1;
+                Fallback ??= "the desktop compositor's frame wait (DwmFlush) or its timing counters failed, so frames are paced by a 60 Hz clock";
+                _choice.Failed(); last = null;
                 Thread.Sleep(100);
                 continue;
             }
-            double now = clock.Elapsed.TotalMilliseconds;
-            if (last >= 0) _choice.Composed(now - last);
-            last = now;
+            // A watch that woke after two compositions sees both: the interval is per composed frame, by the compositor's times.
+            if (last is { } l && c.Value.Frame > l.Frame) _choice.Composed((c.Value.AtMs - l.AtMs) / (c.Value.Frame - l.Frame));
+            if (last is null || c.Value.Frame > last.Value.Frame) last = c;
             _composed.Set();
         }
     }
@@ -154,6 +157,19 @@ internal sealed class FramePacer : IDisposable
         _timer = IntPtr.Zero;
     }
 
+    // DWM_TIMING_INFO, packed to 1 (dwmapi.h): cbSize at 0, qpcRefreshPeriod at 12, qpcCompose at 48, cFrame at 56.
+    [ThreadStatic] static byte[]? _timing;
+
+    /// <summary>The last composition by the compositor's counters: when (qpcCompose, on the Stopwatch clock, in ms) and
+    /// which frame (cFrame); null when the counters do not answer.</summary>
+    static Composition? LastComposition()
+    {
+        var b = _timing ??= new byte[292];
+        BitConverter.TryWriteBytes(b, (uint)b.Length);
+        if (DwmGetCompositionTimingInfo(IntPtr.Zero, b) != 0) return null;
+        return new Composition(BitConverter.ToUInt64(b, 48) * 1000.0 / Stopwatch.Frequency, BitConverter.ToUInt64(b, 56));
+    }
+
     /// <summary>The display's refresh period from the compositor's timing counters, or null when it does not answer.</summary>
     static double? RefreshPeriodMs()
     {
@@ -172,6 +188,9 @@ internal sealed class FramePacer : IDisposable
     [DllImport("kernel32.dll")] static extern uint WaitForMultipleObjects(uint count, IntPtr[] handles, bool waitAll, uint milliseconds);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
 }
+
+/// <summary>One desktop composition by the compositor's own counters: when it happened (ms on a monotonic clock) and its frame number.</summary>
+internal readonly record struct Composition(double AtMs, ulong Frame);
 
 /// <summary>Whether the pacer follows the compositor or its own clock, decided from the time between compositions: two in a
 /// row more than a period and a half apart switch to the clock, thirty in a row within it (half a second at 60 Hz) switch

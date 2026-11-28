@@ -47,6 +47,7 @@ static class RecordChecks
             [LostEditCheck.FieldsId] = LostEditCheck.Fields,
             [LostEditCheck.CellsId] = LostEditCheck.Cells,
             [MissingAssetCheck.Id] = MissingAssetCheck.Run,
+            [RegistrationCheck.Id] = RegistrationCheck.Run,
         };
 
     /// <summary>A plugin is one of the game's own files: Bethesda's or Creation Club's (BaseGamePlugins owns the names).</summary>

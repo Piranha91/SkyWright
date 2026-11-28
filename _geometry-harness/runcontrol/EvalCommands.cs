@@ -1,3 +1,5 @@
+using SkyWright.Engine;
+
 namespace RunControl;
 
 /// <summary>What one of evalrun.py's commands was asked, flag for flag as its parser reads them.</summary>
@@ -143,6 +145,11 @@ public static class EvalCommands
         catch (Unreadable u)
         {
             Console.Error.WriteLine($"REFUSED: {u.Message}; make the file readable and run again.");
+            return Exit.Refused;
+        }
+        catch (CommandLineTooLongException tooLong)   // a check's probe whose command line Windows would not take
+        {
+            Console.Error.WriteLine($"REFUSED: {tooLong.Message}");
             return Exit.Refused;
         }
         catch (Exception ex) when (IsShapeError(ex))

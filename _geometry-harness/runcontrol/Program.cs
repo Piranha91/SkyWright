@@ -108,6 +108,11 @@ catch (Refusal r)
     Console.Error.WriteLine($"REFUSED: {r.Message}");
     return Exit.Refused;
 }
+catch (CommandLineTooLongException tooLong)   // a child started outside the stage launcher (the plan's preflight)
+{
+    Console.Error.WriteLine($"REFUSED: {tooLong.Message}");
+    return Exit.Refused;
+}
 catch (ProfileUnreadableException locked)
 {
     Console.Error.WriteLine($"REFUSED: {locked.Message}");

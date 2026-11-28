@@ -28,6 +28,7 @@ internal static class ProbeNames
         "loadability.dangling-references" => "Records that use a record of another mod which the installed version of that mod does not have.",
         "loadability.missing-assets" => "Files a mod's records use that the game cannot find because another mod's archive of the same name wins.",
         "records.contested-fields" => "Changes one mod made to a record that a later mod, not made with it, puts back or changes again.",
+        "records.registration-and-dialogue" => "Items one mod added to a form list, and quest, dialogue, location and package changes, that a later mod, not made with it, undoes.",
         "records.cell-attributes" => "Cell settings one mod changed, such as lighting or water height, that a later mod, not made with it, puts back or changes again.",
         "geometry.navmesh-ownership" => "Navmesh edits a later plugin throws away, and broken links in the navmesh that wins.",
         "geometry.object-overlap" => "Objects one mod placed or moved into another mod's objects.",

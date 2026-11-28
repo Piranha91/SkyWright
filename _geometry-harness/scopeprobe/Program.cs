@@ -44,7 +44,7 @@ using Mutagen.Bethesda.Skyrim;
 // conflict, and a mod with an empty footprint is not thereby compatible. It also does not resolve asset paths
 // against the VFS (that is housecarl_asset_status) and does not read scripts (only counts their carriers).
 //
-// usage: scopeprobe --target X.esp [--target Y.esp]... [--order FILE | --enable X.esp | --disable X.esp]
+// usage: scopeprobe --target X.esp [--target Y.esp]... [--target-file FILE] [--order FILE | --enable X.esp | --disable X.esp]
 //                   [--json FILE] [--assets N] [--instance DIR] [--profile NAME] [--game DIR]
 //
 //   --order/--enable/--disable  the configuration to read the targets in, through HarnessOrderCli — the same three
@@ -57,6 +57,11 @@ using Mutagen.Bethesda.Skyrim;
 //                   (nearby.ring in scope.json; default 0, none). The loaded grid is 2.
 //   --also-scan F   a plugin file outside the configuration (a disabled mod's) to check, records only, for CELL records
 //                   in the footprint or its ring (nearby.alsoScanned); repeatable. It is never loaded into the order.
+//   --target-file F, --also-scan-file F
+//                   the same lists from a file, one entry a line (UTF-8, blank lines skipped), taken in the place the flag
+//                   stands, so a caller passes a list that grows with the load order without a command line that grows
+//                   with it (runcontrol's scope stage does). A list file that is missing or unreadable: one sentence on
+//                   stderr, exit 2, no scope.json.
 //
 //   unreadableRecords
 //                 a target holding a record Mutagen cannot read is not measured: the record is named here (plugin,
@@ -87,6 +92,7 @@ var alsoScan = new List<string>();
 var targetNames = new List<string>();
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
+string? listProblem = null;   // a list file that cannot be read, said once the loop has read --json
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -104,6 +110,13 @@ for (int i = 0; i < args.Length; i++)
         { Console.Error.WriteLine($"--ring needs a whole number from 0 to 5; got '{args[i]}'."); return 2; }
     }
     else if (args[i] == "--also-scan" && i + 1 < args.Length) alsoScan.Add(args[++i]);
+    else if (args[i] is "--target-file" or "--also-scan-file" && i + 1 < args.Length)
+    {
+        string flag = args[i];
+        var (entries, problem) = ListFile.Read(args[++i], flag);
+        if (problem is not null) listProblem ??= problem;
+        else (flag == "--target-file" ? targetNames : alsoScan).AddRange(entries!);
+    }
     else if (args[i] == "--assets" && i + 1 < args.Length)
     {
         if (!int.TryParse(args[++i], out assetsListed) || assetsListed < 0)
@@ -114,6 +127,7 @@ for (int i = 0; i < args.Length; i++)
     else targetNames.Add(args[i]);
 }
 
+if (listProblem is not null) return ScopeOutcome.Fail(listProblem, jsonPath, __run);
 if (targetNames.Count == 0)
 {
     Console.Error.WriteLine("scopeprobe needs at least one --target Plugin.esp: the footprint is a fact about a "

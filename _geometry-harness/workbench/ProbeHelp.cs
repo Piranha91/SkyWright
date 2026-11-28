@@ -95,7 +95,7 @@ internal static class ProbeHelp
 
             The check reads every record a mod of your selection changes that another mod's plugin also changes. It compares each copy that does not win with what its own plugin was made with, to find what that mod really changed, then with the copy that wins. A field is listed when one mod changed it, the winning value differs in game, the two plugins are in different mods, and the winning plugin was not made with the other (it does not list it among its masters). It looks both ways, and says whether the winning mod changed the field itself or only carries an older value.
 
-            Values are compared as the game reads them; two positions less than half a unit apart are the same. Changes within one mod, the game's own files, cells, navmesh, and quests, dialogue and form lists are not listed.
+            Values are compared as the game reads them; two positions less than half a unit apart are the same. Changes within one mod, the game's own files, cells and navmesh are not listed; quests, dialogue and form lists are the registration and dialogue check's.
             """),
 
         ["records.cell-attributes"] = new(
@@ -104,6 +104,16 @@ internal static class ProbeHelp
             A cell's own record holds its lighting, water, music, flags and encounter zone. When two mods change the same cell, the game uses only the version of the mod lower in the load order, so a mod made without the other carries the cell's settings it was made with and undoes the other mod's.
 
             The check is the same as the check for changed fields, on cells: it lists a setting one mod changed whose winning value is another mod's, when the two plugins are in different mods and the winning plugin was not made with the other one. It looks both ways, says whether the winning mod changed the setting itself, compares values as the game reads them, and does not list changes within one mod or in the game's own files. A cell's occlusion data and height map, which the editor rebuilds from the cell's objects and land, are not listed.
+            """),
+
+        ["records.registration-and-dialogue"] = new(
+            "Finds items one mod added to a form list that a later mod's list does not hold, and quest, dialogue, location and package changes a later mod undoes without having been made with the first mod.",
+            """
+            A form list is a list of items that scripts and conditions check, such as the keys a lock accepts or the ingredients a recipe takes. When two mods change the same list, the game uses only the copy of the mod with the higher priority, so an item the other mod added is gone in game unless the winning copy holds it too.
+
+            The check reads every quest, topic, scene, form list, location, story-manager node and package a mod of your selection changes that another mod's plugin also changes, with the same rule as the check for changed fields: a change is listed when the two plugins are in different mods and the winning plugin was not made with the other one. A form list is read item by item: each item one mod added that the winning list lacks, or removed that it still holds, is its own row.
+
+            Script properties left unfilled and dialogue lines with text the game cannot show are one mod's own, so they are counted, not listed. The order of a topic's lines between mods is not checked. It has not yet found a real clash between two mods, so a scan does not run it unless you tick it.
             """),
 
         ["geometry.stranded-object"] = new(
