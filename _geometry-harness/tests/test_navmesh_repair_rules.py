@@ -89,6 +89,15 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
     2671-2673  review of Gate B: a version whose own island box is not its navmesh's is refused (2671); a plain navedit
           write whose read-back fails leaves nothing (2672, through navedit's test switch NAVEDIT_FAIL_READBACK=1); a patch
           already at --out is never touched, and a write that holds leaves no staging folder (2673)
+    2679-2685  R10, carry a set of navmeshes (navownprobe --write-mover-fixture DIR set | set-ground): two re-cut navmeshes
+          refused alone, planned as a set grown by need or stated (2679); the written set read back raw by navi_bytes.py,
+          two-way borders by position, inner, outer, merged and ledge links (2680); the navmesh info map changed once, an
+          island member, the masters (2681); each refusal in one sentence (2682); a member refused for another reason, and
+          undo: a refused or failing set leaves the output folder as it was (2683); the repair plan carries a pair as one set,
+          its second row carried with it, written by R1 (2684); self-test of the row carried with an earlier set (2685)
+    2686-2688  review of Gate C: the two-way read-back judges only borders with a member at one end (2686); a link into a
+          member its version does not return is refused at plan time and grown in (2687); a clobber moved to a re-pointing
+          patch is one unchanged row in the re-check (2688, navownprobe's self-test)
 
 The write of the plan through houseCARL's server program, its read-back and the re-check (2494-2499, 2504, 2505) are the
 module's suite integration/housecarl/tests/test_navmesh_repair_write.py, on this fixture: only the module holds that
@@ -660,8 +669,9 @@ _MOVER = None
 _MOVER_DOORS = None
 
 
-def _mover_instance(tmp: Path, flags):
+def _mover_instance(tmp: Path, flags, order=None):
     """navownprobe --write-mover-fixture (with FLAGS) laid out as an MO2 instance with profile P; returns (instance, game)."""
+    MOVER_ORDER = order or globals()["MOVER_ORDER"]
     keep = tmp / "fixture"
     w = run([exe("navownprobe"), "--write-mover-fixture", keep] + list(flags))
     if w.returncode != 0 or not all((keep / n).exists() for n in MOVER_ORDER):
@@ -1178,6 +1188,256 @@ def t2673():
     assert out.read_bytes() == before and sorted(p.name for p in out.parent.iterdir()) == [out.name], "the first patch was touched, or something was left beside it"
 
 
+# ---- R10: carry a set of navmeshes (Gate A C:/hc-runs/2026-11-27-navmesh-r10/GATE-A.md; navownprobe --write-mover-fixture DIR
+# set | set-ground, NavRepairFixture.WriteSetCase gives the table). Every written patch is read back raw by navi_bytes.py
+# (not_returned: two-way borders by position, its own measure), before anything about the plan row is asserted.
+
+from navi_bytes import not_returned  # noqa: E402
+
+SET_ORDER = ["Skyrim.esm", "SetP.esp", "Revert.esp", "Touch.esp"]
+SA, SB, SO, SS, SR, SC, SX, SW, SDN, DZ = (sk(x) for x in ("000B20", "000B21", "000B22", "000B23", "000B24", "000B25", "000B26", "000B27", "000B28", "000D40"))
+SQ, SK, SL = sk("000B29"), sk("000B2A"), sk("000B2B")
+_SETLAB = {}
+
+
+def set_lab(variant="set"):
+    """The set variant laid out as an MO2 instance: (tmp, instance, game, fixture folder, order)."""
+    if variant not in _SETLAB:
+        tmp = Path(tempfile.mkdtemp(prefix=f"nr-{variant}-"))
+        order = SET_ORDER if variant == "set" else MOVER_ORDER
+        inst, game = _mover_instance(tmp, [variant], order)
+        _SETLAB[variant] = (tmp, inst, game, tmp / "fixture", order)
+    return _SETLAB[variant]
+
+
+def set_plan(edits, name):
+    """navedit plan on the set variant: (rows, plan run, folder)."""
+    tmp, inst, game, _, _ = set_lab()
+    d = Path(tempfile.mkdtemp(prefix=f"{name}-", dir=tmp))
+    (d / "edits.json").write_text(json.dumps({"edits": edits}), encoding="utf-8")
+    plan = run([buildlayout.program_under(PROBES, "navedit"), "plan", "--edits", d / "edits.json", "--out", d / "plan.json", "--instance", inst, "--game", game, "--profile", "P"])
+    rows = json.loads((d / "plan.json").read_text(encoding="utf-8"))["edits"] if (d / "plan.json").exists() else []
+    return rows, plan, d
+
+
+def set_write(d, out, env=None):
+    return subprocess.run([str(buildlayout.program_under(PROBES, "navedit")), "write", "--plan", str(d / "plan.json"), "--out", str(out)],
+                          capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600, env=env)
+
+
+def raw_taken(fx, order, patch):
+    """{key: Navmesh} as the game takes them with the patch loaded last, read raw."""
+    taken = {}
+    for n in order:
+        taken.update(RawPlugin(fx / n).navmeshes())
+    pp = RawPlugin(patch)
+    taken.update(pp.navmeshes())
+    return taken, pp
+
+
+def raw_two_way(fx, order, patch, carried=None):
+    """navi_bytes' two-way check, as the game takes the navmeshes with the patch last. With carried (the members' keys), the
+    borders with a member at one end (review of Gate C, decision 1); without, every border of every navmesh the patch holds
+    and of every navmesh linking into one of them."""
+    taken, pp = raw_taken(fx, order, patch)
+    held = set(carried) if carried is not None else set(pp.navmeshes())
+    sources = held | {k for k, n in taken.items() if any(l[1] in held for l in n.links)}
+    return not_returned(taken, sorted(sources, key=str), held if carried is not None else None), pp
+
+
+def members(row):
+    return [m["navmesh"].lower() for m in ((row.get("useVersion") or {}).get("members") or [])]
+
+
+def one_sentence(w):
+    return w.endswith(".") and "\n" not in w and len(w.rstrip(".").split(". ")) == 1
+
+
+_GROWN = None
+
+
+def grown_set():
+    """use_version SA from SetP.esp grown by need, planned and written once: (rows, plan run, folder, write run, patch)."""
+    global _GROWN
+    if _GROWN is None:
+        rows, plan, d = set_plan([{"navmesh": SA, "use_version": "SetP.esp", "with_neighbours": True}], "Grown")
+        out = d / "out" / "SetFix.esp"
+        w = set_write(d, out) if plan.returncode == 0 else None
+        _GROWN = (rows, plan, d, w, out)
+    return _GROWN
+
+
+def t2679():
+    """Rejects: SA or SB carried alone (each one's border to the other would be one-way), a refusal that does not name the
+    other and the edit that carries it, a grown set other than exactly [SA, SB] (growth that stops short, or adds SR, which
+    SetP already wins, or SO or SS, which need nothing), or a stated set [SA, SB] planning other ops than the grown one."""
+    for k, other in ((SA, SB), (SB, SA)):
+        rows, _, _ = set_plan([{"navmesh": k, "use_version": "SetP.esp"}], "Single")
+        whys = (rows[0].get("why") or []) if rows else []
+        assert rows and rows[0]["status"] == "refused", f"{k} alone: {row_said(rows)}"
+        assert any(other in w and "does not link back" in w and '"with_neighbours": true' in w and one_sentence(w) for w in whys), f"{k} alone: {whys}"
+    rows, plan, _, _, _ = grown_set()
+    assert rows and rows[0]["status"] == "planned", f"grown: {row_said(rows)}"
+    assert members(rows[0]) == [SA.lower(), SB.lower()], f"grown set members {members(rows[0])}, want [SA, SB]"
+    st, _, _ = set_plan([{"navmeshes": [SA, SB], "use_version": "SetP.esp"}], "Stated")
+    assert st and st[0]["status"] == "planned", f"stated: {row_said(st)}"
+    assert st[0]["ops"] == rows[0]["ops"], "the stated set [SA, SB] plans other ops than the grown one"
+
+
+def t2680():
+    """Rejects: a written set whose borders are not all two-way (read raw), members not carried as SetP has them, an inner
+    link naming the winner's numbering, an outer link matched against SetP's own SO (which links nothing back) rather than
+    Revert's, SS (linked into both members) re-pointed into one member only, SR (SetP wins it) carried or its ledge dropped,
+    or anything but the patch left in the output folder."""
+    rows, _, d, w, out = grown_set()
+    assert w is not None and w.returncode == 0, f"navedit write {write_said(w)} (plan {row_said(rows)})"
+    tmp, _, _, fx, order = set_lab()
+    bad, pp = raw_two_way(fx, order, out, {rk(SA), rk(SB)})
+    assert not bad, f"raw: borders not two-way: {bad}"
+    assert sorted(p.name for p in out.parent.iterdir()) == [out.name], f"the output folder holds {sorted(p.name for p in out.parent.iterdir())}"
+    nav, src = pp.navmeshes(), RawPlugin(fx / "SetP.esp").navmeshes()
+    assert set(nav) == {rk(SA), rk(SB), rk(SO), rk(SS)}, f"the patch holds {sorted(nav)}"
+    for k in (SA, SB):
+        assert nav[rk(k)].vertices == src[rk(k)].vertices and [t[:3] for t in nav[rk(k)].triangles] == [t[:3] for t in src[rk(k)].triangles], f"{k} is not SetP's"
+    L = {k: [(l[1], l[2], l[0]) for l in nav[rk(k)].links] for k in (SA, SB, SO, SS)}
+    assert (rk(SB), 3, 0) in L[SA] and (rk(SA), 1, 0) in L[SB], f"inner links SA {L[SA]}, SB {L[SB]} (want SB 3 and SA 1, SetP's own numbering)"
+    assert (rk(SO), 0, 0) in L[SA], f"SA's link into SO {L[SA]} (want Revert's SO triangle 0)"
+    # CORRECTED 2026-11-27 (review of Gate C): SS also links one way into SQ now, a border the set does not touch
+    assert [x for x in L[SS] if x[0] != rk(SQ)] == [(rk(SA), 2, 0), (rk(SB), 2, 0)], f"SS's links {L[SS]} (want both re-pointed to triangle 2: one merged change)"
+    assert L[SO] == [(rk(SA), 3, 0)], f"SO's links {L[SO]} (want re-pointed to SA's triangle 3)"
+    assert (rk(SR), 1, 2) in L[SB], f"SB's ledge into SR {L[SB]}"
+
+
+def t2681():
+    """Rejects: the navmesh info map changed member by member (a neighbour gained between two members written twice), a
+    member's entry not following its version (SB takes SetP's island data byte for byte; SA names exactly SO, SS, SB; SB
+    exactly SA, SS, SR), another entry touched, or a patch not mastering every plugin whose version of a member it
+    supersedes (Revert.esp for SA, Touch.esp for SB), in load order, read from the written header."""
+    rows, _, d, w, out = grown_set()
+    assert w is not None and w.returncode == 0, f"navedit write {write_said(w)}"
+    tmp, _, _, fx, order = set_lab()
+    pn, rn, sn = RawPlugin(out).navi(), RawPlugin(fx / "Revert.esp").navi(), RawPlugin(fx / "SetP.esp").navi()
+    for k, want in ((SA, {SO, SS, SB}), (SB, {SA, SS, SR})):
+        e = pn[rk(k)]
+        named = e.merged_to + e.preferred
+        assert sorted(named) == sorted(rk(x) for x in want) and len(named) == len(set(named)), f"{k}'s entry names {named}, want each of {sorted(want)} once"
+    assert pn[rk(SB)].island_bytes == sn[rk(SB)].island_bytes and pn[rk(SB)].unknown == 32, "SB's island data is not SetP's"
+    assert pn[rk(SA)].island is None, "SA's entry gained island data"
+    assert all(pn[k].raw == rn[k].raw for k in rn if k not in (rk(SA), rk(SB))), "an entry outside the set differs from the winner's"
+    ops = [json.dumps(o, sort_keys=True) for o in rows[0]["ops"] if o["formid"].lower() == "000c00:skyrim.esm"]
+    assert ops and len(ops) == len(set(ops)), f"the plan's NAVI ops repeat: {ops}"
+    masters = RawPlugin(out).masters
+    assert "revert.esp" in masters and "touch.esp" in masters and masters.index("revert.esp") < masters.index("touch.esp"), f"the patch's masters {masters}"
+
+
+def t2682():
+    """Rejects: a stated set that carries anything but what it names, a refusal that is not one sentence or misses the
+    shape GATE-A section 3 gives: a navmesh named twice; one SetP already wins (SR); one SetP has no version of (SX); a set
+    [SA] alone whose border needs SB (the sentence says to add it); and, grown from SC, a neighbour SetP has no version of
+    (SX) and one whose version SetP already wins but does not fit (SW): growth stops at both, SW never a member."""
+    cases = [
+        ({"navmeshes": [SA, SB, SA], "use_version": "SetP.esp"}, f"{SA} is named twice in the set; name each navmesh once."),
+        ({"navmeshes": [SA, SB, SR], "use_version": "SetP.esp"}, f"SetP.esp already wins {SR}, so there is nothing to carry; leave {SR} out of the set."),
+        ({"navmeshes": [SA, SB, SX], "use_version": "SetP.esp"}, f"SetP.esp has no version of {SX}, or deletes it, so there is nothing to carry."),
+        ({"navmeshes": [SA], "use_version": "SetP.esp"}, f"add {SB} to the set, or keep the winner's version of {SA}."),
+        ({"navmesh": SC, "use_version": "SetP.esp", "with_neighbours": True}, f"SetP.esp has no version of {SX} to carry with it, so keep the winner's version of {SC}."),
+        ({"navmesh": SC, "use_version": "SetP.esp", "with_neighbours": True}, f"SetP.esp's own version of {SW}, the one the game takes, does not fit it either, so keep the winner's version of {SC}."),
+    ]
+    for i, (edit, want) in enumerate(cases):
+        rows, _, _ = set_plan([edit], f"Refuse{i}")
+        whys = (rows[0].get("why") or []) if rows else []
+        assert rows and rows[0]["status"] == "refused" and not rows[0]["ops"], f"{edit}: {row_said(rows)}"
+        assert any(w.endswith(want) and one_sentence(w) for w in whys), f"{edit}: no one-sentence refusal ending '{want}' in {whys}"
+        assert rk(SW) not in [rk(m) for m in members(rows[0])], f"{edit}: SW, which SetP already wins, was made a member"
+
+
+def t2683():
+    """Rejects: a set with a member refused for another reason written in part, or refused without that member's own
+    sentence starting with which member (SD stands before door DZ, which no plugin places); a refused set touching the
+    output folder (its listing and a file already there, byte for byte); or a set whose read-back fails (navedit's test
+    switch NAVEDIT_FAIL_READBACK=1) leaving anything there."""
+    rows, plan, d = set_plan([{"navmeshes": [SA, SB, SDN], "use_version": "SetP.esp"}], "DoorSet")
+    outd = d / "out"
+    outd.mkdir()
+    (outd / "keep.txt").write_bytes(b"left as it was\n")
+    w = set_write(d, outd / "DoorSet.esp")
+    left = sorted(p.name for p in outd.iterdir())
+    assert left == ["keep.txt"] and (outd / "keep.txt").read_bytes() == b"left as it was\n", f"the refused set left {left} in the output folder (write exit {w.returncode})"
+    assert w.returncode != 0, f"writing a refused set: exit {w.returncode}"
+    whys = (rows[0].get("why") or []) if rows else []
+    assert rows and rows[0]["status"] == "refused", f"the set with SD: {row_said(rows)}"
+    assert any(x.startswith(f"{SDN}: ") and DZ in x and "no plugin of this order provides" in x and one_sentence(x) for x in whys), f"SD's own sentence: {whys}"
+    grows, gplan, gd = set_plan([{"navmesh": SA, "use_version": "SetP.esp", "with_neighbours": True}], "FailRb")
+    gout = gd / "out"
+    gout.mkdir()
+    (gout / "keep.txt").write_bytes(b"left as it was\n")
+    fw = set_write(gd, gout / "Failing.esp", env=dict(os.environ, NAVEDIT_FAIL_READBACK="1"))
+    left = sorted(p.name for p in gout.iterdir())
+    assert fw.returncode != 0 and "NAVEDIT_FAIL_READBACK" in fw.stdout, f"the failing write: {write_said(fw)}"
+    assert left == ["keep.txt"] and (gout / "keep.txt").read_bytes() == b"left as it was\n", f"a set whose read-back failed left {left}"
+
+
+def t2684():
+    """Rejects: navownprobe's repair plan carrying one member of a re-cut pair alone (refused for the other's border, the
+    behaviour before R10), planning the pair's second row again as its own set (two rows changing the same navmeshes), or
+    an R1 patch of the set that does not hold or is not two-way read raw. set-ground: Mover re-cuts SA and SB on its raised
+    ground, linked to each other; Revert reverts both."""
+    tmp, inst, game, fx, order = set_lab("set-ground")
+    d = Path(tempfile.mkdtemp(prefix="r1-", dir=tmp))
+    log = run([exe("navownprobe"), "--instance", inst, "--game", game, "--profile", "P", "--emit", d / "emit.json", "--repair-plan", d / "plan.json"])
+    assert log.returncode == 0 and (d / "plan.json").exists(), f"no plan (exit {log.returncode}): {(log.stdout + log.stderr)[-500:]}"
+    plan = json.loads((d / "plan.json").read_text(encoding="utf-8"))
+    uv = {p["source"].lower(): p for p in plan["plans"] if p["class"] == "use_version"}
+    assert set(uv) == {SA.lower(), SB.lower()}, f"use_version rows {[(k, p['status']) for k, p in uv.items()]}"
+    seed = [p for p in uv.values() if p["edits"]]
+    assert len(seed) == 1 and seed[0]["status"] == "planned", f"rows: {[(p['source'], p['status'], p['why'][:160]) for p in uv.values()]}"
+    s = seed[0]
+    other = [p for p in uv.values() if p is not s][0]
+    assert sorted(members(s)) == sorted([SA.lower(), SB.lower()]), f"the set's members {members(s)}"
+    assert other["status"] == "planned" and f"carried with {s['source']}'s set" in other["why"] and other["edits"] == [] and other["changes"] == [], \
+        f"the second row: {other['status']} '{other['why']}', {len(other['edits'])} edits, changes {other['changes']}"
+    out = d / "out" / "SetGround.esp"
+    w = run([buildlayout.program_under(PROBES, "navedit"), "write", "--repair-plan", d / "plan.json", "--out", out])
+    assert w.returncode == 0, f"R1 {write_said(w)}"
+    bad, pp = raw_two_way(fx, order, out, {rk(SA), rk(SB)})
+    assert not bad, f"raw: borders not two-way: {bad}"
+    assert set(pp.navmeshes()) == {rk(SA), rk(SB)}, f"the patch holds {sorted(pp.navmeshes())}"
+    rb = json.loads(out.with_name("SetGround.readback.json").read_text(encoding="utf-8"))
+    assert rb["holds"] is True, f"the read-back: {[r for r in rb['records'] if not r['holds']]}"
+
+
+
+def t2686():
+    """Rejects (review of Gate C, decision 1): a set refused at the two-way read-back for a border neither end of which is a
+    member. SS, which the set re-points and so holds whole, links one way into SQ in Skyrim.esm itself; that border is as the
+    order had it. The grown set [SA, SB] must write, navedit's read-back saying its borders are two-way, and the raw reader
+    must find SS -> SQ broken (the fixture really has it) but every member border two-way. That a member's one-way border is
+    still refused is C2677 (the read-back) and arm 8 (the raw reader)."""
+    rows, _, d, w, out = grown_set()
+    assert w is not None and w.returncode == 0, f"navedit write {write_said(w)} (plan {row_said(rows)})"
+    assert "is two-way" in w.stdout, f"no two-way line in the read-back: {write_said(w)}"
+    tmp, _, _, fx, order = set_lab()
+    every, _ = raw_two_way(fx, order, out)
+    assert any(f"{rk(SS)} triangle 0 links into {rk(SQ)}" in x for x in every), f"the fixture's SS -> SQ border is not broken as written: {every}"
+    mine, _ = raw_two_way(fx, order, out, {rk(SA), rk(SB)})
+    assert not mine, f"raw: member borders not two-way: {mine}"
+
+
+def t2687():
+    """Rejects (review of Gate C, decision 2): an outside navmesh's link into a member that the member's version does not
+    return planned (it would be one-way), refused without naming that navmesh in one sentence, or not taken in by growth when
+    the plugin has its own version of it. SL links into SK at its west and its north; SetP's SK links back only west. SK
+    alone is refused naming SL's north link; grown, SetP's own SL (which links only west) joins, and the set plans."""
+    rows, _, _ = set_plan([{"navmesh": SK, "use_version": "SetP.esp"}], "InboundAlone")
+    whys = (rows[0].get("why") or []) if rows else []
+    assert rows and rows[0]["status"] == "refused", f"SK alone: {row_said(rows)}"
+    assert any(x.startswith(f"{SL}'s triangle 2 links into {SK} triangle 0 of SetP.esp's version, whose edge there does not link back to {SL}, so carrying it would leave that border one-way")
+               and one_sentence(x) for x in whys), f"SK alone: {whys}"
+    rows, _, _ = set_plan([{"navmesh": SK, "use_version": "SetP.esp", "with_neighbours": True}], "InboundGrown")
+    assert rows and rows[0]["status"] == "planned", f"SK grown: {row_said(rows)}"
+    assert members(rows[0]) == [SK.lower(), SL.lower()], f"SK grown: members {members(rows[0])}"
+
+
 CASES = [
     ("2450 the fixture's five plugins in order", t2450),
     ("2451 a link into a deleted navmesh is EDGE-NAV naming the deleter", t2451),
@@ -1259,6 +1519,16 @@ CASES = [
     ("2671 navedit, island-sloppy-version: a version whose island box is not its navmesh's is refused", t2671),
     ("2672 navedit write: a plain write whose read-back fails is left unwritten", t2672),
     ("2673 navedit write: a patch already at --out is never touched; a write that holds leaves no staging folder", t2673),
+    ("2679 navedit, set: SA and SB refused alone, planned as a set grown by need or stated", t2679),
+    ("2680 navedit, set: the written set read back raw: two-way borders, inner, outer, merged and ledge links", t2680),
+    ("2681 navedit, set: the navmesh info map changed once for the set, the island member, the masters", t2681),
+    ("2682 navedit, set: each refusal of a stated or grown set in one sentence", t2682),
+    ("2683 navedit, set: a member refused for another reason refuses the set; a refused or failing set leaves the output folder as it was", t2683),
+    ("2684 R1, set-ground: the repair plan carries the pair as one set, the second row carried with it", t2684),
+    ("2685 self-test: a repair plan row carried with an earlier set of the same plugin; another plugin's set clashes", lambda: selftest("2685")),
+    ("2686 navedit, set: a re-pointed neighbour's broken border to a third navmesh does not refuse the set", t2686),
+    ("2687 navedit, set: a link into a member its version does not return is refused, and grown in", t2687),
+    ("2688 self-test: a clobber moved from the winner to a re-pointing patch is one unchanged row", lambda: selftest("2688")),
 ]
 
 if __name__ == "__main__":

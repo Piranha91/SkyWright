@@ -819,6 +819,131 @@ static class NavEditSelfTest
                 ? null : "a neighbour edge linking into another navmesh was taken as a link back: " + r3.Status + " " + string.Join(" | ", r3.Why);
         });
 
+        // ---- R10: carry a set of navmeshes (NavEdit.UseVersionSet; Gate A C:/hc-runs/2026-11-27-navmesh-r10/GATE-A.md) ----
+        // W (K) and N (NK) as Pair has them but linking nothing to each other (the winners); their versions from one plugin,
+        // each in reversed numbering (triangle x becomes 7 - x), link each other across x = 200 into each other's numbering.
+        // O, a strip of four 100 u cells south of both (y -100 to 0), links its cell 0 into W's triangle 0 and its cell 2 into
+        // N's triangle 0; W and N, and both versions, link back.
+        FormKey OS = new(new ModKey("SelfTest", ModType.Master), 0xE08);
+        static bool OneSentenceU(string s) => s.EndsWith('.') && !s.Contains('\n') && s.TrimEnd('.').Split(". ").Length == 1;
+        (NavmeshGeometry W, NavmeshGeometry N, NavmeshGeometry VW, NavmeshGeometry VN, NavmeshGeometry O) SetPair()
+        {
+            var (w0, n0) = Pair(linkW: false, linkN: false);
+            NavmeshGeometry South(NavmeshGeometry g, List<NavEdgeLink> extra, Func<List<NavTri>, List<NavTri>> more)
+            {
+                var t = g.Triangles.ToList();
+                t[0] = t[0] with { Flags = t[0].Flags | 1, EdgeLink01 = 0 };
+                return g with { Triangles = more(t), EdgeLinks = extra };
+            }
+            var w = South(w0, new List<NavEdgeLink> { new(OS, 1) }, t => t);
+            var n = South(n0, new List<NavEdgeLink> { new(OS, 5) }, t => t);
+            var vw = Reversed(South(w0, new List<NavEdgeLink> { new(OS, 1), new(NK, 7 - 1), new(NK, 7 - 5) }, t =>
+            {
+                t[2] = t[2] with { Flags = t[2].Flags | 2, EdgeLink12 = 1 }; t[6] = t[6] with { Flags = t[6].Flags | 2, EdgeLink12 = 2 }; return t;
+            }));
+            var vn = Reversed(South(n0, new List<NavEdgeLink> { new(OS, 5), new(K, 7 - 2), new(K, 7 - 6) }, t =>
+            {
+                t[1] = t[1] with { Flags = t[1].Flags | 4, EdgeLink20 = 1 }; t[5] = t[5] with { Flags = t[5].Flags | 4, EdgeLink20 = 2 }; return t;
+            }));
+            var ov = new List<Vec3>();
+            for (int i = 0; i <= 4; i++) ov.Add(new Vec3(100 * i, -100, 0));
+            for (int i = 0; i <= 4; i++) ov.Add(new Vec3(100 * i, 0, 0));
+            var ot = new List<NavTri>();
+            for (int i = 0; i < 4; i++) { ot.Add(new NavTri((short)i, (short)(i + 1), (short)(i + 6), 0)); ot.Add(new NavTri((short)i, (short)(i + 6), (short)(i + 5), 0)); }
+            ot[1] = ot[1] with { Flags = 2, EdgeLink12 = 0 }; ot[5] = ot[5] with { Flags = 2, EdgeLink12 = 1 };
+            var o = Geom(ov, ot, new List<NavEdgeLink> { new(K, 0), new(NK, 0) }) with { FormKey = OS };
+            return (w, n, vw, vn, o);
+        }
+        string? SetPlanned(UseVersionSetResult r) => r.Status == "planned" ? null : "the set was refused: " + string.Join(" | ", r.Why);
+
+        // C2675: two members refused singly for each other's borders are planned as a set. Alone, W's version links into N's
+        // winner, which does not link back: refused, the neighbour named in Need and the sentence naming the edit that carries it.
+        // Together: the inner links name the other version's own triangles (matched against the set's versions, not the
+        // winners: N's winner would match by position but name its own numbering and not link back); the outer link into O is
+        // matched against O as the game takes it; O, linked into both members, is re-pointed in ONE merged change (both its
+        // entries, 0 -> 7 and 1 -> 7), not one member's change over the other's.
+        Case("2675 use-version-set-pair", () =>
+        {
+            var (w, n, vw, vn, o) = SetPair();
+            var alone = NavEdit.UseVersionSet(new[] { new SetMember(w, vw) }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n, [OS] = o }, tol);
+            if (alone.Status != "refused" || !alone.Need.Contains(NK)) return $"alone: {alone.Status}, need [{string.Join(",", alone.Need)}] (want refused, needing {NK})";
+            if (!alone.Why.Any(x => x.Contains(NK.ToString()) && x.Contains("\"with_neighbours\": true") && OneSentenceU(x))) return "alone: no one-sentence refusal names N and the edit that carries it: " + string.Join(" | ", alone.Why);
+            var set = NavEdit.UseVersionSet(new[] { new SetMember(w, vw), new SetMember(n, vn) }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [OS] = o }, tol);
+            if (SetPlanned(set) is { } why) return why;
+            var aw = set.Members[0].After!.EdgeLinks!; var an = set.Members[1].After!.EdgeLinks!;
+            if (aw[1].TriangleIndex != 6 || aw[2].TriangleIndex != 2 || an[1].TriangleIndex != 5 || an[2].TriangleIndex != 1)
+                return $"inner links name W->N {aw[1].TriangleIndex},{aw[2].TriangleIndex} (want 6,2) and N->W {an[1].TriangleIndex},{an[2].TriangleIndex} (want 5,1)";
+            if (aw[0] != new NavEdgeLink(OS, 1) || an[0] != new NavEdgeLink(OS, 5)) return $"outer links into O {aw[0]}, {an[0]} (want O's own triangles 1 and 5)";
+            if (!set.Others.TryGetValue(OS, out var oo) || oo.EdgeLinks![0].TriangleIndex != 7 || oo.EdgeLinks[1].TriangleIndex != 7)
+                return "O's merged change: " + (set.Others.TryGetValue(OS, out var x2) ? string.Join(", ", x2.EdgeLinks!) : "none") + " (want both entries re-pointed to 7)";
+            var oOps = set.Ops.Where(p => p.FormId == OS.ToString()).Select(p => $"{p.FieldPath}={p.Value}").ToList();
+            if (string.Join(" ", oOps) != "Data.EdgeLinks[0].TriangleIndex=7 Data.EdgeLinks[1].TriangleIndex=7") return "O's ops " + string.Join(" ", oOps);
+            return set.Ops.Count(p => p.Op == "CopyFrom") == 2 && set.Repointed == 2 ? null : $"{set.Ops.Count(p => p.Op == "CopyFrom")} CopyFrom ops, {set.Repointed} re-pointed (want 2 and 2)";
+        });
+
+        // C2676: the ledge rule. A neighbour in the plugin's own layout (one it already wins) keeps its ledge link into a renumbered
+        // version as the plugin has it, while the index is in range; the same ledge from a neighbour outside that layout is
+        // still refused (it cannot be re-pointed by edge position), as C2561 has it.
+        Case("2676 use-version-set-ledge-layout", () =>
+        {
+            var (w2, n2) = Pair();
+            var nLedge = n2 with { EdgeLinks = new List<NavEdgeLink> { new(K, 5, 1), new(K, 6) } };
+            var near = new Dictionary<FormKey, NavmeshGeometry> { [NK] = nLedge };
+            var own = NavEdit.UseVersionSet(new[] { new SetMember(w2, Reversed(w2)) }, "Ver.esp", near, tol, pWins: m => m == NK);
+            var other = NavEdit.UseVersionSet(new[] { new SetMember(w2, Reversed(w2)) }, "Ver.esp", near, tol, pWins: _ => false);
+            if (SetPlanned(own) is { } why) return "a ledge from a navmesh the plugin wins: " + why;
+            if (other.Status != "refused" || !other.Why.Any(x => x.Contains("cannot be re-pointed by edge position"))) return $"a ledge from outside the layout: {other.Status} {string.Join(" | ", other.Why)}";
+            var past = NavEdit.UseVersionSet(new[] { new SetMember(w2, Reversed(w2)) }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n2 with { EdgeLinks = new List<NavEdgeLink> { new(K, 9, 1), new(K, 6) } } }, tol, pWins: m => m == NK);
+            return past.Status == "refused" ? null : "a layout ledge naming a triangle past the version was kept";
+        });
+
+        // C2677: the two-way read-back on the written patch (NavRepairReadBack.TwoWayBorders): a border of a navmesh the patch
+        // holds that the far side does not return is one sentence naming both triangles; so is an outside navmesh's link into
+        // it that is not returned; a two-way pair gives nothing.
+        Case("2677 two-way-read-back", () =>
+        {
+            var (w, n) = Pair(linkN: false);
+            var one = NavRepairReadBack.TwoWayBorders(new Dictionary<FormKey, NavmeshGeometry> { [K] = w, [NK] = n }, new[] { K }, tol, new[] { K });
+            var want = $"{K}'s triangle 2 links into {NK} triangle 1, which does not link back; the patch was not written.";
+            if (!one.Contains(want) || one.Count != 2) return $"one-way: [{string.Join(" | ", one)}] (want 2, among them '{want}')";
+            var (w3, n3) = Pair(linkW: false);
+            var inn = NavRepairReadBack.TwoWayBorders(new Dictionary<FormKey, NavmeshGeometry> { [K] = w3, [NK] = n3 }, new[] { NK }, tol, new[] { K });
+            if (inn.Count != 2 || !inn.All(x => x.StartsWith($"{NK}'s triangle"))) return "an outside link not returned: " + string.Join(" | ", inn);
+            var (w2, n2) = Pair();
+            var ok = NavRepairReadBack.TwoWayBorders(new Dictionary<FormKey, NavmeshGeometry> { [K] = w2, [NK] = n2 }, new[] { K, NK }, tol, new[] { K });
+            if (ok.Count != 0) return "a two-way pair: " + string.Join(" | ", ok);
+            // CORRECTED 2026-11-27 (review of Gate C, decision 1): only borders with a member at one end are judged; a one-way
+            // link between two navmeshes neither of which is carried (a re-pointed neighbour's border to a third) is as the
+            // order had it, and is not the read-back's to refuse
+            var notMine = NavRepairReadBack.TwoWayBorders(new Dictionary<FormKey, NavmeshGeometry> { [K] = w, [NK] = n }, new[] { K, NK }, tol, new[] { OS });
+            return notMine.Count == 0 ? null : "a border between two navmeshes that are not members was judged: " + string.Join(" | ", notMine);
+        });
+
+        // C2678: the sentences. A plain single use_version's border refusal names the edit that would carry the neighbour, and no
+        // longer says "once sets of navmeshes are supported"; a link into a member that meets no edge of the member's version
+        // says so and is a "border link meeting no edge"; an outside neighbour's entry serving two edges into a member that meet
+        // different triangles of its version is refused in one sentence naming the member.
+        Case("2678 use-version-set-sentences", () =>
+        {
+            var (w, n) = Pair(linkN: false);
+            var single = NavEdit.UseVersion(w, w, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n }, tol);
+            var bad = new List<string>();
+            if (single.Why.Any(x => x.Contains("once sets of navmeshes are supported")) || !single.Why.Any(x => x.Contains("\"with_neighbours\": true")))
+                bad.Add("single: " + string.Join(" | ", single.Why));
+            var (ws, ns, vws, vns, os) = SetPair();
+            var v = vns.Vertices.ToList();
+            foreach (var i in new[] { 0, 3, 6 }) v[i] = v[i] with { X = 210 };   // N's version's west border moved 10 u east
+            var moved = NavEdit.UseVersionSet(new[] { new SetMember(ws, vws), new SetMember(ns, vns with { Vertices = v }) }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [OS] = os }, tol);
+            var nm = moved.Why.FirstOrDefault(x => x.Contains($"links into {NK}") && x.Contains("version of it lies along it"));
+            if (nm is null || NavUseVersionPlan.ReasonKind(nm) != "border link meeting no edge" || !OneSentenceU(nm)) bad.Add($"member border: '{nm}' ({(nm is null ? "" : NavUseVersionPlan.ReasonKind(nm))}) in [{string.Join(" | ", moved.Why)}]");
+            var (w2, n2) = Pair();
+            var shared = n2.Triangles.ToList(); shared[5] = shared[5] with { EdgeLink20 = 0 };
+            var conflict = NavEdit.UseVersionSet(new[] { new SetMember(w2, Reversed(w2)) }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = n2 with { Triangles = shared } }, tol);
+            var cs = conflict.Why.FirstOrDefault(x => x.Contains("link entry 0 serves edges into"));
+            if (cs is null || !cs.Contains(K.ToString()) || !OneSentenceU(cs)) bad.Add("entry conflict: " + string.Join(" | ", conflict.Why));
+            return bad.Count == 0 ? null : string.Join(" || ", bad);
+        });
+
         // C2602: every refusal UseVersion gives is classified by NavUseVersionPlan.ReasonKind as the kind its cause is (a repair
         // plan's one sentence counts a refused row's reasons by kind, so a sentence reworded out of its kind must fail here).
         Case("2602 use-version-reason-kinds", () =>
@@ -846,6 +971,12 @@ static class NavEditSelfTest
             var oneWay = NavEdit.UseVersion(wl, barel, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = nl2 }, tol);
             var (wr, nr0) = Pair(linkN: false);
             var notReturned = NavEdit.UseVersion(wr, wr, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = nr0 }, tol);
+            // the version keeps its link into N from triangle 2 only; N's triangle 5 still links into triangle 6, which no longer links back
+            var (wi, ni) = Pair();
+            var vt = wi.Triangles.ToList(); vt[6] = vt[6] with { Flags = vt[6].Flags & ~2, EdgeLink12 = -1 };
+            var inNotReturned = NavEdit.UseVersion(wi, wi with { Triangles = vt }, "Ver.esp", new Dictionary<FormKey, NavmeshGeometry> { [NK] = ni }, tol);
+            if (!inNotReturned.Why.Any(x => x.StartsWith($"{NK}'s triangle 5 links into {K} triangle 6 of Ver.esp's version, whose edge there does not link back to {NK}") && OneSentenceU(x)))
+                return "a link in that the version does not return: " + string.Join(" | ", inNotReturned.Why);
             string Kind(string why) => NavUseVersionPlan.ReasonKind(why);
             var want = new (string Case, UseVersionResult R, Func<string, string> Expect)[]
             {
@@ -855,6 +986,8 @@ static class NavEditSelfTest
                 ("a dropped neighbour that still links in", oneWay, why => why.Contains("one-way border") ? "neighbour that still links in, dropped" : Kind(why)),
                 ("neighbour's ledge renumbered", ledgeIn, _ => "neighbour link into it that cannot be re-pointed"),
                 ("a border the neighbour does not return", notReturned, _ => "border link the neighbour does not return"),
+                // review of Gate C, decision 2: a neighbour's link into the navmesh that the version does not return
+                ("a link in the version does not return", inNotReturned, why => why.Contains("so carrying it would leave that border one-way") ? "neighbour link into it the version does not return" : Kind(why)),
             };
             var bad = new List<string>();
             foreach (var (c, r, expect) in want)

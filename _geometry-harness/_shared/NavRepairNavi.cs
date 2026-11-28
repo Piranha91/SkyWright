@@ -98,6 +98,10 @@ public sealed record NaviEntryChange(FormKey Nav, string FromPlugin, string From
     public NavIslandEntry? IslandAfter { get; init; }
 }
 
+/// <summary>One carried navmesh as the navmesh info map must follow it (R10): its version's door table and link targets, the
+/// neighbours it gains, and the island data its entry ends with (null: the entry's own).</summary>
+public sealed record NavVersionEntry(FormKey Key, IReadOnlyList<FormKey> DoorTable, IReadOnlyCollection<FormKey> Targets, IReadOnlyCollection<FormKey> Gained, NavIslandEntry? Island);
+
 /// <summary>The NAVI change of a relink plan, and its ops for housecarl_apply.</summary>
 public sealed class NaviPlan
 {
@@ -183,18 +187,28 @@ public static class NavRepairNavi
     /// a navmesh no plugin's NAVI states, or a whole interior entry (the write engine's known gap).</summary>
     public static (NaviPlan Plan, string? Refused) ForVersion(FormKey key, IReadOnlyList<FormKey> doorTable, IReadOnlyCollection<FormKey> targets,
                                                               IReadOnlyCollection<FormKey> gained, NaviView view, NavIslandEntry? island = null)
+        => ForVersions(new[] { new NavVersionEntry(key, doorTable, targets, gained, island) }, view);
+
+    /// <summary>THE NAVI CHANGE FOR A CARRIED SET (R10): <see cref="ForVersion"/>'s rule for every member of
+    /// <paramref name="versions"/> at once, in one change: each member's entry follows its own version, and a neighbour outside
+    /// the set that several members gain gains each of them in one entry change. A member gained by another member is not
+    /// given a second change: its own entry already names the other (its version links back), so nothing is written twice.</summary>
+    public static (NaviPlan Plan, string? Refused) ForVersions(IReadOnlyList<NavVersionEntry> versions, NaviView view)
     {
-        // island (R7): the flag and island data the carried navmesh's entry ends with (NavIsland.ForVersion decides it; null:
-        // the entry's own stay)
         var np = new NaviPlan { Record = view.Record, WinnerPlugin = view.Winner?.Plugin, WinnerPath = view.Winner?.Path };
         if (view.Problem is { } pr) return (np, pr);
-        if (island is not null && !view.Effective.ContainsKey(key) && island.Island is not null)
-            return (np, view.Record is null ? "no plugin of the order carries a NAVI record" : $"no plugin's NAVI states {key}, so its island data cannot be written");
+        foreach (var v in versions)
+            if (v.Island is not null && !view.Effective.ContainsKey(v.Key) && v.Island.Island is not null)
+                return (np, view.Record is null ? "no plugin of the order carries a NAVI record" : $"no plugin's NAVI states {v.Key}, so its island data cannot be written");
+        var inSet = versions.Select(v => v.Key).ToHashSet();
+        var islands = versions.Where(v => v.Island is not null).ToDictionary(v => v.Key, v => v.Island!);
         // per entry: what it must name (null: only gain Add), what it gains, and its door table (null: unchanged)
         var want = new SortedDictionary<FormKey, (IReadOnlyCollection<FormKey>? Exactly, IReadOnlyCollection<FormKey> Add, IReadOnlyList<FormKey>? Doors)>(
             Comparer<FormKey>.Create((a, b) => string.CompareOrdinal(a.ToString(), b.ToString())));
-        want[key] = (targets.Union(gained).Where(m => m != key).ToList(), gained, doorTable);
-        foreach (var m in gained) if (m != key) want[m] = (null, new[] { key }, null);
+        foreach (var mv in versions) want[mv.Key] = (mv.Targets.Union(mv.Gained).Where(m => m != mv.Key).ToList(), mv.Gained, mv.DoorTable);
+        foreach (var mv in versions)
+            foreach (var m in mv.Gained)
+                if (m != mv.Key && !inSet.Contains(m)) want[m] = (null, (want.TryGetValue(m, out var w0) ? w0.Add : Array.Empty<FormKey>()).Append(mv.Key).Distinct().ToList(), null);
         foreach (var (n, (_, add, doors)) in want)
             if (!view.Effective.ContainsKey(n) && (add.Count > 0 || doors is { Count: > 0 }))
                 return (np, view.Record is null ? "no plugin of the order carries a NAVI record"
@@ -212,7 +226,7 @@ public static class NavRepairNavi
             int keep = doors is null ? 0 : KeptDoors(e, doors);
             bool doorsChange = doors is not null && (keep < e.LinkedDoors.Count || keep < doors.Count);
             var islandBefore = NavIsland.Of(e);
-            var islandTo = n == key && island is not null && !NavIsland.Same(islandBefore, island) ? island : null;
+            var islandTo = islands.TryGetValue(n, out var isl) && !NavIsland.Same(islandBefore, isl) ? isl : null;
             if (add.Count == 0 && dropM.Count == 0 && dropP.Count == 0 && !doorsChange && islandTo is null) { np.Why.Add($"{n}'s entry ({src.Plugin}) already follows the version"); continue; }
             int? wi = src == view.Winner ? idx : null;
             np.Entries.Add(new NaviEntryChange(n, src.Plugin, src.Path, idx, wi, add, merged, pref)
