@@ -43,15 +43,13 @@ using Image = SixLabors.ImageSharp.Image;
 // the render at a different MO2 layout, which is how a field-test shot shows the exact state the
 // tester will see rather than the state of whatever list happens to be configured. Require() runs
 // AFTER the flags, so passing --instance never trips it.
-// TEXTURE ROUTE PIN. CharacterViewer.Rendering's default DDS route is authored-mip compressed
-// uploads, which change captured pixels (mostly normal-mapped surfaces and alpha edges) while
-// geometry, depth and masks stay exact. Retained captures, frozen hashes and receipts were all made
-// on the decoded route, and the configuration fingerprint does not yet record the texture policy,
-// so viewprobe stays decoded until it does. The library reads this once per AssetCache
-// construction, so it must be set before the first scene is built. An explicitly set value wins,
-// which is how a run opts in to compressed uploads deliberately.
-if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CVR_DDS_MAX_FINAL_MIP_DIMENSION")))
-    Environment.SetEnvironmentVariable("CVR_DDS_MAX_FINAL_MIP_DIMENSION", "decoded");
+// TEXTURE POLICY. No pin: SkyRender's default DDS route applies (authored-mip compressed uploads for
+// chains whose last mip is at most 4 px), which changes captured texture pixels (mostly normal-mapped
+// surfaces and alpha edges) and, at alpha-tested edges, depth and the masks read from it; geometry stays
+// exact. Every picture's identity and
+// reuse key now carries the policy (TexturePolicy.cs), so results from two policies never pass for
+// one. SKYRENDER_DDS_MAX_FINAL_MIP_DIMENSION=decoded (or the legacy CVR_ name when the new one is
+// unset) still selects the decoded route; the library reads it once per AssetCache.
 // LAUNCHED FROM EXPLORER — a double-click, or a worklist DROPPED ON THE ICON. Registered FIRST,
 // ahead of the Require() calls just below, because an unconfigured harness exits from inside those:
 // a window that closes on the one message explaining how to configure it has taught nobody
@@ -75,6 +73,10 @@ using var __run = RunLog.BeginProcess("viewprobe", args,
 // every path out of Main, including the early returns just below (where nothing was claimed and
 // it does nothing at all). See ExtractionScratch.cs.
 using var __scratch = ViewProbe.ExtractionScratch.ProcessScope();
+// THE TEXTURE POLICY (TexturePolicy.cs): read once, after the pin above and before any texture cache is built, so an
+// unreadable setting refuses here in one sentence instead of the library quietly rendering decoded.
+try { ViewProbe.TexturePolicy.Refresh(); }
+catch (ViewProbe.TexturePolicyRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }
 
 if (args.Length == 2 && args[0] == "--report-mode-smoke")
     return ViewProbe.TexturedScene.ReportModeSmoke(args[1]);
@@ -134,6 +136,11 @@ if (args.Length >= 1 && args[0] == "--depth-measurement-selftest")
 // synthetic depth with ties, uncovered pixels and hidden pixels. Needs a GL context, no MO2 instance and no game.
 if (args.Length >= 1 && args[0] == "--occlusion-query-selftest")
     return ViewProbe.OcclusionQuerySelfTest.Run();
+// Known answers for ResidentKey.cs against this SkyRender package: a real texture uploaded through GlTextureManager under
+// each texture policy is found in the resident cache under the key the retained scene looks it up by. Needs a GL context,
+// no MO2 instance and no game.
+if (args.Length >= 1 && args[0] == "--resident-key-selftest")
+    return ViewProbe.ResidentKeySelfTest.Run();
 // Known answers for which placed references the winning state admits, and where (WinningRefs.cs), on
 // Mutagen-written synthetic plugins. Needs no MO2 instance, no game and no GL context.
 if (args.Length >= 1 && args[0] == "--winning-refs-selftest")
@@ -4709,7 +4716,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 CandidateSha256 = candidateSha256,
                 Cell = cellKey.ToString(),
                 View = new { navPlugin, navCellSpecs, navVersionSpecs, comparePlugins = compare is { } pair ? new[] { pair.A, pair.B } : null,
-                             cullAbove, bosMode, stateView, replayArgs = shotReplay },
+                             cullAbove, bosMode, stateView, replayArgs = shotReplay,
+                             texturePolicy = ViewProbe.TexturePolicy.Current.Label },   // changes texture pixels (TexturePolicy.cs)
                 Note = "Input configuration before diagnostic view transformations; inspect PNG pose and view settings before media qualification."
             };
             string configurationPath = Path.Combine(shotOutDir, $"{safe}-configuration.json");
@@ -5195,6 +5203,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 string HashFile(string path) { using var f = File.OpenRead(path); return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(f)); }
                 var plugins = order.OrderedPaths.Select(p => new { file = Path.GetFileName(p), sha256 = HashFile(p) }).ToArray();
                 var inputJson = System.Text.Json.JsonSerializer.Serialize(new { plugins, stateSpec, bosMode, keepFx, cullAbove, size,
+                    texturePolicy = ViewProbe.TexturePolicy.Current.Token,
                     visibilityBudget = os.VisibilityBudget,
                     ruleSha256 = ViewProbe.ShapeCullPolicy.Sha256,
                     cell = cellKey.ToString(), eye = new[] { eyeS.X, eyeS.Y, eyeS.Z },
@@ -5231,7 +5240,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     rule = ViewProbe.ShapeCullPolicy.Identity, scope = ViewProbe.ShapeCullPolicy.Scope,
                     ruleSha256 = ViewProbe.ShapeCullPolicy.Sha256, ruleConfiguration = ViewProbe.ShapeCullPolicy.Configuration,
                     inputSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(inputJson))),
-                    inputIdentityScope = "record files, source mesh bytes, effective scene placements, planes, camera, state and visibility budget; texture/material assets not yet fingerprinted",
+                    inputIdentityScope = "record files, source mesh bytes, effective scene placements, planes, camera, state, visibility budget and texture policy; texture/material assets not yet fingerprinted",
                     appearance = shotDepthMeasurement?.Appearance() ?? (object)new { status = "unassessed", reasonCode = "appearance_inputs_not_fingerprinted",
                         reason = "Texture/material inputs and renderer fallbacks are not qualified; geometry visibility is not a claim of matching game appearance." },
                     plugins, assemblies = new[] { typeof(ViewProbe.ShapeOcclusion).Assembly.Location, typeof(SphereBound).Assembly.Location,
@@ -5690,6 +5699,7 @@ if (worklist is not null)
                 if (bosIdx is not null && bosLayer is null) { bosIdx = new BosFormIndex(); bosLight.Clear(); }
             }
             catch (ViewProbe.GlAllocationRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // F-G4-1
+            catch (ViewProbe.TexturePolicyRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }    // TexturePolicy.cs
             catch (ViewProbe.CaptureRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }        // CaptureViews.cs
             catch (ViewProbe.ReadRefusal ex) { ViewProbe.PluginRead.Report(ex); return 2; }   // PluginRead.cs
             // A host's request for a cell this worklist may not hold (InteractiveViewer.CellRequest): it joins the list.
@@ -5914,6 +5924,7 @@ if (winRefsDump is not null)
 int singleRc;
 try { singleRc = RunCellTextured(target, 0, 0, null, out _); }
 catch (ViewProbe.GlAllocationRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // F-G4-1
+catch (ViewProbe.TexturePolicyRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }    // TexturePolicy.cs
 catch (ViewProbe.CaptureRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }        // CaptureViews.cs
 catch (ViewProbe.ReadRefusal ex) { ViewProbe.PluginRead.Report(ex); return 2; }   // PluginRead.cs
 // FinalExitCode, not a bare return: a shot must never return 3 itself, because the worklist loop

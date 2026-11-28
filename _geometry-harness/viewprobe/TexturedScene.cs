@@ -331,11 +331,17 @@ static class TexturedScene
     }
 
     /// <summary>The live scene's prefetch (LiveScene.cs): read the meshes of <paramref name="refs"/> into the session's mesh
-    /// table and decode their textures into its pixel cache, off the window's thread, so the slice build that follows mostly
-    /// uploads. Stops early when cancelled. Returns how many meshes it read.</summary>
+    /// table and get their textures ready, off the window's thread, so the slice build that follows mostly uploads. Under the
+    /// decoded texture policy that is a decode into the pixel cache. Under a compressed one (TexturePolicy.cs) a texture the
+    /// library uploads compressed needs no decoded pixels, and which ones fall back is the library's rule, decided at upload:
+    /// so nothing 2D is decoded or kept here, only each path resolved (the archive lookup and any extraction, off the window's
+    /// thread), and the few fallbacks decode on demand at upload, as every CPU use of pixels already does. The environment
+    /// map (slot 4) is the exception: it always decodes, so it is still warmed, through the cube-map cache it is read from. Stops early when
+    /// cancelled. Returns how many meshes it read.</summary>
     internal static int Prefetch(LiveSession session, IEnumerable<SceneRef> refs, bool parallel, CancellationToken ct)
     {
         int read = 0;
+        bool decode = session.Assets.Cache.DdsMaximumFinalMipDimension is null;   // the cache's frozen policy: decoded
         var rels = refs.Select(r => r.MeshRelPath.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? r.MeshRelPath : Path.Combine("meshes", r.MeshRelPath))
                        .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         // parallel (half the cores) only while nothing is drawn; beside a drawing window one thread, which measured smoother
@@ -354,10 +360,19 @@ static class TexturedScene
                 if (read1.MissingPath || read1.Failure is not null || identityFailure is null) session.Mesh.Store(rel, read1);
                 made = true;
             }
+            var cache = session.Assets.Cache;
             foreach (var b in outcome.Built ?? new List<NifMeshBuilder.BuiltMesh>())
-                foreach (var t in b.TexturePaths.Values)
+                foreach (var (slot, t) in b.TexturePaths)
                     if (t is { Length: > 0 } && !ct.IsCancellationRequested)
-                        try { session.Assets.Cache.GetOrLoadDdsPixels(t); } catch { /* the slice build reports what it cannot read */ }
+                        try
+                        {
+                            if (decode) cache.GetOrLoadDdsPixels(t);
+                            // slot 4, the environment map, always decodes (a cube map, else a 2D map): warmed here as the
+                            // library's own prewarm does, so that decode stays off the window's thread too
+                            else if (slot == 4) { if (cache.GetOrLoadDdsCubemap(t) is null) cache.GetOrLoadDdsPixels(t); }
+                            else cache.ResolveAssetPath(t);
+                        }
+                        catch { /* the slice build reports what it cannot read */ }
             return made;
         }
     }
@@ -487,11 +502,11 @@ static class TexturedScene
         return folders;
     }
 
-    static string StaticInputKey(string preparedIdentity, IReadOnlyList<SceneRef> refs,
+    internal static string StaticInputKey(string preparedIdentity, IReadOnlyList<SceneRef> refs,
         IReadOnlyDictionary<string, List<(Vector3 A, Vector3 B, Vector3 C)>> terrainPatches,
         IReadOnlyList<(string Diffuse, List<(Vector3 A, Vector3 B, Vector3 C, float Oa, float Ob, float Oc)> Tris)> terrainLayers,
         IReadOnlyDictionary<FormKey, Covering> coverings, bool keepFx, bool fxStatic,
-        float? cullAbove, bool refSurface, float refSurfaceOpacity)
+        float? cullAbove, bool refSurface, float refSurfaceOpacity, string texturePolicy)
     {
         using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(
             System.Security.Cryptography.HashAlgorithmName.SHA256);
@@ -506,6 +521,7 @@ static class TexturedScene
         Add(preparedIdentity); Add($"fx={keepFx};fxStatic={fxStatic};cull={cullAbove?.ToString("R", System.Globalization.CultureInfo.InvariantCulture)};surface={refSurface};opacity={F(refSurfaceOpacity)}");
         Add(Environment.GetEnvironmentVariable("VP_LAYER_ONLY")); Add(Environment.GetEnvironmentVariable("VP_LAYER_SOLID"));
         Add(Environment.GetEnvironmentVariable("VP_FX_DOUBLESIDED"));
+        Add("textures=" + texturePolicy);   // TexturePolicy.cs: the uploaded textures differ by policy
         foreach (var r in refs)
             Add(string.Join("|", r.MeshRelPath, r.RefKey, r.BaseKey, r.BaseEditorId, H(r.Position), H(r.Rotation),
                 F(r.Scale), r.Highlight, r.Marker, r.BosRecordBase, r.BosLabel, r.BosRandom, r.StateChange,
@@ -649,8 +665,11 @@ static class TexturedScene
         CellAssets MakeAssets()
         {
             var made = MakeResolver();
-            return new CellAssets(made,
-                new AssetCache(made, logger, gate, new CvSettings()));
+            var madeCache = new AssetCache(made, logger, gate, new CvSettings());
+            // the cache froze the policy from the environment; the pictures it feeds carry TexturePolicy.Current's token
+            TexturePolicy.Current.RequireSameAs(madeCache);
+            Console.WriteLine($"   texture policy: {TexturePolicy.Current.Label} ({TexturePolicy.Current.Source})");
+            return new CellAssets(made, madeCache);
         }
         var (resolver, cache) = live is not null ? live.Assets : cellScene is null ? MakeAssets() : cellScene.Assets(MakeAssets);
 
@@ -667,7 +686,7 @@ static class TexturedScene
         if (graphicsCell is not null && string.IsNullOrWhiteSpace(preparedIdentity))
             throw new InvalidOperationException("retained graphics requires the prepared-cell identity");
         string staticKey = graphicsCell is null ? "unretained" : StaticInputKey(preparedIdentity!, refs,
-            terrainPatches, terrainLayers, coveringsByBase, keepFx, fxStatic, cullAbove, refSurface, refSurfaceOpacity)
+            terrainPatches, terrainLayers, coveringsByBase, keepFx, fxStatic, cullAbove, refSurface, refSurfaceOpacity, TexturePolicy.Current.Token)
             + (depthMeasurement is null ? "" : "|" + DepthMeasurement.Name);   // a retained scene never crosses modes
         // Measurement only (Gate B4, G2 RED): per-component digests of the key's inputs; inert without a RED session.
         if (graphicsCell is not null)
@@ -824,7 +843,7 @@ static class TexturedScene
                 return new(loaded, missing ? [gamePath] : []);
             }
             var lease = isStatic && builtScene is not null
-                ? builtScene.Texture(category, gamePath, diskPath, LoadAndCaptureMissing, manager.WhiteTexture)
+                ? builtScene.Texture(category, gamePath, diskPath, ResidentKey.For(cache, diskPath), LoadAndCaptureMissing, manager.WhiteTexture)
                 : LoadAndCaptureMissing();
             int handle = lease.Handle;
             retainedMissingTexturePaths.UnionWith(lease.MissingPaths);
@@ -3452,6 +3471,7 @@ static class TexturedScene
         // fly-through and the absence was briefly mistaken for "no coverings were drawn").
         void PrintBuildCensus()
         {
+        Console.WriteLine("   " + TexturePolicy.UploadSummary(new[] { textures, graphicsCell?.InstallTextures }, cache));
         Console.WriteLine($"   textured: {shapes:N0} shapes ({texturedShapes:N0} with a real diffuse), {missingMesh:N0} refs without a resolvable mesh"
                             + $"; {sizeW}x{sizeH}, {(samples >= 2 ? samples + "x msaa" : "no msaa")}");
             if (depthMeasurement is not null)
@@ -3549,6 +3569,7 @@ static class TexturedScene
         var frameSw = System.Diagnostics.Stopwatch.StartNew();
         ApplyHide();
         var pixels = Draw(pickDepth);
+        Console.WriteLine($"   frame drawn: {frameSw.Elapsed.TotalMilliseconds:0} ms after the scene was built");
         // --lod: the final frame's draw time (GL.Finish inside Draw), since LOD is what adds draws.
         if (DistantLodLayer.Requested) Console.WriteLine($"   lod timing: final frame drawn in {frameSw.Elapsed.TotalMilliseconds:0} ms");
         // --depth-dump: the finished frame's depth buffer, exactly as --pick reads it below — size*size
@@ -4026,6 +4047,9 @@ static class TexturedScene
         if (pngTextMeta is { Length: > 0 })
             img.Metadata.GetPngMetadata().TextData.Add(
                 new SixLabors.ImageSharp.Formats.Png.Chunks.PngTextData("viewprobe", pngTextMeta, string.Empty, string.Empty));
+        // the texture policy the frame was drawn under (TexturePolicy.cs): it changes texture pixels, so a frame says it
+        img.Metadata.GetPngMetadata().TextData.Add(new SixLabors.ImageSharp.Formats.Png.Chunks.PngTextData(
+            "viewprobe-textures", TexturePolicy.Current.Token, string.Empty, string.Empty));
         if (incompleteMeta is { Length: > 0 })
             img.Metadata.GetPngMetadata().TextData.Add(
                 new SixLabors.ImageSharp.Formats.Png.Chunks.PngTextData("viewprobe-incomplete", incompleteMeta, string.Empty, string.Empty));

@@ -73,9 +73,13 @@ public static class OverlayVerify
         if (Ev.Exists(PyPath.Join(app, "receipts")))
         {
             var measured = OverlayBundle.AppMeasured(app);
-            foreach (var e in Ev.Items(manifest.Get("evidence")).Select(PyValue.Dict).Where(e => Ev.Eq(e.Get("kind"), "media")))
+            var media = Ev.Items(manifest.Get("evidence")).Select(PyValue.Dict).Where(e => Ev.Eq(e.Get("kind"), "media")).ToList();
+            var renderPolicies = MediaRule.RenderPolicies(media);   // and every bundled render states one texture policy
+            foreach (var e in media)
                 if (MediaRule.IdentityRefusal(e, measured.Own, measured.Other, measured.State) is { reason: { } reason } r)
                     Defect("media-" + reason, e.Get("path"), r.detail!);
+                else if (MediaRule.PolicyRefusal(e, renderPolicies) is { reason: { } policy } p)
+                    Defect("media-" + policy, e.Get("path"), p.detail!);
         }
 
         var b = Ev.OrEmpty(verify.Get("bundle"));

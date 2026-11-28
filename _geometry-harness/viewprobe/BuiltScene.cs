@@ -19,7 +19,8 @@ internal sealed class BuiltScene : IDisposable
         internal bool BaselineRendering { get; set; } = true;
         internal MeshMaterialState? BaselineMaterial { get; set; }   // F-G5-2
     }
-    sealed record TextureEntry(string Category, string GamePath, string? DiskPath, int Handle, bool Resident,
+    // ResidentKey: the key the resident cache holds this texture under (ResidentKey.cs), which is not always the disk path
+    sealed record TextureEntry(string Category, string GamePath, string? DiskPath, string? ResidentKey, int Handle, bool Resident,
         string[] MissingPaths);
 
     readonly GlRenderer renderer;
@@ -97,7 +98,7 @@ internal sealed class BuiltScene : IDisposable
         entry.AddedToRenderer = true;
     }
 
-    internal TextureLease Texture(string category, string gamePath, string? diskPath,
+    internal TextureLease Texture(string category, string gamePath, string? diskPath, string? residentKey,
         Func<TextureLease> load, int white)
     {
         ThrowOpen();
@@ -118,7 +119,7 @@ internal sealed class BuiltScene : IDisposable
         // White is manager-owned and intentionally absent from the resident manifest. An unresolved
         // path has no stable cache key and therefore cannot be promised resident across an epoch.
         bool isResident = loaded.Handle != white && loaded.Handle > 0 && !string.IsNullOrWhiteSpace(diskPath);
-        textures.Add(new(category, gamePath, diskPath, loaded.Handle, isResident, loaded.MissingPaths));
+        textures.Add(new(category, gamePath, diskPath, residentKey, loaded.Handle, isResident, loaded.MissingPaths));
         textureCursor++;
         return loaded;
     }
@@ -163,7 +164,7 @@ internal sealed class BuiltScene : IDisposable
         var manifest = textures.Where(x => x.Resident).ToArray();
         foreach (var entry in manifest)
         {
-            int current = resident.TryGet(entry.DiskPath!);
+            int current = resident.TryGet(entry.ResidentKey!);
             if (current == entry.Handle && current > 0 && GL.IsTexture(current))
             {
                 found++;

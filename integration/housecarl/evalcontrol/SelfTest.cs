@@ -224,7 +224,8 @@ public static partial class SelfTest
             {
                 var item = D(row["item"]);
                 var (reason, detail) = MediaRule.Refusal(item, PyPath.Str(PyValue.Truthy(item.Get("path")) ? S(item["path"]) : ""),
-                    Keyed(ka["fingerprints"]), Keyed(ka["others"]), State);
+                    Keyed(ka["fingerprints"]), Keyed(ka["others"]), State,
+                    row.Get("renderPolicies") is { } rp ? Strings(rp).ToList() : null);
                 if (reason != null && !MediaRule.Reasons.Contains(reason)) return $"a reason outside the vocabulary: {reason}";
                 return Same("reason", reason, (string?)row["reason"]) ?? Same("detail", detail, (string?)row["detail"]);
             }));

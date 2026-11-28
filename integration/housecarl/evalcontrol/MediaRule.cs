@@ -15,6 +15,7 @@ public static class MediaRule
     [
         "file-missing", "kind-missing", "subject-missing", "state-missing", "fingerprint-missing", "fingerprint-source-missing",
         "provenance-missing", "no-accepted-receipt-on-arm", "fingerprint-mismatch", "source-missing", "original-missing",
+        "texture-policy-missing", "texture-policy-mixed",
     ];
 
     static readonly Regex ScopedPopulation = new(@"\+population:[0-9a-f]{12}$", RegexOptions.CultureInvariant);
@@ -114,12 +115,37 @@ public static class MediaRule
         return (null, null);
     }
 
+    /// <summary>The texture policies the renders among <paramref name="items"/> say they were drawn under (viewprobe's
+    /// TexturePolicy token, which capture_acquire copies from the frame's own metadata); a render that states none adds
+    /// nothing here and is refused on its own.</summary>
+    public static HashSet<string> RenderPolicies(IEnumerable<object?> items) =>
+        items.OfType<PyDict>().Where(i => Ev.Eq(i.Get("mediaKind"), "offline-render"))
+            .Select(i => i.Get("texturePolicy")).OfType<string>().Where(p => p.Length > 0).ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>Why a render cannot stand beside the others: the texture policy changes a render's texture pixels (and
+    /// depth at alpha-tested edges), so a render that does not say which policy drew it (one made before renders recorded
+    /// it) is not accepted as matching, and renders drawn under more than one policy are never accepted together.
+    /// <paramref name="renderPolicies"/>: RenderPolicies of every item supplied with this one. Other kinds are not drawn
+    /// by viewprobe and carry no policy.</summary>
+    public static (string? reason, string? detail) PolicyRefusal(PyDict item, IReadOnlyCollection<string>? renderPolicies)
+    {
+        if (!Ev.Eq(item.Get("mediaKind"), "offline-render")) return (null, null);
+        if (item.Get("texturePolicy") is not string own || own.Length == 0)
+            return ("texture-policy-missing", "the render does not say which texture policy drew it (it was made before renders recorded one); render it again");
+        var all = new SortedSet<string>(renderPolicies ?? [], StringComparer.Ordinal) { own };
+        if (all.Count > 1)
+            return ("texture-policy-mixed", $"the supplied renders were drawn under {all.Count} texture policies ({string.Join(", ", all)}); "
+                + "render them again under one, so pictures from two policies are not compared as one");
+        return (null, null);
+    }
+
     /// <summary>Why a media item is unassessed: one closed reason and a plain sentence, or (null, null) when it is
     /// accepted. The checks run in the standard's order. fingerprints: each arm's own configurations, arm and
     /// fingerprint each under its PyValue.Hash key; otherFingerprints: what the arm's reverse and diff parts
     /// consumed, which only ever explains a refusal; stateFingerprints(arm key, state): StateFingerprints for that arm.</summary>
     public static (string? reason, string? detail) Refusal(PyDict item, string src, IReadOnlyDictionary<string, HashSet<string>> fingerprints,
-        IReadOnlyDictionary<string, HashSet<string>> otherFingerprints, Func<string, object?, HashSet<string>>? stateFingerprints)
+        IReadOnlyDictionary<string, HashSet<string>> otherFingerprints, Func<string, object?, HashSet<string>>? stateFingerprints,
+        IReadOnlyCollection<string>? renderPolicies = null)
     {
         static bool Missing(string path) => !Ev.Exists(path) || Directory.Exists(path);
         if (!PyValue.Truthy(item.Get("path")) || Missing(src))
@@ -140,6 +166,7 @@ public static class MediaRule
         if (item.Get("provenance") is not PyDict prov || !PyValue.Truthy(prov.Get("tool")) || !PyValue.Truthy(prov.Get("capturedUtc")))
             return ("provenance-missing", "provenance must be an object naming tool and capturedUtc");
         if (IdentityRefusal(item, fingerprints, otherFingerprints, stateFingerprints) is { reason: not null } refused) return refused;
+        if (PolicyRefusal(item, renderPolicies) is { reason: not null } policy) return policy;
         if (item.Get("sourceInterval") is { } interval)
         {
             if (interval is not PyDict iv || !PyValue.Truthy(iv.Get("sourcePath"))) return ("source-missing", "sourceInterval names no sourcePath");

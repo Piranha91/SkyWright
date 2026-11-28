@@ -2876,6 +2876,31 @@
           ]
         },
         {
+          "id": "viewprobe.resident-key-selftest",
+          "answers": [
+            "Does the retained scene look a resident texture up under the key this SkyRender package stores it by, under each texture policy?"
+          ],
+          "useWhen": "Check ResidentKey.cs after a SkyRender package change, or when a --reuse-cell render refuses a texture as evicted: a real texture is uploaded through GlTextureManager under the decoded and the compressed policy and must be found through the helper.",
+          "inputs": [
+            "No arguments; needs a GL context but no MO2 instance or game."
+          ],
+          "outputs": [
+            "One line per known answer (the route each upload took, and the entry found under the helper's key), and exit status 0 when all hold."
+          ],
+          "selector": {
+            "kind": "cli",
+            "tokens": [
+              "--resident-key-selftest"
+            ]
+          },
+          "evidence": [
+            {
+              "path": "_geometry-harness/viewprobe/Program.cs",
+              "anchor": "--resident-key-selftest"
+            }
+          ]
+        },
+        {
           "id": "viewprobe.mask-evidence-selftest",
           "answers": [
             "Does the visibility mask evidence diagnostic satisfy its expected contract?"
@@ -3647,6 +3672,7 @@
         "--depth-measurement-selftest": "Known answers for the depth-measurement mode's texture keep rule and mask rule; needs no instance or GL context.",
         "--occlusion-query": "With --depth-measurement: count each isolated draw's covered and visible pixels with a GPU occlusion query; only shapes with visible pixels are read back, hashed and checked on the CPU.",
         "--occlusion-query-selftest": "Known answers for --occlusion-query on this GPU: depth conversion over a full-range fill, counts against the CPU compare, restored bindings; needs a GL context, no instance.",
+        "--resident-key-selftest": "Known answers for the key the retained scene finds a resident texture by, against this SkyRender package under each texture policy; needs a GL context, no MO2 instance and no game.",
         "--water-arm": "Set water arm for this invocation; consult the linked parser for accepted values.",
         "--worklist-readiness-sha256": "Set worklist readiness sha256 for this invocation; consult the linked parser for accepted values.",
         "--worklist-selection": "Set worklist selection for this invocation; consult the linked parser for accepted values.",
@@ -8935,6 +8961,27 @@
       ],
       "outputs": [
         "Assertion results for: Does viewprobe's occlusion rule admit and refuse primitive orientations as its rule file states?"
+      ]
+    },
+    {
+      "id": "_geometry-harness/viewprobe/tools/test_resident_key.py",
+      "path": "_geometry-harness/viewprobe/tools/test_resident_key.py",
+      "kind": "script",
+      "answers": [
+        "Does the retained scene look a resident texture up under the key this SkyRender package stores it by, under each texture policy?"
+      ],
+      "useWhen": "Run viewprobe's resident-key known answers against the built viewprobe after a SkyRender package or texture policy change.",
+      "evidence": [
+        {
+          "path": "_geometry-harness/viewprobe/tools/test_resident_key.py",
+          "anchor": "Runs viewprobe's resident-key known answers"
+        }
+      ],
+      "inputs": [
+        "The built viewprobe; a GL context."
+      ],
+      "outputs": [
+        "Assertion results for: Does the retained scene look a resident texture up under the key this SkyRender package stores it by, under each texture policy?"
       ]
     },
     {

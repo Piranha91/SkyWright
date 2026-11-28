@@ -90,6 +90,20 @@ def probe_cmd(text: str) -> dict:
     return {**rec, "state": "present", "digest": _digest("probe-cmd:", lines)}
 
 
+#: The variables SkyRender reads the DDS texture policy from (DdsMipPolicy: the first, else its former name). The policy
+#: changes a render's texture pixels, so a picture's identity carries their values; SkyRender alone interprets them.
+TEXTURE_POLICY_ENVIRONMENT = ("SKYRENDER_DDS_MAX_FINAL_MIP_DIMENSION", "CVR_DDS_MAX_FINAL_MIP_DIMENSION")
+
+
+def texture_policy_setting(environ=None) -> str:
+    """The texture policy a viewprobe started from here renders with, as the raw values of its variables (`<unset>` for
+    one not set): never None, so an identity holding it stays comparable. Two settings that SkyRender reads alike (unset
+    and `4`) differ here, which only ever re-makes a picture, never reuses one across policies."""
+    import os
+    env = os.environ if environ is None else environ
+    return ";".join(f"{name}={env[name] if env.get(name) is not None else '<unset>'}" for name in TEXTURE_POLICY_ENVIRONMENT)
+
+
 def short(digest) -> str:
     """A digest's first twelve hex characters, after its kind prefix."""
     s = str(digest or "none")

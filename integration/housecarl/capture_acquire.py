@@ -152,7 +152,8 @@ def utcnow() -> str:
 
 def capture_tool_identity(vp=None) -> dict:
     """The capture's tool identity: this module, the point picker and the renderer build, the last as toolidentity's
-    package digest of viewprobe's folder (its code, not its apphost, which a code change leaves byte-identical). A part
+    package digest of viewprobe's folder (its code, not its apphost, which a code change leaves byte-identical), and
+    the texture policy viewprobe inherits from this process (toolidentity.texture_policy_setting). A part
     that is missing or unreadable is None, and evalpipeline.reusable_capture never reuses a result under such an
     identity, nor one taken with another identity."""
     import toolidentity
@@ -166,6 +167,8 @@ def capture_tool_identity(vp=None) -> dict:
     except toolidentity.Unreadable:
         rec_ = {}
     out_["viewprobe"] = rec_.get("digest") if rec_.get("state") == "present" else None
+    # the texture policy viewprobe inherits from here changes a frame's texture pixels (toolidentity)
+    out_["texturePolicy"] = toolidentity.texture_policy_setting()
     return out_
 
 
@@ -1900,6 +1903,9 @@ def _capture(a) -> int:
         from PIL import Image
         with Image.open(pngs[-1]) as im:
             meta, size = str(im.info.get("viewprobe") or ""), im.size
+            # the texture policy the frame was drawn under (viewprobe TexturePolicy.cs): the bundle accepts renders only
+            # under one stated policy (evalcontrol MediaRule.PolicyRefusal)
+            texture_policy = im.info.get("viewprobe-textures") or None
         reported = meta.split("| pose:", 1)[1].split("|", 1)[0].strip() if "| pose:" in meta else None
         if not reported:
             result["reason"] = f"the {state} PNG carries no replay pose in its viewprobe metadata"
@@ -1917,6 +1923,7 @@ def _capture(a) -> int:
                         "description": f"{'navmesh comparison' if navmesh else 'split' if split else 'vignette'} "
                                        f"{vig.get('chapterId')} {state}: request {a.request}"},
             "state": request.get("state") or "baseline", "configurationFingerprint": fp, "fingerprintSource": "emitted",
+            "texturePolicy": texture_policy,
             "provenance": {"tool": "viewprobe", "capturedUtc": utcnow(), "argv": argv, "rendererHashes": renderer,
                            "captureRequest": a.request, "request": a.request,
                            "poseId": acq.get("poseId") if not relative else f"{acq.get('poseId')}:{state}",
