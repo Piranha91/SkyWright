@@ -95,7 +95,9 @@ def case_15_records_sharing_a_name_are_counted_when_spoken():
 def case_17_the_capture_identity_is_the_renderer_side_only():
     import capture_acquire as CA
     ident = CA.capture_tool_identity()
-    assert set(ident) == {"capture_acquire.py", "capture_points.py", "viewprobe"}, (
+    # texturePolicy is renderer-side: viewprobe inherits it from this process and it changes a frame's texture
+    # pixels, so a picture drawn under another policy is a different render (toolidentity.texture_policy_setting)
+    assert set(ident) == {"capture_acquire.py", "capture_points.py", "viewprobe", "texturePolicy"}, (
         f"shotplan chooses cameras, which a finished result records; it is not part of what renders them: {sorted(ident)}")
 
 
