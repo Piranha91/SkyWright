@@ -50,10 +50,10 @@ internal sealed class RunEngine
     /// <summary>The engine's own command: it writes UTF-8, and its run records go where the caller keeps them.</summary>
     static ProcessStartInfo Start(string program, IEnumerable<string> args, string runlogDir)
     {
-        var psi = new ProcessStartInfo(program) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        var psi = RunLogFolder.Start(program, runlogDir);
+        psi.RedirectStandardOutput = true; psi.RedirectStandardError = true;
         foreach (var a in args) psi.ArgumentList.Add(a);
         psi.StandardOutputEncoding = Encoding.UTF8; psi.StandardErrorEncoding = Encoding.UTF8;
-        psi.Environment["HOUSECARL_RUNLOG_DIR"] = runlogDir;                         // set, not left to a default
         return psi;
     }
 
@@ -94,5 +94,5 @@ internal sealed class RunEngine
         catch (JsonException) { return null; }
     }
 
-    static string RunlogBeside(string file) => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(file))!, "runlog");
+    static string RunlogBeside(string file) => RunLogFolder.Beside(file);
 }

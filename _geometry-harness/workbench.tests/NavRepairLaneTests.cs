@@ -38,7 +38,8 @@ public sealed class NavRepairWorld : IDisposable
         Root = Path.Combine(Path.GetTempPath(), "hc-wb-navrepair-" + Guid.NewGuid().ToString("N"));
         var fixture = Path.Combine(Root, "fixture");
         if (!File.Exists(Probe)) throw new InvalidOperationException($"navownprobe is not in the build at {Probe}; build the solution first.");
-        var (exit, text) = Recheck.Run(Probe, new[] { "--write-navrepair-fixture", fixture }, null);
+        Directory.CreateDirectory(Root);
+        var (exit, text) = Recheck.Run(Probe, new[] { "--write-navrepair-fixture", fixture }, Path.Combine(Root, "fixture-write.log"));
         if (exit != 0 || !Plugins.All(p => File.Exists(Path.Combine(fixture, p)))) throw new InvalidOperationException($"the fixture was not written (exit {exit}): {text}");
         var profile = Path.Combine(Instance, "profiles", "P");
         Directory.CreateDirectory(profile); Directory.CreateDirectory(Path.Combine(Instance, "overwrite"));
