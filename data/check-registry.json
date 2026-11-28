@@ -203,7 +203,7 @@
       "evidence": {
         "strength": "record-fact",
         "claim": null,
-        "limits": "On by default since a person read every row it found on the lab's load order on 2026-11-27 (424 rows of the two record checks, profile EP-ho-ume-jks-r3): 3 were false alarms (a position 0.157 units from the winning one, and one cell's occlusion data and height map, which the editor derives), and none of the three is a row now; ruling R7 of the record checks asked for at most one in ten. houseCARL's record tool, called in process, reads each record a plugin of the selection touches that more than one plugin changes, and what each copy of it changed against what its plugin was made with (the latest of its masters, transitively, that has the record). A row is a field one mod changed whose winning value is another mod's, the two plugins in different mods, neither one of the game's own files (Bethesda's and Creation Club's), and the winner not made with the loser (it does not list it among its masters, transitively); both directions are judged, a selected plugin's change lost to another mod and another mod's change lost to a selected plugin. Values are compared as the game reads them: numbers at four decimals, two positions closer than data/record-field-scope.json's positionTolerance (half a unit) as one, rotations a full turn apart as one, record flags without the bit that only says how the record is stored, the cell grid flags' unused bytes ignored, the fields data/record-field-scope.json leaves out (file and group bookkeeping, data the game merges at run time, child records), the data it names derived (a cell's occlusion data and height map, counted, never a row), and a reordered list is no change unless the game reads its order, when it is not judged. No row, counted under its reason: a winner made with the loser, two plugins of one mod, a game file on either side, a pair with neither plugin in the selection. A read houseCARL marks incomplete, a line of its comparison SkyWright cannot read, a record without an override depth and a plugin whose masters' headers could not be read are not judged. Each of the two record checks reads the selection's records again in its own process (about half a minute on the lab's order), one process per check so a crash stays in one. Cells are records.cell-attributes'. Navmesh records are left to geometry.navmesh-ownership, and quests, dialogue, form lists, locations, packages and story-manager nodes to the registration and dialogue check (not built yet); both are counted, never rows."
+        "limits": "On by default since a person read every row it found on the lab's load order on 2026-11-27 (424 rows of the two record checks, profile EP-ho-ume-jks-r3): 3 were false alarms (a position 0.157 units from the winning one, and one cell's occlusion data and height map, which the editor derives), and none of the three is a row now; ruling R7 of the record checks asked for at most one in ten. houseCARL's record tool, called in process, reads each record a plugin of the selection touches that more than one plugin changes, and what each copy of it changed against what its plugin was made with (the latest of its masters, transitively, that has the record). A row is a field one mod changed whose winning value is another mod's, the two plugins in different mods, neither one of the game's own files (Bethesda's and Creation Club's), and the winner not made with the loser (it does not list it among its masters, transitively); both directions are judged, a selected plugin's change lost to another mod and another mod's change lost to a selected plugin. Values are compared as the game reads them: numbers at four decimals, two positions closer than data/record-field-scope.json's positionTolerance (half a unit) as one, rotations a full turn apart as one, record flags without the bit that only says how the record is stored, the cell grid flags' unused bytes ignored, the fields data/record-field-scope.json leaves out (file and group bookkeeping, data the game merges at run time, child records), the data it names derived (a cell's occlusion data and height map, counted, never a row), and a reordered list is no change unless the game reads its order, when it is not judged. No row, counted under its reason: a winner made with the loser, two plugins of one mod, a game file on either side, a pair with neither plugin in the selection. A read houseCARL marks incomplete, a line of its comparison SkyWright cannot read, a record without an override depth and a plugin whose masters' headers could not be read are not judged. Each of the two record checks reads the selection's records again in its own process (about half a minute on the lab's order), one process per check so a crash stays in one. Cells are records.cell-attributes'. Navmesh records are left to geometry.navmesh-ownership, and quests, dialogue, form lists, locations, packages and story-manager nodes to records.registration-and-dialogue (held); both are counted, never rows."
       },
       "manualDecisionAllowed": false
     },
@@ -243,6 +243,58 @@
         "strength": "record-fact",
         "claim": null,
         "limits": "On by default since a person read every row it found on the lab's load order on 2026-11-27 (424 rows of the two record checks, profile EP-ho-ume-jks-r3): 3 were false alarms (a position 0.157 units from the winning one, and one cell's occlusion data and height map, which the editor derives), and none of the three is a row now; ruling R7 of the record checks asked for at most one in ten. houseCARL's record tool, called in process, reads each record a plugin of the selection touches that more than one plugin changes, and what each copy of it changed against what its plugin was made with (the latest of its masters, transitively, that has the record). A row is a field one mod changed whose winning value is another mod's, the two plugins in different mods, neither one of the game's own files (Bethesda's and Creation Club's), and the winner not made with the loser (it does not list it among its masters, transitively); both directions are judged, a selected plugin's change lost to another mod and another mod's change lost to a selected plugin. Values are compared as the game reads them: numbers at four decimals, two positions closer than data/record-field-scope.json's positionTolerance (half a unit) as one, rotations a full turn apart as one, record flags without the bit that only says how the record is stored, the cell grid flags' unused bytes ignored, the fields data/record-field-scope.json leaves out (file and group bookkeeping, data the game merges at run time, child records), the data it names derived (a cell's occlusion data and height map, counted, never a row), and a reordered list is no change unless the game reads its order, when it is not judged. No row, counted under its reason: a winner made with the loser, two plugins of one mod, a game file on either side, a pair with neither plugin in the selection. A read houseCARL marks incomplete, a line of its comparison SkyWright cannot read, a record without an override depth and a plugin whose masters' headers could not be read are not judged. Each of the two record checks reads the selection's records again in its own process (about half a minute on the lab's order), one process per check so a crash stays in one. The same rule as records.contested-fields, on cell records only."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "records.registration-and-dialogue",
+      "family": "records",
+      "title": "Quest, dialogue, form list, location and package changes one mod made that another mod's plugin, not made with it, undoes",
+      "required": false,
+      "optIn": true,
+      "heldWhy": "it is held back until it has found a real clash between two mods",
+      "applicability": {
+        "trigger": {
+          "anyType": [
+            "QUST",
+            "DIAL",
+            "INFO",
+            "SCEN",
+            "FLST",
+            "LCTN",
+            "SMQN",
+            "SMBN",
+            "SMEN",
+            "PACK",
+            "DLBR",
+            "DLVW"
+          ]
+        },
+        "note": "These record types carry quest, dialogue and registration data; a plugin with none of them cannot change any."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "probe-emit",
+        "exe": "recordprobe",
+        "args": [
+          "--check",
+          "records.registration-and-dialogue"
+        ],
+        "reverse": false,
+        "output": "conflict-file",
+        "commonFlags": true,
+        "populationFlag": "--population"
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": null,
+        "limits": "Held: a scan does not run it unless it is ticked, because it has never found a real clash between two mods: on the lab's load order (profile EP-ho-ume-jks-r3) its lost edits are all between Ultimate Markarth and Ultimate Markarth Expanded, which is made with it, and the script and dialogue findings are each one plugin's own. The hold lifts when a scan of real mods finds one and a person confirms it in the game or in xEdit. It reads, with houseCARL's record tool in process, each quest, topic and topic line, scene, form list, location, story-manager node and package a plugin of the selection touches that more than one plugin changes (the list is data/record-field-scope.json's registrationTypes), and applies the same rule as records.contested-fields: a field one mod changed whose winning value is another mod's, the two plugins in different mods, neither one of the game's own files, the winner not made with the loser, both directions judged. A form list's items are judged item by item: a row is an item one mod added that the winning list does not hold, or removed and the winning list still holds, one row per item. A list only reordered is no change unless the game reads its order (a form list's items, conditions, a package list), when it is not judged. houseCARL's own script and dialogue checks are asked about the selection's plugins and the quests and topics it wins: an unbound script property and a dialogue finding are each one plugin's own, counted under their reasons and never rows. Not built: the order of a topic's lines between mods (which line another mod's plugin moves or hides), which houseCARL can read and this check does not. No row, counted under its reason: a winner made with the loser, two plugins of one mod, a game file on either side, a pair with neither plugin in the selection. A read houseCARL marks incomplete, a line of its comparison SkyWright cannot read, a form list whose items could not all be read and a plugin whose masters' headers could not be read are not judged. It reads the selection's records again in its own process, one process per check so a crash stays in one."
       },
       "manualDecisionAllowed": false
     },
