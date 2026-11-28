@@ -33,10 +33,23 @@ public static class RowsAt
         emit.Where(c => c.Necessary.Concat(c.Alternative ?? new List<ConflictRecord>()).Any(r => string.Equals(r.FormKey, nav, StringComparison.OrdinalIgnoreCase)))
             .Select(c => Key(c, nav)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Navmesh <paramref name="nav"/>'s rows, base against now: gone, new, unchanged.</summary>
-    public static (List<string> Gone, List<string> New, List<string> Same) Compare(IEnumerable<Conflict> baseEmit, IEnumerable<Conflict> now, string nav)
+    /// <summary>Navmesh <paramref name="nav"/>'s rows, base against now: gone, new, unchanged. <paramref name="patch"/>: the
+    /// enabled patch's file name when it overrides the navmesh with the previous winner's geometry (its links re-pointed only).</summary>
+    public static (List<string> Gone, List<string> New, List<string> Same) Compare(IEnumerable<Conflict> baseEmit, IEnumerable<Conflict> now, string nav, string? patch = null)
     {
         var b = Of(baseEmit, nav); var n = Of(now, nav);
+        // the review of Gate C, decision 3: a CLOBBERED row whose winner is the enabled patch (named only when the patch carries
+        // the previous winner's geometry, re-pointing links alone) is the base's CLOBBERED row for this navmesh and the same loser
+        if (patch is not null)
+        {
+            string pre = $"CLOBBERED|{nav}|";
+            foreach (var k in n.Where(k => k.StartsWith(pre, StringComparison.OrdinalIgnoreCase) && k.EndsWith(">" + patch, StringComparison.OrdinalIgnoreCase)).ToList())
+            {
+                var loser = k.Substring(pre.Length, k.Length - pre.Length - patch.Length - 1);
+                var was = b.FirstOrDefault(x => x.StartsWith($"{pre}{loser}>", StringComparison.OrdinalIgnoreCase) && !n.Contains(x));
+                if (was is not null) { n.Remove(k); n.Add(was); }
+            }
+        }
         return (b.Except(n).OrderBy(x => x).ToList(), n.Except(b).OrderBy(x => x).ToList(), b.Intersect(n).OrderBy(x => x).ToList());
     }
 

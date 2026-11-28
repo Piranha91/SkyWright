@@ -390,6 +390,38 @@ static class NavRepairSelfTest
             return bad.Count == 0 ? null : string.Join(" | ", bad);
         });
 
+        // C2685 (R10): a repair plan's use_version row whose navmesh an earlier set of the SAME plugin already carries is
+        // planned "carried with" that set's first navmesh, with no edits of its own; carried by another plugin's set, it is not
+        // (it is planned as its own set, and the clash then refuses it: a set touching what another set changes).
+        Case("2685 use-version-carried-with-set", () =>
+        {
+            FormKey a = K(0xD11), b = K(0xD12), c = K(0xD13);
+            var carried = new Dictionary<FormKey, (FormKey Seed, string Mover)> { [a] = (a, "City.esp"), [b] = (a, "City.esp") };
+            var bad = new List<string>();
+            var same = NavRepairRun.CarriedWith(b, "City.esp", carried);
+            if (same is null || !same.Contains($"carried with {a}'s set") || !same.EndsWith('.')) bad.Add("same plugin: " + same);
+            if (NavRepairRun.CarriedWith(b, "Other.esp", carried) is { } o) bad.Add("another plugin's set: " + o);
+            if (NavRepairRun.CarriedWith(c, "City.esp", carried) is { } n) bad.Add("a navmesh no set carries: " + n);
+            var clash = NavRepairRun.UseVersionClash(c, "Other.esp", new[] { c, b }, Array.Empty<FormKey>(), new HashSet<FormKey>(), new Dictionary<FormKey, FormKey> { [b] = a }, new Dictionary<FormKey, FormKey>());
+            if (clash is null || !clash.Contains("write them as separate patches")) bad.Add("another plugin's set over a member: " + clash);
+            return bad.Count == 0 ? null : string.Join(" | ", bad);
+        });
+
+        // C2688 (review of Gate C, decision 3): a patch that overrides a navmesh only to re-point its links carries the previous
+        // winner's geometry, so the clobber of a loser's version moves from that winner to the patch and is one unchanged row:
+        // a CLOBBERED row against the patch matches the base's CLOBBERED row for the same navmesh and loser. A clobber against the
+        // patch of a loser the base had no clobber for stays new; without the patch named, the C2555 rule stands.
+        Case("2688 rows-at-relabelled-clobber", () =>
+        {
+            Conflict Clob(string a, string b, params string[] navs) => new("CLOBBERED", a, b, "re-cut", navs.Select(n => new ConflictRecord(n, "navmesh", null)).ToList());
+            var relabel = RowsAt.Compare(new[] { Clob("U.esp", "W.esp", A) }, new[] { Clob("U.esp", "Patch.esp", A) }, A, "Patch.esp");
+            var fresh = RowsAt.Compare(new[] { Clob("U.esp", "W.esp", A) }, new[] { Clob("U.esp", "Patch.esp", A), Clob("V.esp", "Patch.esp", A) }, A, "Patch.esp");
+            var plain = RowsAt.Compare(new[] { Clob("U.esp", "W.esp", A) }, new[] { Clob("U.esp", "Patch.esp", A) }, A);
+            return relabel.Gone.Count == 0 && relabel.New.Count == 0 && relabel.Same.Count == 1 && fresh.New.Count == 1 && fresh.New[0].Contains("V.esp>Patch.esp")
+                   && fresh.Gone.Count == 0 && plain.Gone.Count == 1 && plain.New.Count == 1
+                ? null : $"relabel {relabel.Gone.Count}/{relabel.New.Count}/{relabel.Same.Count}; a new loser [{string.Join(",", fresh.New)}] gone {fresh.Gone.Count}; no patch named {plain.Gone.Count}/{plain.New.Count}";
+        });
+
         // C2591: the plan for a band one-way row writes no link back across the band: refused by name.
         Case("2591 band-oneway-repair-refused", () =>
         {

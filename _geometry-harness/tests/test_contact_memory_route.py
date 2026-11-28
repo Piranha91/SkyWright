@@ -1,7 +1,7 @@
 """Known answers for contactprobe's memory route on a real probe run (task 2026-10-14-contactprobe-default-pass-memory-g1,
 Piranha's rule 2026-11-05: fast when the memory exists, warn on contention, lean when refused or absent, never a bare failure).
 
-    python _geometry-harness/tests/test_contact_memory_route.py
+    python _geometry-harness/tests/test_contact_memory_route.py [CR-16 CR-21 ...]   (no names: every case)
 
 On PopulationFixture laid out as an MO2 instance (test_contact_reverse.py's Lab, without its reverse runs), the REAL contactprobe:
   CR-16  a GC heap hard limit below the fast route's need: the run says lean and names the limit, completes, and its emit and rows
@@ -17,6 +17,10 @@ On PopulationFixture laid out as an MO2 instance (test_contact_reverse.py's Lab,
   CR-19  nothing fits (a limit below the lean need): exit 2, one sentence, no emit, no rows.
   CR-20  out of memory before the route is decided (HC_CONTACT_FAULT=oom-before-route; on the large order a 4 GiB heap limit did
          this at 37 s with a bare "Out of memory." and exit e0434352): exit 2, one sentence, no stack trace, no emit or rows.
+  CR-21  start-up garbage under a heap limit: the run log's estimator reads the whole run history when the probe starts (this
+         machine's was 315 MB on 2026-11-27, about 480 MiB of heap, all garbage by the time the probe takes its 64 MiB out-of-memory
+         reserve). A planted 330 MB history under the 512 MiB limit, a missing --base, in workstation and in server GC: exit 2 with
+         the missing-input sentence, never a bare "Out of memory." (workstation GC on the real history: bare, 10 of 10).
 Each case names the wrong answer it rejects. The probe comes from this checkout's Release build unless HC_REVERSE_HARNESS names
 another build folder.
 """
@@ -187,6 +191,53 @@ def cr20():
     assert not e.exists() and not j.exists(), "an emit or rows file was left"
 
 
+
+def planted_history(records=200_000):
+    """A run-log folder whose history.jsonl is about 330 MB of well-formed records (the estimator reads them all at start-up)."""
+    d = lab_free_tmp() / "runlog"
+    (d / "events").mkdir(parents=True, exist_ok=True)
+    pad = "x" * 1300
+    with open(d / "history.jsonl", "w", encoding="utf-8", newline="\n") as f:
+        for i in range(records):
+            f.write('{"schemaVersion":1,"runId":"fixture-history-%07d","attempt":1,"op":"fixture-history","mode":"default",'
+                    '"toolVersion":"1.0.0","algoEpoch":1,"compatKey":"000000000000","host":{"machine":"fixture","os":"windows",'
+                    '"cores":16,"runtime":"9.0.8"},"resources":{"argc":1,"args":"%s%07d"},"status":"Completed","outcome":"Refused",'
+                    '"stageSource":"SingleStage","exitCode":1,"startedUtc":"2026-09-06T22:27:24+00:00",'
+                    '"endedUtc":"2026-09-06T22:27:25+00:00","wallSeconds":1.0}\n' % (i, pad, i))
+    return d
+
+
+TMP = []
+
+
+def lab_free_tmp():
+    if not TMP:
+        TMP.append(Path(tempfile.mkdtemp(prefix="contact-memory-startup-")))
+    return TMP[0]
+
+
+def cr21():
+    runlog = planted_history()
+    size = (runlog / "history.jsonl").stat().st_size
+    assert size > 300_000_000, f"the planted history is {size:,} bytes: too small to stand for the real one"
+    missing = lab_free_tmp() / "no-such-base.json"
+    try:
+        start_up_under_limit(runlog, missing)
+    finally:
+        (runlog / "history.jsonl").unlink()
+
+
+def start_up_under_limit(runlog, missing):
+    for gc in ("0", "1"):
+        r = run([exe(tcr.PROBES, "contactprobe"), "--base", missing, "--emit", lab_free_tmp() / "emit.json"],
+                env=dict(os.environ, DOTNET_GCHeapHardLimit="0x20000000", DOTNET_gcServer=gc, HOUSECARL_RUNLOG_DIR=str(runlog)))
+        assert "Out of memory." not in plain(r), f"gcServer={gc}: a bare out-of-memory at start-up: exit {r.returncode}: {plain(r)[-600:]}"
+        no_stack(r)
+        last = r.stderr.strip().splitlines()[-1] if r.stderr.strip() else ""
+        assert r.returncode == 2 and last == f"--base input does not exist: {missing}", \
+            f"gcServer={gc}: exit {r.returncode}, want 2 and the missing-input sentence: {plain(r)[-600:]}"
+
+
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     for name, fn in [("CR-16 a heap limit below the fast need: lean, named, same rows", cr16),
@@ -194,7 +245,10 @@ if __name__ == "__main__":
                      ("CR-18 contention under auto: warned, lean, unattended default recorded", cr18),
                      ("CR-14 out of memory in the host loop: one sentence, no partial or stale output", cr14),
                      ("CR-19 nothing fits: one sentence, no output", cr19),
-                     ("CR-20 out of memory before the route is decided: one sentence, exit 2, no output", cr20)]:
+                     ("CR-20 out of memory before the route is decided: one sentence, exit 2, no output", cr20),
+                     ("CR-21 start-up garbage under a heap limit: the input sentence, never a bare out-of-memory", cr21)]:
+        if len(sys.argv) > 1 and not any(name.startswith(a + " ") for a in sys.argv[1:]):
+            continue
         check(name, fn)
     print(f"\n{len(PASSED)} passed, {len(FAILURES)} failed")
     sys.exit(1 if FAILURES else 0)

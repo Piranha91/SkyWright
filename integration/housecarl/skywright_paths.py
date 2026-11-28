@@ -17,6 +17,8 @@ import json
 import sys
 from pathlib import Path
 
+import os
+
 MODULE = Path(__file__).resolve().parent
 CHECKOUT = MODULE.parent.parent
 HARNESS = CHECKOUT / "_geometry-harness"
@@ -71,3 +73,22 @@ def program(name: str, config: str | None = None) -> Path:
 def server(config: str | None = None) -> Path:
     """houseCARL's server program in the module's build (Tools/housecarl-mcp/, its rulebook corpus.json beside it)."""
     return tool("housecarl-mcp", config)
+
+
+RUN_LOG = "HOUSECARL_RUNLOG_DIR"
+
+
+def set_run_log(folder) -> str | None:
+    """Point houseCARL's run log at FOLDER for a block of a test or tool; returns what was there, for restore_run_log.
+    A block that removed the setting instead would send every later program to the user's shared run history."""
+    before = os.environ.get(RUN_LOG)
+    os.environ[RUN_LOG] = str(folder)
+    return before
+
+
+def restore_run_log(before: str | None) -> None:
+    """Put the run log back as set_run_log found it: the caller's folder, or unset."""
+    if before is None:
+        os.environ.pop(RUN_LOG, None)
+    else:
+        os.environ[RUN_LOG] = before

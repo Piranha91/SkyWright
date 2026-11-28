@@ -393,11 +393,8 @@ internal sealed class MapTileLayer
 
     bool Start(LoadOrderSpec order, string cellKey, int ring, double cx, double cy, string req, string runDir)
     {
-        var psi = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "viewprobe.exe"))
-        {
-            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
-            WorkingDirectory = runDir,
-        };
+        var psi = RunLogFolder.Start(Path.Combine(AppContext.BaseDirectory, "viewprobe.exe"), RunLogFolder.In(runDir));
+        psi.CreateNoWindow = true; psi.RedirectStandardOutput = true; psi.RedirectStandardError = true; psi.WorkingDirectory = runDir;
         string F(double v) => v.ToString("0", CultureInfo.InvariantCulture);
         foreach (var a in new[] { cellKey, "--ring", ring.ToString(CultureInfo.InvariantCulture) }.Concat(order.Args()).Concat(new[]
                  {

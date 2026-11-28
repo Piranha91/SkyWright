@@ -26,6 +26,24 @@ internal static class LauncherView
     static readonly TextBlock Status = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
     static readonly TextBlock Settings = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4), Foreground = Brushes.Salmon };
     static readonly TextBlock RunLine = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0), Foreground = Theme.Brush(Theme.Dim) };
+    // what the Work and Output Folders hold (DiskUse), read in the background when they change and every half minute
+    static readonly TextBlock DiskLine = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0), Foreground = Theme.Brush(Theme.Dim) };
+    static int _diskTicks;
+    static bool _diskReading;
+    static void ReadDisk()
+    {
+        if (_diskReading) return;
+        _diskReading = true;
+        string? work = L.WorkFolder, output = L.Output;
+        var ui = DiskLine.Dispatcher;
+        Task.Run(() => DiskUse.Sentence(work, DiskUse.Measure(work), output, DiskUse.Measure(output)))
+            .ContinueWith(t => ui.BeginInvoke(() =>
+            {
+                _diskReading = false;
+                DiskLine.Text = t.IsCompletedSuccessfully ? t.Result : $"Disk: the folders' size could not be read ({t.Exception?.InnerException?.Message}).";
+                DiskLine.Visibility = DiskLine.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+            }));
+    }
     static readonly TextBlock NotProbes = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 8, 4, 4), Foreground = Theme.Brush(Theme.Dim) };
     static readonly Button RunAll = new() { Content = "Run selected", Margin = new Thickness(4), FontWeight = FontWeights.SemiBold };
     static readonly Button AbortAll = new() { Content = "Abort run", Margin = new Thickness(4) };
@@ -116,6 +134,7 @@ internal static class LauncherView
         ModsSection.Children.Add(FullCheck);
         panel.Children.Add(ModsSection);
         panel.Children.Add(RunLine);
+        panel.Children.Add(DiskLine);
         panel.Children.Add(Status);
         // everything else the launcher does, for whoever needs it
         var head = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
@@ -142,7 +161,12 @@ internal static class LauncherView
         BuildTiles();
         // the run read again every second: each probe's progress from its own run record, and the whole run's line
         var tick = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        tick.Tick += (_, _) => { if (Signature() != _seen) Fill(); else Refresh(); };
+        tick.Tick += (_, _) =>
+        {
+            bool changed = Signature() != _seen;
+            if (changed) Fill(); else Refresh();
+            if (changed || ++_diskTicks % 30 == 0) ReadDisk();
+        };
         tick.Start();
         var outer = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Background = Theme.Brush(Theme.Panel) };
         // the mod list scrolls on its own, at most about 40% of the tab, so the probes stay in view below it

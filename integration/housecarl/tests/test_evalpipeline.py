@@ -547,7 +547,7 @@ def case_68_a_stage_after_the_bundle_runs_again_when_its_tools_change():
         ep = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(ep)
         out = Path(t) / "run"
-        os.environ["HOUSECARL_RUNLOG_DIR"] = str(Path(t) / "runlog")
+        _runlog = SW.set_run_log(Path(t) / "runlog")
         calls = []
 
         class FakeCtx:
@@ -585,7 +585,7 @@ def case_68_a_stage_after_the_bundle_runs_again_when_its_tools_change():
             (module / "evalreel.py").write_text("# changed: report-plan and capture both run it\n", encoding="utf-8")
             rc5, after_reel = run_once()
         finally:
-            os.environ.pop("HOUSECARL_RUNLOG_DIR", None)
+            SW.restore_run_log(_runlog)
     if rc1 != EP.EXIT_OK or "capture" not in first:
         problems.append(f"the first run did not run through the capture (exit {rc1}, ran {first})")
     if again:
@@ -630,7 +630,7 @@ def _run_pipeline(t, entry_box, calls, runs, refuse_when=None, res=None, machine
     import types
     saved = EP.Context, dict(EP.STAGE_BODIES), EP.MEASURE
     out = Path(t) / "run"
-    os.environ["HOUSECARL_RUNLOG_DIR"] = str(Path(t) / "runlog")
+    _runlog = SW.set_run_log(Path(t) / "runlog")
     got = []
     try:
         fake, bodies = _fake_pipeline(entry_box, calls, refuse_when, res, machine)
@@ -649,7 +649,7 @@ def _run_pipeline(t, entry_box, calls, runs, refuse_when=None, res=None, machine
         EP.STAGE_BODIES.clear()
         EP.STAGE_BODIES.update(saved[1])
         EP.MEASURE = saved[2]
-        os.environ.pop("HOUSECARL_RUNLOG_DIR", None)
+        SW.restore_run_log(_runlog)
     return out, got
 
 
@@ -923,11 +923,11 @@ def case_2331_a_fresh_run_folder_is_refused_naming_the_built_in_controller_and_n
         entry_p = Path(t) / "entry.json"
         entry_p.write_text(json.dumps({"schema": 1, "id": "m", "inPlace": {"instance": str(t), "profile": "P", "game": str(t)}}), encoding="utf-8")
         out = Path(t) / "run"
-        os.environ["HOUSECARL_RUNLOG_DIR"] = str(Path(t) / "runlog")
+        _runlog = SW.set_run_log(Path(t) / "runlog")
         try:
             rc = EP.cmd_run(types.SimpleNamespace(entry=str(entry_p), machine=None, out=str(out), through=None))
         finally:
-            os.environ.pop("HOUSECARL_RUNLOG_DIR", None)
+            SW.restore_run_log(_runlog)
         status = json.loads((out / "status.json").read_text(encoding="utf-8"))
         made = sorted(x.name for x in out.iterdir())
     assert rc == EP.EXIT_REFUSED, rc
@@ -952,7 +952,7 @@ def case_2332_a_controller_run_folder_is_continued_reusing_census_to_bundle_and_
     with tempfile.TemporaryDirectory() as t:
         doc = {"schema": 1, "id": "m", "inPlace": {"instance": str(t), "profile": "P", "game": str(t)}, "modNames": {"S.esp": "Ess"}}
         out, entry_p, _ = _continuation_folder(t, doc)
-        os.environ["HOUSECARL_RUNLOG_DIR"] = str(Path(t) / "runlog")
+        _runlog = SW.set_run_log(Path(t) / "runlog")
         try:
             EP.STAGE_BODIES["precedent"] = precedent
             buf = io.StringIO()
@@ -968,7 +968,7 @@ def case_2332_a_controller_run_folder_is_continued_reusing_census_to_bundle_and_
         finally:
             EP.STAGE_BODIES.clear()
             EP.STAGE_BODIES.update(saved)
-            os.environ.pop("HOUSECARL_RUNLOG_DIR", None)
+            SW.restore_run_log(_runlog)
     assert rc == EP.EXIT_OK, (rc, text)
     for name in ("census", "prepare", "scope", "plan", "evaluate", "bundle"):
         assert f"{name}: reused (inputs and outputs unchanged)" in text, f"{name} was not reused: {text}"
@@ -1008,4 +1008,10 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _runlog = os.environ.get("HOUSECARL_RUNLOG_DIR")   # the caller's run log (the harness-suites guard sets one)
+    _code = main()
+    if os.environ.get("HOUSECARL_RUNLOG_DIR") != _runlog:
+        print(f"FAIL  the suite left HOUSECARL_RUNLOG_DIR as {os.environ.get('HOUSECARL_RUNLOG_DIR')!r}, not the caller's {_runlog!r}: "
+              "a later program would write the user's shared run history")
+        _code = 1
+    sys.exit(_code)
