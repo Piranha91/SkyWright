@@ -49,10 +49,11 @@ public static class OverlayBundle
         {
             var evidence = (List<object?>)manifest["evidence"]!;
             var measured = AppMeasured(appBundle);
+            var renderPolicies = MediaRule.RenderPolicies(items);   // renders under two texture policies are refused together
             foreach (var item in items.Cast<PyDict>())
             {
                 string src = PyPath.Str(PyValue.Truthy(item.Get("path")) ? (string)item["path"]! : "");
-                var (reason, detail) = MediaRule.Refusal(item, src, measured.Own, measured.Other, measured.State);
+                var (reason, detail) = MediaRule.Refusal(item, src, measured.Own, measured.Other, measured.State, renderPolicies);
                 if (reason != null)
                 {
                     unassessed.Add(new PyDict(item) { ["reason"] = reason, ["detail"] = detail });

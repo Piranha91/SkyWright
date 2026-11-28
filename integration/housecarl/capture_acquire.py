@@ -1903,6 +1903,9 @@ def _capture(a) -> int:
         from PIL import Image
         with Image.open(pngs[-1]) as im:
             meta, size = str(im.info.get("viewprobe") or ""), im.size
+            # the texture policy the frame was drawn under (viewprobe TexturePolicy.cs): the bundle accepts renders only
+            # under one stated policy (evalcontrol MediaRule.PolicyRefusal)
+            texture_policy = im.info.get("viewprobe-textures") or None
         reported = meta.split("| pose:", 1)[1].split("|", 1)[0].strip() if "| pose:" in meta else None
         if not reported:
             result["reason"] = f"the {state} PNG carries no replay pose in its viewprobe metadata"
@@ -1920,6 +1923,7 @@ def _capture(a) -> int:
                         "description": f"{'navmesh comparison' if navmesh else 'split' if split else 'vignette'} "
                                        f"{vig.get('chapterId')} {state}: request {a.request}"},
             "state": request.get("state") or "baseline", "configurationFingerprint": fp, "fingerprintSource": "emitted",
+            "texturePolicy": texture_policy,
             "provenance": {"tool": "viewprobe", "capturedUtc": utcnow(), "argv": argv, "rendererHashes": renderer,
                            "captureRequest": a.request, "request": a.request,
                            "poseId": acq.get("poseId") if not relative else f"{acq.get('poseId')}:{state}",
