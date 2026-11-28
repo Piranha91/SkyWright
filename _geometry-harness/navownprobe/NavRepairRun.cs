@@ -92,8 +92,23 @@ static class NavRepairRun
         return null;
     }
 
-    /// <summary>R10 STUB (Gate B, red first): no row is carried with an earlier set.</summary>
-    public static string? CarriedWith(FormKey nav, string mover, IReadOnlyDictionary<FormKey, (FormKey Seed, string Mover)> carried) => null;
+    /// <summary>R10: why a use_version row needs no plan of its own, in one sentence, or null: an earlier set of the same plugin
+    /// (<paramref name="carried"/>: navmesh to that set's first navmesh and plugin) already carries <paramref name="nav"/>. Carried
+    /// by another plugin's set it is planned as its own, and UseVersionClash refuses it.</summary>
+    public static string? CarriedWith(FormKey nav, string mover, IReadOnlyDictionary<FormKey, (FormKey Seed, string Mover)> carried)
+        => carried.TryGetValue(nav, out var c) && string.Equals(c.Mover, mover, StringComparison.OrdinalIgnoreCase)
+            ? $"Planned: carried with {c.Seed}'s set from {mover}, which writes {nav} too, so this row has no edits of its own." : null;
+
+    /// <summary>R10: the row of a navmesh carried with an earlier set (<see cref="CarriedWith"/>): planned, no edits, no changes,
+    /// "carriedWith" naming the set's first navmesh, so the writer and the read-back skip it.</summary>
+    public static JsonObject CarriedWithRow(FormKey nav, string mover, string moverPath, FormKey seed, string why) => new()
+    {
+        ["source"] = nav.ToString(), ["class"] = "use_version", ["status"] = "planned", ["why"] = why,
+        ["whyKinds"] = new JsonArray(), ["whyAll"] = new JsonArray(),
+        ["winner"] = new JsonObject { ["plugin"] = mover, ["path"] = moverPath, ["sha256"] = Sha(moverPath) },
+        ["links"] = new JsonArray(), ["adjacencyChange"] = false, ["invariants"] = new JsonArray(), ["useVersion"] = null,
+        ["carriedWith"] = seed.ToString(), ["edits"] = new JsonArray(), ["changes"] = new JsonArray(),
+    };
 
     public static JsonObject UseVersionRow(FormKey nav, string mover, string moverPath, string? refused, UseVersionPlan? u)
     {

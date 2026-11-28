@@ -413,12 +413,62 @@ public static class NavRepairReadBack
         return why;
     }
 
-    /// <summary>R10 STUB (Gate B, red first): the two-way border check finds nothing.</summary>
-    public static List<string> TwoWayBorders(IReadOnlyDictionary<FormKey, NavmeshGeometry> taken, IEnumerable<FormKey> sources, EdgeTolerance tol) => new();
+    /// <summary>THE TWO-WAY BORDER READ-BACK (R10, Gate A section 1): every border link of each navmesh in
+    /// <paramref name="sources"/>, as <paramref name="taken"/> has it (the navmeshes the game takes with the patch loaded last), must
+    /// be returned: the triangle it names has an edge along it linking back (NavEdit.LinksBack, the planner's own rule). A ledge
+    /// link (Type 1 or 2) is not made by edge geometry and is not judged; a link into the navmesh itself keeps its own
+    /// numbering. One sentence per link that is not returned; empty when every border holds.</summary>
+    public static List<string> TwoWayBorders(IReadOnlyDictionary<FormKey, NavmeshGeometry> taken, IEnumerable<FormKey> sources, EdgeTolerance tol)
+    {
+        var bad = new List<string>();
+        foreach (var k in sources)
+        {
+            if (!taken.TryGetValue(k, out var g)) continue;
+            var links = g.EdgeLinks ?? Array.Empty<NavEdgeLink>();
+            for (int t = 0; t < g.Triangles.Count; t++)
+                for (int e = 0; e < 3; e++)
+                {
+                    var tri = g.Triangles[t];
+                    if (!NavBorderMatch.EdgeIsLink(tri, e)) continue;
+                    int x = NavBorderMatch.EdgeLink(tri, e);
+                    if (x < 0 || x >= links.Count) { bad.Add($"{k}'s triangle {t} names link entry {x}, past its table of {links.Count}; the patch was not written."); continue; }
+                    var l = links[x];
+                    if (l.Mesh == k || l.Type is 1 or 2) continue;
+                    var (i, j) = NavBorderMatch.EdgeVerts(tri, e);
+                    if (!taken.TryGetValue(l.Mesh, out var n) || !NavEdit.LinksBack(n, l.TriangleIndex, g.Vertices[i], g.Vertices[j], k, tol))
+                        bad.Add($"{k}'s triangle {t} links into {l.Mesh} triangle {l.TriangleIndex}, which does not link back; the patch was not written.");
+                }
+        }
+        return bad;
+    }
+
+    /// <summary>The two-way read-back of a written patch (<see cref="TwoWayBorders"/>): every navmesh the patch holds, and every
+    /// navmesh of <paramref name="order"/> outside it that links into one of <paramref name="members"/> (the carried navmeshes),
+    /// each as the game takes it with the patch loaded last. Returns the sentences and how many navmeshes were checked.</summary>
+    public static (List<string> Why, int Checked) TwoWay(IReadOnlyList<string> order, string patchPath, IReadOnlyCollection<FormKey> members)
+    {
+        var full = Path.GetFullPath(patchPath);
+        var rest = order.Where(p => !string.Equals(Path.GetFullPath(p), full, StringComparison.OrdinalIgnoreCase)).ToList();
+        var taken = new Dictionary<FormKey, NavmeshGeometry>();
+        using (var patch = SkyrimMod.CreateFromBinaryOverlay(patchPath, SkyrimRelease.SkyrimSE))
+            foreach (var n in PlacementExtract.FromMod(patch).SelectMany(cp => cp.Navmeshes)) if (!n.Deleted) taken[n.FormKey] = n;
+        var held = taken.Keys.ToList();
+        var inbound = NavUseVersionPlan.InboundIndex(rest);
+        var outside = inbound.Where(kv => !taken.ContainsKey(kv.Key) && kv.Value.Links.Any(l => members.Contains(l.Mesh))).Select(kv => kv.Key).ToList();
+        foreach (var k in outside) if (NavUseVersionPlan.Winning(inbound[k].Path, k) is { } g) taken[k] = g;
+        foreach (var m in taken.Values.SelectMany(g => g.EdgeLinks ?? Array.Empty<NavEdgeLink>()).Select(l => l.Mesh).Distinct().ToList())
+            if (!taken.ContainsKey(m) && inbound.TryGetValue(m, out var w) && NavUseVersionPlan.Winning(w.Path, m) is { } g) taken[m] = g;
+        var sources = held.Concat(outside).ToList();
+        return (TwoWayBorders(taken, sources, NavRuleDefaults.Edge), sources.Count);
+    }
 
     /// <summary>A repair plan's planned use_version rows.</summary>
     public static List<JsonNode> UseVersionRows(JsonNode plan) => (plan["plans"] as JsonArray ?? new JsonArray())
-        .Where(p => (string?)p!["class"] == "use_version" && (string?)p["status"] != "refused").Select(p => p!).ToList();
+        .Where(p => (string?)p!["class"] == "use_version" && (string?)p["status"] != "refused" && p["carriedWith"] is null).Select(p => p!).ToList();
+
+    /// <summary>The navmeshes a use_version row carries (R10: each member of its set; a row from before R10 carries its source).</summary>
+    public static List<FormKey> Members(JsonNode row) => row["useVersion"]?["members"] is JsonArray ms && ms.Count > 0
+        ? ms.Select(m => FormKey.Factory((string)m!["navmesh"]!)).ToList() : new List<FormKey> { FormKey.Factory((string)row["source"]!) };
 
     /// <summary>The union of one navmesh's planned changes (a relink's entries, edge fields and flags; a ground plan's vertices
     /// and box): the later row's value where both set the same thing.</summary>
@@ -494,7 +544,7 @@ public static class NavRepairReadBack
                     else diff = GeometryDifferences(k, e.Geom, e.OldIndex, e.WinnerPath, e.Rebuilt, geoms.GetValueOrDefault(k), written.GetValueOrDefault(k))
                                 ?? new() { $"{k} is planned but not in the patch" };
                     // the carried navmesh's NAVI entry, as the game takes it with the patch last, against the version itself
-                    if (expect is not null && k == FormKey.Factory((string)p["source"]!))
+                    if (expect is not null && Members(p).Contains(k))
                         diff.AddRange(NaviFollowsVersion(plan["order"]?.AsArray().Select(x => (string)x!).ToList() ?? new List<string>(), patchPath, k, (string?)p["winner"]?["path"] ?? ""));
                     if (diff.Count > 0) failed++;
                     results.Add(new JsonObject { ["navmesh"] = k.ToString(), ["useVersion"] = (string?)p["source"], ["holds"] = diff.Count == 0, ["differences"] = new JsonArray(diff.Select(x => (JsonNode)x).ToArray()) });

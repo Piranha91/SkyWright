@@ -1224,6 +1224,7 @@ if (emitPath is not null)
                 .SelectMany(p => p.Change.SetEntries.Values.Select(v => v.Mesh).Concat(p.Change.AddedEntries.Select(a => a.Mesh)).Select(m => (Into: m, By: p.Nav)))
                 .GroupBy(x => x.Into).ToDictionary(g => g.Key, g => g.Select(x => x.By).ToList());
             FormKey? naviBy = null;
+            var carriedBy = new Dictionary<FormKey, (FormKey Seed, string Mover)>();   // R10: each navmesh an earlier set carries
             Dictionary<FormKey, (string Path, List<NavEdgeLink> Links)>? inbound = null;
             using var uvResolver = LoadOrderResolver.Build(paths);
             var uvView = uvResolver.Capture();
@@ -1232,18 +1233,26 @@ if (emitPath is not null)
                 if (scope is not null && !scope.Contains(r.Nav)) continue;
                 if (MoverOf(r) is not { } mv || !winGeom.TryGetValue(r.Nav, out var wgeom)) continue;
                 var moverIx = Array.FindIndex(pluginKey, k => string.Equals(k.FileName.String, mv.Mover, StringComparison.OrdinalIgnoreCase));
+                // R10: a navmesh an earlier set of the same plugin already carries is planned with it, with no edits of its own
+                if (NavRepairRun.CarriedWith(r.Nav, mv.Mover, carriedBy) is { } cw) { useVersions.Add(NavRepairRun.CarriedWithRow(r.Nav, mv.Mover, paths[moverIx], carriedBy[r.Nav].Seed, cw)); continue; }
                 string? refused = NavUseVersionPlan.NaviRefusal(naviView, r.Nav);   // navedit's own rule for every edit
-                var u = refused is null ? NavUseVersionPlan.Plan(uvView, naviView, paths, r.Nav, wgeom.Geom, mv.Winner, mv.Mover, () => inbound ??= NavUseVersionPlan.InboundIndex(paths)) : null;
+                // R10: grown by need, so a re-cut that needs its neighbours' re-cuts is carried with them as one set
+                var u = refused is null ? NavUseVersionPlan.PlanSet(uvView, naviView, paths, new[] { r.Nav }, mv.Mover, UseVersionSetMode.Grown, () => inbound ??= NavUseVersionPlan.InboundIndex(paths), (wgeom.Geom, mv.Winner)) : null;
                 refused ??= u!.Refuse;
                 if (refused is null && u!.Planned)
                 {
                     // every navmesh the version was matched against: the winners linking into it, the version's own link
                     // targets, and the planned rows that point a link at it (review of slice B, 2026-11-22, finding 1: a
                     // neighbour whose link already fits the version is not re-pointed, so it is not among the changes)
-                    var around = new HashSet<FormKey>(inbound!.Where(kv => kv.Value.Links.Any(l => l.Mesh == r.Nav)).Select(kv => kv.Key));
-                    if (moverGeom.TryGetValue((r.Nav, moverIx), out var vg)) foreach (var l in vg.EdgeLinks ?? Array.Empty<NavEdgeLink>()) around.Add(l.Mesh);
-                    if (linkedByPlan.TryGetValue(r.Nav, out var into)) foreach (var b in into) around.Add(b);
-                    around.Remove(r.Nav);
+                    // (R10) for every member of the set: what links into it, what its version links into, the rows pointing at it
+                    var mem = u.Expect.Where(kv => kv.Value.Rebuilt).Select(kv => kv.Key).ToHashSet();
+                    var around = new HashSet<FormKey>(inbound!.Where(kv => kv.Value.Links.Any(l => mem.Contains(l.Mesh))).Select(kv => kv.Key));
+                    foreach (var m in mem)
+                    {
+                        foreach (var l in u.Expect[m].Geom.EdgeLinks ?? Array.Empty<NavEdgeLink>()) around.Add(l.Mesh);
+                        if (linkedByPlan.TryGetValue(m, out var into)) foreach (var b in into) around.Add(b);
+                    }
+                    around.ExceptWith(mem);
                     bool naviChange = u.Row?["navi"] is System.Text.Json.Nodes.JsonObject;
                     refused = NavRepairRun.UseVersionClash(r.Nav, mv.Mover, u.Expect.Keys, around, plannedNavs, claimedBy, matchedBy)
                            ?? (naviChange && naviPlan.Ops.Count > 0 ? $"Carrying {mv.Mover}'s version of {r.Nav} changes the navmesh info map, which this plan's relinks change too; write it as its own patch."
@@ -1252,6 +1261,7 @@ if (emitPath is not null)
                     if (refused is null)
                     {
                         foreach (var k in u.Expect.Keys) claimedBy[k] = r.Nav;
+                        foreach (var k in mem) carriedBy[k] = (r.Nav, mv.Mover);
                         foreach (var k in around) matchedBy.TryAdd(k, r.Nav);
                         if (naviChange) naviBy = r.Nav;
                     }

@@ -50,6 +50,10 @@ using Mutagen.Bethesda.Skyrim;
 //   {"navmesh": "0E6430:Skyrim.esm", "cut": {"ref": "0A1B2C:Skyrim.esm", "margin": 0}}      (NavCut by a placed obstacle: its
 //       collision on the layers an actor meets, cut where it stands between step height and an actor's top above each
 //       navmesh triangle's own plane; _shared/NavCutFootprint.cs)
+//   {"navmesh": "0E6430:Skyrim.esm", "use_version": "Mod.esp"}                                 (carry Mod.esp's version)
+//   {"navmesh": "0E6430:Skyrim.esm", "use_version": "Mod.esp", "with_neighbours": true}       (R10: with each neighbour its
+//       borders need, while Mod.esp has its own version of it the game does not take)
+//   {"navmeshes": ["0E6430:Skyrim.esm", "0E6431:Skyrim.esm"], "use_version": "Mod.esp"}       (R10: exactly this set)
 //   An added triangle's corners index the navmesh's vertices, then the added ones (n, n+1, ...). A removed triangle's
 //   place is taken by the navmesh's last triangle (highest removal first); added triangles are appended after the kept ones.
 // The profile comes from the flags, then the environment and harness.local.json (_shared/HarnessTarget.cs), as for the
@@ -253,7 +257,7 @@ static class NavEditCli
                     foreach (var (fk, x) in u.Expect) expect[fk] = x;
                     if (u.Row is not null) row["useVersion"] = u.Row;
                     if (u.Why.Count == 0 && u.Row?["navi"] is JsonObject nv) row["navi"] = nv.DeepClone();   // main's place for a row's NAVI change
-                    islandExpect = u.IslandAfter;
+                    islandExpect = null;   // R10: each member's island data is on its member (useVersion.members[].islandExpect)
                 }
                 else if (refuse is null)
                 {
@@ -696,6 +700,8 @@ static class NavEditCli
             if (ForwardCarried(resolver, outPath, order, NaviPlanned(again)) is { } ferr) { Console.Error.WriteLine(ferr); return 1; }
         }
         var masters = again.SelectMany(p => (p.Row["useVersion"]?["masters"]?.AsArray().Select(x => (string)x!) ?? Array.Empty<string>())
+                               // a use_version's re-pointed neighbour: its override supersedes that neighbour's winner (R10, as R1 has it)
+                               .Concat(p.Row["useVersion"] is JsonObject ? p.Expect.Values.Where(e => !e.Rebuilt).Select(e => Path.GetFileName(e.WinnerPath)) : Array.Empty<string>())
                                .Concat(p.Row["useVersion"]?["navi"]?["entries"] is JsonArray { Count: > 0 } && (string?)p.Row["useVersion"]?["navi"]?["winner"]?["plugin"] is { } nw
                                        ? new[] { nw } : Array.Empty<string>())   // the NAVI winner too, when the row changes NAVI
                                // an island's data written by a vertex move or a cut changes NAVI too (R7): the NAVI winner is superseded
@@ -820,7 +826,7 @@ static class NavEditCli
                     if (geom is null) throw new Refusal($"navedit write: {key} has no winning geometry on the plan's order now, so carrying {from}'s version cannot be re-planned; plan again.");
                     var u = NavUseVersionPlan.NaviRefusal(uvNavi, key) is { } nvr
                         ? new UseVersionPlan(nvr, Array.Empty<string>(), new List<RepairOp>(), new(), null)
-                        : NavUseVersionPlan.Plan(uvView, uvNavi, order, key, geom, w!.Value.WinnerPlugin, from, () => inbound ??= InboundIndex(order));
+                        : NavUseVersionPlan.PlanSet(uvView, uvNavi, order, new[] { key }, from, UseVersionSetMode.Grown, () => inbound ??= InboundIndex(order), (geom, w!.Value.WinnerPlugin));
                     if (!u.Planned || NavRepairRunJson.OpsJson(u.Ops).ToJsonString() != row["edits"]!.ToJsonString())
                         throw new Refusal($"navedit write: carrying {from}'s version of {key} no longer plans the same on this load order ({u.Refuse ?? (u.Why.Count > 0 ? string.Join(" ", u.Why) : "other ops")}); plan again.");
                     uv.Add((row, u));
@@ -887,6 +893,20 @@ static class NavEditCli
             var rbPath = Path.ChangeExtension(outPath, null) + ".readback.json";
             var uvExpect = uv.SelectMany(x => x.U.Expect).ToDictionary(kv => kv.Key, kv => kv.Value);
             int rb = NavRepairReadBack.Run(planPath, outPath, rbPath, uvExpect);
+            // R10: the carried sets' borders are two-way on the written patch
+            var uvMembers = uv.SelectMany(x => NavRepairReadBack.Members(x.Row)).ToList();
+            if (uvMembers.Count > 0)
+            {
+                var (tw, twn) = NavRepairReadBack.TwoWay(order, outPath, uvMembers);
+                foreach (var x in tw) Console.WriteLine($"   FAILS  {x}");
+                if (tw.Count == 0) Console.WriteLine($"   holds  every border of the patch's navmeshes, and of every navmesh linking into a carried one, is two-way ({twn} navmeshes checked)");
+                if (tw.Count > 0)
+                {
+                    if (File.Exists(rbPath) && JsonNode.Parse(File.ReadAllText(rbPath)) is JsonObject twDoc)
+                    { twDoc["twoWay"] = new JsonArray(tw.Select(x => (JsonNode)x).ToArray()); twDoc["holds"] = false; File.WriteAllText(rbPath, twDoc.ToJsonString(new JsonSerializerOptions { WriteIndented = true })); }
+                    rb = 1;
+                }
+            }
             using var written = SkyrimMod.CreateFromBinaryOverlay(outPath, SkyrimRelease.SkyrimSE);
             var declared = written.ModHeader.MasterReferences.Select(m => m.Master.FileName.String).ToList();
             var missing = masters.Where(m => !declared.Contains(m, StringComparer.OrdinalIgnoreCase)).ToList();
@@ -945,14 +965,30 @@ static class NavEditCli
         }
         // each carried version's NAVI entry, as the game takes it with the patch last, against the version itself (one owner:
         // NavRepairReadBack.NaviFollowsVersion, R1's read-back holds its use_version rows to it too)
+        var carried = new List<FormKey>();
         foreach (var p in planned.Where(p => p.Ok && p.Row["useVersion"] is JsonObject))
+            foreach (var mo in p.Row["useVersion"]!["members"]?.AsArray() ?? new JsonArray())
+            {
+                var key = FormKey.Factory((string)mo!["navmesh"]!);
+                carried.Add(key);
+                var from = (string?)p.Row["useVersion"]!["fromPath"] ?? "";
+                var fd = NavRepairReadBack.NaviFollowsVersion(order, patchPath, key, from);
+                Console.WriteLine(fd.Count == 0 ? $"ok   NAVI follows {Path.GetFileName(from)}'s version of {key}: its linked doors are the version's door table, in order, and its neighbours the version's link targets"
+                                                : $"FAIL NAVI does not follow {Path.GetFileName(from)}'s version of {key}: {string.Join("; ", fd)}");
+                if (fd.Count > 0) failed++;
+                if (mo["islandExpect"] is JsonObject ie)
+                {
+                    var d = NavRepairReadBack.IslandHolds(order, patchPath, key, NavIsland.FromJson(ie));
+                    Console.WriteLine(d.Count == 0 ? $"ok   {key}'s island data, as the game takes it, is the planned one and its box its navmesh's, bit for bit" : $"FAIL {key}'s island data: {string.Join("; ", d)}");
+                    if (d.Count > 0) failed++;
+                }
+            }
+        // R10: every border of every navmesh the patch holds is two-way, and nothing outside it links into a carried one one way
+        if (carried.Count > 0)
         {
-            var key = FormKey.Factory((string)p.Row["navmesh"]!);
-            var from = (string?)p.Row["useVersion"]!["fromPath"] ?? "";
-            var fd = NavRepairReadBack.NaviFollowsVersion(order, patchPath, key, from);
-            Console.WriteLine(fd.Count == 0 ? $"ok   NAVI follows {Path.GetFileName(from)}'s version of {key}: its linked doors are the version's door table, in order, and its neighbours the version's link targets"
-                                            : $"FAIL NAVI does not follow {Path.GetFileName(from)}'s version of {key}: {string.Join("; ", fd)}");
-            if (fd.Count > 0) failed++;
+            var (tw, twn) = NavRepairReadBack.TwoWay(order, patchPath, carried);
+            Console.WriteLine(tw.Count == 0 ? $"ok   every border of the patch's navmeshes, and of every navmesh linking into a carried one, is two-way ({twn} navmeshes checked)" : string.Join(Environment.NewLine, tw.Select(x => "FAIL " + x)));
+            failed += tw.Count;
         }
         // each edited island's entry, as the game takes it with the patch last, against its navmesh's box and the plan (R7; one
         // owner: NavRepairReadBack.IslandHolds, R1's read-back holds its rows to it too)

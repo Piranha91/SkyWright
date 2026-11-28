@@ -181,6 +181,27 @@ a clobber, where a later mod's version replaced an earlier one's).
   - a neighbour's link into K that meets no edge of the version;
   - a ledge link out of range, or one into K that the version renumbers;
   - a version that no longer links into a neighbour that still links into K (the border would be one-way).
+  - a border link the neighbour does not return (the review of R7). Each border refusal ends with what to do: carry the
+    neighbour with it (`"with_neighbours": true`), or, where the plugin has no version of the neighbour, keep the winner's.
+- **A set of navmeshes (R10, 2026-11-27).** A mod that re-cut several adjacent navmeshes and lost all of them cannot be
+  carried one at a time: each version's borders fit only the others' versions. Two edit shapes carry them in one patch:
+  `{"navmeshes": [K1, K2, ...], "use_version": "Plugin.esp"}` carries exactly those; `{"navmesh": K, "use_version":
+  "Plugin.esp", "with_neighbours": true}` starts with K and adds each neighbour a border refusal names, while the plugin has
+  its own version of it that the game does not already take, until nothing more can join (navownprobe's repair plan grows
+  every use_version row this way). The plan row's `useVersion.members` lists every member, `useVersion.set` what was asked
+  and what growth added. One planner (`NavUseVersionPlan.PlanSet`; plain use_version is a set of one, never grown):
+  - a link between two members is matched against the other member's version; a link to anything else against the navmesh
+    the game takes (a navmesh the plugin already wins is then its own version). A ledge link into a member from a member or
+    a navmesh the plugin wins is kept as the plugin has it while its index is in range;
+  - an outside navmesh linked into several members gets one merged change; the navmesh info map is changed once for the set
+    (`NavRepairNavi.ForVersions`); the patch masters every plugin whose version of any member it supersedes, and each
+    re-pointed neighbour's winner;
+  - one refused member refuses the whole set, nothing written; in a set each sentence starts with its member. Refused too:
+    a navmesh named twice, a stated member the plugin already wins or has no version of;
+  - the read-back adds a two-way check on the written patch (`NavRepairReadBack.TwoWay`): every border link of every navmesh
+    the patch holds, and of every navmesh outside it linking into a member, must be returned by the triangle it names
+    (ledges are not judged). In a repair plan a row whose navmesh an earlier set of the same plugin carries is planned
+    "carried with" that set, with no edits of its own.
 - **The navmesh info map follows the version** (2026-11-22, houseCARL's items 2 and 3). The entry's linked doors become the
   version's door table, in order, and its MergedTo and PreferredMerges together the version's link-table targets: a
   neighbour it drops is removed (by value, from the list naming it), one it gains is added to MergedTo, and the neighbour's
