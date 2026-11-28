@@ -103,6 +103,7 @@ static class NpcActorBuilder
             resolver = new GameAssetResolver(new HcDataFolder(dataDir), new HcBsaProvider(assets), gate, logger);
         resolver.SetAdditionalFolders(TexturedScene.ResolverFolders(modFoldersHighestFirst, overwriteDir));
         var cache = new CharacterPreviewCache(new NullNpcSource(), resolver, logger, gate, new CvSettings());
+        TexturePolicy.Current.RequireSameAs(cache.Assets);   // the NPCs are drawn under the policy the frame records
         return new Host
         {
             Resolver = resolver,

@@ -75,6 +75,10 @@ using var __run = RunLog.BeginProcess("viewprobe", args,
 // every path out of Main, including the early returns just below (where nothing was claimed and
 // it does nothing at all). See ExtractionScratch.cs.
 using var __scratch = ViewProbe.ExtractionScratch.ProcessScope();
+// THE TEXTURE POLICY (TexturePolicy.cs): read once, after the pin above and before any texture cache is built, so an
+// unreadable setting refuses here in one sentence instead of the library quietly rendering decoded.
+try { ViewProbe.TexturePolicy.Refresh(); }
+catch (ViewProbe.TexturePolicyRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }
 
 if (args.Length == 2 && args[0] == "--report-mode-smoke")
     return ViewProbe.TexturedScene.ReportModeSmoke(args[1]);
@@ -5690,6 +5694,7 @@ if (worklist is not null)
                 if (bosIdx is not null && bosLayer is null) { bosIdx = new BosFormIndex(); bosLight.Clear(); }
             }
             catch (ViewProbe.GlAllocationRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // F-G4-1
+            catch (ViewProbe.TexturePolicyRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }    // TexturePolicy.cs
             catch (ViewProbe.CaptureRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }        // CaptureViews.cs
             catch (ViewProbe.ReadRefusal ex) { ViewProbe.PluginRead.Report(ex); return 2; }   // PluginRead.cs
             // A host's request for a cell this worklist may not hold (InteractiveViewer.CellRequest): it joins the list.
@@ -5914,6 +5919,7 @@ if (winRefsDump is not null)
 int singleRc;
 try { singleRc = RunCellTextured(target, 0, 0, null, out _); }
 catch (ViewProbe.GlAllocationRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // F-G4-1
+catch (ViewProbe.TexturePolicyRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }    // TexturePolicy.cs
 catch (ViewProbe.CaptureRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }        // CaptureViews.cs
 catch (ViewProbe.ReadRefusal ex) { ViewProbe.PluginRead.Report(ex); return 2; }   // PluginRead.cs
 // FinalExitCode, not a bare return: a shot must never return 3 itself, because the worklist loop

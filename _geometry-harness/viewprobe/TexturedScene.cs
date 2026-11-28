@@ -649,8 +649,11 @@ static class TexturedScene
         CellAssets MakeAssets()
         {
             var made = MakeResolver();
-            return new CellAssets(made,
-                new AssetCache(made, logger, gate, new CvSettings()));
+            var madeCache = new AssetCache(made, logger, gate, new CvSettings());
+            // the cache froze the policy from the environment; the pictures it feeds carry TexturePolicy.Current's token
+            TexturePolicy.Current.RequireSameAs(madeCache);
+            Console.WriteLine($"   texture policy: {TexturePolicy.Current.Label} ({TexturePolicy.Current.Source})");
+            return new CellAssets(made, madeCache);
         }
         var (resolver, cache) = live is not null ? live.Assets : cellScene is null ? MakeAssets() : cellScene.Assets(MakeAssets);
 
