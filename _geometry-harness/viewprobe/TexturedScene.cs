@@ -334,8 +334,9 @@ static class TexturedScene
     /// table and get their textures ready, off the window's thread, so the slice build that follows mostly uploads. Under the
     /// decoded texture policy that is a decode into the pixel cache. Under a compressed one (TexturePolicy.cs) a texture the
     /// library uploads compressed needs no decoded pixels, and which ones fall back is the library's rule, decided at upload:
-    /// so nothing is decoded or kept here, only each path resolved (the archive lookup and any extraction, off the window's
-    /// thread), and the few fallbacks decode on demand at upload, as every CPU use of pixels already does. Stops early when
+    /// so nothing 2D is decoded or kept here, only each path resolved (the archive lookup and any extraction, off the window's
+    /// thread), and the few fallbacks decode on demand at upload, as every CPU use of pixels already does. The environment
+    /// map (slot 4) is the exception: it always decodes, so it is still warmed, through the cube-map cache it is read from. Stops early when
     /// cancelled. Returns how many meshes it read.</summary>
     internal static int Prefetch(LiveSession session, IEnumerable<SceneRef> refs, bool parallel, CancellationToken ct)
     {
@@ -359,10 +360,18 @@ static class TexturedScene
                 if (read1.MissingPath || read1.Failure is not null || identityFailure is null) session.Mesh.Store(rel, read1);
                 made = true;
             }
+            var cache = session.Assets.Cache;
             foreach (var b in outcome.Built ?? new List<NifMeshBuilder.BuiltMesh>())
-                foreach (var t in b.TexturePaths.Values)
+                foreach (var (slot, t) in b.TexturePaths)
                     if (t is { Length: > 0 } && !ct.IsCancellationRequested)
-                        try { if (decode) session.Assets.Cache.GetOrLoadDdsPixels(t); else session.Assets.Cache.ResolveAssetPath(t); }
+                        try
+                        {
+                            if (decode) cache.GetOrLoadDdsPixels(t);
+                            // slot 4, the environment map, always decodes (a cube map, else a 2D map): warmed here as the
+                            // library's own prewarm does, so that decode stays off the window's thread too
+                            else if (slot == 4) { if (cache.GetOrLoadDdsCubemap(t) is null) cache.GetOrLoadDdsPixels(t); }
+                            else cache.ResolveAssetPath(t);
+                        }
                         catch { /* the slice build reports what it cannot read */ }
             return made;
         }
