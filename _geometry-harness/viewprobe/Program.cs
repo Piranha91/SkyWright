@@ -45,7 +45,8 @@ using Image = SixLabors.ImageSharp.Image;
 // AFTER the flags, so passing --instance never trips it.
 // TEXTURE POLICY. No pin: SkyRender's default DDS route applies (authored-mip compressed uploads for
 // chains whose last mip is at most 4 px), which changes captured texture pixels (mostly normal-mapped
-// surfaces and alpha edges) while geometry, depth and masks stay exact. Every picture's identity and
+// surfaces and alpha edges) and, at alpha-tested edges, depth and the masks read from it; geometry stays
+// exact. Every picture's identity and
 // reuse key now carries the policy (TexturePolicy.cs), so results from two policies never pass for
 // one. SKYRENDER_DDS_MAX_FINAL_MIP_DIMENSION=decoded (or the legacy CVR_ name when the new one is
 // unset) still selects the decoded route; the library reads it once per AssetCache.

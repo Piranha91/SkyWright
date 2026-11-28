@@ -12,7 +12,8 @@ namespace ViewProbe;
 /// <para>Nothing set: the library's default, authored-mip compressed uploads for chains whose last mip is at most
 /// <see cref="DdsMipPolicy.DefaultMaximumFinalMipDimension"/> px. <c>decoded</c>: every texture decoded to RGBA and its
 /// mips generated (the route viewprobe was pinned to until the policy was recorded). The policy changes captured
-/// texture pixels (mostly normal-mapped surfaces and alpha edges), never geometry, depth or masks, so it is part of
+/// texture pixels (mostly normal-mapped surfaces and alpha edges) and, where an alpha-tested shape is cut by its texture's
+/// alpha, that shape's depth and what is read from it (picks, visibility masks); never geometry. So it is part of
 /// a picture's identity: <see cref="Token"/> joins every key a picture is reused or compared by.</para>
 /// </summary>
 internal sealed record TexturePolicy(int? MaxFinalMip, bool Explicit, string? Setting)
