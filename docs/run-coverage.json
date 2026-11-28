@@ -993,7 +993,7 @@
         "--navgrid-selftest": "run the navmesh grid rebuild's known answers (NavGrid.cs) and exit; tests/test_navgrid_rebuild.py drives it",
         "--navgrid-oracle": "rebuild every navmesh grid of the named plugins and compare it piece by piece with the stored grid (a measurement)",
         "--write-navi-master-fixture": "write the navmesh-repair fixture whose NAVI master case a test reads, and print its path",
-        "--write-mover-fixture": "write the navmesh-repair mover fixture (optionally with doors or a neighbour) and print its path"
+        "--write-mover-fixture": "write the navmesh-repair mover fixture (optionally with doors or a neighbour, or one island variant: island-version, island-plain-version, island-plain-winner, island-noentry, island-sloppy-version, island-ground, island-ground-whole, island-door) and print its path"
       }
     },
     {
@@ -10825,6 +10825,48 @@
       ],
       "outputs": [
         "The instance, candidates and (as a script) one top and one eye-level frame per cell."
+      ]
+    },
+    {
+      "id": "_geometry-harness/tests/navi_bytes.py",
+      "path": "_geometry-harness/tests/navi_bytes.py",
+      "kind": "script",
+      "answers": [
+        "What does a written plugin's navmesh info map (NAVI entries, island data) and navmesh box hold, read straight from its bytes?"
+      ],
+      "useWhen": "Hold a written navmesh patch to a second reader that shares no code with the writer (the navmesh repair suites import it).",
+      "evidence": [
+        {
+          "path": "_geometry-harness/tests/navi_bytes.py",
+          "anchor": "A raw-bytes reader of a plugin's navmesh info map"
+        }
+      ],
+      "inputs": [
+        "A plugin file."
+      ],
+      "outputs": [
+        "Its NAVI entries and NAVM navmeshes, fields and raw bytes."
+      ]
+    },
+    {
+      "id": "_geometry-harness/tests/navi_floor.py",
+      "path": "_geometry-harness/tests/navi_floor.py",
+      "kind": "script",
+      "answers": [
+        "Do the island box rule and flag rule hold on every navmesh info map entry of the base game?"
+      ],
+      "useWhen": "Measure the vanilla floor of the island rules on the five base-game files (test_navedit.py's real-data case runs it).",
+      "evidence": [
+        {
+          "path": "_geometry-harness/tests/navi_floor.py",
+          "anchor": "The vanilla floor of the island rules"
+        }
+      ],
+      "inputs": [
+        "The game's Data folder (Skyrim.esm, Update.esm and the three DLC)."
+      ],
+      "outputs": [
+        "One JSON line per file: entries, islands, empty meshes, box and flag rule counts."
       ]
     },
     {
