@@ -84,6 +84,8 @@ public sealed class WorldRead
     public int Prepared { get; private set; }
     /// <summary>Plugins whose prepared file was already present and read.</summary>
     public int Reused { get; private set; }
+    /// <summary>Prepared files rebuilt during a read because a cell's data failed its hash on disk after the open.</summary>
+    public int Rebuilt { get; private set; }
     /// <summary>Schema, Engine version and the ordered plugin names with their content hashes, for receipts.</summary>
     public string Identity { get; private set; } = "";
     public WorldReadTimings Timings { get; private set; } = new(0, 0, 0);
@@ -175,13 +177,24 @@ public sealed class WorldRead
     static WorldFile Prepare(string cache, string path, string sha)
     {
         string name = Path.GetFileName(path);
-        string at;
-        try { at = WorldReadFile.WriteFor(path, sha, WorldReadFile.PathFor(cache, sha, name), Schema, EngineVersion); }
+        string at, final = WorldReadFile.PathFor(cache, sha, name);
+        try { at = WorldReadFile.WriteFor(path, sha, final, Schema, EngineVersion); }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             throw new WorldReadException($"The plugin {name} could not be read for the world read ({ex.GetType().Name}: {ex.Message}); check that it is a complete Skyrim Special Edition plugin, or take it out of the load order.", ex);
         }
-        try { return WorldReadFile.Load(at, sha, name, Schema, EngineVersion); }
+        try
+        {
+            var f = WorldReadFile.Load(at, sha, name, Schema, EngineVersion);
+            if (at != final)
+            {
+                // The rename failed (another reader holds the old file): keep this complete copy in memory and delete it,
+                // so no temporary file is left; the next open tries the rename again.
+                f.Bytes = File.ReadAllBytes(at);
+                try { File.Delete(at); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            }
+            return f;
+        }
         catch (WorldFileUnreadable why)
         { throw new WorldReadException($"The world read's prepared file for {name} could not be read back ({why.Message}); check the cache folder {cache} is not being changed by another program.", why); }
     }
@@ -195,7 +208,7 @@ public sealed class WorldRead
         {
             lock (_rebuild)
             {
-                if (ReferenceEquals(_files[plugin], f)) _files[plugin] = Prepare(_cache, _paths[plugin], _shas[plugin]);
+                if (ReferenceEquals(_files[plugin], f)) { _files[plugin] = Prepare(_cache, _paths[plugin], _shas[plugin]); Rebuilt++; }
                 var nf = _files[plugin];
                 var cell = f.Cells[row].Cell;
                 int nrow = Array.FindIndex(nf.Cells, c => c.Cell == cell);

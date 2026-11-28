@@ -493,4 +493,58 @@ public sealed class WorldReadTests : IClassFixture<WorldReadWorld>, IDisposable
         Assert.True(again.Identity == _w.Read.Identity && again.Identity.Contains("WrC.esp") && again.Identity.Contains($"schema {WorldRead.Schema}"),
             $"[rule 13] the identity must be the same on both opens and name the plugins and schema; got '{again.Identity}'");
     }
+
+    // ---- rules 14 and 15: the recovery paths ----
+
+    static readonly FormKey OneCell = new(new ModKey("WrOne", ModType.Master), 0x850);
+
+    [Fact]
+    public void Rule14_a_cell_damaged_on_disk_after_open_is_rebuilt_once_and_answered()
+    {
+        string cache = Path.Combine(_dir, "cache");
+        var path = WrPlugins.Save(Path.Combine(_dir, "plugins"), OnePlugin(One, 100));
+        var read = WorldRead.Open(new[] { path }, cache);
+        var prepared = WorldReadFile.PathFor(cache, Sha(path), Path.GetFileName(path));
+        var bytes = File.ReadAllBytes(prepared);
+        bytes[WorldReadFile.HeaderLength + 12] ^= 0xFF;   // inside the first (only) cell's data, after the open loaded the tables
+        File.WriteAllBytes(prepared, bytes);
+        WorldAnswer? a = null; Exception? err = null;
+        try { a = read.Cell(OneCell); } catch (Exception e) { err = e; }
+        var x = a?.Winners.SingleOrDefault(w => w.Reference == One)?.Ref?.Position.X;
+        Assert.True(err is null && x == 100f,
+            $"[rule 14] a cell damaged on disk after the open must be answered from a rebuilt file: x 100 expected, got {x?.ToString() ?? "nothing"}{(err is null ? "" : $", threw {err.GetType().Name}: {err.Message}")}");
+        Assert.True(read.Rebuilt == 1, $"[rule 14] the damaged file must be rebuilt once; rebuilt {read.Rebuilt}");
+        read.Cell(OneCell);
+        Assert.True(read.Rebuilt == 1, $"[rule 14] a second read of the cell must not rebuild again; rebuilt {read.Rebuilt}");
+        var later = WorldRead.Open(new[] { path }, cache);
+        Assert.True(later.Prepared == 0 && later.Reused == 1 && later.Lookup(One)?.Ref?.Position.X == 100f,
+            $"[rule 14] a later open must reuse the rebuilt file; prepared {later.Prepared}, reused {later.Reused}");
+    }
+
+    [Fact]
+    public void Rule15_a_prepared_file_held_open_by_another_reader_leaves_no_temporary_file()
+    {
+        foreach (var (label, share) in new[] { ("the reader's own sharing, read and delete", FileShare.Read | FileShare.Delete),
+                                               ("read sharing only", FileShare.Read) })
+        {
+            string dir = Path.Combine(_dir, Guid.NewGuid().ToString("N")), cache = Path.Combine(dir, "cache");
+            var path = WrPlugins.Save(Path.Combine(dir, "plugins"), OnePlugin(One, 100));
+            WorldRead.Open(new[] { path }, cache);
+            var prepared = WorldReadFile.PathFor(cache, Sha(path), Path.GetFileName(path));
+            var whole = File.ReadAllBytes(prepared);
+            File.WriteAllBytes(prepared, whole[..^1]);   // cut, so the next open rebuilds it while the old one is held
+            WorldRead r;
+            using (new FileStream(prepared, FileMode.Open, FileAccess.Read, share))
+            {
+                r = WorldRead.Open(new[] { path }, cache);
+                var x = r.Lookup(One)?.Ref?.Position.X;
+                Assert.True(r.Prepared == 1 && x == 100f,
+                    $"[rule 15] with the old prepared file held open ({label}) the read must answer x 100 from a rebuilt file; prepared {r.Prepared}, x {x?.ToString() ?? "nothing"}");
+            }
+            var left = Directory.GetFiles(cache, "*.partial-*");
+            Assert.True(left.Length == 0,
+                $"[rule 15] with the old prepared file held open ({label}) no temporary file may be left in the cache folder; found {string.Join(", ", left.Select(Path.GetFileName))}");
+            Assert.True(r.Lookup(One)?.Ref?.Position.X == 100f, $"[rule 15] ({label}) the read must keep answering after its temporary file is gone");
+        }
+    }
 }
