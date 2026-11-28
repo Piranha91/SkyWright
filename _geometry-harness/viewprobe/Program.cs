@@ -4713,7 +4713,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 CandidateSha256 = candidateSha256,
                 Cell = cellKey.ToString(),
                 View = new { navPlugin, navCellSpecs, navVersionSpecs, comparePlugins = compare is { } pair ? new[] { pair.A, pair.B } : null,
-                             cullAbove, bosMode, stateView, replayArgs = shotReplay },
+                             cullAbove, bosMode, stateView, replayArgs = shotReplay,
+                             texturePolicy = ViewProbe.TexturePolicy.Current.Label },   // changes texture pixels (TexturePolicy.cs)
                 Note = "Input configuration before diagnostic view transformations; inspect PNG pose and view settings before media qualification."
             };
             string configurationPath = Path.Combine(shotOutDir, $"{safe}-configuration.json");
@@ -5199,6 +5200,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 string HashFile(string path) { using var f = File.OpenRead(path); return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(f)); }
                 var plugins = order.OrderedPaths.Select(p => new { file = Path.GetFileName(p), sha256 = HashFile(p) }).ToArray();
                 var inputJson = System.Text.Json.JsonSerializer.Serialize(new { plugins, stateSpec, bosMode, keepFx, cullAbove, size,
+                    texturePolicy = ViewProbe.TexturePolicy.Current.Token,
                     visibilityBudget = os.VisibilityBudget,
                     ruleSha256 = ViewProbe.ShapeCullPolicy.Sha256,
                     cell = cellKey.ToString(), eye = new[] { eyeS.X, eyeS.Y, eyeS.Z },
@@ -5235,7 +5237,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     rule = ViewProbe.ShapeCullPolicy.Identity, scope = ViewProbe.ShapeCullPolicy.Scope,
                     ruleSha256 = ViewProbe.ShapeCullPolicy.Sha256, ruleConfiguration = ViewProbe.ShapeCullPolicy.Configuration,
                     inputSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(inputJson))),
-                    inputIdentityScope = "record files, source mesh bytes, effective scene placements, planes, camera, state and visibility budget; texture/material assets not yet fingerprinted",
+                    inputIdentityScope = "record files, source mesh bytes, effective scene placements, planes, camera, state, visibility budget and texture policy; texture/material assets not yet fingerprinted",
                     appearance = shotDepthMeasurement?.Appearance() ?? (object)new { status = "unassessed", reasonCode = "appearance_inputs_not_fingerprinted",
                         reason = "Texture/material inputs and renderer fallbacks are not qualified; geometry visibility is not a claim of matching game appearance." },
                     plugins, assemblies = new[] { typeof(ViewProbe.ShapeOcclusion).Assembly.Location, typeof(SphereBound).Assembly.Location,

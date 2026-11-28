@@ -4030,6 +4030,9 @@ static class TexturedScene
         if (pngTextMeta is { Length: > 0 })
             img.Metadata.GetPngMetadata().TextData.Add(
                 new SixLabors.ImageSharp.Formats.Png.Chunks.PngTextData("viewprobe", pngTextMeta, string.Empty, string.Empty));
+        // the texture policy the frame was drawn under (TexturePolicy.cs): it changes texture pixels, so a frame says it
+        img.Metadata.GetPngMetadata().TextData.Add(new SixLabors.ImageSharp.Formats.Png.Chunks.PngTextData(
+            "viewprobe-textures", TexturePolicy.Current.Token, string.Empty, string.Empty));
         if (incompleteMeta is { Length: > 0 })
             img.Metadata.GetPngMetadata().TextData.Add(
                 new SixLabors.ImageSharp.Formats.Png.Chunks.PngTextData("viewprobe-incomplete", incompleteMeta, string.Empty, string.Empty));
