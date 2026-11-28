@@ -177,6 +177,8 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Does the report say each record in words (a placed object by its kind and base, a name, an editor ID in words, a navmesh by its place), keep two different values apart and number records named alike, say once per check across mod pairs what to check in game, keep a patch verdict's names out of the reel, say why a cell could not be read, and say a long mod name in full once and then by its own short form?](#tool-integration-housecarl-tests-test_report_record_labels.py) — `integration/housecarl/tests/test_report_record_labels.py`
 - [Does the report show the frame that states a clash (the marked view, both halves of a split), and does the reel drop capital mod prefixes from names?](#tool-integration-housecarl-tests-test_report_figures.py) — `integration/housecarl/tests/test_report_figures.py`
 - [Does the requested canvas aspect reach every worklist and capture path?](#tool-_geometry-harness-tests-test_worklist_aspect.py) — `_geometry-harness/tests/test_worklist_aspect.py`
+- [Does the retained scene look a resident texture up under the key this SkyRender package stores it by, under each texture policy?](#tool-_geometry-harness-viewprobe-tools-test_resident_key.py) — `_geometry-harness/viewprobe/tools/test_resident_key.py`
+- [Does the retained scene look a resident texture up under the key this SkyRender package stores it by, under each texture policy?](#tool-viewprobe.resident-key-selftest) — `viewprobe.resident-key-selftest`
 - [Does the review reel plan and render Piranha's vignette format by rule: opening still, without/with/highlight vignettes, data stills, plain words, own-pair patch sentences and a closing still?](#tool-integration-housecarl-tests-test_reel_vignettes.py) — `integration/housecarl/tests/test_reel_vignettes.py`
 - [Does the route-cut check read each arm's candidate and only the targets that arm loads?](#tool-_geometry-harness-tests-test_route_cut_adapter.py) — `_geometry-harness/tests/test_route_cut_adapter.py`
 - [Does the run controller still write the JSON bytes, hashes, orderings and stage ledger its known answers record?](#tool-runcontrol) — `runcontrol`
@@ -1794,6 +1796,21 @@ Inputs: Controlled fixtures for test_renderlimit.
 Outputs: Assertion results or generated fixture data for: Does the render concurrency calculation refuse absent or insufficient memory readings?
 
 Source: [_geometry-harness/viewprobe/tools/test_renderlimit.py](../_geometry-harness/viewprobe/tools/test_renderlimit.py) — `How many renders may run side by side, and what happens when the machine will not say.`
+
+
+<a id="tool-_geometry-harness-viewprobe-tools-test_resident_key.py"></a>
+
+### _geometry-harness/viewprobe/tools/test_resident_key.py
+
+**Does the retained scene look a resident texture up under the key this SkyRender package stores it by, under each texture policy?**
+
+Run viewprobe's resident-key known answers against the built viewprobe after a SkyRender package or texture policy change.
+
+Inputs: The built viewprobe; a GL context.
+
+Outputs: Assertion results for: Does the retained scene look a resident texture up under the key this SkyRender package stores it by, under each texture policy?
+
+Source: [_geometry-harness/viewprobe/tools/test_resident_key.py](../_geometry-harness/viewprobe/tools/test_resident_key.py) — `Runs viewprobe's resident-key known answers`
 
 
 <a id="tool-_geometry-harness-viewprobe-tools-test_shotplan_camera.py"></a>
@@ -7772,6 +7789,23 @@ Outputs: Diagnostic assertions and exit status; fault arms deliberately refuse.
 Source: [_geometry-harness/viewprobe/Program.cs](../_geometry-harness/viewprobe/Program.cs) — `--report-sink-selftest`
 
 
+<a id="tool-viewprobe.resident-key-selftest"></a>
+
+### viewprobe.resident-key-selftest
+
+**Does the retained scene look a resident texture up under the key this SkyRender package stores it by, under each texture policy?**
+
+Check ResidentKey.cs after a SkyRender package change, or when a --reuse-cell render refuses a texture as evicted: a real texture is uploaded through GlTextureManager under the decoded and the compressed policy and must be found through the helper.
+
+Selector: `--resident-key-selftest`
+
+Inputs: No arguments; needs a GL context but no MO2 instance or game.
+
+Outputs: One line per known answer (the route each upload took, and the entry found under the helper's key), and exit status 0 when all hold.
+
+Source: [_geometry-harness/viewprobe/Program.cs](../_geometry-harness/viewprobe/Program.cs) — `--resident-key-selftest`
+
+
 <a id="tool-viewprobe.route"></a>
 
 ### viewprobe.route
@@ -8039,6 +8073,7 @@ Modifiers (do not select a separate mode):
 - `--red` — Set red for this invocation; consult the linked parser for accepted values.
 - `--ref` — Set ref for this invocation; consult the linked parser for accepted values.
 - `--ref-surface-opacity` — Set ref surface opacity for this invocation; consult the linked parser for accepted values.
+- `--resident-key-selftest` — Known answers for the key the retained scene finds a resident texture by, against this SkyRender package under each texture policy; needs a GL context, no MO2 instance and no game.
 - `--reuse-cell` — Set reuse cell for this invocation; consult the linked parser for accepted values.
 - `--ring` — Loaded area for exteriors: 1 (default, the 3x3), N (radius N) or visible (every cell whose ground the frame sees); opt-in because it multiplies load time.
 - `--ring-cap` — With --ring visible: the most cells loaded (default 160), nearest the eye kept.
