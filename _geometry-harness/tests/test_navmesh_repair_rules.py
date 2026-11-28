@@ -73,12 +73,22 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
     2591  self-test: the plan writes no link back for a band one-way row: refused by name
     2592  self-test: a link back a lower version authored (its edge within the band) is restored, "restored from" it, "in
           the band"; one linking from beyond the band is not taken
-    2593  self-test: a follow-the-ground plan on a NAVI island is refused by name until R7
+    2593  self-test: a follow-the-ground plan on a NAVI island makes the same navmesh edits as on a plain one (corrected for R7)
     2594  self-test: a one-way refusal whose match joins its own triangle names it, never an empty target
     2563  navedit on the fixture: use_version of G4 from Skyrim.esm masters RpD.esp, whose version it supersedes (read from the
           written header), the read-back says so, and no staging folder is left
     2566  self-test: NAVI linked doors: added in place on the winner's entry with the base game's Unknown; a door already linked,
           an unstated navmesh, and a whole interior entry (the write engine's compose gap) are refused by name
+    2658-2668  R7, islands of the navmesh info map (_shared/NavIsland.cs): following the ground on an island plans with its
+          island data (2658) and is refused beside a relink of the same entry (2659); on the island variants of the mover
+          fixture, read back by the raw-bytes reader tests/navi_bytes.py: use_version carries the version's own island data
+          (2660), also where one side only is an island (2661), and is refused by name where the version's plugin states no
+          entry (2662); following the ground moves the island box and mesh by the height rule, stated here apart from the
+          C# (2663), also on an entry added whole (2664); a height-only move (2665); a sideways move refused with a mesh,
+          written without (2666); a door leaves the island data (2667); a patch whose read-back fails is left unwritten (2668)
+    2671-2673  review of Gate B: a version whose own island box is not its navmesh's is refused (2671); a plain navedit
+          write whose read-back fails leaves nothing (2672, through navedit's test switch NAVEDIT_FAIL_READBACK=1); a patch
+          already at --out is never touched, and a write that holds leaves no staging folder (2673)
 
 The write of the plan through houseCARL's server program, its read-back and the re-check (2494-2499, 2504, 2505) are the
 module's suite integration/housecarl/tests/test_navmesh_repair_write.py, on this fixture: only the module holds that
@@ -836,6 +846,338 @@ def t2606():
     assert [d.lower() for d in e["doorsAfter"]] == [DB.lower(), DC.lower(), DA.lower()] and e["keepDoors"] == 0, e
 
 
+# ---- R7: islands of the navmesh info map (_shared/NavIsland.cs; Gate B C:/hc-runs/2026-11-27-navmesh-repair/r7/GATE-B.md) ----
+# Each case runs the real probes on an island variant of the mover fixture (navownprobe --write-mover-fixture DIR <variant>;
+# NavRepairFixture.IslandVariants gives each one's table) and reads the written patch back with navi_bytes.py, the raw-bytes
+# second reader, which shares no code with the writer.
+
+sys.path.insert(0, str(HERE))
+from navi_bytes import Plugin as RawPlugin  # noqa: E402
+
+GE, GQ, DT = sk("000B12"), sk("000B13"), sk("000D34")
+_ISLAND = {}
+
+
+def rk(key):
+    """A FormKey string as the raw reader keys it."""
+    i, p = key.split(":")
+    return (p.lower(), int(i, 16))
+
+
+def island_lab(variant):
+    """The island variant laid out as an MO2 instance: (tmp, instance, game, fixture folder)."""
+    if variant not in _ISLAND:
+        tmp = Path(tempfile.mkdtemp(prefix=f"nr-{variant}-"))
+        inst, game = _mover_instance(tmp, [variant])
+        _ISLAND[variant] = (tmp, inst, game, tmp / "fixture")
+    return _ISLAND[variant]
+
+
+def navedit_edit(variant, edits, name):
+    """navedit plan and (when it plans) write on the variant: (rows, plan run, write run or None, patch path)."""
+    tmp, inst, game, _ = island_lab(variant)
+    d = Path(tempfile.mkdtemp(prefix=f"{name}-", dir=tmp))
+    (d / "edits.json").write_text(json.dumps({"edits": edits}), encoding="utf-8")
+    navedit = buildlayout.program_under(PROBES, "navedit")
+    plan = run([navedit, "plan", "--edits", d / "edits.json", "--out", d / "plan.json", "--instance", inst, "--game", game, "--profile", "P"])
+    rows = json.loads((d / "plan.json").read_text(encoding="utf-8"))["edits"] if (d / "plan.json").exists() else []
+    out = d / "out" / f"{name}.esp"
+    write = run([navedit, "write", "--plan", d / "plan.json", "--out", out]) if plan.returncode == 0 else None
+    return rows, plan, write, out
+
+
+def row_said(rows):
+    return [(r.get("status"), r.get("why")) for r in rows]
+
+
+def write_said(w):
+    if w is None:
+        return "no write"
+    lines = (w.stdout + w.stderr).strip().splitlines()
+    return f"exit {w.returncode}: {[l.strip() for l in lines if 'FAIL' in l or 'refused' in l][:3] or lines[-2:]}"
+
+
+def heights_by_rule(island, before, after):
+    """THE HEIGHT RULE, stated independently of the C# (Gate A review condition 2): each island vertex moves in height by
+    what the navmesh surface under it moved, at its own point in plan when a triangle of the navmesh holds it there (of
+    several, the one whose plane is nearest the vertex in height), else at the nearest point of the navmesh in plan (of
+    ties, the nearest in height). before and after are navi_bytes Navmesh objects with the same triangles."""
+    import math
+    out = []
+    V0, V1 = before.vertices, after.vertices
+    for (x, y, z) in island:
+        best = None
+        for t in before.triangles:
+            a, b, c = t[0], t[1], t[2]
+            A, B, C = V0[a], V0[b], V0[c]
+            den = (B[1] - C[1]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[1] - C[1])
+            if den == 0:
+                continue
+            l1 = ((B[1] - C[1]) * (x - C[0]) + (C[0] - B[0]) * (y - C[1])) / den
+            l2 = ((C[1] - A[1]) * (x - C[0]) + (A[0] - C[0]) * (y - C[1])) / den
+            l3 = 1 - l1 - l2
+            if min(l1, l2, l3) >= -1e-9:
+                k = abs(l1 * A[2] + l2 * B[2] + l3 * C[2] - z)
+                if best is None or k < best[0]:
+                    best = (k, [(a, l1), (b, l2), (c, l3)])
+        if best is None:
+            for t in before.triangles:
+                for p, q in ((t[0], t[1]), (t[1], t[2]), (t[2], t[0])):
+                    P, Q = V0[p], V0[q]
+                    ex, ey = Q[0] - P[0], Q[1] - P[1]
+                    L = ex * ex + ey * ey
+                    s = 0.0 if L == 0 else max(0.0, min(1.0, ((x - P[0]) * ex + (y - P[1]) * ey) / L))
+                    k = (math.hypot(P[0] + ex * s - x, P[1] + ey * s - y), abs(P[2] + (Q[2] - P[2]) * s - z))
+                    if best is None or k < best[0]:
+                        best = (k, [(p, 1 - s), (q, s)])
+        dz = sum(w * (V1[i][2] - V0[i][2]) for i, w in best[1])
+        out.append((x, y, z + dz))
+    return out
+
+
+def close3(a, b, tol=1e-3):
+    return len(a) == len(b) and all(abs(p - q) <= tol for u, v in zip(a, b) for p, q in zip(u, v))
+
+
+def same_but_island(got, want):
+    """True when two NVMI entries agree byte for byte outside the flag and the island block."""
+    return got.raw[8:got.island_start - 1] == want.raw[8:want.island_start - 1] and got.raw[:4] == want.raw[:4] \
+        and got.raw[got.island_end:] == want.raw[want.island_end:]
+
+
+def holds_box(entry, nav):
+    return entry.island is not None and entry.island["min_bits"] == nav.min_bits and entry.island["max_bits"] == nav.max_bits
+
+
+def t2660():
+    """Rejects: use_version on an island refused (the behaviour before R7), or written with the winner's island data left on
+    the carried version, the flag not carried, the box not the carried navmesh's, another entry touched, or anything else
+    left in the output folder. island-version: GM's entry, in place in Revert.esp's list (the winner), takes Mover.esp's own
+    island block byte for byte and its flag; every other byte of NAVI is Revert's."""
+    _, _, _, fx = island_lab("island-version")
+    rows, plan, write, out = navedit_edit("island-version", [{"navmesh": GM, "use_version": "Mover.esp"}], "UseIsland")
+    assert len(rows) == 1 and rows[0].get("status") == "planned", f"the use_version row: {row_said(rows)}"
+    assert write is not None and write.returncode == 0, f"navedit write {write_said(write)}"
+    assert sorted(p.name for p in out.parent.iterdir()) == [out.name], f"the output folder holds {sorted(p.name for p in out.parent.iterdir())}"
+    pn, rn, mn = RawPlugin(out).navi(), RawPlugin(fx / "Revert.esp").navi(), RawPlugin(fx / "Mover.esp").navi()
+    g = rk(GM)
+    assert set(pn) == set(rn), f"the patch's NAVI states {sorted(pn)}, Revert's {sorted(rn)}"
+    assert all(pn[k].raw == rn[k].raw for k in pn if k != g), "an entry other than GM's differs from the winner's"
+    e = pn[g]
+    assert e.island_bytes == mn[g].island_bytes, f"GM's island block is not Mover.esp's ({len(e.island_bytes)} bytes, Mover's {len(mn[g].island_bytes)})"
+    assert e.unknown == mn[g].unknown == 32, f"GM's flag {e.unknown}, Mover.esp's {mn[g].unknown}"
+    assert same_but_island(e, rn[g]), "GM's entry differs from the winner's outside the flag and the island data"
+    assert holds_box(e, RawPlugin(out).navmeshes()[g]), "GM's island box is not the box of the navmesh the patch carries"
+
+
+def t2661():
+    """Rejects: use_version where only one side is an island written with the winner's flag or island data. island-plain-
+    version: GM's entry ends plain (flag 0, no island data); island-plain-winner: it ends Mover.esp's island (flag 32, its
+    block byte for byte, the box the carried navmesh's)."""
+    g = rk(GM)
+    rows, _, write, out = navedit_edit("island-plain-version", [{"navmesh": GM, "use_version": "Mover.esp"}], "PlainVersion")
+    assert len(rows) == 1 and rows[0].get("status") == "planned", f"plain version: {row_said(rows)}"
+    assert write is not None and write.returncode == 0, f"plain version: navedit write {write_said(write)}"
+    fx = island_lab("island-plain-version")[3]
+    e, w = RawPlugin(out).navi()[g], RawPlugin(fx / "Revert.esp").navi()[g]
+    assert e.unknown == 0 and e.island is None, f"plain version: GM's flag {e.unknown}, island {'kept' if e.island else 'none'}"
+    assert same_but_island(e, w), "plain version: GM's entry differs from the winner's outside the flag and the island data"
+    rows, _, write, out = navedit_edit("island-plain-winner", [{"navmesh": GM, "use_version": "Mover.esp"}], "PlainWinner")
+    assert len(rows) == 1 and rows[0].get("status") == "planned", f"plain winner: {row_said(rows)}"
+    assert write is not None and write.returncode == 0, f"plain winner: navedit write {write_said(write)}"
+    fx = island_lab("island-plain-winner")[3]
+    e, m = RawPlugin(out).navi()[g], RawPlugin(fx / "Mover.esp").navi()[g]
+    assert e.unknown == 32 and e.island_bytes == m.island_bytes, f"plain winner: GM's flag {e.unknown}, island block {'Mover.esp' if e.island_bytes == m.island_bytes else 'not Mover.esp'}'s"
+    assert holds_box(e, RawPlugin(out).navmeshes()[g]), "plain winner: GM's island box is not the carried navmesh's"
+
+
+def t2662():
+    """Rejects: use_version from a plugin that states no navmesh info map entry for the island navmesh written (with the
+    winner's island data or none), or refused for another reason or in more than one sentence, or a refused plan written.
+    island-noentry: Mover.esp carries no NAVI."""
+    rows, plan, write, out = navedit_edit("island-noentry", [{"navmesh": GM, "use_version": "Mover.esp"}], "NoEntry")
+    why = " ".join(rows[0].get("why") or []) if rows else ""
+    assert len(rows) == 1 and rows[0].get("status") == "refused" and plan.returncode == 1, f"the row: {row_said(rows)}, plan exit {plan.returncode}"
+    assert "Mover.esp" in why and "states no" in why and why.count(". ") == 0 and why.endswith("."), f"the refusal: {why}"
+    w = run([buildlayout.program_under(PROBES, "navedit"), "write", "--plan", out.parent.parent / "plan.json", "--out", out])
+    left = sorted(p.name for p in out.parent.iterdir()) if out.parent.exists() else []
+    assert w.returncode != 0 and left == [], f"writing the refused plan: exit {w.returncode}, the output folder holds {left}"
+
+
+def island_r1(variant, tamper=None):
+    """navownprobe --repair-plan on the variant, then navedit write --repair-plan (after TAMPER(plan) when given)."""
+    tmp, inst, game, _ = island_lab(variant)
+    d = Path(tempfile.mkdtemp(prefix="r1-", dir=tmp))
+    log = run([exe("navownprobe"), "--instance", inst, "--game", game, "--profile", "P", "--emit", d / "emit.json", "--repair-plan", d / "plan.json"])
+    plan = json.loads((d / "plan.json").read_text(encoding="utf-8")) if log.returncode == 0 and (d / "plan.json").exists() else None
+    if plan is not None and tamper is not None:
+        tamper(plan)
+        (d / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+    out = d / "out" / "IslandFix.esp"
+    write = run([buildlayout.program_under(PROBES, "navedit"), "write", "--repair-plan", d / "plan.json", "--out", out]) if plan else None
+    return plan, log, write, out
+
+
+def ground_rows(plan, key):
+    return [p for p in plan["plans"] if p["source"].lower() == key.lower() and p["class"] == "ground"]
+
+
+def check_ground_islands(out, fx, whole):
+    """The written ground patch's NAVI against the raw bytes: GM's island box the patch's GM box bit for bit and its mesh by
+    the height rule from the winner's; GE's box its navmesh's, its mesh empty; every byte else as its source entry."""
+    pp = RawPlugin(out)
+    pn, pnav = pp.navi(), pp.navmeshes()
+    src = RawPlugin(fx / ("Skyrim.esm" if whole else "Revert.esp")).navi()
+    rn = RawPlugin(fx / "Revert.esp").navi()
+    before = RawPlugin(fx / "Revert.esp").navmeshes()
+    g, ge = rk(GM), rk(GE)
+    want_keys = set(rn) | ({g, ge} if whole else set())
+    assert set(pn) == want_keys, f"the patch's NAVI states {sorted(pn)}, want {sorted(want_keys)}"
+    assert all(pn[k].raw == rn[k].raw for k in rn if k not in (g, ge)), "an entry the plan does not change differs from the winner's"
+    e = pn[g]
+    assert holds_box(e, pnav[g]), f"GM's island box {e.island and (e.island['min'], e.island['max'])} is not the patch's GM box {(pnav[g].min, pnav[g].max)}"
+    want = heights_by_rule(src[g].island["vertices"], before.get(g) or RawPlugin(fx / "Skyrim.esm").navmeshes()[g], pnav[g])
+    assert close3(e.island["vertices"], want), f"GM's island vertices {e.island['vertices']}, the height rule gives {want}"
+    assert e.island["triangles"] == src[g].island["triangles"] and e.unknown == 32, "GM's island triangles or flag changed"
+    assert same_but_island(e, src[g]), "GM's entry differs from its source outside the island data"
+    f = pn[ge]
+    gnav = pnav.get(ge)
+    assert gnav is not None and holds_box(f, gnav) and not f.island["vertices"] and not f.island["triangles"], \
+        f"GE's island: {f.island and (f.island['min'], f.island['max'], len(f.island['vertices']))}, want the patch's GE box and an empty mesh"
+    assert same_but_island(f, src[ge]), "GE's entry differs from its source outside the island data"
+
+
+def t2663():
+    """Rejects: following the ground refused on an island (the behaviour before R7), or written with the island box left
+    stale, an island vertex not moved by the height rule (stated here, apart from the C#), an empty mesh given vertices, or
+    an entry outside the plan touched. island-ground: GM (a mesh) and GE (an empty mesh) follow Mover.esp's ground up 200
+    u; their entries are Revert.esp's (the NAVI winner), changed in place; R1 writes and reads back."""
+    plan, log, write, out = island_r1("island-ground")
+    assert plan is not None, f"no plan (exit {log.returncode}): {(log.stdout + log.stderr)[-500:]}"
+    for k in (GM, GE):
+        r = ground_rows(plan, k)
+        assert len(r) == 1 and r[0]["status"] == "planned", f"{k}'s ground row: {[(x['status'], x['why']) for x in r]}"
+    assert write is not None and write.returncode == 0, f"R1 {write_said(write)}"
+    assert sorted(p.name for p in out.parent.iterdir()) == ["IslandFix.esp", "IslandFix.readback.json"], f"the output folder holds {sorted(p.name for p in out.parent.iterdir())}"
+    check_ground_islands(out, island_lab("island-ground")[3], whole=False)
+
+
+def t2664():
+    """Rejects (Gate A review condition 4): an island entry stated by an earlier plugin than the NAVI winner written with its
+    old island data, or not at all, when the ground moves. island-ground-whole: Revert.esp's NAVI states only GQ, so GM's
+    and GE's entries are Skyrim.esm's and the patch adds them whole, each with its new island data."""
+    plan, log, write, out = island_r1("island-ground-whole")
+    assert plan is not None, f"no plan (exit {log.returncode}): {(log.stdout + log.stderr)[-500:]}"
+    for k in (GM, GE):
+        r = ground_rows(plan, k)
+        assert len(r) == 1 and r[0]["status"] == "planned", f"{k}'s ground row: {[(x['status'], x['why']) for x in r]}"
+    assert write is not None and write.returncode == 0, f"R1 {write_said(write)}"
+    check_ground_islands(out, island_lab("island-ground-whole")[3], whole=True)
+
+
+def t2665():
+    """Rejects: a height-only vertex move on an island refused, or written with the island box or mesh not following it.
+    GM's vertex 1 rises 30 u: the box becomes (12300,500,0)-(12800,800,30); of the island's vertices only (12900,650,0),
+    east of the navmesh, whose nearest point is the middle of edge 1-2, rises (15 u); the patch is read back raw."""
+    rows, _, write, out = navedit_edit("island-ground", [{"navmesh": GM, "move": [{"vertex": 1, "by": [0, 0, 30]}]}], "MoveUp")
+    assert len(rows) == 1 and rows[0].get("status") == "planned", f"the move: {row_said(rows)}"
+    assert write is not None and write.returncode == 0, f"navedit write {write_said(write)}"
+    fx = island_lab("island-ground")[3]
+    pp = RawPlugin(out)
+    e, nav = pp.navi()[rk(GM)], pp.navmeshes()[rk(GM)]
+    src = RawPlugin(fx / "Revert.esp")
+    assert holds_box(e, nav) and nav.max[2] == 30, f"GM's island box {e.island and (e.island['min'], e.island['max'])}, its navmesh's {(nav.min, nav.max)}"
+    want = heights_by_rule(src.navi()[rk(GM)].island["vertices"], src.navmeshes()[rk(GM)], nav)
+    assert close3(e.island["vertices"], want) and close3(want, [(12300, 650, 0), (12650, 650, 5), (12900, 650, 15)]), f"GM's island vertices {e.island['vertices']}, the rule gives {want}"
+
+
+def t2666():
+    """Rejects: a plan-changing edit allowed on an island with a mesh, refused for another reason or in more than one
+    sentence; or refused on an island with an empty mesh, or written there with the box not following. A sideways move of
+    GM's vertex 2 is refused by name; the same move of GE's vertex 2 (empty mesh) is written, its box (13300,500,0)-
+    (13810,800,0) as its navmesh's."""
+    rows, plan, _, _ = navedit_edit("island-ground", [{"navmesh": GM, "move": [{"vertex": 2, "by": [10, 0, 0]}]}], "SideMesh")
+    why = " ".join(rows[0].get("why") or []) if rows else ""
+    assert len(rows) == 1 and rows[0].get("status") == "refused", f"the sideways move on GM: {row_said(rows)}"
+    assert "island" in why and "height only" in why and why.count(". ") == 0 and why.endswith("."), f"the refusal: {why}"
+    rows, _, write, out = navedit_edit("island-ground", [{"navmesh": GE, "move": [{"vertex": 2, "by": [10, 0, 0]}]}], "SideEmpty")
+    assert len(rows) == 1 and rows[0].get("status") == "planned", f"the sideways move on GE: {row_said(rows)}"
+    assert write is not None and write.returncode == 0, f"navedit write {write_said(write)}"
+    pp = RawPlugin(out)
+    e, nav = pp.navi()[rk(GE)], pp.navmeshes()[rk(GE)]
+    assert holds_box(e, nav) and nav.max[0] == 13810 and not e.island["vertices"], f"GE's island {e.island and (e.island['min'], e.island['max'], len(e.island['vertices']))}, its navmesh's box {(nav.min, nav.max)}"
+
+
+def t2667():
+    """Rejects: a door edit on an island refused, or written with the island data or flag touched. island-door: DT's
+    arrival is on GM; the patch's GM entry gains DT and keeps Skyrim.esm's island block byte for byte."""
+    rows, _, write, out = navedit_edit("island-door", [{"navmesh": GM, "door": {"ref": DT}}], "DoorIsland")
+    assert len(rows) == 1 and rows[0].get("status") == "planned", f"the door: {row_said(rows)}"
+    assert write is not None and write.returncode == 0, f"navedit write {write_said(write)}"
+    e = RawPlugin(out).navi()[rk(GM)]
+    s = RawPlugin(island_lab("island-door")[3] / "Skyrim.esm").navi()[rk(GM)]
+    assert e.island_bytes == s.island_bytes and e.unknown == 32, "GM's island data or flag changed with the door"
+    assert [d for _, d in e.doors] == [rk(DT)], f"GM's linked doors {e.doors}"
+
+
+def t2668():
+    """Rejects: a written patch whose read-back fails left in the output folder (Gate A section 4: a failing patch is left
+    unwritten; section 6: undo). The island-ground repair plan with GQ's planned vertex op changed after planning (its
+    "change" kept): the read-back fails, and the output folder must hold nothing, no staging folder either."""
+    def tamper(plan):
+        ops = [o for o in plan["ops"] if o["formid"].lower() == GQ.lower() and o["field_path"] == "Data.Vertices"]
+        assert ops, "the plan has no vertex op for GQ to change"
+        x, y, z = ops[0]["value"].split(",")
+        ops[0]["value"] = f"{x},{y},{float(z) + 7}"
+    plan, log, write, out = island_r1("island-ground", tamper)
+    assert plan is not None and write is not None, f"no plan (exit {log.returncode})"
+    left = sorted(p.name for p in out.parent.iterdir()) if out.parent.exists() else []
+    assert write.returncode != 0, f"R1 passed a tampered patch: {write_said(write)}"
+    assert left == [], f"a failing patch left {left} in the output folder"
+
+
+def t2671():
+    """Rejects (review F2): a version whose own island box is not its navmesh's box carried (the read-back would then fail
+    after a faithful carry) or its box corrected silently; the refusal is one sentence naming the box and what to try.
+    island-sloppy-version: Mover.esp's entry gives the island the top z 201, where its navmesh stores 200."""
+    rows, plan, write, out = navedit_edit("island-sloppy-version", [{"navmesh": GM, "use_version": "Mover.esp"}], "Sloppy")
+    why = " ".join(rows[0].get("why") or []) if rows else ""
+    assert len(rows) == 1 and rows[0].get("status") == "refused" and plan.returncode == 1, f"the row: {row_said(rows)}, plan exit {plan.returncode}"
+    assert "Mover.esp" in why and "box" in why and "201" in why and why.count(". ") == 0 and why.endswith("."), f"the refusal: {why}"
+
+
+def t2672():
+    """Rejects (review F4): plain navedit write (not --repair-plan) leaving a patch, or its staging folder, in the output
+    folder when the read-back fails. The read-back is made to fail by navedit's test switch NAVEDIT_FAIL_READBACK=1 on an
+    edit that otherwise writes (the door on island-door); the output folder must hold nothing."""
+    tmp, inst, game, _ = island_lab("island-door")
+    d = Path(tempfile.mkdtemp(prefix="failrb-", dir=tmp))
+    (d / "edits.json").write_text(json.dumps({"edits": [{"navmesh": GM, "door": {"ref": DT}}]}), encoding="utf-8")
+    navedit = buildlayout.program_under(PROBES, "navedit")
+    plan = run([navedit, "plan", "--edits", d / "edits.json", "--out", d / "plan.json", "--instance", inst, "--game", game, "--profile", "P"])
+    assert plan.returncode == 0, f"navedit plan exit {plan.returncode}: {(plan.stdout + plan.stderr).strip().splitlines()[-2:]}"
+    out = d / "out" / "Failing.esp"
+    env = dict(os.environ, NAVEDIT_FAIL_READBACK="1")
+    w = subprocess.run([str(navedit), "write", "--plan", str(d / "plan.json"), "--out", str(out)], capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", timeout=600, env=env)
+    left = sorted(p.name for p in out.parent.iterdir()) if out.parent.exists() else []
+    assert w.returncode != 0 and "NAVEDIT_FAIL_READBACK" in w.stdout, f"the write: exit {w.returncode}: {(w.stdout + w.stderr).strip().splitlines()[-2:]}"
+    assert left == [], f"a failing plain write left {left} in the output folder"
+
+
+def t2673():
+    """Rejects (review F4): a write that replaces or touches a patch already at --out (a second write over a first is
+    refused, Gate A section 6), or leaves its staging folder after a write that holds. On island-door: a first write holds
+    and leaves exactly the patch; a second to the same --out is refused and the first patch is byte for byte as it was."""
+    rows, _, write, out = navedit_edit("island-door", [{"navmesh": GM, "door": {"ref": DT}}], "Twice")
+    assert len(rows) == 1 and rows[0].get("status") == "planned" and write is not None and write.returncode == 0, f"the first write: {row_said(rows)} {write_said(write)}"
+    assert sorted(p.name for p in out.parent.iterdir()) == [out.name], f"after a write that holds the output folder holds {sorted(p.name for p in out.parent.iterdir())}"
+    before = out.read_bytes()
+    again = run([buildlayout.program_under(PROBES, "navedit"), "write", "--plan", out.parent.parent / "plan.json", "--out", out])
+    assert again.returncode != 0 and "already exists" in (again.stdout + again.stderr), f"the second write: exit {again.returncode}"
+    assert out.read_bytes() == before and sorted(p.name for p in out.parent.iterdir()) == [out.name], "the first patch was touched, or something was left beside it"
+
+
 CASES = [
     ("2450 the fixture's five plugins in order", t2450),
     ("2451 a link into a deleted navmesh is EDGE-NAV naming the deleter", t2451),
@@ -888,7 +1230,7 @@ CASES = [
     ("2590 self-test: a band link with no link back is EDGE-ONEWAY", lambda: selftest("2590")),
     ("2591 self-test: no link back is written across the band", lambda: selftest("2591")),
     ("2592 self-test: an authored link back is restored", lambda: selftest("2592")),
-    ("2593 self-test: no ground plan on an island", lambda: selftest("2593")),
+    ("2593 self-test: a ground plan on an island makes the same navmesh edits", lambda: selftest("2593")),
     ("2594 self-test: a one-way refusal names its own neighbour", lambda: selftest("2594")),
     ("2563 a use_version patch masters what it supersedes", t2563),
     ("2566 self-test: NAVI linked doors", lambda: selftest("2566")),
@@ -903,6 +1245,20 @@ CASES = [
     ("2599 plan, mover case: ground refused, use_version planned", t2599),
     ("2600 R1, mover case: the mover's version written, read back, its superseded plugin mastered", t2600),
     ("2601 R1, mover case: a tampered use_version row and a stand-alone read-back are refused", t2601),
+    ("2658 self-test: following the ground on an island plans, with its island data", lambda: selftest("2658")),
+    ("2659 self-test: a ground row's island change beside a relink of the same entry is refused", lambda: selftest("2659")),
+    ("2660 navedit, island-version: use_version carries the version's own island data", t2660),
+    ("2661 navedit: use_version where one side only is an island", t2661),
+    ("2662 navedit, island-noentry: a version whose plugin states no entry is refused, nothing written", t2662),
+    ("2663 R1, island-ground: following the ground moves the island box and mesh", t2663),
+    ("2664 R1, island-ground-whole: an entry stated by an earlier plugin is added whole with its new island data", t2664),
+    ("2665 navedit: a height-only move on an island", t2665),
+    ("2666 navedit: a sideways move refused on an island with a mesh, written on one without", t2666),
+    ("2667 navedit, island-door: a door on an island leaves its island data", t2667),
+    ("2668 R1: a patch whose read-back fails is left unwritten", t2668),
+    ("2671 navedit, island-sloppy-version: a version whose island box is not its navmesh's is refused", t2671),
+    ("2672 navedit write: a plain write whose read-back fails is left unwritten", t2672),
+    ("2673 navedit write: a patch already at --out is never touched; a write that holds leaves no staging folder", t2673),
 ]
 
 if __name__ == "__main__":

@@ -265,8 +265,49 @@ static class NavRepairFixture
     /// GN's names nothing, as each follows its own link table. Mover's re-cut links nothing, so carrying it, GM's entry must
     /// drop GN, and GN's entry stays as it is. Planned through navedit (navownprobe's detector would file the one-way link).</summary>
     public static readonly FormKey DA = S(0xD31), DB = S(0xD32), DC = S(0xD33), GN = S(0xB11);
-    public static string WriteMoverCase(string dir, bool doors = false, bool neighbour = false)
+    /// <summary>The island variants' extra records: GE, a second navmesh in (3,0) whose entry is an island with an empty mesh;
+    /// GQ, a third, stated alone by Revert.esp's NAVI in the "whole" variant; DT and DP, a teleport door pair.</summary>
+    public static readonly FormKey GE = S(0xB12), GQ = S(0xB13), DT = S(0xD34), DP = S(0xD35);
+    /// <summary>The island variants (R7, Gate B; <paramref name="island"/> of <see cref="WriteMoverCase"/>), each a word after
+    /// the directory on <c>--write-mover-fixture</c>. The vanilla GM (box (12300,500,0)-(12800,800,0)) has island data IS:
+    /// that box and a mesh of 3 vertices, 1 triangle; Mover's re-cut (box (12300,500,200)-(12800,800,200)) has IM: its box and a
+    /// mesh of 4 vertices, 2 triangles. NAVI is Skyrim.esm's record (NV) in every plugin that carries it.
+    ///   island-version        Skyrim and Revert state GM as an island (32, IS), Mover as an island (32, IM); the NAVI winner
+    ///                         is Revert. use_version GM from Mover: the entry, in place in Revert's list, takes (32, IM).
+    ///   island-plain-version  as island-version, but Mover's entry is plain (0, none): the entry takes (0, none).
+    ///   island-plain-winner   Skyrim's and Revert's entries plain, Mover's (32, IM): the entry takes (32, IM).
+    ///   island-noentry        as island-version, but Mover.esp carries no NAVI: use_version from Mover is refused by name.
+    ///   island-sloppy-version as island-version, but Mover.esp's entry gives its island the box top z 201, where its own
+    ///                         navmesh stores 200: use_version from Mover is refused by name (review F2).
+    ///   island-ground         Mover raises (3,0)'s LAND to 200 and ships no re-cut; Revert reverts GM to vanilla. Skyrim and
+    ///                         Revert state GM as an island (32, IG: the vanilla box; vertices (12300,650,0) on a navmesh
+    ///                         vertex, (12650,650,5) 5 u above the surface, (12900,650,0) 100 u east of the navmesh in plan;
+    ///                         one triangle) and GE (a fan at x 13500, z 0) as an island with an empty mesh. Following the
+    ///                         ground: GM's box becomes (12300,500,200)-(12800,800,200), its mesh (12300,650,200), (12650,650,205),
+    ///                         (12900,650,200); GE's box rises 200 u, its mesh stays empty.
+    ///   island-ground-whole   as island-ground, but Revert's NAVI states only GQ, so GM's and GE's entries are Skyrim's and the
+    ///                         patch adds them whole, with their new island data.
+    ///   island-door           GM an island (32, IS) in Skyrim's NAVI only (the winner); Skyrim places a teleport door pair DT and
+    ///                         DP in (3,0); arriving through DT puts an actor at (12550, 650, 0), on GM's triangle 1. A door edit
+    ///                         of GM with DT leaves the island data as it is.</summary>
+    public static readonly string[] IslandVariants = { "island-version", "island-plain-version", "island-plain-winner", "island-noentry", "island-sloppy-version", "island-ground", "island-ground-whole", "island-door" };
+    static IslandData Isl((float, float, float) mn, (float, float, float) mx, (float X, float Y, float Z)[] v, params (short, short, short)[] t)
     {
+        var d = new IslandData { Min = new P3Float(mn.Item1, mn.Item2, mn.Item3), Max = new P3Float(mx.Item1, mx.Item2, mx.Item3) };
+        foreach (var p in v) d.Vertices.Add(new P3Float(p.X, p.Y, p.Z));
+        foreach (var (a, b, c) in t) d.Triangles.Add(new P3Int16(a, b, c));
+        return d;
+    }
+    static IslandData IS() => Isl((12300, 500, 0), (12800, 800, 0), new[] { (12300f, 650f, 0f), (12800f, 500f, 0f), (12800f, 800f, 0f) }, (0, 1, 2));
+    static IslandData IM() => Isl((12300, 500, 200), (12800, 800, 200), new[] { (12300f, 500f, 200f), (12800f, 500f, 200f), (12800f, 800f, 200f), (12300f, 800f, 200f) }, (0, 1, 2), (0, 2, 3));
+    static IslandData IG() => Isl((12300, 500, 0), (12800, 800, 0), new[] { (12300f, 650f, 0f), (12650f, 650f, 5f), (12900f, 650f, 0f) }, (0, 1, 2));
+    static NavigationMapInfo Island(NavigationMapInfo i, IslandData? d) { if (d is not null) { i.Unknown = 32; i.Island = d; } return i; }
+
+    public static string WriteMoverCase(string dir, bool doors = false, bool neighbour = false, string? island = null)
+    {
+        if (island is not null && !IslandVariants.Contains(island)) throw new ArgumentException($"'{island}' is not an island variant ({string.Join(", ", IslandVariants)})");
+        if (island is not null && (doors || neighbour)) throw new ArgumentException("an island variant is written without the doors and neighbour variants");
+        if (island is not null) return WriteIslandCase(dir, island);
         // the vanilla GM: Fan's three triangles, the first's edge 1-2 linked into GN's triangle 0 when there is a neighbour
         NavigationMesh VanillaGM() => !neighbour ? Fan(GM, 3, 12500, 500, 0)
             : Nav(GM, InGrid(3), new[] { (12500f, 500f, 0f), (12800f, 500f, 0f), (12800f, 800f, 0f), (12500f, 800f, 0f), (12300f, 650f, 0f) },
@@ -302,6 +343,63 @@ static class NavRepairFixture
         var r3 = GridCell(3, null);
         r3.NavigationMeshes.Add(WithDoors(VanillaGM(), (DA, 0), (DB, 1)));
         rev.Worldspaces.Add(World(r3));
+        rev.BeginWrite.ToPath(rp).WithLoadOrder(skyRead).Write();
+        return dir;
+    }
+
+    /// <summary>One island variant of the mover case (<see cref="IslandVariants"/>), into <paramref name="dir"/>, holding the
+    /// three plugins of <see cref="MoverOrder"/>.</summary>
+    static string WriteIslandCase(string dir, string v)
+    {
+        Directory.CreateDirectory(dir);
+        bool ground = v.StartsWith("island-ground"), door = v == "island-door";
+        var mKey = new ModKey("Mover", ModType.Plugin); var rKey = new ModKey("Revert", ModType.Plugin);
+        string sp = Path.Combine(dir, "Skyrim.esm"), mp = Path.Combine(dir, "Mover.esp"), rp = Path.Combine(dir, "Revert.esp");
+        // the vanilla entries: GM an island unless the winner's side is plain; GE (ground variants) an island with an empty mesh
+        IslandData? Vanilla() => v == "island-plain-winner" ? null : ground ? IG() : IS();
+        IslandData GEIsland() => Isl((13300, 500, 0), (13800, 800, 0), Array.Empty<(float, float, float)>());
+        NavigationMapInfo GmInfo() => Island(Info(GM, 3, 12500, 500), Vanilla());
+        NavigationMapInfo GeInfo() => Island(Info(GE, 3, 13500, 500), GEIsland());
+        NavigationMapInfo GqInfo() => Info(GQ, 3, 15000, 500);
+
+        var sky = new SkyrimMod(SkyKey, Rel);
+        var c3 = GridCell(3, Flat(LandK(3), 0));
+        c3.NavigationMeshes.Add(Fan(GM, 3, 12500, 500, 0));
+        if (ground) { c3.NavigationMeshes.Add(Fan(GE, 3, 13500, 500, 0)); c3.NavigationMeshes.Add(Fan(GQ, 3, 15000, 500, 0)); }
+        if (door)
+        {
+            // arriving through DT puts an actor at DP's destination position, on GM; DT's own destination is beside it
+            TeleportDestination To(FormKey door, float x, float y) { var td = new TeleportDestination { Position = new P3Float(x, y, 0), Rotation = new P3Float(0, 0, 0) }; td.Door.SetTo(door); return td; }
+            c3.Temporary.Add(new PlacedObject(DT, Rel) { EditorID = "RpIslandDoorT", Placement = new Placement { Position = new P3Float(12520, 560, 0) }, TeleportDestination = To(DP, 12700, 700) });
+            c3.Temporary.Add(new PlacedObject(DP, Rel) { EditorID = "RpIslandDoorP", Placement = new Placement { Position = new P3Float(12700, 700, 0) }, TeleportDestination = To(DT, 12550, 650) });
+        }
+        sky.Worldspaces.Add(World(c3));
+        sky.NavigationMeshInfoMaps.Add(ground ? Navi(GmInfo(), GeInfo(), GqInfo()) : Navi(GmInfo()));
+        sky.BeginWrite.ToPath(sp).WithLoadOrder(Array.Empty<ISkyrimModGetter>()).Write();
+        using var skyRead = SkyrimMod.CreateFromBinaryOverlay(sp, Rel);
+
+        // Mover.esp: the ground raised; its own re-cut of GM (not in the ground variants) and, but for island-noentry and the
+        // ground and door variants, its own NAVI entry for it
+        var mover = new SkyrimMod(mKey, Rel);
+        var m3 = GridCell(3, Flat(LandK(3), 200));
+        if (!ground)
+            m3.NavigationMeshes.Add(Nav(GM, InGrid(3), new[] { (12300f, 500f, 200f), (12800f, 500f, 200f), (12800f, 800f, 200f), (12300f, 800f, 200f), (12550f, 650f, 200f) },
+                                        new T3(0, 1, 4), new T3(1, 2, 4), new T3(2, 3, 4), new T3(3, 0, 4)));
+        mover.Worldspaces.Add(World(m3));
+        if (v is "island-version" or "island-plain-winner") mover.NavigationMeshInfoMaps.Add(Navi(Island(Info(GM, 3, 12300, 500), IM())));
+        if (v is "island-sloppy-version") { var sloppy = IM(); sloppy.Max = new P3Float(12800, 800, 201); mover.NavigationMeshInfoMaps.Add(Navi(Island(Info(GM, 3, 12300, 500), sloppy))); }
+        if (v is "island-plain-version") mover.NavigationMeshInfoMaps.Add(Navi(Info(GM, 3, 12300, 500)));
+        mover.BeginWrite.ToPath(mp).WithLoadOrder(skyRead).Write();
+
+        // Revert.esp: GM back to the vanilla geometry, and its NAVI (the winner) restating Skyrim's entries; in island-ground-whole
+        // it states only GQ; in island-door it carries none
+        var rev = new SkyrimMod(rKey, Rel);
+        var r3 = GridCell(3, null);
+        r3.NavigationMeshes.Add(Fan(GM, 3, 12500, 500, 0));
+        rev.Worldspaces.Add(World(r3));
+        if (v == "island-ground-whole") rev.NavigationMeshInfoMaps.Add(Navi(GqInfo()));
+        else if (ground) rev.NavigationMeshInfoMaps.Add(Navi(GmInfo(), GeInfo(), GqInfo()));
+        else if (!door) rev.NavigationMeshInfoMaps.Add(Navi(GmInfo()));
         rev.BeginWrite.ToPath(rp).WithLoadOrder(skyRead).Write();
         return dir;
     }
@@ -360,6 +458,7 @@ static class NavRepairFixture
         isl.Vertices.AddRange(new[] { new P3Float(3896, 3000, 0), new P3Float(4096, 3000, 0), new P3Float(4096, 3300, 0) });
         isl.Triangles.Add(new P3Int16(0, 1, 2));
         l6.Island = isl;
+        l6.Unknown = 32;   // an island's flag, as on every island of the base game (CORRECTED 2026-11-27, R7: was 0)
         var infos = new List<NavigationMapInfo>();
         foreach (var (cell, gx) in new[] { (c0, 0), (c1, 1), (c3, 3), (c4, 4), (c5, 5) })
             foreach (var n in cell.NavigationMeshes)

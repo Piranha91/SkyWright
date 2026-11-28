@@ -38,6 +38,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [Do the depth-measurement mode's texture keep rule and mask rule give their known answers?](#tool-viewprobe.depth-measurement-selftest) — `viewprobe.depth-measurement-selftest`
 - [Do the frustum test and the occlusion rule's shape classes still give their known answers?](#tool-planeassess.selftest) — `planeassess.selftest`
 - [Do the geometry probes leave out activators and doors whose base record has no model, set editor markers aside by name, and keep a marker carrying a collision primitive unjudged?](#tool-_geometry-harness-tests-test_modelless_activators_doors.py) — `_geometry-harness/tests/test_modelless_activators_doors.py`
+- [Do the island box rule and flag rule hold on every navmesh info map entry of the base game?](#tool-_geometry-harness-tests-navi_floor.py) — `_geometry-harness/tests/navi_floor.py`
 - [Do the load-order and geometry rules pass their constructed known-answer cases?](#tool-proofprobe) — `proofprobe`
 - [Do the report and reel give a verdict and next step per patch, say unfinished testing first, name one patch per outcome, show every produced picture, and plan the reel's counts, labels, pages and closing in the report's terms?](#tool-integration-housecarl-tests-test_reader_rules.py) — `integration/housecarl/tests/test_reader_rules.py`
 - [Do the report and reel say a single case in the singular, one reason per unchecked check, offline renders as renders, the location list's share of the load order, places by name or grid, forward-versus-carry-both, worse patch placements, a patch's lines on its own pair only, and relative PDF links?](#tool-integration-housecarl-tests-test_report_reel_batch.py) — `integration/housecarl/tests/test_report_reel_batch.py`
@@ -320,6 +321,7 @@ Not drawn / missing object / enable parent / initially disabled: start with [vie
 - [What character appearance and runtime outfit occupy this pose?](#tool-viewprobe.npc) — `viewprobe.npc`
 - [What does Base Object Swapper change in this scene?](#tool-viewprobe.bos) — `viewprobe.bos`
 - [What does a lower storey look like with upper geometry sliced away?](#tool-viewprobe.cull-above) — `viewprobe.cull-above`
+- [What does a written plugin's navmesh info map (NAVI entries, island data) and navmesh box hold, read straight from its bytes?](#tool-_geometry-harness-tests-navi_bytes.py) — `_geometry-harness/tests/navi_bytes.py`
 - [What does an app scan list as a lighting clash (the lighting check behind the registry's environment.lighting row)?](#tool-lightprobe) — `lightprobe`
 - [What does each candidate mod touch, which edit kinds does it and its key patches make, and which assets does it override?](#tool-modcensus.run) — `modcensus.run`
 - [What does each edited plane hide, by owner, in each rendered view of a plane-patch group?](#tool-planeassess.score) — `planeassess.score`
@@ -803,6 +805,36 @@ Modifiers (do not select a separate mode):
 
 - `--out` — where to write the generated fixtures (never the tracked tree)
 - `--registry-from` — Set registry from for this invocation; consult the linked parser for accepted values.
+
+<a id="tool-_geometry-harness-tests-navi_bytes.py"></a>
+
+### _geometry-harness/tests/navi_bytes.py
+
+**What does a written plugin's navmesh info map (NAVI entries, island data) and navmesh box hold, read straight from its bytes?**
+
+Hold a written navmesh patch to a second reader that shares no code with the writer (the navmesh repair suites import it).
+
+Inputs: A plugin file.
+
+Outputs: Its NAVI entries and NAVM navmeshes, fields and raw bytes.
+
+Source: [_geometry-harness/tests/navi_bytes.py](../_geometry-harness/tests/navi_bytes.py) — `A raw-bytes reader of a plugin's navmesh info map`
+
+
+<a id="tool-_geometry-harness-tests-navi_floor.py"></a>
+
+### _geometry-harness/tests/navi_floor.py
+
+**Do the island box rule and flag rule hold on every navmesh info map entry of the base game?**
+
+Measure the vanilla floor of the island rules on the five base-game files (test_navedit.py's real-data case runs it).
+
+Inputs: The game's Data folder (Skyrim.esm, Update.esm and the three DLC).
+
+Outputs: One JSON line per file: entries, islands, empty meshes, box and flag rule counts.
+
+Source: [_geometry-harness/tests/navi_floor.py](../_geometry-harness/tests/navi_floor.py) — `The vanilla floor of the island rules`
+
 
 <a id="tool-_geometry-harness-tests-test_app_bundle_boundary.py"></a>
 
@@ -4715,7 +4747,7 @@ Modifiers (do not select a separate mode):
 - `--navrepair-selftest` — --navrepair-selftest: the navmesh repair plan (_shared/NavRepair.cs) on small in-memory navmeshes, one ok or FAIL line per case, for tests/test_navmesh_repair_rules.py; test-only.
 - `--repair-readback` — --repair-readback PLAN PATCH OUT: hold every navmesh a written repair patch carries to its winner with exactly the plan's change applied (_shared/NavRepairReadBack.cs), written to OUT as JSON; exit 1 names each difference.
 - `--write-edge-link-fixture` — --write-edge-link-fixture DIR: write the edge-link identity fixture (navownprobe/EdgeLinkFixture.cs) that tests/test_navown_edge_identity.py runs the real probe on; test-only.
-- `--write-mover-fixture` — write the navmesh-repair mover fixture (optionally with doors or a neighbour) and print its path
+- `--write-mover-fixture` — write the navmesh-repair mover fixture (optionally with doors or a neighbour, or one island variant: island-version, island-plain-version, island-plain-winner, island-noentry, island-sloppy-version, island-ground, island-ground-whole, island-door) and print its path
 - `--write-navi-master-fixture` — write the navmesh-repair fixture whose NAVI master case a test reads, and print its path
 - `--write-navrepair-fixture` — --write-navrepair-fixture DIR: write the navmesh repair fixture (navownprobe/NavRepairFixture.cs) that tests/test_navmesh_repair_rules.py runs the real probe on; test-only.
 

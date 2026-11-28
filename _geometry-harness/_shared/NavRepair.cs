@@ -94,6 +94,9 @@ public sealed class NavPlan
     public NavChange Change { get; set; } = new();
     public List<RepairOp> Edits { get; set; } = new();
     public readonly List<PlanInvariant> Invariants = new();
+    /// <summary>A follow-the-ground plan on an island of the navmesh info map: the island data its entry ends with (NavIsland's
+    /// height rule; null: not an island, or not planned).</summary>
+    public NavIslandData? IslandAfter { get; set; }
 }
 
 public sealed class NavRepairPlan
@@ -350,7 +353,7 @@ public static class NavRepair
     /// <summary>The follow-the-ground plan for <paramref name="rows"/>: every used vertex within <paramref name="band"/> of its
     /// author's ground moves by what the ground moved under it, and the box's z is recomputed.</summary>
     public static NavRepairPlan Ground(IReadOnlyDictionary<FormKey, WinningNav> nav, IReadOnlyList<GroundRow> rows, float band, EdgeTolerance tol,
-                                       ISet<FormKey>? scope = null, ISet<FormKey>? islands = null, string? naviProblem = null)
+                                       ISet<FormKey>? scope = null, IReadOnlyDictionary<FormKey, NavIslandData>? islands = null, string? naviProblem = null)
     {
         var plan = new NavRepairPlan();
         var moved = new Dictionary<FormKey, NavmeshGeometry>();
@@ -364,14 +367,6 @@ public static class NavRepair
             {
                 p.Status = "refused";
                 p.Why.Add($"the navmesh info map cannot be read ({naviProblem}), so whether {r.Nav} is an island is not known; following the ground is refused");
-                continue;
-            }
-            if (islands is not null && islands.Contains(r.Nav))
-            {
-                // the navmesh info map keeps its own copy of an island's geometry: moving the vertices would leave it stale
-                // (houseCARL's sweep, 2026-11-22: 0DEEFB in the Clockwork order); refused until island support (R7)
-                p.Status = "refused";
-                p.Why.Add($"{r.Nav} is an island in the navmesh info map, which keeps its own copy of the geometry; following the ground is refused until island support (R7)");
                 continue;
             }
             if (r.Mover is { } mv)
@@ -404,8 +399,16 @@ public static class NavRepair
             p.Change = ch;
             p.Why.Add($"{ch.Vertices.Count} vertices follow the ground the later plugin moved; the box's z becomes {F(used.Min.Z)} to {F(used.Max.Z)}");
             moved[r.Nav] = w.Geom with { Vertices = verts, Min = ch.Min.Value, Max = ch.Max.Value };
+            // an island of the navmesh info map (R7): its box becomes the moved navmesh's, its mesh follows by the height rule
+            // (NavIsland, the rule's owner); the plan's NAVI change writes it
+            if (islands is not null && islands.TryGetValue(r.Nav, out var isl))
+            {
+                p.IslandAfter = NavIsland.ForEdit(r.Nav, isl, w.Geom, moved[r.Nav], NavIslandEdit.HeightOnly).After;
+                p.Why.Add($"{r.Nav} is an island in the navmesh info map, so its island box becomes the navmesh's and its island mesh follows the ground");
+            }
         }
         Check(plan, nav, tol, null, moved);
+        foreach (var rp in plan.Plans.Where(x => x.Status == "refused")) rp.IslandAfter = null;
         return plan;
     }
 

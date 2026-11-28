@@ -239,6 +239,13 @@ public static class NavRepairReadBack
                 {
                     foreach (var d in dropM) { int j = m.MergedTo.FindIndex(x => x.FormKey == d); if (j >= 0) m.MergedTo.RemoveAt(j); }
                     foreach (var d in dropP) { int j = m.PreferredMerges.FindIndex(x => x.FormKey == d); if (j >= 0) m.PreferredMerges.RemoveAt(j); }
+                    // the entry's planned flag and island data (R7)
+                    if (e["island"] is JsonObject ij)
+                    {
+                        var ie = NavIsland.FromJson(ij);
+                        m.Unknown = ie.Unknown;
+                        m.Island = ie.Island is null ? null : NavIsland.ToMutagen(ie.Island);
+                    }
                 }
                 if (e["winnerIndex"] is { } wi)
                 {
@@ -274,11 +281,45 @@ public static class NavRepairReadBack
                 if (!want.MapInfos[i].Equals(got.MapInfos[i]))
                     diff.Add($"NAVI entry {i} ({got.MapInfos[i].NavigationMesh.FormKey}) differs from the planned {want.MapInfos[i].NavigationMesh.FormKey}'s: MergedTo written "
                              + $"[{string.Join(",", got.MapInfos[i].MergedTo.Select(x => x.FormKey))}], planned [{string.Join(",", want.MapInfos[i].MergedTo.Select(x => x.FormKey))}]; LinkedDoors written "
-                             + $"[{string.Join(",", got.MapInfos[i].LinkedDoors.Select(x => x.Door.FormKey))}], planned [{string.Join(",", want.MapInfos[i].LinkedDoors.Select(x => x.Door.FormKey))}]");
+                             + $"[{string.Join(",", got.MapInfos[i].LinkedDoors.Select(x => x.Door.FormKey))}], planned [{string.Join(",", want.MapInfos[i].LinkedDoors.Select(x => x.Door.FormKey))}]; "
+                             + $"island written {IslandText(NavIsland.Of(got.MapInfos[i]))}, planned {IslandText(NavIsland.Of(want.MapInfos[i]))}");
             if (diff.Count == 0 && !want.Equals(got)) diff.Add("the NAVI records differ in a field outside the named set (Mutagen's whole-record equality)");
             return (diff, want.MapInfos.Count);
         }
         finally { foreach (var m in opened.Values) m.Dispose(); }
+    }
+
+    static string IslandText(NavIslandEntry e) => e.Island is not { } d ? $"none (flag {e.Unknown})"
+        : $"flag {e.Unknown}, box {d.Min}-{d.Max}, {d.Vertices.Count} vertices, {d.Triangles.Count} triangles";
+
+    /// <summary>THE ISLAND READ-BACK (R7): <paramref name="key"/>'s entry as the game takes it with the patch loaded last (the last
+    /// plugin of <paramref name="order"/>, then <paramref name="patchPath"/>, that states it), read from the written files, held
+    /// by <see cref="NavIsland.Check"/> to <paramref name="expected"/> and to the box of the navmesh the game takes (the patch's,
+    /// else the order's winner). One sentence per difference; empty when it holds.</summary>
+    public static List<string> IslandHolds(IReadOnlyList<string> order, string patchPath, FormKey key, NavIslandEntry expected)
+    {
+        var full = Path.GetFullPath(patchPath);
+        var paths = order.Where(p => !string.Equals(Path.GetFullPath(p), full, StringComparison.OrdinalIgnoreCase)).Append(patchPath).ToList();
+        var (view, open) = NaviView.Read(paths);
+        try
+        {
+            if (view.Problem is { } pr) return new() { $"the navmesh info map cannot be read back ({pr}), so {key}'s island data cannot be checked" };
+            NavIslandEntry taken; string from;
+            if (view.Effective.TryGetValue(key, out var ef)) { taken = NavIsland.Of(ef.Src.Map.MapInfos[ef.Index]); from = ef.Src.Plugin; }
+            else { taken = new NavIslandEntry(0, null); from = "no plugin"; }
+            (Vec3 Min, Vec3 Max)? box = null;
+            foreach (var p in Enumerable.Reverse(paths))
+            {
+                using var mod = SkyrimMod.CreateFromBinaryOverlay(p, SkyrimRelease.SkyrimSE);
+                var n = mod.EnumerateMajorRecords<INavigationMeshGetter>().FirstOrDefault(x => x.FormKey == key);
+                if (n is null) continue;
+                if (!n.IsDeleted && n.Data is { } d) box = (new Vec3(d.Min.X, d.Min.Y, d.Min.Z), new Vec3(d.Max.X, d.Max.Y, d.Max.Z));
+                break;
+            }
+            if (box is null) return new() { $"{key} has no navmesh the game takes with the patch last, so its island box has nothing to equal" };
+            return NavIsland.Check(key, taken, from, box.Value.Min, box.Value.Max, expected);
+        }
+        finally { foreach (var o in open) o.Dispose(); }
     }
 
     /// <summary>THE NAVI AGAINST THE VERSION, apart from the plan (houseCARL's items 2 and 3; the master's condition of
@@ -483,6 +524,17 @@ public static class NavRepairReadBack
                 ["differences"] = new JsonArray(naviDiff.Select(x => (JsonNode)x).ToArray()), ["compared"] = compared, ["planned"] = true,
             });
         }
+        // the island data of every planned entry that carries one (R7), as the game takes it with the patch last, against its
+        // navmesh's box (NavIsland.Check); the ground rows' in the plan's NAVI change, a use_version row's in its own
+        foreach (var nv in new[] { plan["navi"] }.Concat(uvNavi).Where(n => n?["entries"] is JsonArray).Distinct())
+            foreach (var en in nv!["entries"]!.AsArray())
+                if (en!["island"] is JsonObject ij)
+                {
+                    var k = FormKey.Factory((string)en["navmesh"]!);
+                    var d = IslandHolds(order, patchPath, k, NavIsland.FromJson(ij));
+                    if (d.Count > 0) failed++;
+                    results.Add(new JsonObject { ["navmesh"] = k.ToString(), ["island"] = true, ["holds"] = d.Count == 0, ["differences"] = new JsonArray(d.Select(x => (JsonNode)x).ToArray()) });
+                }
         var doc = new JsonObject
         {
             ["patch"] = patchPath, ["plan"] = planPath, ["holds"] = failed == 0, ["records"] = results,
