@@ -843,7 +843,7 @@ static class TexturedScene
                 return new(loaded, missing ? [gamePath] : []);
             }
             var lease = isStatic && builtScene is not null
-                ? builtScene.Texture(category, gamePath, diskPath, LoadAndCaptureMissing, manager.WhiteTexture)
+                ? builtScene.Texture(category, gamePath, diskPath, ResidentKey.For(cache, diskPath), LoadAndCaptureMissing, manager.WhiteTexture)
                 : LoadAndCaptureMissing();
             int handle = lease.Handle;
             retainedMissingTexturePaths.UnionWith(lease.MissingPaths);

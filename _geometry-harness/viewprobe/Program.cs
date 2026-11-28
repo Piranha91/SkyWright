@@ -136,6 +136,11 @@ if (args.Length >= 1 && args[0] == "--depth-measurement-selftest")
 // synthetic depth with ties, uncovered pixels and hidden pixels. Needs a GL context, no MO2 instance and no game.
 if (args.Length >= 1 && args[0] == "--occlusion-query-selftest")
     return ViewProbe.OcclusionQuerySelfTest.Run();
+// Known answers for ResidentKey.cs against this SkyRender package: a real texture uploaded through GlTextureManager under
+// each texture policy is found in the resident cache under the key the retained scene looks it up by. Needs a GL context,
+// no MO2 instance and no game.
+if (args.Length >= 1 && args[0] == "--resident-key-selftest")
+    return ViewProbe.ResidentKeySelfTest.Run();
 // Known answers for which placed references the winning state admits, and where (WinningRefs.cs), on
 // Mutagen-written synthetic plugins. Needs no MO2 instance, no game and no GL context.
 if (args.Length >= 1 && args[0] == "--winning-refs-selftest")
