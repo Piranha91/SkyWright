@@ -73,6 +73,7 @@ internal static class HarnessSuitesGuard
         Alone: new[]
         {
             ("_geometry-harness/tests/test_contact_memory_route.py", "its case CR-16 needs the unlimited contactprobe run to take the fast memory route, which the probe takes only while the machine's free physical memory covers the fast route's need; a runner beside it that holds memory turns that run lean and the case red"),
+            ("runcontrol", "its --self-test went red in 2 of 4 runs of the whole guard at --jobs 4 (2026-11-27) and passed alone and one at a time; the red case was not shown then, and its cases 61 and 63 check deadlines on the real clock within 6 to 12 seconds, which a loaded machine can miss"),
         });
 
     public static int RunGuard(string[] args)
